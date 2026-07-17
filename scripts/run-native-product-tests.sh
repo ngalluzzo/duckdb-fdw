@@ -122,7 +122,9 @@ env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}
 readonly NATIVE_TEST_ROOT="${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/extension/duckdb_api"
 "${NATIVE_TEST_ROOT}/duckdb_api_connector_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_contract_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_fixture_decoder_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_fixture_stream_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_adapter_tests"
 (
     cd "${TEMPLATE_ROOT}"
     "./build/${BUILD_PROFILE}/test/unittest" --require duckdb_api 'test/*'

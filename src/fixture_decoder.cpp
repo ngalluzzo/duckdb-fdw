@@ -1,79 +1,16 @@
-#include "duckdb_api/contracts.hpp"
-
-#include "duckdb/common/exception.hpp"
+#include "duckdb_api/internal/fixture_decoder.hpp"
 
 #include <cerrno>
-#include <chrono>
 #include <cstdlib>
 #include <limits>
-#include <sstream>
-#include <stdexcept>
 #include <utility>
 
 namespace duckdb_api {
-
-ExecutionError::ExecutionError(ErrorStage stage_p, std::string field_p, std::string safe_message_p)
-    : stage(stage_p), field(std::move(field_p)), safe_message(std::move(safe_message_p)) {
-}
-
-const char *ExecutionError::what() const noexcept {
-	return safe_message.c_str();
-}
-
-ErrorStage ExecutionError::Stage() const {
-	return stage;
-}
-
-const std::string &ExecutionError::Field() const {
-	return field;
-}
-
-const std::string &ExecutionError::SafeMessage() const {
-	return safe_message;
-}
-
-FixtureReadBuffer::FixtureReadBuffer(duckdb::ClientContext &context_p, FixtureSource &source_p,
-                                     duckdb::idx_t max_bytes_p, std::chrono::steady_clock::time_point deadline_p)
-    : context(context_p), source(source_p), max_bytes(max_bytes_p), deadline(deadline_p) {
-}
-
-void FixtureReadBuffer::Checkpoint() {
-	if (context.IsInterrupted()) {
-		source.OnInterruption();
-		throw duckdb::InterruptException();
-	}
-	if (std::chrono::steady_clock::now() >= deadline) {
-		throw ExecutionError(ErrorStage::POLICY, "", "execution exceeds the wall-time budget");
-	}
-}
-
-void FixtureReadBuffer::Append(const std::string &chunk) {
-	Checkpoint();
-	if (chunk.size() > max_bytes - contents.size()) {
-		throw ExecutionError(ErrorStage::POLICY, "", "response exceeds the fixture-byte budget");
-	}
-	contents.append(chunk);
-}
-
-const std::string &FixtureReadBuffer::Contents() const {
-	return contents;
-}
-
+namespace internal {
 namespace {
 
-void CheckExecution(duckdb::ClientContext &context, FixtureSource &source,
-                    std::chrono::steady_clock::time_point deadline) {
-	if (context.IsInterrupted()) {
-		source.OnInterruption();
-		throw duckdb::InterruptException();
-	}
-	if (std::chrono::steady_clock::now() >= deadline) {
-		throw ExecutionError(ErrorStage::POLICY, "", "execution exceeds the wall-time budget");
-	}
-}
-
 bool TryParseLosslessInt64(const std::string &token, int64_t &result) {
-	auto position = duckdb::idx_t(0);
+	auto position = std::size_t(0);
 	const auto negative = token[position] == '-';
 	if (negative) {
 		position++;
@@ -126,7 +63,7 @@ bool TryParseLosslessInt64(const std::string &token, int64_t &result) {
 		if (removed_digits > digits.size()) {
 			return false;
 		}
-		const auto retained_digits = digits.size() - static_cast<duckdb::idx_t>(removed_digits);
+		const auto retained_digits = digits.size() - static_cast<std::size_t>(removed_digits);
 		if (digits.find_first_not_of('0', retained_digits) != std::string::npos) {
 			return false;
 		}
@@ -138,10 +75,10 @@ bool TryParseLosslessInt64(const std::string &token, int64_t &result) {
 		}
 		digits.erase(0, retained_nonzero);
 	} else {
-		if (scale > 19 || digits.size() + static_cast<duckdb::idx_t>(scale) > 19) {
+		if (scale > 19 || digits.size() + static_cast<std::size_t>(scale) > 19) {
 			return false;
 		}
-		digits.append(static_cast<duckdb::idx_t>(scale), '0');
+		digits.append(static_cast<std::size_t>(scale), '0');
 	}
 
 	const std::string limit = negative ? "9223372036854775808" : "9223372036854775807";
@@ -164,9 +101,8 @@ bool TryParseLosslessInt64(const std::string &token, int64_t &result) {
 
 class JsonParser {
 public:
-	JsonParser(const std::string &input_p, duckdb::ClientContext &context_p, FixtureSource &source_p,
-	           const ResourceBudgets &budgets_p, std::chrono::steady_clock::time_point deadline_p)
-	    : input(input_p), context(context_p), source(source_p), budgets(budgets_p), deadline(deadline_p), position(0) {
+	JsonParser(const std::string &input_p, FixtureReadBuffer &checkpoint_p, const ResourceBudgets &budgets_p)
+	    : input(input_p), checkpoint(checkpoint_p), budgets(budgets_p), position(0) {
 	}
 
 	std::vector<ItemRow> ParseResponse() {
@@ -247,7 +183,7 @@ private:
 
 	void SkipWhitespace() {
 		while (position < input.size()) {
-			CheckExecution(context, source, deadline);
+			checkpoint.Checkpoint();
 			const auto character = input[position];
 			if (character != ' ' && character != '\n' && character != '\r' && character != '\t') {
 				break;
@@ -264,7 +200,7 @@ private:
 	}
 
 	void Expect(char expected) {
-		CheckExecution(context, source, deadline);
+		checkpoint.Checkpoint();
 		if (position >= input.size() || input[position] != expected) {
 			throw ExecutionError(ErrorStage::DECODE, "", "response is not valid JSON");
 		}
@@ -275,7 +211,7 @@ private:
 		Expect('"');
 		std::string result;
 		while (position < input.size()) {
-			CheckExecution(context, source, deadline);
+			checkpoint.Checkpoint();
 			const auto character = input[position++];
 			if (character == '"') {
 				return result;
@@ -324,8 +260,8 @@ private:
 
 	uint32_t ParseHexCodeUnit() {
 		uint32_t result = 0;
-		for (duckdb::idx_t index = 0; index < 4; index++) {
-			CheckExecution(context, source, deadline);
+		for (std::size_t index = 0; index < 4; index++) {
+			checkpoint.Checkpoint();
 			if (position >= input.size()) {
 				throw ExecutionError(ErrorStage::DECODE, "", "response is not valid JSON");
 			}
@@ -386,7 +322,7 @@ private:
 			result.push_back(first_character);
 			return;
 		}
-		duckdb::idx_t continuation_count = 0;
+		std::size_t continuation_count = 0;
 		uint32_t code_point = 0;
 		uint32_t minimum = 0;
 		if ((first & 0xe0) == 0xc0) {
@@ -405,8 +341,8 @@ private:
 			throw ExecutionError(ErrorStage::DECODE, "", "response is not valid JSON");
 		}
 		const auto begin = position - 1;
-		for (duckdb::idx_t index = 0; index < continuation_count; index++) {
-			CheckExecution(context, source, deadline);
+		for (std::size_t index = 0; index < continuation_count; index++) {
+			checkpoint.Checkpoint();
 			if (position >= input.size()) {
 				throw ExecutionError(ErrorStage::DECODE, "", "response is not valid JSON");
 			}
@@ -437,7 +373,7 @@ private:
 				throw ExecutionError(ErrorStage::DECODE, "", "response is not valid JSON");
 			}
 			while (Peek() >= '0' && Peek() <= '9') {
-				CheckExecution(context, source, deadline);
+				checkpoint.Checkpoint();
 				position++;
 			}
 		}
@@ -447,7 +383,7 @@ private:
 				throw ExecutionError(ErrorStage::DECODE, "", "response is not valid JSON");
 			}
 			while (Peek() >= '0' && Peek() <= '9') {
-				CheckExecution(context, source, deadline);
+				checkpoint.Checkpoint();
 				position++;
 			}
 		}
@@ -460,7 +396,7 @@ private:
 				throw ExecutionError(ErrorStage::DECODE, "", "response is not valid JSON");
 			}
 			while (Peek() >= '0' && Peek() <= '9') {
-				CheckExecution(context, source, deadline);
+				checkpoint.Checkpoint();
 				position++;
 			}
 		}
@@ -468,12 +404,12 @@ private:
 	}
 
 	void ParseLiteral(const char *literal) {
-		for (duckdb::idx_t index = 0; literal[index] != '\0'; index++) {
+		for (std::size_t index = 0; literal[index] != '\0'; index++) {
 			Expect(literal[index]);
 		}
 	}
 
-	void SkipValue(duckdb::idx_t depth = 0) {
+	void SkipValue(uint64_t depth = 0) {
 		SkipWhitespace();
 		if (depth > budgets.json_nesting) {
 			throw ExecutionError(ErrorStage::POLICY, "", "response exceeds the JSON nesting budget");
@@ -655,7 +591,7 @@ private:
 		Expect('[');
 		SkipWhitespace();
 		while (Peek() != ']') {
-			CheckExecution(context, source, deadline);
+			checkpoint.Checkpoint();
 			if (result.size() >= budgets.decoded_records) {
 				throw ExecutionError(ErrorStage::POLICY, "", "response exceeds the decoded-record budget");
 			}
@@ -676,142 +612,16 @@ private:
 	}
 
 	const std::string &input;
-	duckdb::ClientContext &context;
-	FixtureSource &source;
+	FixtureReadBuffer &checkpoint;
 	const ResourceBudgets &budgets;
-	std::chrono::steady_clock::time_point deadline;
-	duckdb::idx_t position;
+	std::size_t position;
 };
-
-void ValidateFixturePlan(const ScanPlan &plan) {
-	const std::vector<std::string> expected_columns = {"id", "name", "active"};
-	const std::vector<std::string> expected_ownership = {"filter", "ordering", "limit", "offset"};
-	if (plan.operation_name != "items_list" || plan.executor_name != "fixture_rest" || plan.method != "GET" ||
-	    plan.path != "/items" || plan.extractor != "$.items[*]" || plan.fixture_digest.empty() ||
-	    plan.output_columns != expected_columns || plan.remote_predicate != "TRUE" ||
-	    plan.runtime_residual_predicate != "TRUE" || !plan.remote_ordering.empty() || !plan.runtime_ordering.empty() ||
-	    plan.has_remote_limit || plan.has_remote_offset || plan.has_runtime_limit || plan.has_runtime_offset ||
-	    plan.duckdb_owned_operations != expected_ownership || plan.pagination_enabled || plan.providers_enabled ||
-	    plan.retry_enabled || plan.cache_enabled || plan.network_enabled || !plan.budgets.IsPreviewBudget()) {
-		throw ExecutionError(ErrorStage::POLICY, "", "scan plan is not authorized for fixture execution");
-	}
-}
-
-class FixtureBatchStream : public BatchStream {
-public:
-	FixtureBatchStream(ScanPlan plan_p, std::unique_ptr<FixtureSource> source_p)
-	    : plan(std::move(plan_p)), source(std::move(source_p)), offset(0), loaded(false), cancelled(false),
-	      closed(false), started(std::chrono::steady_clock::now()),
-	      deadline(started + std::chrono::milliseconds(plan.budgets.wall_milliseconds)) {
-		if (!source || source->ContentDigest() != plan.fixture_digest) {
-			throw ExecutionError(ErrorStage::POLICY, "", "fixture identity does not match the immutable scan plan");
-		}
-		source->OnStreamOpen();
-	}
-
-	~FixtureBatchStream() override {
-		Close();
-	}
-
-	bool Next(duckdb::ClientContext &context, std::vector<ItemRow> &output) override {
-		output.clear();
-		CheckCancellation(context);
-		CheckWallTime();
-		if (!loaded) {
-			FixtureReadBuffer buffer(context, *source, plan.budgets.fixture_bytes, deadline);
-			source->Read(buffer);
-			buffer.Checkpoint();
-			JsonParser parser(buffer.Contents(), context, *source, plan.budgets, deadline);
-			rows = parser.ParseResponse();
-			CheckWallTime();
-			loaded = true;
-		}
-		CheckCancellation(context);
-		if (offset >= rows.size()) {
-			return false;
-		}
-		const auto remaining = rows.size() - offset;
-		const auto count = std::min<duckdb::idx_t>(plan.budgets.batch_rows, remaining);
-		output.reserve(count);
-		for (duckdb::idx_t index = 0; index < count; index++) {
-			CheckCancellation(context);
-			output.push_back(rows[offset + index]);
-		}
-		offset += count;
-		source->OnBatch(count);
-		return true;
-	}
-
-	void Cancel() override {
-		cancelled = true;
-	}
-
-	void Close() override {
-		if (closed) {
-			return;
-		}
-		closed = true;
-		if (source) {
-			source->OnStreamClose();
-		}
-		rows.clear();
-	}
-
-private:
-	void CheckCancellation(duckdb::ClientContext &context) {
-		if (cancelled) {
-			source->OnInterruption();
-			throw duckdb::InterruptException();
-		}
-		CheckExecution(context, *source, deadline);
-	}
-
-	void CheckWallTime() const {
-		if (std::chrono::steady_clock::now() >= deadline) {
-			throw ExecutionError(ErrorStage::POLICY, "", "execution exceeds the wall-time budget");
-		}
-	}
-
-	ScanPlan plan;
-	std::unique_ptr<FixtureSource> source;
-	std::vector<ItemRow> rows;
-	duckdb::idx_t offset;
-	bool loaded;
-	bool cancelled;
-	bool closed;
-	std::chrono::steady_clock::time_point started;
-	std::chrono::steady_clock::time_point deadline;
-};
-
 } // namespace
 
-FixtureSource::~FixtureSource() {
+std::vector<ItemRow> DecodeFixtureItems(FixtureReadBuffer &buffer, const ResourceBudgets &budgets) {
+	JsonParser parser(buffer.Contents(), buffer, budgets);
+	return parser.ParseResponse();
 }
 
-void FixtureSource::OnStreamOpen() {
-}
-
-void FixtureSource::OnBatch(duckdb::idx_t) {
-}
-
-void FixtureSource::OnInterruption() {
-}
-
-void FixtureSource::OnStreamClose() {
-}
-
-FixtureFactory::~FixtureFactory() {
-}
-
-BatchStream::~BatchStream() {
-}
-
-std::unique_ptr<BatchStream> OpenBatchStream(const ScanPlan &plan, const FixtureFactory &factory) {
-	ValidateFixturePlan(plan);
-	if (factory.ContentDigest() != plan.fixture_digest) {
-		throw ExecutionError(ErrorStage::POLICY, "", "fixture identity does not match the immutable scan plan");
-	}
-	return std::unique_ptr<BatchStream>(new FixtureBatchStream(plan, factory.Open()));
-}
-
+} // namespace internal
 } // namespace duckdb_api

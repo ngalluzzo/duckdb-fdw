@@ -13,12 +13,18 @@ set(CONNECTOR_SOURCES src/connector.cpp)
 set(PLANNING_SOURCES
     src/scan_request.cpp
     src/scan_planner.cpp)
-set(RUNTIME_SOURCES src/duckdb_api_core.cpp)
+set(RUNTIME_SOURCES
+    src/execution_error.cpp
+    src/fixture_decoder.cpp
+    src/fixture_runtime.cpp)
+set(COMPOSITION_SOURCES src/example_composition.cpp)
 set(ADAPTER_SOURCES src/duckdb_api_extension.cpp)
+set(TEST_SUPPORT_SOURCES test/cpp/support/fixture_scenarios.cpp)
 set(PRODUCTION_SOURCES
     ${CONNECTOR_SOURCES}
     ${PLANNING_SOURCES}
     ${RUNTIME_SOURCES}
+    ${COMPOSITION_SOURCES}
     ${ADAPTER_SOURCES})
 
 build_static_extension(${TARGET_NAME} ${PRODUCTION_SOURCES})
@@ -56,15 +62,36 @@ add_executable(
 configure_duckdb_api_cpp_target(duckdb_api_scan_planner_tests)
 
 add_executable(
-  duckdb_api_contract_tests
-  test/cpp/duckdb_api_contract_tests.cpp
+  duckdb_api_fixture_decoder_tests
+  test/cpp/fixture_decoder_tests.cpp
+  ${CONNECTOR_SOURCES}
+  ${PLANNING_SOURCES}
+  ${RUNTIME_SOURCES}
+  ${TEST_SUPPORT_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_fixture_decoder_tests)
+target_link_libraries(duckdb_api_fixture_decoder_tests Threads::Threads)
+
+add_executable(
+  duckdb_api_fixture_stream_tests
+  test/cpp/fixture_stream_tests.cpp
+  ${CONNECTOR_SOURCES}
+  ${PLANNING_SOURCES}
+  ${RUNTIME_SOURCES}
+  ${TEST_SUPPORT_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_fixture_stream_tests)
+target_link_libraries(duckdb_api_fixture_stream_tests Threads::Threads)
+
+add_executable(
+  duckdb_api_adapter_tests
+  test/cpp/duckdb_adapter_tests.cpp
   ${PRODUCTION_SOURCES})
 target_link_libraries(
-  duckdb_api_contract_tests
+  duckdb_api_adapter_tests
   dummy_static_extension_loader
   duckdb_static
   Threads::Threads)
-configure_duckdb_api_cpp_target(duckdb_api_contract_tests)
+target_sources(duckdb_api_adapter_tests PRIVATE ${TEST_SUPPORT_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_adapter_tests)
 
 install(
   TARGETS ${EXTENSION_NAME}

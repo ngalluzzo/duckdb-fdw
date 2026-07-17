@@ -1,7 +1,10 @@
 #pragma once
 
 #include "duckdb.hpp"
-#include "duckdb_api/contracts.hpp"
+#include "duckdb_api/connector.hpp"
+#include "duckdb_api/execution.hpp"
+
+#include <memory>
 
 namespace duckdb {
 
@@ -12,6 +15,7 @@ public:
 	std::string Version() const override;
 };
 
-void RegisterDuckdbApi(ExtensionLoader &loader, shared_ptr<duckdb_api::FixtureFactory> fixture_factory);
+void RegisterDuckdbApi(ExtensionLoader &loader, duckdb_api::CompiledConnector connector,
+                       std::shared_ptr<const duckdb_api::ScanExecutor> executor);
 
 } // namespace duckdb

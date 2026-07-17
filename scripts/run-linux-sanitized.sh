@@ -107,7 +107,9 @@ readonly NATIVE_TEST_ROOT="${TEMPLATE_ROOT}/build/debug/extension/duckdb_api"
 for test_binary in \
     duckdb_api_connector_tests \
     duckdb_api_scan_planner_tests \
-    duckdb_api_contract_tests; do
+    duckdb_api_fixture_decoder_tests \
+    duckdb_api_fixture_stream_tests \
+    duckdb_api_adapter_tests; do
     ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
         "${NATIVE_TEST_ROOT}/${test_binary}"
 done

@@ -5,7 +5,8 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
-#include "duckdb_api/embedded_example.hpp"
+#include "duckdb_api/example_composition.hpp"
+#include "duckdb_api/scan_request.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -14,51 +15,42 @@
 namespace duckdb {
 namespace {
 
-class EmbeddedFixtureSource : public duckdb_api::FixtureSource {
+class DuckdbExecutionControl : public duckdb_api::ExecutionControl {
 public:
-	const std::string &ContentDigest() const override {
-		static const std::string digest(duckdb_api::EXAMPLE_FIXTURE_SHA256);
-		return digest;
+	explicit DuckdbExecutionControl(ClientContext &context_p) : context(context_p) {
 	}
 
-	void Read(duckdb_api::FixtureReadBuffer &buffer) override {
-		buffer.Append(duckdb_api::EXAMPLE_FIXTURE);
-	}
-};
-
-class EmbeddedFixtureFactory : public duckdb_api::FixtureFactory {
-public:
-	const std::string &ContentDigest() const override {
-		static const std::string digest(duckdb_api::EXAMPLE_FIXTURE_SHA256);
-		return digest;
+	bool IsCancellationRequested() const noexcept override {
+		try {
+			return context.IsInterrupted();
+		} catch (...) {
+			return true;
+		}
 	}
 
-	std::unique_ptr<duckdb_api::FixtureSource> Open() const override {
-		return std::unique_ptr<duckdb_api::FixtureSource>(new EmbeddedFixtureSource());
-	}
+private:
+	ClientContext &context;
 };
 
 struct DuckdbApiFunctionInfo : public TableFunctionInfo {
 	DuckdbApiFunctionInfo(duckdb_api::CompiledConnector connector_p,
-	                      shared_ptr<duckdb_api::FixtureFactory> fixture_factory_p)
-	    : connector(std::move(connector_p)), fixture_factory(std::move(fixture_factory_p)) {
+	                      std::shared_ptr<const duckdb_api::ScanExecutor> executor_p)
+	    : connector(std::move(connector_p)), executor(std::move(executor_p)) {
 	}
 
 	const duckdb_api::CompiledConnector connector;
-	shared_ptr<duckdb_api::FixtureFactory> fixture_factory;
+	const std::shared_ptr<const duckdb_api::ScanExecutor> executor;
 };
 
 struct DuckdbApiBindData : public TableFunctionData {
-	DuckdbApiBindData(duckdb_api::CompiledConnector connector_p, duckdb_api::ScanRequest request_p,
-	                  duckdb_api::ScanPlan plan_p, shared_ptr<duckdb_api::FixtureFactory> fixture_factory_p)
-	    : connector(std::move(connector_p)), request(std::move(request_p)), plan(std::move(plan_p)),
-	      fixture_factory(std::move(fixture_factory_p)) {
+	DuckdbApiBindData(duckdb_api::ScanRequest request_p, duckdb_api::ScanPlan plan_p,
+	                  std::shared_ptr<const duckdb_api::ScanExecutor> executor_p)
+	    : request(std::move(request_p)), plan(std::move(plan_p)), executor(std::move(executor_p)) {
 	}
 
-	duckdb_api::CompiledConnector connector;
-	duckdb_api::ScanRequest request;
-	duckdb_api::ScanPlan plan;
-	shared_ptr<duckdb_api::FixtureFactory> fixture_factory;
+	const duckdb_api::ScanRequest request;
+	const duckdb_api::ScanPlan plan;
+	const std::shared_ptr<const duckdb_api::ScanExecutor> executor;
 };
 
 struct DuckdbApiGlobalState : public GlobalTableFunctionState {
@@ -109,6 +101,26 @@ const char *ErrorStageName(duckdb_api::ErrorStage stage) {
 	                            error.SafeMessage());
 }
 
+LogicalType ConnectorLogicalType(const duckdb_api::CompiledColumn &column) {
+	if (column.logical_type == "BIGINT") {
+		return LogicalType::BIGINT;
+	}
+	if (column.logical_type == "VARCHAR") {
+		return LogicalType::VARCHAR;
+	}
+	if (column.logical_type == "BOOLEAN") {
+		return LogicalType::BOOLEAN;
+	}
+	throw InternalException("duckdb_api compiled connector contains an unsupported logical type");
+}
+
+[[noreturn]] void ThrowCancellation(duckdb_api::BatchStream *stream) {
+	if (stream) {
+		stream->Cancel();
+	}
+	throw InterruptException();
+}
+
 unique_ptr<FunctionData> DuckdbApiBind(ClientContext &, TableFunctionBindInput &input,
                                        vector<LogicalType> &return_types, vector<string> &names) {
 	const auto connector_name = RequiredNamedString(input, "connector");
@@ -123,24 +135,27 @@ unique_ptr<FunctionData> DuckdbApiBind(ClientContext &, TableFunctionBindInput &
 		throw InternalException("duckdb_api table function is missing immutable function information");
 	}
 	auto &function_info = input.info->Cast<DuckdbApiFunctionInfo>();
-	if (!function_info.fixture_factory) {
-		throw InternalException("duckdb_api table function is missing its fixture factory");
+	if (!function_info.executor) {
+		throw InternalException("duckdb_api table function is missing its scan executor");
 	}
 
-	auto connector = function_info.connector;
 	auto request = duckdb_api::BuildConservativeScanRequest();
-	auto plan = duckdb_api::BuildConservativeScanPlan(connector, request);
+	auto plan = duckdb_api::BuildConservativeScanPlan(function_info.connector, request);
 
-	names = {"id", "name", "active"};
-	return_types = {LogicalType::BIGINT, LogicalType::VARCHAR, LogicalType::BOOLEAN};
-	return make_uniq<DuckdbApiBindData>(std::move(connector), std::move(request), std::move(plan),
-	                                    function_info.fixture_factory);
+	for (const auto &column : function_info.connector.columns) {
+		names.push_back(column.name);
+		return_types.push_back(ConnectorLogicalType(column));
+	}
+	return make_uniq<DuckdbApiBindData>(std::move(request), std::move(plan), function_info.executor);
 }
 
-unique_ptr<GlobalTableFunctionState> DuckdbApiInit(ClientContext &, TableFunctionInitInput &input) {
+unique_ptr<GlobalTableFunctionState> DuckdbApiInit(ClientContext &context, TableFunctionInitInput &input) {
 	auto &bind_data = input.bind_data->Cast<DuckdbApiBindData>();
 	try {
-		return make_uniq<DuckdbApiGlobalState>(duckdb_api::OpenBatchStream(bind_data.plan, *bind_data.fixture_factory));
+		DuckdbExecutionControl control(context);
+		return make_uniq<DuckdbApiGlobalState>(bind_data.executor->Open(bind_data.plan, control));
+	} catch (const duckdb_api::ExecutionCancelled &) {
+		ThrowCancellation(nullptr);
 	} catch (const duckdb_api::ExecutionError &error) {
 		ThrowExecutionError(error);
 	} catch (const std::exception &) {
@@ -156,25 +171,26 @@ void DuckdbApiScan(ClientContext &context, TableFunctionInput &input, DataChunk 
 	auto &state = input.global_state->Cast<DuckdbApiGlobalState>();
 	std::vector<duckdb_api::ItemRow> rows;
 	try {
-		if (!state.stream->Next(context, rows)) {
+		DuckdbExecutionControl control(context);
+		if (!state.stream->Next(control, rows)) {
 			return;
 		}
 		if (rows.size() > STANDARD_VECTOR_SIZE) {
 			throw std::logic_error("batch stream exceeded DuckDB's vector size");
 		}
 		for (idx_t index = 0; index < rows.size(); index++) {
-			if (context.IsInterrupted()) {
-				state.stream->Cancel();
-				throw InterruptException();
+			if (control.IsCancellationRequested()) {
+				throw duckdb_api::ExecutionCancelled();
 			}
 			output.SetValue(0, index, Value::BIGINT(rows[index].id));
 			output.SetValue(1, index, Value(rows[index].name));
 			output.SetValue(2, index, Value::BOOLEAN(rows[index].active));
 		}
 		output.SetCardinality(rows.size());
+	} catch (const duckdb_api::ExecutionCancelled &) {
+		ThrowCancellation(state.stream.get());
 	} catch (const InterruptException &) {
-		state.stream->Cancel();
-		throw;
+		ThrowCancellation(state.stream.get());
 	} catch (const duckdb_api::ExecutionError &error) {
 		ThrowExecutionError(error);
 	} catch (const std::exception &) {
@@ -188,23 +204,24 @@ void DuckdbApiScan(ClientContext &context, TableFunctionInput &input, DataChunk 
 
 } // namespace
 
-void RegisterDuckdbApi(ExtensionLoader &loader, shared_ptr<duckdb_api::FixtureFactory> fixture_factory) {
-	if (!fixture_factory) {
-		throw InternalException("duckdb_api registration requires a fixture factory");
+void RegisterDuckdbApi(ExtensionLoader &loader, duckdb_api::CompiledConnector connector,
+                       std::shared_ptr<const duckdb_api::ScanExecutor> executor) {
+	if (!executor) {
+		throw InternalException("duckdb_api registration requires a scan executor");
 	}
-	auto connector = duckdb_api::BuildCompiledConnector(fixture_factory->ContentDigest());
 	TableFunction scan("duckdb_api_scan", {}, DuckdbApiScan, DuckdbApiBind, DuckdbApiInit);
 	scan.named_parameters["connector"] = LogicalType::VARCHAR;
 	scan.named_parameters["relation"] = LogicalType::VARCHAR;
 	scan.projection_pushdown = false;
 	scan.filter_pushdown = false;
 	scan.filter_prune = false;
-	scan.function_info = make_shared_ptr<DuckdbApiFunctionInfo>(std::move(connector), std::move(fixture_factory));
+	scan.function_info = make_shared_ptr<DuckdbApiFunctionInfo>(std::move(connector), std::move(executor));
 	loader.RegisterFunction(std::move(scan));
 }
 
 void DuckdbApiExtension::Load(ExtensionLoader &loader) {
-	RegisterDuckdbApi(loader, make_shared_ptr<EmbeddedFixtureFactory>());
+	auto example = duckdb_api::BuildEmbeddedExampleComposition();
+	RegisterDuckdbApi(loader, std::move(example.connector), std::move(example.executor));
 }
 
 std::string DuckdbApiExtension::Name() {
@@ -224,6 +241,7 @@ std::string DuckdbApiExtension::Version() const {
 extern "C" {
 
 DUCKDB_CPP_EXTENSION_ENTRY(duckdb_api, loader) {
-	duckdb::RegisterDuckdbApi(loader, duckdb::make_shared_ptr<duckdb::EmbeddedFixtureFactory>());
+	auto example = duckdb_api::BuildEmbeddedExampleComposition();
+	duckdb::RegisterDuckdbApi(loader, std::move(example.connector), std::move(example.executor));
 }
 }
