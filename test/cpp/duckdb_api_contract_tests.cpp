@@ -10,7 +10,6 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -153,60 +152,6 @@ std::string QueryError(duckdb::Connection &connection, const std::string &sql) {
 	return result->GetError();
 }
 
-void TestContractSnapshots() {
-	const auto connector = duckdb_api::BuildCompiledConnector("fixture-digest");
-	const auto request = duckdb_api::BuildConservativeScanRequest();
-	const auto plan = duckdb_api::BuildConservativeScanPlan(connector, request);
-	Require(connector.connector_name == "example" && connector.version == "0.1.0" &&
-	            connector.relation_name == "items" && connector.operation_name == "items_list" &&
-	            connector.method == "GET" && connector.path == "/items" && connector.extractor == "$.items[*]",
-	        "CompiledConnector fields drifted");
-	Require(request.connector_name == "example" && request.relation_name == "items" &&
-	            request.explicit_inputs.empty() &&
-	            request.projected_columns == std::vector<std::string>({"id", "name", "active"}) &&
-	            request.predicate == "TRUE" && request.orderings.empty() && !request.has_limit && !request.has_offset &&
-	            request.capabilities.IsConservativePreview(),
-	        "ScanRequest fields drifted");
-	Require(plan.operation_name == "items_list" && plan.executor_name == "fixture_rest" && plan.method == "GET" &&
-	            plan.path == "/items" && plan.extractor == "$.items[*]" &&
-	            plan.output_columns == std::vector<std::string>({"id", "name", "active"}) &&
-	            plan.remote_predicate == "TRUE" && plan.runtime_residual_predicate == "TRUE" &&
-	            plan.remote_ordering.empty() && plan.runtime_ordering.empty() && !plan.has_remote_limit &&
-	            !plan.has_remote_offset && !plan.has_runtime_limit && !plan.has_runtime_offset &&
-	            plan.duckdb_owned_operations == std::vector<std::string>({"filter", "ordering", "limit", "offset"}) &&
-	            !plan.pagination_enabled && !plan.providers_enabled && !plan.retry_enabled && !plan.cache_enabled &&
-	            !plan.network_enabled && plan.budgets.IsPreviewBudget(),
-	        "ScanPlan fields drifted");
-
-	Require(connector.Snapshot() ==
-	            "connector=example;version=0.1.0;relation=items;"
-	            "schema=id:BIGINT!:$.id,name:VARCHAR!:$.name,active:BOOLEAN!:$.active;"
-	            "operation=items_list:fallback:many:REST:GET:/items:$.items[*];fixture=fixture-digest",
-	        "CompiledConnector snapshot drifted");
-	Require(request.Snapshot() ==
-	            "connector=example;relation=items;inputs=[];projection=id,name,active;predicate=TRUE;ordering=[];"
-	            "limit=unset;"
-	            "offset=unset;capabilities=projection:unavailable,filter:unavailable,ordering:unavailable,"
-	            "limit:unavailable,offset:unavailable,progress:unavailable,cancellation:verified,secrets:unavailable",
-	        "ScanRequest snapshot drifted");
-	Require(plan.Snapshot() ==
-	            "operation=items_list;executor=fixture_rest;method=GET;path=/items;extractor=$.items[*];"
-	            "fixture=fixture-digest;projection=id,name,active;remote_predicate=TRUE;runtime_residual=TRUE;"
-	            "duckdb_owns=filter,ordering,limit,offset;remote_ordering=[];runtime_ordering=[];remote_limit=unset;"
-	            "remote_offset=unset;runtime_limit=unset;runtime_offset=unset;pagination=disabled;providers=disabled;"
-	            "retry=disabled;cache=disabled;"
-	            "network=disabled;budgets=fixture_bytes:4096,records:32,name_bytes:128,json_nesting:16,batch_rows:2,"
-	            "wall_ms:5000,concurrency:1",
-	        "ScanPlan snapshot drifted");
-
-	std::ifstream input(DUCKDB_API_SOURCE_ROOT "/fixtures/example/compiled_connector.snapshot");
-	std::string tracked_snapshot;
-	std::getline(input, tracked_snapshot);
-	Require(input.good() || input.eof(), "tracked CompiledConnector snapshot could not be read");
-	Require(duckdb_api::BuildCompiledConnector(duckdb_api::EXAMPLE_FIXTURE_SHA256).Snapshot() == tracked_snapshot,
-	        "executable CompiledConnector drifted from the tracked snapshot");
-}
-
 void RequirePlanRejected(duckdb_api::ScanPlan plan, const std::string &field) {
 	auto factory = duckdb::make_shared_ptr<ScenarioFactory>(FixtureScenario::SUCCESS);
 	bool rejected = false;
@@ -222,29 +167,9 @@ void RequirePlanRejected(duckdb_api::ScanPlan plan, const std::string &field) {
 	        "fixture executor opened a source before rejecting " + field);
 }
 
-void RequireRequestRejected(const duckdb_api::CompiledConnector &connector, duckdb_api::ScanRequest request,
-                            const std::string &field) {
-	bool rejected = false;
-	try {
-		duckdb_api::BuildConservativeScanPlan(connector, request);
-	} catch (const std::logic_error &) {
-		rejected = true;
-	}
-	Require(rejected, "planner accepted a non-conservative request " + field);
-}
-
 void TestFixturePlanValidation() {
 	const auto connector = duckdb_api::BuildCompiledConnector("fixture-digest");
 	const auto request = duckdb_api::BuildConservativeScanRequest();
-	auto mutated_request = request;
-	mutated_request.explicit_inputs.push_back("unexpected");
-	RequireRequestRejected(connector, mutated_request, "with explicit inputs");
-	mutated_request = request;
-	mutated_request.capabilities.projection = true;
-	RequireRequestRejected(connector, mutated_request, "with projection capability");
-	mutated_request = request;
-	mutated_request.capabilities.cancellation = false;
-	RequireRequestRejected(connector, mutated_request, "without verified cancellation");
 	auto plan = duckdb_api::BuildConservativeScanPlan(connector, request);
 	plan.method = "POST";
 	RequirePlanRejected(plan, "method");
@@ -688,7 +613,6 @@ void TestSynchronizedCancellation() {
 
 int main() {
 	try {
-		TestContractSnapshots();
 		TestFixturePlanValidation();
 		TestSuccessAndOfflineBind();
 		TestFrozenConnectorMetadata();

@@ -119,7 +119,10 @@ env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}
     make -C "${TEMPLATE_ROOT}" "${EXTRA_FLAGS_NAME}=-DCMAKE_CXX_STANDARD=11 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" \
         "${BUILD_PROFILE}"
 
-"${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/extension/duckdb_api/duckdb_api_contract_tests"
+readonly NATIVE_TEST_ROOT="${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/extension/duckdb_api"
+"${NATIVE_TEST_ROOT}/duckdb_api_connector_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_contract_tests"
 (
     cd "${TEMPLATE_ROOT}"
     "./build/${BUILD_PROFILE}/test/unittest" --require duckdb_api 'test/*'

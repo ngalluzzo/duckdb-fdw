@@ -11,10 +11,33 @@ def main() -> int:
     if len(sys.argv) != 2:
         raise SystemExit("usage: verify-sanitizer-flags.py COMPILE_COMMANDS_JSON")
     commands = json.loads(pathlib.Path(sys.argv[1]).resolve(strict=True).read_text())
+    target_sources = {
+        "duckdb_api_loadable_extension": {
+            "connector.cpp",
+            "scan_request.cpp",
+            "scan_planner.cpp",
+            "duckdb_api_core.cpp",
+            "duckdb_api_extension.cpp",
+        },
+        "duckdb_api_connector_tests": {"connector.cpp"},
+        "duckdb_api_scan_planner_tests": {
+            "connector.cpp",
+            "scan_request.cpp",
+            "scan_planner.cpp",
+        },
+        "duckdb_api_contract_tests": {
+            "connector.cpp",
+            "scan_request.cpp",
+            "scan_planner.cpp",
+            "duckdb_api_core.cpp",
+            "duckdb_api_extension.cpp",
+        },
+    }
+    production_sources = set().union(*target_sources.values())
     production = [
         entry
         for entry in commands
-        if "/src/duckdb_api_" in entry["file"]
+        if pathlib.Path(entry["file"]).name in production_sources
     ]
     if not production:
         raise AssertionError(
@@ -22,15 +45,15 @@ def main() -> int:
         )
     expected = {
         (target, source)
-        for target in ("duckdb_api_loadable_extension", "duckdb_api_contract_tests")
-        for source in ("duckdb_api_core.cpp", "duckdb_api_extension.cpp")
+        for target, sources in target_sources.items()
+        for source in sources
     }
     observed: set[tuple[str, str]] = set()
     for entry in production:
         command = entry["command"]
         output = entry.get("output", "")
         source = pathlib.Path(entry["file"]).name
-        for target in ("duckdb_api_loadable_extension", "duckdb_api_contract_tests"):
+        for target in target_sources:
             if f"/{target}.dir/" in output:
                 observed.add((target, source))
         if "-fsanitize=address" not in command:

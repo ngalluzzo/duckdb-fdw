@@ -103,8 +103,14 @@ if "${REPOSITORY_ROOT}/scripts/verify-sanitizer-flags.py" "${DISABLED_CANARY}" >
 fi
 echo "disabled-sanitizer negative canary passed"
 
-ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
-    "${TEMPLATE_ROOT}/build/debug/extension/duckdb_api/duckdb_api_contract_tests"
+readonly NATIVE_TEST_ROOT="${TEMPLATE_ROOT}/build/debug/extension/duckdb_api"
+for test_binary in \
+    duckdb_api_connector_tests \
+    duckdb_api_scan_planner_tests \
+    duckdb_api_contract_tests; do
+    ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+        "${NATIVE_TEST_ROOT}/${test_binary}"
+done
 (
     cd "${TEMPLATE_ROOT}"
     ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
