@@ -1,0 +1,4 @@
+interface:
+  display_name: "Contract Change"
+  short_description: "Keep project contracts synchronized"
+  default_prompt: "Use $contract-change to update this semantic contract across documentation, code, validation, and tests."

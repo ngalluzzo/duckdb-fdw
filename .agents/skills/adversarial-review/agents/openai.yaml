@@ -1,0 +1,4 @@
+interface:
+  display_name: "Adversarial Review"
+  short_description: "Find defects with independent reviewers"
+  default_prompt: "Use $adversarial-review to challenge this diff for correctness, security, and lifecycle defects."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Delivery Loop"
+  short_description: "Orchestrate verified project changes"
+  default_prompt: "Use $delivery-loop to implement this change through planning, review, verification, and commit."
