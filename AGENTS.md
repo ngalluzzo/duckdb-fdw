@@ -24,6 +24,8 @@ choices when evidence in the repository can resolve them.
 
 Read the relevant documents before changing behavior:
 
+- `docs/PRODUCT_DELIVERY.md` defines product intake, goal shaping, acceptance
+  evidence, and handoff.
 - `docs/ARCHITECTURE.md` defines product and relational invariants.
 - `docs/CONNECTOR_SPECIFICATIONS.md` defines author-facing package syntax and
   validation.
@@ -67,16 +69,19 @@ Do not weaken an invariant to make an implementation or test easier.
 
 ## Delivery workflow
 
-1. Inspect the current worktree and authoritative contracts.
-2. Translate the request into observable acceptance evidence.
-3. Identify uncertain external facts and verify them from primary sources.
-4. Prefer one thin end-to-end trial when an interface or architecture is still
+1. For a product goal, follow `docs/PRODUCT_DELIVERY.md`; make the persistent
+   goal reference that document and state its outcome, evidence, and
+   guardrails.
+2. Inspect the current worktree and authoritative contracts.
+3. Translate the request into observable acceptance evidence.
+4. Identify uncertain external facts and verify them from primary sources.
+5. Prefer one thin end-to-end trial when an interface or architecture is still
    unproven.
-5. Implement the complete behavior without placeholders, silent fallbacks, or
+6. Implement the complete behavior without placeholders, silent fallbacks, or
    disabled tests.
-6. Run independent review and apply only findings supported by evidence.
-7. Run the narrow checks first, then the complete relevant gate.
-8. Review the final diff and commit a coherent change using Conventional
+7. Run independent review and apply only findings supported by evidence.
+8. Run the narrow checks first, then the complete relevant gate.
+9. Review the final diff and commit a coherent change using Conventional
    Commits.
 
 When a failure pattern repeats, improve the test, skill, hook, or guidance that
