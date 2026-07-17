@@ -4,10 +4,12 @@
 > semantic pushdown, bounded streaming execution, pagination, enrichment,
 > shared auth and transport infrastructure, and an escape hatch for custom code.
 
-**Status:** Design proposal, revision 0.3
+**Status:** Design proposal, revision 0.4; the `0.1.0` native preview profile is
+accepted by RFC 0001
 
-**Integration profiles:** Portable C Extension API table functions and an optional
-deep DuckDB catalog/optimizer shell over the same Rust core
+**Integration profiles:** A source-built native C++ preview, portable C
+Extension API table functions, and an optional deep DuckDB catalog/optimizer
+shell over the same semantic core
 
 ---
 
@@ -44,9 +46,11 @@ The design deliberately separates:
 5. **Connector authoring** — declarative specifications for common APIs and
    trusted Rust or sandboxed WASM for exceptional cases.
 
-The portable profile uses a Rust table-function extension. A custom attached
-catalog and logical-plan optimizer are an optional integration profile, not a
-requirement of the connector contract.
+The accepted `0.1.0` preview uses a native C++ table function to prove the
+semantic boundaries on one exact DuckDB build. The intended portable profile
+uses a Rust table-function extension. A custom attached catalog and
+logical-plan optimizer are an optional integration profile, not a requirement
+of the connector contract.
 
 ---
 
@@ -162,11 +166,18 @@ execution runtime does not decide relational correctness.
 
 ## 5. DuckDB Integration Strategy
 
-The architecture has two integration levels. They should not be conflated.
+The architecture has one accepted preview profile and two intended integration
+levels. They should not be conflated.
 
 ```mermaid
 flowchart TB
     CORE[Shared Rust connector core]
+
+    subgraph P[Accepted native preview]
+        NATIVE[DuckDB native C++ extension]
+        DISPATCH[duckdb_api_scan dispatcher]
+        NATIVE --> DISPATCH
+    end
 
     subgraph A[Profile A — portable table functions]
         CAPI[DuckDB C Extension API]
@@ -186,6 +197,49 @@ flowchart TB
     CORE --> CAPI
     CORE -. stable FFI boundary .-> CPP
 ```
+
+### 5.0 Accepted native C++ preview
+
+RFC 0001 defines a deliberately narrow native profile for the first published
+product contract. It is a source-built DuckDB C++ extension named `duckdb_api`,
+version `0.1.0`, with exactly one project-defined SQL function:
+
+```sql
+SELECT id, name, active
+FROM duckdb_api_scan(
+    connector := 'example',
+    relation := 'items'
+)
+ORDER BY id;
+```
+
+The profile recognizes only the immutable `example.items` relation and returns
+the three typed rows recorded in the repository fixture. Its implementation is
+native C++ end to end and introduces neither Rust nor a cross-language FFI.
+It preserves the same semantic `CompiledConnector → ScanRequest → ScanPlan →
+BatchStream` boundaries so the preview does not turn native adapter details
+into a future public ABI.
+
+The native capability profile exposes no projection, filter, ordering, limit,
+offset, progress, or secret-manager delegation. Its adapter therefore requests
+the full three-column projection, uses `TRUE` for remote and runtime residual
+predicates, leaves ordering empty and bounds unset, and lets DuckDB retain every
+filter, ordering, limit, and offset. Cancellation is the one verified lifecycle
+capability. Ordinary bind and planning read only immutable embedded metadata
+and cannot open the fixture executor.
+
+Execution is a single-task synchronous fixture-backed REST-shaped stream. It
+validates the fixed `GET /items` plan and `$.items[*]` extractor, strictly
+converts JSON records, emits at most two rows per internal batch, and enforces
+hard fixture-byte, record, field-size, wall-time, and concurrency ceilings.
+There is no network, credential, retry, cache, pagination, provider, package
+loader, or runtime file-path capability.
+
+The supported compatibility cell is DuckDB 1.5.4 at commit `08e34c447b` with
+platform `osx_arm64`, macOS 26.5.1 on Apple Silicon arm64, Apple clang 17 in
+C++11 mode, CMake 4.1.2, and Ninja 1.13.0. Installation is a clean source build
+and unsigned direct local load. No public binary distribution or broader
+native ABI compatibility follows from this profile.
 
 ### 5.1 Profile A: portable Rust table-function extension
 
@@ -1536,6 +1590,7 @@ Reuse as a concrete source of API patterns:
 
 | Area                       | Decision                                                               |
 | -------------------------- | ---------------------------------------------------------------------- |
+| Native preview             | `duckdb_api` 0.1.0 C++ table function on one exact source-built cell  |
 | Portable integration       | Pure-Rust C Extension API table functions                              |
 | Deep integration           | Optional thin C++ catalog/optimizer shell                              |
 | Core abstraction           | `ScanRequest` → explicit `ScanPlan` → `BatchStream`                    |

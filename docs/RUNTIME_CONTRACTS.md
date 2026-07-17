@@ -1,8 +1,9 @@
 # Compiled Connector IR and Runtime Contracts
 
-> Internal Rust contracts for compiling declarative connector packages, planning
-> relational scans, executing remote operations, enriching rows, and producing
-> DuckDB vectors.
+> Internal semantic contracts for compiling declarative connector packages,
+> planning relational scans, executing remote operations, enriching rows, and
+> producing DuckDB vectors. Rust is the intended portable implementation; the
+> accepted native preview maps a strict subset into private C++ types.
 >
 > Companion to [ARCHITECTURE.md](ARCHITECTURE.md) and
 > [CONNECTOR_SPECIFICATIONS.md](CONNECTOR_SPECIFICATIONS.md).
@@ -70,6 +71,25 @@ The runtime contracts do not require:
 - A custom DuckDB storage catalog.
 - Deep optimizer integration through DuckDB internal C++ APIs.
 - Columnar remote-source batches.
+
+### 1.2 Accepted native `0.1.0` mapping
+
+RFC 0001 maps the minimum end-to-end subset of these contracts into a private
+native C++ implementation. Those C++ types are neither a public ABI nor a
+replacement for the intended portable Rust runtime.
+
+| Semantic artifact | Native preview mapping |
+|---|---|
+| `CompiledConnector` | Immutable `example` version `0.1.0` snapshot with one `items` relation, three non-null columns, one fallback many-row REST operation, fixed extractors, and a content-addressed embedded fixture |
+| `ScanRequest` | Full projection closure; `TRUE` predicate; empty ordering; unset limit and offset; no SQL text or I/O capability |
+| `ScanPlan` | Fixed `GET /items` and `$.items[*]` fixture executor; `TRUE` remote and runtime residuals; DuckDB ownership of filtering, ordering, limit, and offset; explicit hard budgets |
+| `BatchStream` | Synchronous single-task pull stream with two-row internal batches, strict conversion, cancellation checks, and idempotent close |
+
+No connector compiler, package loader, protocol registry, network transport,
+secret capability, provider pipeline, pagination, retry, cache, async runtime,
+or cross-language FFI exists in this profile. The embedded snapshot is built
+from repository metadata at extension construction; arbitrary connector syntax
+is not accepted.
 
 ---
 
@@ -726,6 +746,9 @@ Ordinary bind and scan planning operate only on:
 - Cached local observations.
 
 Network I/O begins after a `ScanPlan` has been accepted and execution starts.
+The native preview has no network capability at any phase. Its fixture source
+is also unopened until global scan initialization, so a bind-only oracle can
+distinguish metadata work from execution.
 
 ### 6.2 Parallel DuckDB scan state
 
@@ -769,6 +792,11 @@ unavailable query structure from SQL text.
 Every supported DuckDB version and adapter profile has a compatibility test
 that records these capabilities. A capability is enabled only after its full
 lifecycle behavior, including teardown and error paths, is verified.
+
+The accepted native profile records projection, filters, ordering, limit,
+offset, progress, and secret-manager access as unavailable. Cancellation is
+verified. It uses one DuckDB source task, requests the full projection closure,
+and leaves every row-removing, ordering, and bounding operation in DuckDB.
 
 An adapter cannot delegate limit, offset, or ordering past an unavailable or
 DuckDB-owned row-removing or ordering prerequisite. It must retain the
@@ -1476,6 +1504,8 @@ pub trait BatchStream: Send {
     fn progress(&self) -> Option<f64>;
 
     fn cancel(&mut self);
+
+    fn close(&mut self);
 }
 ```
 
@@ -1488,6 +1518,11 @@ pub enum BatchStatus {
 
 `DuckdbBatchWriter` abstracts over `DataChunk` mutation and logical type
 conversion.
+
+`close` is idempotent. Success, failure, cancellation, early consumer close,
+connection destruction, and extension shutdown all reach the same close path.
+The native preview implements this interface synchronously without a worker,
+queue, or async runtime and uses RAII destruction as a final close guarantee.
 
 ### 18.1 Async bridge
 
@@ -2162,6 +2197,14 @@ Errors should include:
 - Retry count.
 - Relevant input and predicate names.
 - Suggested corrective action when possible.
+
+For the native preview, malformed JSON maps to public category `decode`.
+Missing extraction, forbidden nulls, duplicate required fields, and strict
+declared-type conversion failures map to `schema`. The DuckDB boundary performs
+that mapping once. It may expose the category, `example`, `items`, and a known
+schema field, but never the rejected scalar, response body, credential, or
+unrestricted path. Unknown native exceptions become a redacted `internal`
+error; interruption remains DuckDB cancellation.
 
 ---
 

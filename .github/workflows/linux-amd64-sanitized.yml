@@ -1,0 +1,20 @@
+name: linux-amd64-sanitized evidence
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - v0.1.0
+
+permissions:
+  contents: read
+
+jobs:
+  sanitizer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Run in the pinned Linux amd64 cell
+        run: scripts/run-linux-sanitized-cell.sh "$PWD/.build/linux-amd64-sanitized"

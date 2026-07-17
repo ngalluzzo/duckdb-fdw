@@ -135,3 +135,14 @@ compatibility promise is part of this goal.
 This tracked brief is the approved working record for the `0.1.0` goal. Stable
 behavior is authoritative only after it is propagated to the contracts and
 executable evidence named above.
+
+### Delivery status
+
+The native vertical slice, contract propagation, private scenario/lifecycle
+suite, public SQL and inventory oracles, pinned product-cell runner, release
+manifest/canaries, sanitizer launcher, and runbook are implemented. Fresh
+debug and release-profile product builds pass on the declared macOS arm64 cell.
+
+The goal remains active until the same clean source commit passes the native
+Linux amd64 ASan/UBSan cell, receives durable evidence custody, is tagged once
+as `v0.1.0`, and completes the tagged product and two-workspace evidence gates.

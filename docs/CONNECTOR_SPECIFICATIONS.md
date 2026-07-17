@@ -99,6 +99,21 @@ Connector
     └── partitions
 ```
 
+### 1.4 Repository preview evidence boundary
+
+The repository-owned `example.items` metadata used by `duckdb_api` 0.1.0 is an
+internal acceptance fixture, not an implementation of this authoring
+specification. It may mirror the `duckdb_api/draft` field meanings needed to
+construct one immutable `CompiledConnector`, but the preview does not parse or
+validate arbitrary YAML, load connector directories, resolve caller-selected
+paths, expose author tooling, or establish package compatibility.
+
+The preview's `duckdb_api_scan(connector := 'example', relation := 'items')`
+dispatcher is likewise not a general mapping from connector packages to SQL
+names. Package loading, registration, reload, validation, and distribution
+remain specification capabilities that require their own accepted product
+contract and executable authoring evidence.
+
 ---
 
 ## 2. Terminology
@@ -2916,7 +2931,9 @@ Custom code is not permission to bypass host security policy.
 
 ## 33. Distribution
 
-Package loading is intentionally local and explicit in this contract.
+Package loading is intended to be local and explicit when this draft becomes
+an implemented authoring contract. The `0.1.0` native preview embeds its single
+repository-owned example and does not implement the loading behavior below.
 
 ### 33.1 Local packages
 

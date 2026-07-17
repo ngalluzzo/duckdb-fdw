@@ -1,0 +1,68 @@
+{
+  "project": {
+    "extension": "duckdb_api",
+    "tag": "v0.1.0",
+    "version": "0.1.0"
+  },
+  "dependencies": {
+    "duckdb": {
+      "commit": "08e34c447bae34eaee3723cac61f2878b6bdf787",
+      "git_describe": "v1.5.4-0-g08e34c447b",
+      "tree": "33c1f40f6421fd8f79912a6ce96722feca538c61",
+      "version": "1.5.4"
+    },
+    "duckdb_mismatch": {
+      "commit": "14eca11bd9d4a0de2ea0f078be588a9c1c5b279c",
+      "version": "1.5.3"
+    },
+    "extension_ci_tools": {
+      "commit": "b777c70d30942cca5bef62d6d4fa23a13362f398",
+      "tree": "d3295344af82907cad620374596c44479f35f410"
+    },
+    "extension_template": {
+      "commit": "cfaf3e236008e782d27f4341b0ee036002d0a449",
+      "tree": "e9d306f3e8b0eed85e3cfc132066769baab9f6d2"
+    }
+  },
+  "identities": {
+    "compiled_connector_sha256": "a3f59ec862769f2e32b234500e9d95e002fb82d64fb0e4881560fb0980ce6072",
+    "fixture_sha256": "1b789738607ae9a74d24b07cacc09e98531c0de5ae9a822e78cabe9c8fc0eb39",
+    "public_contract_sha256": "a18df636619ffd09eae963cc5c6e7d3aa0670e69644380ab6a7c0fb340de2fb2"
+  },
+  "product_cell": {
+    "architecture": "arm64",
+    "cmake": "4.1.2",
+    "compiler": "Apple clang version 17.0.0",
+    "cxx_standard": "c++11",
+    "duckdb_platform": "osx_arm64",
+    "host": "macOS 26.5.1",
+    "ninja": "1.13.0"
+  },
+  "sanitizer_cell": {
+    "base_image": "docker.io/library/ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90",
+    "name": "linux_amd64-sanitized",
+    "platform": "linux/amd64",
+    "required_sanitizers": [
+      "address",
+      "undefined"
+    ]
+  },
+  "tools": {
+    "cmake_macos_universal": {
+      "sha256": "3be85f5b999e327b1ac7d804cbc9acd767059e9f603c42ec2765f6ab68fbd367",
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-macos-universal.tar.gz"
+    },
+    "cmake_linux_x86_64": {
+      "sha256": "773cc679c3a7395413bd096523f8e5d6c39f8718af4e12eb4e4195f72f35e4ab",
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-linux-x86_64.tar.gz"
+    },
+    "ninja_macos": {
+      "sha256": "229314c7ef65e9c11d19f84e5f4bb374105a4f21f64ed55e8f403df765ab52a7",
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.0/ninja-mac.zip"
+    },
+    "ninja_linux": {
+      "sha256": "46aa8ad0a431e9b6e39f6ca0abc47bf8b13be094e3ac7d0f6d39e94bbdc746f9",
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.0/ninja-linux.zip"
+    }
+  }
+}

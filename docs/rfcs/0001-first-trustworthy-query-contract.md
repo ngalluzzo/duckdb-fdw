@@ -350,8 +350,8 @@ intended portable stable-C-API boundary for `1.0.0`.
 | Can a native table function emit bounded typed chunks? | Exact multi-chunk row oracle | `experiments/native-extension/test/sql/fdw_boundary_probe.test` | Passed 29 SQLLogic assertions; experimental SQL is not the product contract |
 | Can cancellation occur inside a callback and release state? | Synchronized interruption and independent lifecycle observation | `experiments/native-extension/test/cancellation.py` | Passed with one observed interrupt, no active waiter, and matched open/close counters |
 | Is local sanitizer evidence clean? | Sanitized native build | Official debug build on the recorded macOS host | Not established: upstream platform helper recurses in ASan initialization before extension code; sanitizer coverage is required on a working CI target during delivery |
-| Does the proposed product pipeline preserve the contract? | End-to-end success, offline-bind, distinct decode/schema failures, cancellation, teardown, and public-inventory oracles | Repository-owned scenarios injected only into the statically linked test host | Required delivery evidence; the private seam must traverse the production pipeline and be absent from the release artifact |
-| Can the release evidence reject stale or misidentified artifacts? | Clean-room gate plus deliberate failure canaries | Two cache-empty workspaces, `linux_amd64-sanitized`, pristine supported and mismatched DuckDB hosts, and manifest tampering | Required delivery evidence; `0.1.0` cannot release until every positive and negative gate passes |
+| Does the proposed product pipeline preserve the contract? | End-to-end success, offline-bind, distinct decode/schema failures, cancellation, teardown, and public-inventory oracles | Repository-owned scenarios injected only into the statically linked test host | Implemented in the product source and private static host; pre-tag debug and release-profile product cells pass, while tagged release evidence remains outstanding |
+| Can the release evidence reject stale or misidentified artifacts? | Clean-room gate plus deliberate failure canaries | Two cache-empty workspaces, `linux_amd64-sanitized`, pristine supported and mismatched DuckDB hosts, and manifest tampering | Gate and canaries implemented; native sanitizer execution, clean tag, two-workspace run, and durable custody remain required before release |
 
 The complete trial record is in
 `experiments/native-extension/RESULTS.md`. Acceptance of this RFC authorizes the
@@ -455,12 +455,12 @@ code under a working sanitizer runtime.
 
 | Source of truth or artifact | Impact | Required update | Completion evidence |
 | --- | --- | --- | --- |
-| `docs/ARCHITECTURE.md` | Affected | Add the native C++ preview profile, accepted SQL, conservative capability cell, and distinction from the intended portable profile | Pending delivery propagation |
-| `docs/CONNECTOR_SPECIFICATIONS.md` | Clarification required | Identify the repository example as internal `0.1.0` evidence, not general package compatibility or public loading support | Pending delivery propagation |
-| `docs/RUNTIME_CONTRACTS.md` | Affected | Add the native preview mapping for the minimal `CompiledConnector → ScanRequest → ScanPlan → BatchStream` slice without declaring a public ABI | Pending delivery propagation |
+| `docs/ARCHITECTURE.md` | Affected | Add the native C++ preview profile, accepted SQL, conservative capability cell, and distinction from the intended portable profile | Propagated in revision 0.4 |
+| `docs/CONNECTOR_SPECIFICATIONS.md` | Clarification required | Identify the repository example as internal `0.1.0` evidence, not general package compatibility or public loading support | Propagated in the repository preview evidence boundary |
+| `docs/RUNTIME_CONTRACTS.md` | Affected | Add the native preview mapping for the minimal `CompiledConnector → ScanRequest → ScanPlan → BatchStream` slice without declaring a public ABI | Propagated in the accepted native mapping and lifecycle/error contracts |
 | `docs/TEAM_TOPOLOGY.md` and active charters | Not affected | No accountability or team-interface movement | Team reviews recorded below |
 | `docs/PRODUCT_DELIVERY.md`, `AGENTS.md`, and skills | Not affected | Existing goal, RFC, contract-change, delivery, and review rules apply | No update required unless delivery exposes process drift |
-| Examples, diagnostics, fixtures, and tests | Affected | Add the accepted SQL, example success and malformed fixtures, public-surface inventory, lifecycle oracles, and clean-build compatibility evidence | Pending delivery propagation |
+| Examples, diagnostics, fixtures, and tests | Affected | Add the accepted SQL, example success and malformed fixtures, public-surface inventory, lifecycle oracles, and clean-build compatibility evidence | Implemented; authoritative tagged and sanitizer evidence remains a release gate |
 
 The RFC records rationale; propagated contracts and executable behavior become
 the sources of current truth.

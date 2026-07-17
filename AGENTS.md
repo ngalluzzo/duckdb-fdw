@@ -135,14 +135,39 @@ and adversarial review.
 
 ## Current verification
 
-Until the code scaffold defines stronger commands, documentation and agent
-changes must pass:
+Documentation and agent changes must pass:
 
 ```sh
 ruby scripts/validate-agent-assets.rb
 git diff --check
 git diff --cached --check
 ```
+
+Changes to product source, fixtures, build configuration, or release evidence
+must additionally pass:
+
+```sh
+scripts/verify-source-identities.py
+scripts/run-native-product-tests.sh /absolute/new/build-root debug
+```
+
+The first command is the fast content and version identity gate. The second
+performs a fresh pinned DuckDB build, private C++ contract tests, SQLLogicTests,
+loadable-artifact inventory, and pristine-host public behavior tests on the
+supported product cell. Use a new build root on every run.
+
+The authoritative `0.1.0` release and sanitizer commands are intentionally
+stricter:
+
+```sh
+scripts/run-0.1-release-gate.sh /absolute/new/build-root /absolute/new/evidence-root
+scripts/run-linux-sanitized-cell.sh "$PWD/.build/linux-amd64-sanitized"
+```
+
+The release command requires a clean worktree with `v0.1.0` equal to `HEAD`.
+The sanitizer launcher must run on native Linux amd64 and verifies the pinned
+container digest defined by `release/0.1.0/pins.json`; a direct inner-script or
+emulated run is not release evidence.
 
 Run the cached-diff check after staging the intended commit so new files are
 included in the whitespace gate.
