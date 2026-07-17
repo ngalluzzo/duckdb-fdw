@@ -1,0 +1,18 @@
+# Rust and native build output
+/target/
+/build/
+
+# Local DuckDB state
+*.duckdb
+*.duckdb.wal
+
+# Local credentials and environment
+.env
+.env.*
+!.env.example
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+*.swp
+*~
