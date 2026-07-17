@@ -10,6 +10,8 @@ API. Its public contract is DuckDB-native.
 
 ## Project documents
 
+- [Product roadmap](ROADMAP.md) defines the intended SemVer release progression
+  from the first executable preview through the stable `1.0.0` contract.
 - [Product delivery](docs/PRODUCT_DELIVERY.md) defines how product outcomes are
   shaped into agent-led goals, proven, and handed back.
 - [Team topology](docs/TEAM_TOPOLOGY.md) and its linked charters define the
