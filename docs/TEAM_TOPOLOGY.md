@@ -169,15 +169,18 @@ interactions. Once active, each team owns one charter covering its:
 - success evidence and cognitive-load limits; and
 - supported interaction modes and their exit conditions.
 
-When created, charters use these paths:
+The active charters are:
 
-```text
-docs/teams/CONNECTOR_EXPERIENCE.md
-docs/teams/QUERY_EXPERIENCE.md
-docs/teams/REMOTE_RUNTIME.md
-docs/teams/RELATIONAL_SEMANTICS.md
-docs/teams/ENGINEERING_ENABLEMENT.md
-```
+- [Connector Experience](teams/CONNECTOR_EXPERIENCE.md)
+- [Query Experience](teams/QUERY_EXPERIENCE.md)
+- [Remote Runtime](teams/REMOTE_RUNTIME.md)
+- [Relational Semantics](teams/RELATIONAL_SEMANTICS.md)
+- [Engineering Enablement](teams/ENGINEERING_ENABLEMENT.md)
+
+Use `$topology-consult` to route a goal or decision through the minimum affected
+charters and to collect evidence-backed team dispositions when consultation or
+RFC review is required. The skill is a procedure; it does not become a source
+of team authority or require all five teams for every decision.
 
 This overview owns the cross-team model. Once active, a charter owns the
 detailed operation of its team and must remain consistent with this overview,

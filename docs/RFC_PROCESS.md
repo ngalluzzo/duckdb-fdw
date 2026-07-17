@@ -231,6 +231,9 @@ decision, not only the successful example.
 The author requests review from every team named by the topology-impact
 section. Reviewers examine the proposal through their charter and the
 authoritative contracts, then record evidence-backed objections or approval.
+Use `$topology-consult` to select the charter-backed perspectives, preserve
+fresh review context, and format the resulting dispositions. The skill
+facilitates review but does not approve an RFC or replace the decision owner.
 
 The template's review record contains one row for every required reviewer,
 including the reviewer, team, approval or objection, evidence, and disposition.

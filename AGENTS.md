@@ -26,8 +26,8 @@ Read the relevant documents before changing behavior:
 
 - `docs/PRODUCT_DELIVERY.md` defines product intake, goal shaping, acceptance
   evidence, and handoff.
-- `docs/TEAM_TOPOLOGY.md` defines value streams, team accountability, and
-  cross-team interaction rules.
+- `docs/TEAM_TOPOLOGY.md` and its linked charters define value streams, team
+  accountability, review lenses, and cross-team interaction rules.
 - `docs/RFC_PROCESS.md` defines when durable shared decisions require an RFC,
   who decides them, and what acceptance produces.
 - `docs/ARCHITECTURE.md` defines product and relational invariants.
@@ -46,6 +46,9 @@ shaped, assigned, and delivered.
 
 - Use `$draft-product-goal` when turning product-manager direction into a new,
   split, clarified, or materially revised product goal before activation.
+- Use `$topology-consult` when routing accountability, invoking a team
+  perspective, evaluating topology impact, or collecting affected-team input
+  for an RFC.
 - Use `$delivery-loop` for nontrivial implementation, refactoring, bug-fixing,
   integration, or repository setup.
 - Use `$contract-change` whenever behavior crosses architecture, connector
@@ -80,9 +83,9 @@ Do not weaken an invariant to make an implementation or test easier.
 1. For a product goal, use `$draft-product-goal` and follow
    `docs/PRODUCT_DELIVERY.md`; make the persistent goal reference that document
    and state its outcome, evidence, and guardrails.
-2. For a product goal, assign exactly one accountable stream-aligned team using
-   `docs/TEAM_TOPOLOGY.md`; record supporting teams, interaction modes, and
-   exit conditions in the task plan.
+2. For a product goal, use `$topology-consult` in Route mode to assign exactly
+   one accountable stream-aligned team from `docs/TEAM_TOPOLOGY.md`; record
+   supporting teams, interaction modes, and exit conditions in the task plan.
 3. Apply the trigger rules in `docs/RFC_PROCESS.md` to any durable shared
    decision; for a product goal, do so after team assignment. Decide a required
    RFC before implementation commits to the affected shared or public contract.

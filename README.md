@@ -12,8 +12,9 @@ API. Its public contract is DuckDB-native.
 
 - [Product delivery](docs/PRODUCT_DELIVERY.md) defines how product outcomes are
   shaped into agent-led goals, proven, and handed back.
-- [Team topology](docs/TEAM_TOPOLOGY.md) defines the value streams, team types,
-  accountability, and interaction model.
+- [Team topology](docs/TEAM_TOPOLOGY.md) and its linked charters define the
+  value streams, team types, accountability, review lenses, and interaction
+  model.
 - [RFC process](docs/RFC_PROCESS.md) and [template](docs/RFC_TEMPLATE.md) define
   how durable shared decisions are proposed, reviewed, and propagated.
 - [Architecture](docs/ARCHITECTURE.md) defines product invariants, integration
