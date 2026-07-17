@@ -25,6 +25,9 @@ API. Its public contract is DuckDB-native.
   declarative package format and its validation rules.
 - [Runtime contracts](docs/RUNTIME_CONTRACTS.md) defines the compiled IR,
   planning contracts, execution interfaces, and policy capabilities.
+- [Changelog](CHANGELOG.md) records user-visible additions and limitations.
+- [0.1.0 candidate notes](docs/releases/0.1.0-notes.md) describe the current
+  preview without implying that it has been released.
 
 The broader system-design documents remain proposals. RFC 0001 is the accepted
 contract for the executable native `0.1.0` preview, while the connector
@@ -33,36 +36,89 @@ is intentionally published. The product-delivery, team-topology, and RFC
 documents are the active operating model for turning product outcomes into
 agent-led work.
 
-## Native preview
+## Unreleased 0.1.0 native preview
 
-The preview is a source-built native C++ extension for one exact compatibility
-cell. From a clean checkout on the supported macOS arm64 host, run the complete
-product test build in a new path:
+The current source is an **unreleased 0.1.0 candidate**. It is a fixture-backed
+native preview, not a published package or a live HTTP connector. Its purpose is
+to prove that one API-shaped relation can load locally and return trustworthy,
+bounded DuckDB rows.
+
+### Supported cell
+
+The only supported product cell is DuckDB 1.5.4 at commit `08e34c447b`,
+`osx_arm64`, on macOS 26.5.1 Apple Silicon arm64 with Apple clang 17.0.0 in
+C++11 mode, CMake 4.1.2, Ninja 1.13.0, and Python 3.14. The developer bootstrap
+downloads pinned, checksummed build dependencies, so its first run requires
+network access.
+
+Other DuckDB versions, operating systems, architectures, compilers, and load
+modes are unsupported even if they happen to work.
+
+### Run the first query
+
+From the repository root on the supported cell, the shortest path is:
 
 ```sh
-scripts/run-native-product-tests.sh /absolute/new/build-root release
+make demo
 ```
 
-Start the matching DuckDB 1.5.4 host with unsigned local extensions enabled,
-load the artifact path printed by the command, and query:
+This bootstraps a reusable debug build, directly loads the unsigned local
+artifact into the pinned DuckDB 1.5.4 Python host, and executes
+[`examples/first-trustworthy-query.sql`](examples/first-trustworthy-query.sql).
+The example checks extension identity and prints:
 
-```sql
-SELECT id, name, active
-FROM duckdb_api_scan(
-    connector := 'example',
-    relation := 'items'
-)
-ORDER BY id;
+```text
+DuckDB v1.5.4 (08e34c447b)
+Extension duckdb_api 0.1.0 loaded=true installed=false mode=NOT_INSTALLED
+Schema id BIGINT, name VARCHAR, active BOOLEAN
+id      name    active
+1       alpha   true
+2       beta    false
+3       gamma   true
 ```
 
-The result is `(1, 'alpha', true)`, `(2, 'beta', false)`, and
-`(3, 'gamma', true)`. The preview embeds this deterministic fixture; it does
-not provide live HTTP, arbitrary connector loading, authentication, pagination,
-GraphQL, or binary installation.
+### Developer commands
 
-The authoritative tagged release command, Linux sanitizer evidence command,
-manifest format, and reproduction handoff are documented in
+The root Make targets form the supported source-development interface:
+
+| Command | Purpose |
+| --- | --- |
+| `make help` | List the supported targets and build overrides without building or using the network. |
+| `make bootstrap` | Validate the supported host and prepare or refresh pinned tools, sources, and the Python host. |
+| `make build` | Incrementally build reusable debug artifacts. Use `PROFILE=release` for a release-profile developer build. |
+| `make test` | Build and run the focused native, SQL, inventory, and direct-load developer oracles. |
+| `make demo` | Build as needed and run the first-query example through the pinned Python host. |
+| `make paths` | Print absolute `key=value` paths for the current profile, including `pinned_python` and `artifact`. |
+| `make verify` | Run the complete pre-tag product suite from a newly allocated build root rather than the developer cache. |
+
+The reusable commands keep their state under `.build/dev` by default. Select a
+profile or another developer root explicitly when needed:
+
+```sh
+make test PROFILE=release DUCKDB_API_DEV_ROOT=/absolute/developer-root
+make paths PROFILE=release DUCKDB_API_DEV_ROOT=/absolute/developer-root
+```
+
+`make paths` may also report `static_test_cli`. That binary statically links the
+extension for native and SQL testing; it is not a clean host and is not evidence
+of direct artifact loading. The public demo inputs are `pinned_python` and
+`artifact`.
+
+`make build`, `make test`, `make demo`, and `make paths` may reuse developer
+artifacts. `make verify` deliberately uses a fresh root and is stronger pre-tag
+evidence, but it is still not the authoritative release gate. Authoritative
+`v0.1.0` evidence requires the clean tagged product gate, Linux sanitizer cell,
+manifest verification, and two-workspace reproduction documented in
 [the 0.1.0 release runbook](docs/releases/0.1.0.md).
+
+### Preview limitations
+
+The preview embeds one deterministic `example.items` fixture. It does not
+provide live HTTP, arbitrary connector loading, authentication, secrets,
+pagination, retries, caching, GraphQL, binary installation, signing, or
+automatic updates. Filtering, ordering, limits, and offsets remain DuckDB-owned;
+there is no custom explain surface. The `duckdb_api/draft` connector shape is
+internal evidence, not a stable authoring contract.
 
 ## Contributing
 
