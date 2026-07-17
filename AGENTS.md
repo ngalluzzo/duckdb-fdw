@@ -26,6 +26,8 @@ Read the relevant documents before changing behavior:
 
 - `docs/PRODUCT_DELIVERY.md` defines product intake, goal shaping, acceptance
   evidence, and handoff.
+- `docs/TEAM_TOPOLOGY.md` defines value streams, team accountability, and
+  cross-team interaction rules.
 - `docs/ARCHITECTURE.md` defines product and relational invariants.
 - `docs/CONNECTOR_SPECIFICATIONS.md` defines author-facing package syntax and
   validation.
@@ -33,8 +35,10 @@ Read the relevant documents before changing behavior:
   lifecycle contracts.
 - `CONTRIBUTING.md` defines Git and documentation conventions.
 
-The documents are one contract at different layers. A semantic change is not
-complete until every affected layer, example, diagnostic, and test agrees.
+The three system-design documents are one contract at different layers. A
+semantic change is not complete until every affected layer, example,
+diagnostic, and test agrees. The operating documents govern how that work is
+shaped, assigned, and delivered.
 
 ## Required skills
 
@@ -74,16 +78,19 @@ Do not weaken an invariant to make an implementation or test easier.
 1. For a product goal, use `$draft-product-goal` and follow
    `docs/PRODUCT_DELIVERY.md`; make the persistent goal reference that document
    and state its outcome, evidence, and guardrails.
-2. Inspect the current worktree and authoritative contracts.
-3. Translate the request into observable acceptance evidence.
-4. Identify uncertain external facts and verify them from primary sources.
-5. Prefer one thin end-to-end trial when an interface or architecture is still
+2. For a product goal, assign exactly one accountable stream-aligned team using
+   `docs/TEAM_TOPOLOGY.md`; record supporting teams, interaction modes, and
+   exit conditions in the task plan.
+3. Inspect the current worktree and authoritative contracts.
+4. Translate the request into observable acceptance evidence.
+5. Identify uncertain external facts and verify them from primary sources.
+6. Prefer one thin end-to-end trial when an interface or architecture is still
    unproven.
-6. Implement the complete behavior without placeholders, silent fallbacks, or
+7. Implement the complete behavior without placeholders, silent fallbacks, or
    disabled tests.
-7. Run independent review and apply only findings supported by evidence.
-8. Run the narrow checks first, then the complete relevant gate.
-9. Review the final diff and commit a coherent change using Conventional
+8. Run independent review and apply only findings supported by evidence.
+9. Run the narrow checks first, then the complete relevant gate.
+10. Review the final diff and commit a coherent change using Conventional
    Commits.
 
 When a failure pattern repeats, improve the test, skill, hook, or guidance that

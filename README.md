@@ -8,10 +8,12 @@ return bounded columnar batches to DuckDB.
 The project is FDW-like in purpose but does not implement the PostgreSQL FDW
 API. Its public contract is DuckDB-native.
 
-## Design documents
+## Project documents
 
 - [Product delivery](docs/PRODUCT_DELIVERY.md) defines how product outcomes are
   shaped into agent-led goals, proven, and handed back.
+- [Team topology](docs/TEAM_TOPOLOGY.md) defines the value streams, team types,
+  accountability, and interaction model.
 - [Architecture](docs/ARCHITECTURE.md) defines product invariants, integration
   profiles, relational semantics, and operational boundaries.
 - [Connector specification](docs/CONNECTOR_SPECIFICATIONS.md) defines the
@@ -21,8 +23,8 @@ API. Its public contract is DuckDB-native.
 
 The three system-design documents are proposals. The connector specification
 uses `duckdb_api/draft` until a compatibility version is intentionally
-published. The product-delivery document is the active operating process for
-turning product outcomes into agent-led work.
+published. The product-delivery and team-topology documents are the active
+operating model for turning product outcomes into agent-led work.
 
 ## Contributing
 
