@@ -78,6 +78,16 @@ When consulted, evaluate whether:
 - secrets and host authority remain outside distributed packages; and
 - the author path has a deterministic fixture-based oracle.
 
+## Code documentation expectations
+
+Document connector data models and compilation entry points beside the code:
+identifier stability, schema and nullability meaning, extractor semantics,
+defaults, source provenance, immutability, and which information consumers may
+rely upon. Mark internal acceptance metadata distinctly from public package
+compatibility. A reader should be able to inspect and explain a
+`CompiledConnector` without learning DuckDB callback, relational-planner, or
+runtime-lifecycle internals.
+
 ## Success evidence
 
 - Representative packages validate or fail with precise source diagnostics.

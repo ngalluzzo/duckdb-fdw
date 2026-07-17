@@ -79,6 +79,17 @@ When consulted, evaluate whether:
 - an end-to-end DuckDB demonstration proves both success and meaningful
   failure paths.
 
+## Code documentation expectations
+
+Document the DuckDB-facing path so a reader can trace registration, bind,
+planning request construction, scan initialization, stream consumption, error
+translation, and `DataChunk` output. State which DuckDB callback owns each
+piece of state, the supported DuckDB coupling, and the lifetime, cancellation,
+close, and exception-boundary rules. Document capability fallbacks where they
+are applied. Keep connector compilation, relational classification, and runtime
+execution rationale behind their provider interfaces rather than explaining
+provider internals inside the adapter.
+
 ## Success evidence
 
 - The accepted SQL narrative returns the correct result or an actionable

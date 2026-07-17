@@ -80,6 +80,16 @@ When consulted, evaluate whether:
 - deterministic fixtures cover failures, cancellation, exhaustion, replay,
   and lifecycle behavior.
 
+## Code documentation expectations
+
+Document runtime service boundaries and state machines beside their APIs:
+resource authority and accounting, backpressure, cancellation and deadlines,
+threading or synchronization assumptions, ownership transfer, close
+idempotence, error stages and redaction, and shutdown behavior. Explain safety-
+critical ordering such as validation before side effects. Protocol decoders
+should state accepted input, conversion, and exhaustion rules without leaking
+DuckDB adapter state into the runtime interface.
+
 ## Success evidence
 
 - Consumers use stable platform interfaces without protocol-specific bespoke

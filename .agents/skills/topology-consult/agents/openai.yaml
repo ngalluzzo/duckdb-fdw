@@ -1,4 +1,4 @@
 interface:
   display_name: "Topology Consult"
-  short_description: "Route work through the right team perspectives"
-  default_prompt: "Use $topology-consult to route this decision through the affected teams and collect evidence-backed dispositions."
+  short_description: "Route work and audit team boundaries"
+  default_prompt: "Use $topology-consult to route this decision or audit its implementation boundaries against the affected team charters."

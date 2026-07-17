@@ -70,14 +70,19 @@ demonstrated, accepted, or rejected separately.
 5. **Deliver.** The lead agent follows the repository delivery loop. When a
    boundary is unproven, the first increment is a thin end-to-end trial. Later
    increments deepen the same outcome rather than creating unrelated partial
-   systems.
+   systems. Before trial code becomes product code, the lead performs the
+   responsibility pass in `$delivery-loop`; feasibility evidence does not make
+   an experimental source shape production-ready.
 6. **Checkpoint.** The lead agent interrupts delivery only for a reserved
    product decision, evidence that invalidates the outcome, or an external
    condition that prevents meaningful progress. Routine engineering choices do
    not require approval.
 7. **Prove.** Independent review and the relevant repository gates must support
    the acceptance evidence. A passing component test is not a substitute for
-   the promised user-visible demonstration.
+   the promised user-visible demonstration. A named topology interaction does
+   not reach its exit merely because a type exists: the final code and test
+   dependencies must show that consumers use the documented team interface
+   without provider-internal knowledge.
 8. **Hand back.** The lead agent records what changed, the evidence, material
    tradeoffs, and any newly discovered product options. The product manager
    evaluates behavior and value rather than implementation task completion.
@@ -89,6 +94,13 @@ Delivery paths and experiments are working records, not durable product
 promises. Stable behavior belongs in the architecture, connector, and runtime
 contracts and in executable tests. Do not copy transient delivery
 classifications or planned ordering into those contracts.
+
+Implementation decomposition, source readability, test organization, and code
+documentation are lead-agent responsibilities. The product manager need not
+prescribe files or architecture, but should be able to follow the end-to-end
+design from cohesive modules and adjacent interface rationale. These qualities
+belong in delivery evidence and the completion audit, not in user-story
+ceremony or arbitrary size metrics.
 
 ## Goal brief template
 

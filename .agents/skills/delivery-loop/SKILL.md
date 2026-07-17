@@ -58,6 +58,35 @@ When a boundary is unproven, implement one thin end-to-end trial before scaling
 parallel work. Preserve the full requested outcome while using the trial to
 validate architecture and testability.
 
+## Graduate trials into production design
+
+Before promoting a greenfield trial or scaling a vertical slice, perform a
+responsibility pass. A successful experiment proves feasibility, not production
+source shape.
+
+1. Map every affected team interface to its producer, consumers, contract, and
+   interaction exit condition.
+2. Assign each production module one primary responsibility and reason to
+   change. Keep adapters at the edges and dependencies pointed from consumers
+   to provider interfaces, never provider internals.
+3. Split independently changing connector metadata, relational planning,
+   runtime execution, and host integration. Do not create arbitrary files or a
+   line-count target; justify intentional co-location by shared invariants and
+   ownership.
+4. Give each oracle family a home matching the production responsibility. Put
+   reusable fixtures and probes in explicit test support and keep end-to-end
+   behavior in integration tests.
+5. Apply the selected charters' code-documentation expectations to team APIs,
+   lifecycle-sensitive state, non-obvious algorithms, policy ordering, and
+   compatibility boundaries.
+6. Use `$topology-consult` when the design crosses team APIs or claims that an
+   interaction has reached its exit. Record any exit that remains open instead
+   of inferring independence from a named type or passing integration test.
+
+Keep the responsibility map in the active goal or task plan while delivery is
+underway. Put only durable module and dependency intent in shared engineering
+documentation.
+
 ## Delegate deliberately
 
 Use subagents for independent primary-source research, read-heavy exploration,
@@ -80,8 +109,12 @@ coordination through stash, reset, broad checkout, or cleanup commands.
 2. Add or strengthen the oracle before or with the implementation.
 3. Implement complete behavior; reject stubs, silent degradation, speculative
    compatibility shims, and disabled tests.
-4. Keep changes cohesive and preserve unrelated worktree changes.
-5. Run fast, targeted checks during iteration.
+4. Keep changes cohesive by responsibility, not by accumulating the whole
+   outcome in a catch-all module or test suite.
+5. Add adjacent code documentation required by `AGENTS.md` and the owning
+   charters while the design decisions are fresh.
+6. Preserve unrelated worktree changes and run fast, targeted checks during
+   iteration.
 
 If implementation exposes a flawed assumption, update the plan and the
 authoritative contract rather than hiding the discrepancy in code.
@@ -106,21 +139,26 @@ focused review after fixes.
 1. Run targeted tests, then every relevant repository gate from `AGENTS.md`.
 2. Inspect the final diff for accidental files, weakened assertions, stale
    terminology, secrets, and unrelated changes.
-3. Audit each acceptance requirement against authoritative evidence.
-4. Audit the governance record: accepted RFCs are propagated to every affected
+3. Compare the final source, include, build-target, and test dependencies with
+   the responsibility map. Confirm each claimed topology exit against actual
+   consumer-provider separation and adjacent interface documentation.
+4. Audit each acceptance requirement against authoritative evidence.
+5. Audit the governance record: accepted RFCs are propagated to every affected
    contract, or an emergency containment exception records every item required
    by `docs/RFC_PROCESS.md`, including any reserved product decision or
    deferral. A bounded trial must still leave the disputed contract
    unestablished.
-5. Commit one coherent change with a Conventional Commit subject and a body for
+6. Commit one coherent change with a Conventional Commit subject and a body for
    non-obvious motivation or tradeoffs.
-6. Confirm the expected worktree state after the commit.
+7. Confirm the expected worktree state after the commit.
 
 Do not claim completion from a narrow green check. If evidence is incomplete,
 continue working or report the exact missing authority or external condition.
 
 ## Improve the system
 
-When the same failure mode appears twice, add a regression test and update the
-smallest durable control that would prevent it: `AGENTS.md`, a skill, a hook, a
-validator, or CI. Keep workflow changes evidence-based and narrowly scoped.
+When a failure repeats, or one incident demonstrates a systemic process gap
+with a concrete recurrence path, update the smallest durable practice that
+would prevent it. Use a regression test for deterministic behavior; use
+guidance, a skill, or a charter clarification for design-culture failures. Do
+not automate subjective judgment merely to make the control look deterministic.

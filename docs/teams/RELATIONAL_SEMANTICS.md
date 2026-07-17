@@ -78,6 +78,16 @@ When consulted, require evidence that:
 The team must object to an unproven correctness shortcut even when it improves
 performance or simplifies another component.
 
+## Code documentation expectations
+
+Document the semantic meaning of planner inputs and outputs, ownership of each
+remote and residual operation, conservative fallback conditions, classification
+reasons, and proof assumptions. Record why ordering, filtering, limits,
+projection closure, and cardinality are safe where the decision is made. A
+runtime consumer should be able to execute a `ScanPlan` without reclassifying
+relational meaning, and a planner maintainer should not need transport or
+DuckDB lifecycle knowledge.
+
 ## Success evidence
 
 - `ScanRequest → ScanPlan` tests cover exact, superset, unsupported, ambiguous,

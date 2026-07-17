@@ -70,6 +70,16 @@ When consulted, evaluate whether:
 - independent review is genuinely fresh and risk-proportionate; and
 - facilitation has a measurable self-sufficiency exit condition.
 
+## Code documentation expectations
+
+Provide concise shared conventions for responsibility mapping, interface
+documentation, and trial graduation. Facilitate their first application, then
+return source organization and documentation ownership to the receiving team.
+Do not impose line-count, file-count, or comment-density gates, and do not turn
+subjective maintainability review into a permanent Enablement approval queue.
+Tooling comments should explain operational hazards, provenance assumptions,
+and non-obvious failure handling rather than restating shell or build syntax.
+
 ## Success evidence
 
 - Receiving teams apply and maintain the practice without repeated enabling

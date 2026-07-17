@@ -107,13 +107,22 @@ An interface does not prohibit contributions across a team boundary. It makes
 the accountable producer, consumer expectation, compatibility rule, and review
 path visible.
 
+The topology does not require directories or libraries named after teams. It
+does require implementation and test dependencies that preserve independently
+changing responsibilities. A consumer should compile against a bounded team
+API without constructing or importing provider internals, and the provider's
+contract should be understandable and exercisable without the consumer's
+integration machinery. Merely placing all named interface types in one
+catch-all module does not establish these boundaries.
+
 ## Interaction model
 
 Use only three interaction modes:
 
 - **Collaboration** for a defined learning objective where an interface or
   capability is not yet proven. End it when the agreed executable contract and
-  oracle exist.
+  oracle exist and the final dependency direction matches the recorded
+  consumer-provider boundary.
 - **X-as-a-Service** for a documented interface that another team can consume
   with low coordination. This is the normal mode for established platform and
   subsystem capabilities.

@@ -32,3 +32,31 @@ fix(auth)!: reject cross-host token redirects
   contract changes.
 - Treat network access, secrets, resource budgets, redaction, cancellation, and
   replay safety as part of the functional contract.
+
+## Code organization
+
+- Give each module one primary reason to change and keep dependencies pointed
+  through the team APIs in `docs/TEAM_TOPOLOGY.md`.
+- Use production boundaries for independently changing connector, planning,
+  runtime, and adapter responsibilities. Team topology does not require folders
+  named after teams, but a consumer must not depend on provider internals.
+- Mirror production responsibilities in tests. Keep reusable doubles and
+  fixtures in explicit test-support modules and integration-only assertions in
+  integration suites.
+- Treat a catch-all module or test suite as a design smell, not an automatic
+  violation. Split when it combines different invariants, owners, consumers,
+  or reasons to change; do not split merely to satisfy a line threshold.
+
+## Code documentation
+
+- Document cross-team interfaces and lifecycle-sensitive abstractions beside
+  their declarations: purpose, ownership, invariants, lifetime, concurrency,
+  cancellation and close behavior, error ownership, resource authority, and
+  compatibility status as applicable.
+- Add rationale comments for non-obvious correctness algorithms, safety
+  ordering, policy enforcement, and upstream workarounds.
+- Prefer names and small cohesive functions for ordinary mechanics. Do not
+  restate the code or pursue a comment-density target.
+- A technically literate reader should be able to trace an end-to-end path and
+  understand why each module boundary exists without reconstructing design
+  intent from tests or chat history.

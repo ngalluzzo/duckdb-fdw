@@ -95,14 +95,22 @@ Do not weaken an invariant to make an implementation or test easier.
 6. Identify uncertain external facts and verify them from primary sources.
 7. Prefer one thin end-to-end trial when an interface or architecture is still
    unproven.
-8. Implement the complete behavior without placeholders, silent fallbacks, or
+8. Before promoting a trial into product code, map the implementation and test
+   responsibilities to the accepted team interfaces, dependency direction, and
+   code-documentation obligations. A trial proves feasibility; it is not a
+   production source-layout template.
+9. Implement the complete behavior without placeholders, silent fallbacks, or
    disabled tests.
-9. Run independent review and apply only findings supported by evidence.
-10. Run the narrow checks first, then the complete relevant gate.
-11. Review the final diff and commit a coherent change using Conventional
+10. Run independent review and apply only findings supported by evidence.
+11. Audit every interaction exit condition against the final source and test
+    dependencies, not merely the presence of a named type or passing end-to-end
+    test.
+12. Run the narrow checks first, then the complete relevant gate.
+13. Review the final diff and commit a coherent change using Conventional
    Commits.
 
-When a failure pattern repeats, improve the test, skill, hook, or guidance that
+When a failure pattern repeats, or one incident demonstrates a systemic gap
+with a concrete recurrence path, improve the smallest durable practice that
 allowed it. Do not rely on future agents remembering a conversation.
 
 ## Multi-agent rules
@@ -132,6 +140,37 @@ and adversarial review.
 - Treat warnings as actionable. Do not suppress them without a documented
   reason.
 - Preserve unrelated user changes and never use destructive Git commands.
+
+## Implementation design and code documentation
+
+Team topology defines accountability and durable interfaces, not a directory
+per team. Source and test structure must nevertheless preserve those
+interfaces as independently understandable responsibilities:
+
+- Map each production module to one primary reason to change. Split connector
+  metadata, relational planning, runtime execution, and DuckDB integration when
+  they evolve under different contracts or charter responsibilities.
+- Keep dependency direction visible. An adapter may consume a provider's team
+  API; it must not construct, retain, or reinterpret provider internals merely
+  because all code ships in one artifact.
+- Avoid catch-all `core`, `common`, or `utils` modules that accumulate unrelated
+  responsibilities. Do not replace them with arbitrary fragmentation: justify
+  co-location by shared invariants and change ownership, not line count.
+- Organize tests along the same responsibility boundaries. Put shared fixtures
+  and probes in explicit test support; reserve cross-layer suites for behavior
+  that genuinely requires integration.
+- Keep experiments under `experiments/` free to optimize for learning. Before
+  production promotion, perform the responsibility pass above and remove any
+  trial-only coupling that would obscure the intended design.
+
+Code documentation serves maintainers and technically literate product readers.
+Document cross-team and lifecycle-sensitive APIs beside their declarations,
+including purpose, ownership, inputs and outputs, invariants, lifetime,
+concurrency, cancellation and close behavior, error ownership, resource
+authority, and compatibility status where applicable. Explain non-obvious
+algorithms, ordering constraints, and upstream workarounds beside the code that
+depends on them. Do not comment obvious mechanics or optimize for a comment
+quota.
 
 ## Current verification
 
@@ -194,5 +233,7 @@ covers the full request, affected contracts agree, relevant checks pass,
 required RFC decisions and propagation are complete or, for an urgent
 containment commit only, the scoped exception required by
 `docs/RFC_PROCESS.md` is recorded, adversarial findings are resolved or
-explicitly rejected with evidence, and the final diff contains no unrelated or
-unexplained changes.
+explicitly rejected with evidence, topology interaction exits are supported by
+the actual module and test dependencies, code-level design intent is documented
+where required above, and the final diff contains no unrelated or unexplained
+changes.

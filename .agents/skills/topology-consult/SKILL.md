@@ -1,6 +1,6 @@
 ---
 name: topology-consult
-description: Route duckdb-fdw product goals, RFCs, designs, and cross-team reviews through the project topology; select the accountable and affected teams, load their authoritative charters, collect independent evidence-backed perspectives when needed, and produce interaction records or RFC review rows. Use when assigning team ownership, invoking or consulting a team, evaluating topology impact, resolving a cross-team question, or satisfying affected-team review under docs/RFC_PROCESS.md. Do not summon every team when the decision does not affect them.
+description: Route duckdb-fdw product goals, RFCs, implementation designs, interaction-exit audits, and cross-team reviews through the project topology; select the accountable and affected teams, load their authoritative charters, collect independent evidence-backed perspectives when needed, and produce interaction records or RFC review rows. Use when assigning team ownership, invoking or consulting a team, evaluating topology or source-dependency impact, resolving a cross-team question, checking whether a team interaction has exited, or satisfying affected-team review under docs/RFC_PROCESS.md. Do not summon every team when the decision does not affect them.
 ---
 
 # Topology Consult
@@ -16,6 +16,8 @@ invent a standing team persona.
    - **Route:** assign accountability and supporting interactions without
      requesting team review.
    - **Consult:** gather input on a concrete question or proposal.
+   - **Implementation exit audit:** determine whether final source, test, and
+     dependency boundaries satisfy recorded interaction exits.
    - **RFC review:** produce the required review record under
      `docs/RFC_PROCESS.md`.
 3. Read `docs/RFC_PROCESS.md` and the RFC completely for RFC review. Read the
@@ -59,6 +61,26 @@ For each supporting team, record Collaboration, X-as-a-Service, or
 Facilitation plus the learning objective or service expectation and an
 observable exit condition.
 
+## Evaluate implementation boundaries
+
+For an implementation design or exit audit, inspect the actual declarations,
+includes, construction and composition points, build targets, tests, and
+adjacent code documentation. Do not accept a semantic type name or a passing
+end-to-end test as proof of a low-coupling interface.
+
+- Confirm that consumers depend on the provider's bounded team API without
+  constructing, retaining, or reinterpreting provider internals.
+- Confirm that provider responsibilities and their oracle families can be
+  understood and exercised without unrelated consumer integration machinery.
+- Apply each selected charter's cognitive-load and code-documentation
+  expectations, including ownership, lifecycle, errors, resource authority,
+  and semantic rationale where relevant.
+- Evaluate responsibilities and dependency direction rather than demanding a
+  directory or library named after each team.
+- Mark an interaction exit `Open` when future changes still require routine
+  cross-boundary knowledge or coordinated edits outside the recorded service
+  contract.
+
 ## Gather team input
 
 For simple routing, remain in the lead context and do not create reviewers.
@@ -88,7 +110,8 @@ Require each team perspective to return:
 3. evidence from contracts, tests, fixtures, or a concrete counterexample;
 4. the product, correctness, operational, or cognitive-load consequence;
 5. required action or evidence, if any; and
-6. the interaction exit condition.
+6. the interaction exit condition and whether current implementation evidence
+   makes it `Open` or `Satisfied`.
 
 An objection must identify a violated contract or invariant, an unacceptable
 product consequence, an operational hazard, or missing decision-critical
