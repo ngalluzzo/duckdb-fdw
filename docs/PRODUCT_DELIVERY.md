@@ -52,30 +52,36 @@ demonstrated, accepted, or rejected separately.
    contracts, confirms the observable interpretation, identifies the cheapest
    convincing evidence, and completes the agent commitment. It raises only
    material product decisions.
-3. **Activate.** The persistent goal explicitly says to follow this document
+3. **Govern.** The lead agent assigns the accountable stream team using
+   `docs/TEAM_TOPOLOGY.md` and applies the trigger rules in
+   `docs/RFC_PROCESS.md`. A required RFC must be accepted before delivery
+   commits to the affected shared or public contract. A bounded decision-value
+   trial may be activated first when the RFC needs evidence.
+4. **Activate.** The persistent goal explicitly says to follow this document
    and records the approved outcome and completion evidence. For example:
 
    ```text
    Follow docs/PRODUCT_DELIVERY.md. Pursue: <outcome>.
    Completion requires: <acceptance evidence>.
    Preserve: <goal-specific guardrails, or AGENTS.md and relevant contracts>.
+   Governance: <accountable stream; RFC decision, gate, or not-required reason>.
    ```
 
-4. **Deliver.** The lead agent follows the repository delivery loop. When a
+5. **Deliver.** The lead agent follows the repository delivery loop. When a
    boundary is unproven, the first increment is a thin end-to-end trial. Later
    increments deepen the same outcome rather than creating unrelated partial
    systems.
-5. **Checkpoint.** The lead agent interrupts delivery only for a reserved
+6. **Checkpoint.** The lead agent interrupts delivery only for a reserved
    product decision, evidence that invalidates the outcome, or an external
    condition that prevents meaningful progress. Routine engineering choices do
    not require approval.
-6. **Prove.** Independent review and the relevant repository gates must support
+7. **Prove.** Independent review and the relevant repository gates must support
    the acceptance evidence. A passing component test is not a substitute for
    the promised user-visible demonstration.
-7. **Hand back.** The lead agent records what changed, the evidence, material
+8. **Hand back.** The lead agent records what changed, the evidence, material
    tradeoffs, and any newly discovered product options. The product manager
    evaluates behavior and value rather than implementation task completion.
-8. **Close or continue.** If the evidence satisfies the approved outcome, the
+9. **Close or continue.** If the evidence satisfies the approved outcome, the
    goal closes. Feedback within that outcome continues the same goal; a
    materially different outcome starts a new brief.
 
@@ -142,6 +148,13 @@ other lead-agent responsibilities.
 
 - <Authoritative documents and interfaces affected>
 - <Relational, security, lifecycle, or resource invariants that constrain work>
+
+### Team and RFC routing
+
+- Accountable stream: <Connector Experience or Query Experience>
+- Supporting interactions: <team, mode, and exit condition, or none>
+- RFC: <not required with reason; required RFC and status; or bounded evidence
+  trial needed before decision>
 
 ### Unknowns and first trial
 

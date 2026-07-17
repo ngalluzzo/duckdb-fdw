@@ -188,8 +188,9 @@ documented domains. Active goals, task lists, dates, and delivery plans do not
 belong in charters.
 
 A change to one charter is owned by that team. A change that moves an interface
-or accountability boundary requires review from every affected team and an
-update to this overview in the same commit.
+or accountability boundary requires an RFC under `docs/RFC_PROCESS.md`, review
+from every affected team, and an update to this overview in the same coherent
+change.
 
 ## Evolution signals
 

@@ -14,6 +14,8 @@ API. Its public contract is DuckDB-native.
   shaped into agent-led goals, proven, and handed back.
 - [Team topology](docs/TEAM_TOPOLOGY.md) defines the value streams, team types,
   accountability, and interaction model.
+- [RFC process](docs/RFC_PROCESS.md) and [template](docs/RFC_TEMPLATE.md) define
+  how durable shared decisions are proposed, reviewed, and propagated.
 - [Architecture](docs/ARCHITECTURE.md) defines product invariants, integration
   profiles, relational semantics, and operational boundaries.
 - [Connector specification](docs/CONNECTOR_SPECIFICATIONS.md) defines the
@@ -23,7 +25,7 @@ API. Its public contract is DuckDB-native.
 
 The three system-design documents are proposals. The connector specification
 uses `duckdb_api/draft` until a compatibility version is intentionally
-published. The product-delivery and team-topology documents are the active
+published. The product-delivery, team-topology, and RFC documents are the active
 operating model for turning product outcomes into agent-led work.
 
 ## Contributing

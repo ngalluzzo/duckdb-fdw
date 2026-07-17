@@ -1,6 +1,6 @@
 ---
 name: draft-product-goal
-description: Draft or revise a duckdb-fdw product goal brief from concise product-manager direction using docs/PRODUCT_DELIVERY.md. Use when proposing, shaping, splitting, clarifying, or materially revising a product outcome before activation, including when a request names desired value but omits user stories, acceptance criteria, or technical decomposition. Produce the PM brief and agent commitment; do not activate a persistent goal or begin delivery unless the user explicitly asks to pursue it.
+description: Draft or revise a duckdb-fdw product goal brief from concise product-manager direction using docs/PRODUCT_DELIVERY.md, including accountable-team and RFC routing. Use when proposing, shaping, splitting, clarifying, or materially revising a product outcome before activation, including when a request names desired value but omits user stories, acceptance criteria, or technical decomposition. Produce the PM brief and agent commitment; do not activate a persistent goal or begin delivery unless the user explicitly asks to pursue it.
 ---
 
 # Draft Product Goal
@@ -10,16 +10,17 @@ engineering authorship to the product manager.
 
 ## Establish context
 
-1. Read `AGENTS.md` and `docs/PRODUCT_DELIVERY.md` completely.
+1. Read `AGENTS.md`, `docs/PRODUCT_DELIVERY.md`, `docs/TEAM_TOPOLOGY.md`, and
+   `docs/RFC_PROCESS.md` completely.
 2. Inspect the relevant architecture, connector, and runtime contracts plus the
    current worktree when they can clarify existing behavior or constraints.
 3. Treat repository facts as constraints, not evidence of unstated product
    intent. Do not create a new compatibility, security, or public-behavior
    promise by inference.
 4. Keep the pre-activation draft in the task only. After explicit activation,
-   put only the approved outcome, acceptance evidence, and guardrails in the
-   persistent goal record. Do not add transient goal briefs to durable system
-   contracts.
+   put only the approved outcome, acceptance evidence, guardrails, and
+   governance routing in the persistent goal record. Do not add transient goal
+   briefs to durable system contracts.
 
 For a drafting-only request, do not edit product code or activate delivery.
 Read-only investigation is allowed when it improves the draft.
@@ -33,7 +34,7 @@ ownership boundary:
   product-level guardrails, success signals, and any retained product decision.
 - The **agent commitment** supplies the observable interpretation, acceptance
   evidence, affected contracts and invariants, unknowns, first trial, and
-  delivery path.
+  delivery path, including team and RFC routing.
 
 Do not put architecture, libraries, file layout, component tasks, test names,
 or agent assignments into the PM brief. Do not ask the product manager to
@@ -87,6 +88,22 @@ Identify authoritative documents and public interfaces that could change.
 Carry forward relevant relational, security, resource, conversion, concurrency,
 and lifecycle invariants from `AGENTS.md` and the design contracts.
 
+### Team and RFC routing
+
+1. Assign Connector Experience or Query Experience from the primary acceptance
+   narrative in `docs/TEAM_TOPOLOGY.md`.
+2. Name supporting teams, interaction modes, and exit conditions.
+3. Apply the mandatory triggers in `docs/RFC_PROCESS.md` before considering its
+   diagnostic question or exemptions.
+4. Record one route: RFC not required with a reason; accepted RFC with its
+   number; required RFC awaiting decision; or a bounded evidence trial needed
+   before the RFC can be decided.
+
+Do not mark an undecided RFC as an implementation detail. A delivery goal that
+would establish its disputed contract cannot activate until the RFC is
+accepted. A separately bounded decision-value trial may activate when it does
+not establish that contract.
+
 ### Unknowns and first trial
 
 List only facts that could change feasibility, architecture, or acceptance.
@@ -116,6 +133,8 @@ Revise the draft until all statements are true:
 - Success signals describe value; acceptance evidence proves each signal.
 - No unresolved agent-owned question is sent to the product manager.
 - No material product decision has been invented or hidden as an assumption.
+- One accountable stream team and every supporting interaction are recorded.
+- The RFC route follows `docs/RFC_PROCESS.md` and has no unacknowledged gate.
 - Transient delivery classifications and speculative dates are absent.
 
 If the proposed goal is too broad, recommend one thin user-visible path only
@@ -131,7 +150,11 @@ observable capability or decision it unlocks.
 Return the completed **PM brief** and **agent commitment** in the template from
 `docs/PRODUCT_DELIVERY.md`. Follow them with only one of:
 
-- `Ready to activate` when no product decision remains; or
+- `Ready to activate` when no product decision remains and no RFC gate is open;
+- `Ready to activate bounded evidence trial` when the trial cannot establish
+  the disputed contract;
+- `RFC decision required before activation` when a required RFC is not
+  accepted and no bounded trial is the requested next step; or
 - `Decisions needed before activation` with the smallest set of material
   questions.
 
@@ -143,8 +166,15 @@ when the original request also said to start or pursue the goal. Do not
 silently approve the PM-owned portion on their behalf.
 
 If the user asked only for a draft, stop after presenting it. If the user
-explicitly asked to start, pursue, or activate the goal and neither an
-unresolved product decision nor an unapproved intent-changing rewrite remains,
-create the persistent goal using the syntax in
-`docs/PRODUCT_DELIVERY.md`, then use `$delivery-loop`. Never activate from an
-ambiguous expression of interest.
+explicitly asked to start, pursue, or activate the goal, first require that no
+unresolved product decision or unapproved intent-changing rewrite remains.
+Then:
+
+- when no RFC gate is open, create the persistent delivery goal using the
+  syntax in `docs/PRODUCT_DELIVERY.md` and use `$delivery-loop`;
+- when the recorded route is a safe bounded evidence trial, create a persistent
+  goal containing only that trial and use `$delivery-loop` without crossing the
+  RFC boundary; or
+- when any other RFC gate remains open, do not activate a goal.
+
+Never activate from an ambiguous expression of interest.

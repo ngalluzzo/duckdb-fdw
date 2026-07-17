@@ -28,6 +28,8 @@ Read the relevant documents before changing behavior:
   evidence, and handoff.
 - `docs/TEAM_TOPOLOGY.md` defines value streams, team accountability, and
   cross-team interaction rules.
+- `docs/RFC_PROCESS.md` defines when durable shared decisions require an RFC,
+  who decides them, and what acceptance produces.
 - `docs/ARCHITECTURE.md` defines product and relational invariants.
 - `docs/CONNECTOR_SPECIFICATIONS.md` defines author-facing package syntax and
   validation.
@@ -81,16 +83,20 @@ Do not weaken an invariant to make an implementation or test easier.
 2. For a product goal, assign exactly one accountable stream-aligned team using
    `docs/TEAM_TOPOLOGY.md`; record supporting teams, interaction modes, and
    exit conditions in the task plan.
-3. Inspect the current worktree and authoritative contracts.
-4. Translate the request into observable acceptance evidence.
-5. Identify uncertain external facts and verify them from primary sources.
-6. Prefer one thin end-to-end trial when an interface or architecture is still
+3. Apply the trigger rules in `docs/RFC_PROCESS.md` to any durable shared
+   decision; for a product goal, do so after team assignment. Decide a required
+   RFC before implementation commits to the affected shared or public contract.
+   A bounded evidence trial may precede the decision.
+4. Inspect the current worktree and authoritative contracts.
+5. Translate the request into observable acceptance evidence.
+6. Identify uncertain external facts and verify them from primary sources.
+7. Prefer one thin end-to-end trial when an interface or architecture is still
    unproven.
-7. Implement the complete behavior without placeholders, silent fallbacks, or
+8. Implement the complete behavior without placeholders, silent fallbacks, or
    disabled tests.
-8. Run independent review and apply only findings supported by evidence.
-9. Run the narrow checks first, then the complete relevant gate.
-10. Review the final diff and commit a coherent change using Conventional
+9. Run independent review and apply only findings supported by evidence.
+10. Run the narrow checks first, then the complete relevant gate.
+11. Review the final diff and commit a coherent change using Conventional
    Commits.
 
 When a failure pattern repeats, improve the test, skill, hook, or guidance that
@@ -157,5 +163,8 @@ format, lint, test, sanitizer, fuzz, or compatibility-matrix commands.
 
 A change is done only when the requested behavior exists, acceptance evidence
 covers the full request, affected contracts agree, relevant checks pass,
-adversarial findings are resolved or explicitly rejected with evidence, and the
-final diff contains no unrelated or unexplained changes.
+required RFC decisions and propagation are complete or, for an urgent
+containment commit only, the scoped exception required by
+`docs/RFC_PROCESS.md` is recorded, adversarial findings are resolved or
+explicitly rejected with evidence, and the final diff contains no unrelated or
+unexplained changes.
