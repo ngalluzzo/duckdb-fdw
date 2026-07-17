@@ -11,16 +11,27 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace {
 
 using duckdb_api_test::AtomicExecutionControl;
 using duckdb_api_test::BuildPlanFor;
+using duckdb_api_test::BuildScenarioRuntime;
 using duckdb_api_test::FixtureScenario;
 using duckdb_api_test::NeverCancelled;
 using duckdb_api_test::Require;
 using duckdb_api_test::ScenarioFactory;
+
+using ExecutorBuilder =
+    std::shared_ptr<const duckdb_api::ScanExecutor> (*)(std::unique_ptr<duckdb_api::FixtureFactory>);
+static_assert(std::is_same<decltype(&duckdb_api::BuildFixtureScanExecutor), ExecutorBuilder>::value,
+              "fixture executor must take exclusive provider ownership");
+
+std::unique_ptr<ScenarioFactory> NewScenario(FixtureScenario scenario, const std::string &body = "") {
+	return std::unique_ptr<ScenarioFactory>(new ScenarioFactory(scenario, body));
+}
 
 class CountdownExecutionControl : public duckdb_api::ExecutionControl {
 public:
@@ -41,9 +52,10 @@ private:
 };
 
 void RequirePlanRejected(duckdb_api::ScanPlan plan, const std::string &field) {
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
+	auto factory = NewScenario(FixtureScenario::SUCCESS);
 	factory->digest = plan.fixture_digest;
-	auto executor = duckdb_api::BuildFixtureScanExecutor(factory);
+	auto probe = factory->probe;
+	auto executor = duckdb_api::BuildFixtureScanExecutor(std::move(factory));
 	NeverCancelled control;
 	bool rejected = false;
 	try {
@@ -54,119 +66,121 @@ void RequirePlanRejected(duckdb_api::ScanPlan plan, const std::string &field) {
 		           error.SafeMessage() == "scan plan is not authorized for fixture execution";
 	}
 	Require(rejected, "fixture executor accepted a mutated " + field);
-	Require(factory->probe->sources_opened.load(std::memory_order_relaxed) == 0,
+	Require(probe->sources_opened.load(std::memory_order_relaxed) == 0,
 	        "fixture executor opened a source before rejecting " + field);
 }
 
 void TestCapabilityEnvelopeValidation() {
-	auto source_factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
-	auto plan = BuildPlanFor(*source_factory);
+	ScenarioFactory source_factory(FixtureScenario::SUCCESS);
+	auto plan = BuildPlanFor(source_factory);
 	plan.executor_name = "other";
 	RequirePlanRejected(plan, "executor identity");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.method = "POST";
 	RequirePlanRejected(plan, "method");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.path = "/other";
 	RequirePlanRejected(plan, "path");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.extractor = "$.other[*]";
 	RequirePlanRejected(plan, "extractor");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.output_columns.pop_back();
 	RequirePlanRejected(plan, "projection");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.remote_predicate = "id > 1";
 	RequirePlanRejected(plan, "remote predicate work");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.runtime_residual_predicate = "id > 1";
 	RequirePlanRejected(plan, "runtime residual work");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.remote_ordering.push_back("id");
 	RequirePlanRejected(plan, "remote ordering work");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.runtime_ordering.push_back("id");
 	RequirePlanRejected(plan, "runtime ordering work");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.has_remote_limit = true;
 	RequirePlanRejected(plan, "remote limit work");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.has_remote_offset = true;
 	RequirePlanRejected(plan, "remote offset work");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.has_runtime_limit = true;
 	RequirePlanRejected(plan, "runtime limit work");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.has_runtime_offset = true;
 	RequirePlanRejected(plan, "runtime offset work");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.pagination_enabled = true;
 	RequirePlanRejected(plan, "pagination capability");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.providers_enabled = true;
 	RequirePlanRejected(plan, "provider capability");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.retry_enabled = true;
 	RequirePlanRejected(plan, "retry capability");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.cache_enabled = true;
 	RequirePlanRejected(plan, "cache capability");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.network_enabled = true;
 	RequirePlanRejected(plan, "network capability");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.budgets.fixture_bytes++;
 	RequirePlanRejected(plan, "fixture-byte budget");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.budgets.decoded_records++;
 	RequirePlanRejected(plan, "record budget");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.budgets.name_bytes++;
 	RequirePlanRejected(plan, "name budget");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.budgets.json_nesting++;
 	RequirePlanRejected(plan, "nesting budget");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.budgets.batch_rows++;
 	RequirePlanRejected(plan, "batch budget");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.budgets.wall_milliseconds++;
 	RequirePlanRejected(plan, "wall-time budget");
-	plan = BuildPlanFor(*source_factory);
+	plan = BuildPlanFor(source_factory);
 	plan.budgets.concurrency++;
 	RequirePlanRejected(plan, "concurrency budget");
 }
 
 void TestPlannerAnnotationsDoNotAuthorizeExecution() {
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
+	auto factory = NewScenario(FixtureScenario::SUCCESS);
 	auto plan = BuildPlanFor(*factory);
 	plan.duckdb_owned_operations = {"planner-only-diagnostic-drift"};
-	auto executor = duckdb_api::BuildFixtureScanExecutor(factory);
+	auto probe = factory->probe;
+	auto executor = duckdb_api::BuildFixtureScanExecutor(std::move(factory));
 	NeverCancelled control;
 	auto stream = executor->Open(plan, control);
 	stream->Close();
-	Require(factory->probe->sources_opened.load(std::memory_order_relaxed) == 1,
+	Require(probe->sources_opened.load(std::memory_order_relaxed) == 1,
 	        "runtime reconstructed planner-owned relational classifications");
 }
 
 void TestPreOpenRejectionHasNoSourceSideEffects() {
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
-	auto executor = duckdb_api::BuildFixtureScanExecutor(factory);
+	auto factory = NewScenario(FixtureScenario::SUCCESS);
+	auto plan = BuildPlanFor(*factory);
+	auto probe = factory->probe;
+	auto executor = duckdb_api::BuildFixtureScanExecutor(std::move(factory));
 	AtomicExecutionControl cancelled(true);
 	bool cancellation_reported = false;
 	try {
-		executor->Open(BuildPlanFor(*factory), cancelled);
+		executor->Open(plan, cancelled);
 	} catch (const duckdb_api::ExecutionCancelled &) {
 		cancellation_reported = true;
 	}
 	Require(cancellation_reported, "pre-open cancellation did not use the runtime marker");
-	Require(factory->probe->sources_opened.load(std::memory_order_relaxed) == 0,
+	Require(probe->sources_opened.load(std::memory_order_relaxed) == 0,
 	        "pre-open cancellation acquired a fixture source");
-	Require(factory->probe->factory_digest_reads.load(std::memory_order_relaxed) == 0,
+	Require(probe->factory_digest_reads.load(std::memory_order_relaxed) == 0,
 	        "pre-open cancellation consulted provider identity");
 
 	NeverCancelled control;
-	auto plan = BuildPlanFor(*factory);
 	plan.fixture_digest = "other-digest";
 	bool identity_rejected = false;
 	try {
@@ -175,33 +189,44 @@ void TestPreOpenRejectionHasNoSourceSideEffects() {
 		identity_rejected = error.Stage() == duckdb_api::ErrorStage::POLICY;
 	}
 	Require(identity_rejected, "executor accepted fixture identity drift");
-	Require(factory->probe->sources_opened.load(std::memory_order_relaxed) == 0,
-	        "identity rejection acquired a fixture source");
+	Require(probe->sources_opened.load(std::memory_order_relaxed) == 0, "identity rejection acquired a fixture source");
+
+	factory = NewScenario(FixtureScenario::SUCCESS);
+	factory->source_digest = "source-drift-after-acquisition";
+	auto source_runtime = BuildScenarioRuntime(std::move(factory));
+	bool source_identity_rejected = false;
+	try {
+		source_runtime.executor->Open(source_runtime.plan, control);
+	} catch (const duckdb_api::ExecutionError &error) {
+		source_identity_rejected = error.Stage() == duckdb_api::ErrorStage::POLICY;
+	}
+	Require(source_identity_rejected && source_runtime.probe->sources_opened.load(std::memory_order_relaxed) == 1,
+	        "executor accepted source identity drift after acquisition");
+	Require(source_runtime.probe->streams_closed.load(std::memory_order_relaxed) == 1,
+	        "post-acquisition rejection did not run best-effort source cleanup");
 }
 
 void TestBoundedBatchesAndIdempotentClose() {
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
-	auto executor = duckdb_api::BuildFixtureScanExecutor(factory);
+	auto runtime = BuildScenarioRuntime(NewScenario(FixtureScenario::SUCCESS));
 	NeverCancelled control;
-	auto stream = executor->Open(BuildPlanFor(*factory), control);
+	auto stream = runtime.executor->Open(runtime.plan, control);
 	std::vector<duckdb_api::ItemRow> batch;
 	Require(stream->Next(control, batch) && batch.size() == 2, "first runtime batch was not bounded");
 	Require(stream->Next(control, batch) && batch.size() == 1, "second runtime batch was not bounded");
 	Require(!stream->Next(control, batch) && batch.empty(), "runtime did not end with an empty batch");
 	stream->Close();
 	stream->Close();
-	Require(factory->probe->batches.load(std::memory_order_relaxed) == 2 &&
-	            factory->probe->rows.load(std::memory_order_relaxed) == 3,
+	Require(runtime.probe->batches.load(std::memory_order_relaxed) == 2 &&
+	            runtime.probe->rows.load(std::memory_order_relaxed) == 3,
 	        "runtime batch accounting drifted");
-	Require(factory->probe->streams_closed.load(std::memory_order_relaxed) == 1,
+	Require(runtime.probe->streams_closed.load(std::memory_order_relaxed) == 1,
 	        "idempotent close notified the provider more than once");
 }
 
 void TestSynchronizedCancellation() {
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::BLOCKING);
-	auto executor = duckdb_api::BuildFixtureScanExecutor(factory);
+	auto runtime = BuildScenarioRuntime(NewScenario(FixtureScenario::BLOCKING));
 	NeverCancelled open_control;
-	auto stream = executor->Open(BuildPlanFor(*factory), open_control);
+	auto stream = runtime.executor->Open(runtime.plan, open_control);
 	AtomicExecutionControl control;
 	std::atomic<bool> cancelled {false};
 	std::thread worker([&]() {
@@ -213,9 +238,9 @@ void TestSynchronizedCancellation() {
 		}
 	});
 	{
-		std::unique_lock<std::mutex> guard(factory->probe->mutex);
-		const auto ready = factory->probe->condition.wait_for(guard, std::chrono::seconds(5), [&]() {
-			return factory->probe->active_waiters.load(std::memory_order_relaxed) == 1;
+		std::unique_lock<std::mutex> guard(runtime.probe->mutex);
+		const auto ready = runtime.probe->condition.wait_for(guard, std::chrono::seconds(5), [&]() {
+			return runtime.probe->active_waiters.load(std::memory_order_relaxed) == 1;
 		});
 		if (!ready) {
 			control.RequestCancellation();
@@ -226,28 +251,28 @@ void TestSynchronizedCancellation() {
 	control.RequestCancellation();
 	worker.join();
 	Require(cancelled.load(std::memory_order_relaxed), "runtime did not propagate ExecutionCancelled");
-	Require(factory->probe->active_waiters.load(std::memory_order_relaxed) == 0,
+	Require(runtime.probe->active_waiters.load(std::memory_order_relaxed) == 0,
 	        "runtime cancellation left an active fixture waiter");
-	Require(factory->probe->interruptions.load(std::memory_order_relaxed) == 1,
+	Require(runtime.probe->interruptions.load(std::memory_order_relaxed) == 1,
 	        "runtime did not report interruption exactly once");
 	std::vector<duckdb_api::ItemRow> batch;
 	try {
 		stream->Next(control, batch);
 	} catch (const duckdb_api::ExecutionCancelled &) {
 	}
-	Require(factory->probe->interruptions.load(std::memory_order_relaxed) == 1,
+	Require(runtime.probe->interruptions.load(std::memory_order_relaxed) == 1,
 	        "repeated cancellation repeated the provider interruption hook");
 	stream->Close();
 }
 
 void TestCancellationDuringDecoding() {
-	auto factory = std::make_shared<ScenarioFactory>(
-	    FixtureScenario::SUCCESS,
-	    "{\"metadata\":{\"nested\":[1,2,3]},\"items\":[{\"id\":1,\"name\":\"alpha\",\"active\":true},"
-	    "{\"id\":2,\"name\":\"beta\",\"active\":false}]}");
-	auto executor = duckdb_api::BuildFixtureScanExecutor(factory);
+	auto factory =
+	    NewScenario(FixtureScenario::SUCCESS,
+	                "{\"metadata\":{\"nested\":[1,2,3]},\"items\":[{\"id\":1,\"name\":\"alpha\",\"active\":true},"
+	                "{\"id\":2,\"name\":\"beta\",\"active\":false}]}");
+	auto runtime = BuildScenarioRuntime(std::move(factory));
 	CountdownExecutionControl control(20);
-	auto stream = executor->Open(BuildPlanFor(*factory), control);
+	auto stream = runtime.executor->Open(runtime.plan, control);
 	bool cancelled = false;
 	try {
 		std::vector<duckdb_api::ItemRow> batch;
@@ -257,18 +282,17 @@ void TestCancellationDuringDecoding() {
 	}
 	stream->Close();
 	Require(cancelled, "decoder checkpoints did not propagate runtime cancellation");
-	Require(factory->probe->sources_read.load(std::memory_order_relaxed) == 1 &&
-	            factory->probe->batches.load(std::memory_order_relaxed) == 0,
+	Require(runtime.probe->sources_read.load(std::memory_order_relaxed) == 1 &&
+	            runtime.probe->batches.load(std::memory_order_relaxed) == 0,
 	        "decode cancellation occurred before reading or after emitting a batch");
-	Require(factory->probe->interruptions.load(std::memory_order_relaxed) == 1,
+	Require(runtime.probe->interruptions.load(std::memory_order_relaxed) == 1,
 	        "decode cancellation did not report interruption exactly once");
 }
 
 void TestWallTimeBudget() {
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::BLOCKING);
-	auto executor = duckdb_api::BuildFixtureScanExecutor(factory);
+	auto runtime = BuildScenarioRuntime(NewScenario(FixtureScenario::BLOCKING));
 	NeverCancelled control;
-	auto stream = executor->Open(BuildPlanFor(*factory), control);
+	auto stream = runtime.executor->Open(runtime.plan, control);
 	const auto started = std::chrono::steady_clock::now();
 	bool timed_out = false;
 	try {
@@ -286,12 +310,11 @@ void TestWallTimeBudget() {
 }
 
 void TestConcurrentStreamsOwnIndependentState() {
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
-	auto executor = duckdb_api::BuildFixtureScanExecutor(factory);
+	auto runtime = BuildScenarioRuntime(NewScenario(FixtureScenario::SUCCESS));
 	NeverCancelled first_control;
 	NeverCancelled second_control;
-	auto first = executor->Open(BuildPlanFor(*factory), first_control);
-	auto second = executor->Open(BuildPlanFor(*factory), second_control);
+	auto first = runtime.executor->Open(runtime.plan, first_control);
+	auto second = runtime.executor->Open(runtime.plan, second_control);
 	std::string first_error;
 	std::string second_error;
 	auto consume = [](duckdb_api::BatchStream &stream, NeverCancelled &control, std::string &error) {
@@ -311,43 +334,43 @@ void TestConcurrentStreamsOwnIndependentState() {
 	first->Close();
 	second->Close();
 	Require(first_error.empty() && second_error.empty(), "concurrent runtime stream state was shared");
-	Require(factory->probe->sources_opened.load(std::memory_order_relaxed) == 2 &&
-	            factory->probe->streams_closed.load(std::memory_order_relaxed) == 2,
+	Require(runtime.probe->sources_opened.load(std::memory_order_relaxed) == 2 &&
+	            runtime.probe->streams_closed.load(std::memory_order_relaxed) == 2,
 	        "concurrent runtime streams did not own distinct source lifecycles");
 }
 
 void TestHookFailuresPreservePrimaryOutcomes() {
 	NeverCancelled control;
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
+	auto factory = NewScenario(FixtureScenario::SUCCESS);
 	factory->failures.factory_open = true;
-	auto executor = duckdb_api::BuildFixtureScanExecutor(factory);
+	auto runtime = BuildScenarioRuntime(std::move(factory));
 	bool factory_failure = false;
 	try {
-		executor->Open(BuildPlanFor(*factory), control);
+		runtime.executor->Open(runtime.plan, control);
 	} catch (const std::runtime_error &error) {
 		factory_failure = std::string(error.what()) == "top-secret-factory-open-failure";
 	}
-	Require(factory_failure && factory->probe->sources_opened.load(std::memory_order_relaxed) == 0,
+	Require(factory_failure && runtime.probe->sources_opened.load(std::memory_order_relaxed) == 0,
 	        "factory-open failure was replaced or acquired a source");
 
-	factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
+	factory = NewScenario(FixtureScenario::SUCCESS);
 	factory->failures.stream_open = true;
 	factory->failures.close = true;
-	executor = duckdb_api::BuildFixtureScanExecutor(factory);
+	runtime = BuildScenarioRuntime(std::move(factory));
 	bool open_failure = false;
 	try {
-		executor->Open(BuildPlanFor(*factory), control);
+		runtime.executor->Open(runtime.plan, control);
 	} catch (const std::runtime_error &error) {
 		open_failure = std::string(error.what()) == "top-secret-open-hook-failure";
 	}
-	Require(open_failure && factory->probe->streams_closed.load(std::memory_order_relaxed) == 1,
+	Require(open_failure && runtime.probe->streams_closed.load(std::memory_order_relaxed) == 1,
 	        "open-hook cleanup masked the primary failure or did not run");
 
-	factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
+	factory = NewScenario(FixtureScenario::SUCCESS);
 	factory->failures.read = true;
 	factory->failures.close = true;
-	executor = duckdb_api::BuildFixtureScanExecutor(factory);
-	auto stream = executor->Open(BuildPlanFor(*factory), control);
+	runtime = BuildScenarioRuntime(std::move(factory));
+	auto stream = runtime.executor->Open(runtime.plan, control);
 	bool read_failure = false;
 	try {
 		std::vector<duckdb_api::ItemRow> batch;
@@ -356,13 +379,13 @@ void TestHookFailuresPreservePrimaryOutcomes() {
 		read_failure = std::string(error.what()) == "top-secret-read-hook-failure";
 	}
 	stream->Close();
-	Require(read_failure && factory->probe->streams_closed.load(std::memory_order_relaxed) == 1,
+	Require(read_failure && runtime.probe->streams_closed.load(std::memory_order_relaxed) == 1,
 	        "close-hook cleanup masked a read failure or escaped Close");
 
-	factory = std::make_shared<ScenarioFactory>(FixtureScenario::MALFORMED);
+	factory = NewScenario(FixtureScenario::MALFORMED);
 	factory->failures.close = true;
-	executor = duckdb_api::BuildFixtureScanExecutor(factory);
-	stream = executor->Open(BuildPlanFor(*factory), control);
+	runtime = BuildScenarioRuntime(std::move(factory));
+	stream = runtime.executor->Open(runtime.plan, control);
 	bool execution_error_preserved = false;
 	try {
 		std::vector<duckdb_api::ItemRow> batch;
@@ -371,14 +394,14 @@ void TestHookFailuresPreservePrimaryOutcomes() {
 		execution_error_preserved = error.Stage() == duckdb_api::ErrorStage::DECODE;
 	}
 	stream->Close();
-	Require(execution_error_preserved && factory->probe->streams_closed.load(std::memory_order_relaxed) == 1,
+	Require(execution_error_preserved && runtime.probe->streams_closed.load(std::memory_order_relaxed) == 1,
 	        "close-hook cleanup masked a structured execution failure");
 
-	factory = std::make_shared<ScenarioFactory>(FixtureScenario::BLOCKING);
+	factory = NewScenario(FixtureScenario::BLOCKING);
 	factory->failures.interruption = true;
 	factory->failures.close = true;
-	executor = duckdb_api::BuildFixtureScanExecutor(factory);
-	stream = executor->Open(BuildPlanFor(*factory), control);
+	runtime = BuildScenarioRuntime(std::move(factory));
+	stream = runtime.executor->Open(runtime.plan, control);
 	stream->Cancel();
 	bool cancellation_preserved = false;
 	try {
@@ -388,8 +411,8 @@ void TestHookFailuresPreservePrimaryOutcomes() {
 		cancellation_preserved = true;
 	}
 	stream->Close();
-	Require(cancellation_preserved && factory->probe->interruptions.load(std::memory_order_relaxed) == 1 &&
-	            factory->probe->streams_closed.load(std::memory_order_relaxed) == 1,
+	Require(cancellation_preserved && runtime.probe->interruptions.load(std::memory_order_relaxed) == 1 &&
+	            runtime.probe->streams_closed.load(std::memory_order_relaxed) == 1,
 	        "interruption or close hook replaced runtime cancellation");
 }
 

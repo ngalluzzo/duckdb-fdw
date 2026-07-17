@@ -22,6 +22,7 @@ struct HookFailures {
 	bool factory_open;
 	bool stream_open;
 	bool read;
+	bool batch_block;
 	bool interruption;
 	bool close;
 };
@@ -36,6 +37,7 @@ struct LifecycleProbe {
 	std::atomic<uint64_t> interruptions {0};
 	std::atomic<uint64_t> active_waiters {0};
 	std::atomic<uint64_t> factory_digest_reads {0};
+	std::atomic<bool> release_batches {false};
 	std::mutex mutex;
 	std::condition_variable condition;
 };
@@ -49,6 +51,7 @@ public:
 
 	FixtureScenario scenario;
 	std::string digest;
+	std::string source_digest;
 	std::shared_ptr<LifecycleProbe> probe;
 	std::string custom_body;
 	HookFailures failures;
@@ -71,5 +74,15 @@ private:
 };
 
 duckdb_api::ScanPlan BuildPlanFor(const ScenarioFactory &factory);
+
+// Test-side handle left after the concrete provider is transferred into the
+// immutable executor. Scenarios may retain observations, never mutation access.
+struct ScenarioRuntime {
+	duckdb_api::ScanPlan plan;
+	std::shared_ptr<const duckdb_api::ScanExecutor> executor;
+	std::shared_ptr<LifecycleProbe> probe;
+};
+
+ScenarioRuntime BuildScenarioRuntime(std::unique_ptr<ScenarioFactory> factory);
 
 } // namespace duckdb_api_test

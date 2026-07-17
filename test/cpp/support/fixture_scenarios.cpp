@@ -18,7 +18,8 @@ const char *const SUCCESS_RESPONSE = "{\"items\":[{\"id\":1,\"name\":\"alpha\",\
                                      "{\"id\":2,\"name\":\"beta\",\"active\":false},"
                                      "{\"id\":3,\"name\":\"gamma\",\"active\":true}]}\n";
 
-HookFailures::HookFailures() : factory_open(false), stream_open(false), read(false), interruption(false), close(false) {
+HookFailures::HookFailures()
+    : factory_open(false), stream_open(false), read(false), batch_block(false), interruption(false), close(false) {
 }
 
 namespace {
@@ -82,6 +83,13 @@ public:
 	void OnBatch(uint64_t row_count) override {
 		probe->batches.fetch_add(1, std::memory_order_relaxed);
 		probe->rows.fetch_add(row_count, std::memory_order_relaxed);
+		if (failures.batch_block) {
+			probe->active_waiters.fetch_add(1, std::memory_order_relaxed);
+			probe->condition.notify_all();
+			std::unique_lock<std::mutex> guard(probe->mutex);
+			probe->condition.wait(guard, [&]() { return probe->release_batches.load(std::memory_order_relaxed); });
+			probe->active_waiters.fetch_sub(1, std::memory_order_relaxed);
+		}
 	}
 
 	void OnInterruption() override {
@@ -109,8 +117,8 @@ private:
 } // namespace
 
 ScenarioFactory::ScenarioFactory(FixtureScenario scenario_p, std::string custom_body_p)
-    : scenario(scenario_p), digest("test-only-fixture-digest"), probe(std::make_shared<LifecycleProbe>()),
-      custom_body(std::move(custom_body_p)) {
+    : scenario(scenario_p), digest("test-only-fixture-digest"), source_digest(digest),
+      probe(std::make_shared<LifecycleProbe>()), custom_body(std::move(custom_body_p)) {
 }
 
 const std::string &ScenarioFactory::ContentDigest() const {
@@ -123,7 +131,7 @@ std::unique_ptr<duckdb_api::FixtureSource> ScenarioFactory::Open() const {
 		throw std::runtime_error("top-secret-factory-open-failure");
 	}
 	return std::unique_ptr<duckdb_api::FixtureSource>(
-	    new ScenarioSource(scenario, digest, probe, custom_body, failures));
+	    new ScenarioSource(scenario, source_digest, probe, custom_body, failures));
 }
 
 bool NeverCancelled::IsCancellationRequested() const noexcept {
@@ -144,6 +152,14 @@ void AtomicExecutionControl::RequestCancellation() noexcept {
 duckdb_api::ScanPlan BuildPlanFor(const ScenarioFactory &factory) {
 	return duckdb_api::BuildConservativeScanPlan(duckdb_api::BuildCompiledConnector(factory.digest),
 	                                             duckdb_api::BuildConservativeScanRequest());
+}
+
+ScenarioRuntime BuildScenarioRuntime(std::unique_ptr<ScenarioFactory> factory) {
+	ScenarioRuntime result;
+	result.plan = BuildPlanFor(*factory);
+	result.probe = factory->probe;
+	result.executor = duckdb_api::BuildFixtureScanExecutor(std::move(factory));
+	return result;
 }
 
 } // namespace duckdb_api_test

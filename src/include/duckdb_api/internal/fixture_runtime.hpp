@@ -55,8 +55,8 @@ public:
 	virtual std::unique_ptr<FixtureSource> Open() const = 0;
 };
 
-// Constructs the immutable runtime service used by composition. The returned
-// executor owns the provider for its full registration lifetime.
-std::shared_ptr<const ScanExecutor> BuildFixtureScanExecutor(std::shared_ptr<FixtureFactory> factory);
+// Constructs the immutable runtime service used by composition. Construction
+// transfers exclusive provider ownership for the full registration lifetime.
+std::shared_ptr<const ScanExecutor> BuildFixtureScanExecutor(std::unique_ptr<FixtureFactory> factory);
 
 } // namespace duckdb_api

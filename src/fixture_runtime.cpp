@@ -53,12 +53,18 @@ void RequireNotCancelled(ExecutionControl &control) {
 	}
 }
 
+// Mutable state for exactly one serialized DuckDB source task. The executor is
+// shareable, but every Open receives a distinct source, deadline, row buffer,
+// cancellation state, and close transition.
 class FixtureBatchStream : public BatchStream {
 public:
-	FixtureBatchStream(ScanPlan plan_p, std::unique_ptr<FixtureSource> source_p, ExecutionControl &control)
-	    : plan(std::move(plan_p)), source(std::move(source_p)), offset(0), loaded(false), cancelled(false),
-	      interruption_reported(false), closed(false),
+	FixtureBatchStream(const ScanPlan &plan_p, std::unique_ptr<FixtureSource> &source_p, ExecutionControl &control)
+	    : plan(plan_p), source(), offset(0), loaded(false), cancelled(false), interruption_reported(false),
+	      closed(false),
 	      deadline(std::chrono::steady_clock::now() + std::chrono::milliseconds(plan.budgets.wall_milliseconds)) {
+		// Copy the potentially allocating plan before taking source ownership. The
+		// executor still owns and can close the source if member construction fails.
+		source = std::move(source_p);
 		try {
 			if (!source || source->ContentDigest() != plan.fixture_digest) {
 				throw ExecutionError(ErrorStage::POLICY, "", "fixture identity does not match the immutable scan plan");
@@ -114,6 +120,9 @@ public:
 
 	void Cancel() noexcept override {
 		cancelled.store(true, std::memory_order_relaxed);
+		if (source && !closed) {
+			ReportInterruptionNoThrow(*source, interruption_reported);
+		}
 	}
 
 	void Close() noexcept override {
@@ -139,9 +148,11 @@ private:
 	std::chrono::steady_clock::time_point deadline;
 };
 
+// Immutable runtime service. It owns provider lifetime and validates only work
+// this executor must perform; planner-only ownership annotations are ignored.
 class FixtureScanExecutor : public ScanExecutor {
 public:
-	explicit FixtureScanExecutor(std::shared_ptr<FixtureFactory> factory_p) : factory(std::move(factory_p)) {
+	explicit FixtureScanExecutor(std::unique_ptr<FixtureFactory> factory_p) : factory(std::move(factory_p)) {
 	}
 
 	std::unique_ptr<BatchStream> Open(const ScanPlan &plan, ExecutionControl &control) const override {
@@ -151,11 +162,21 @@ public:
 			throw ExecutionError(ErrorStage::POLICY, "", "fixture identity does not match the immutable scan plan");
 		}
 		RequireNotCancelled(control);
-		return std::unique_ptr<BatchStream>(new FixtureBatchStream(plan, factory->Open(), control));
+		auto source = factory->Open();
+		try {
+			return std::unique_ptr<BatchStream>(new FixtureBatchStream(plan, source, control));
+		} catch (...) {
+			// Allocation or plan-copy failure happens before the stream can own the
+			// source. Once ownership moves, the constructor performs this cleanup.
+			if (source) {
+				CloseSourceNoThrow(*source);
+			}
+			throw;
+		}
 	}
 
 private:
-	std::shared_ptr<FixtureFactory> factory;
+	std::unique_ptr<FixtureFactory> factory;
 };
 
 } // namespace
@@ -207,7 +228,7 @@ void FixtureSource::OnStreamClose() {
 FixtureFactory::~FixtureFactory() noexcept {
 }
 
-std::shared_ptr<const ScanExecutor> BuildFixtureScanExecutor(std::shared_ptr<FixtureFactory> factory) {
+std::shared_ptr<const ScanExecutor> BuildFixtureScanExecutor(std::unique_ptr<FixtureFactory> factory) {
 	if (!factory) {
 		throw ExecutionError(ErrorStage::INTERNAL, "", "fixture executor requires a provider");
 	}

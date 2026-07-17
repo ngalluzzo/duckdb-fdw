@@ -11,16 +11,20 @@
 
 namespace {
 
-using duckdb_api_test::BuildPlanFor;
+using duckdb_api_test::BuildScenarioRuntime;
 using duckdb_api_test::FixtureScenario;
 using duckdb_api_test::NeverCancelled;
 using duckdb_api_test::Require;
 using duckdb_api_test::ScenarioFactory;
 
-std::vector<duckdb_api::ItemRow> Execute(const std::shared_ptr<ScenarioFactory> &factory) {
-	auto executor = duckdb_api::BuildFixtureScanExecutor(factory);
+std::unique_ptr<ScenarioFactory> NewScenario(FixtureScenario scenario, const std::string &body = "") {
+	return std::unique_ptr<ScenarioFactory>(new ScenarioFactory(scenario, body));
+}
+
+std::vector<duckdb_api::ItemRow> Execute(std::unique_ptr<ScenarioFactory> factory) {
+	auto runtime = BuildScenarioRuntime(std::move(factory));
 	NeverCancelled control;
-	auto stream = executor->Open(BuildPlanFor(*factory), control);
+	auto stream = runtime.executor->Open(runtime.plan, control);
 	std::vector<duckdb_api::ItemRow> result;
 	std::vector<duckdb_api::ItemRow> batch;
 	while (stream->Next(control, batch)) {
@@ -33,36 +37,37 @@ std::vector<duckdb_api::ItemRow> Execute(const std::shared_ptr<ScenarioFactory> 
 void RequireExecutionFailure(FixtureScenario scenario, duckdb_api::ErrorStage expected_stage,
                              const std::string &expected_message, const std::string &forbidden,
                              const std::string &body = "") {
-	auto factory = std::make_shared<ScenarioFactory>(scenario, body);
+	auto factory = NewScenario(scenario, body);
+	auto probe = factory->probe;
 	bool rejected = false;
 	try {
-		Execute(factory);
+		Execute(std::move(factory));
 	} catch (const duckdb_api::ExecutionError &error) {
 		rejected = error.Stage() == expected_stage && error.SafeMessage() == expected_message &&
 		           error.SafeMessage().find(forbidden) == std::string::npos;
 	}
 	Require(rejected, "decoder failure category, safe message, or redaction drifted");
-	Require(factory->probe->streams_closed.load(std::memory_order_relaxed) == 1,
+	Require(probe->streams_closed.load(std::memory_order_relaxed) == 1,
 	        "decoder failure did not close its stream exactly once");
 }
 
 void TestUnicodeAndAdditiveFields() {
-	auto factory = std::make_shared<ScenarioFactory>(
-	    FixtureScenario::SUCCESS,
-	    "{\"metadata\":{\"nested\":[1,{\"ignored\":true}]},\"items\":[{\"id\":1,\"name\":\"\\u0061lpha\","
-	    "\"active\":true,\"future\":{\"also\":\"ignored\"}},{\"id\":2,\"name\":\"\\uD83D\\uDE00\","
-	    "\"active\":false}]}");
-	const auto rows = Execute(factory);
+	auto factory =
+	    NewScenario(FixtureScenario::SUCCESS,
+	                "{\"metadata\":{\"nested\":[1,{\"ignored\":true}]},\"items\":[{\"id\":1,\"name\":\"\\u0061lpha\","
+	                "\"active\":true,\"future\":{\"also\":\"ignored\"}},{\"id\":2,\"name\":\"\\uD83D\\uDE00\","
+	                "\"active\":false}]}");
+	const auto rows = Execute(std::move(factory));
 	Require(rows.size() == 2 && rows[0].name == "alpha" && rows[1].name == "\xf0\x9f\x98\x80",
 	        "Unicode or additive-field decoding drifted");
 }
 
 void TestLosslessBigintConversion() {
-	auto factory = std::make_shared<ScenarioFactory>(
-	    FixtureScenario::SUCCESS,
-	    "{\"items\":[{\"id\":1.0,\"name\":\"alpha\",\"active\":true},{\"id\":2e0,\"name\":\"beta\","
-	    "\"active\":false},{\"id\":300e-2,\"name\":\"gamma\",\"active\":true}]}");
-	const auto rows = Execute(factory);
+	auto factory =
+	    NewScenario(FixtureScenario::SUCCESS,
+	                "{\"items\":[{\"id\":1.0,\"name\":\"alpha\",\"active\":true},{\"id\":2e0,\"name\":\"beta\","
+	                "\"active\":false},{\"id\":300e-2,\"name\":\"gamma\",\"active\":true}]}");
+	const auto rows = Execute(std::move(factory));
 	Require(rows.size() == 3 && rows[0].id == 1 && rows[1].id == 2 && rows[2].id == 3,
 	        "exact decimal or exponent BIGINT conversion drifted");
 }

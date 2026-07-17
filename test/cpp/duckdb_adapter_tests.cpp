@@ -27,10 +27,25 @@ using duckdb_api_test::FixtureScenario;
 using duckdb_api_test::Require;
 using duckdb_api_test::ScenarioFactory;
 
-void Register(duckdb::DuckDB &database, const std::shared_ptr<ScenarioFactory> &factory) {
+std::unique_ptr<ScenarioFactory> NewScenario(FixtureScenario scenario, const std::string &body = "") {
+	return std::unique_ptr<ScenarioFactory>(new ScenarioFactory(scenario, body));
+}
+
+class NullStreamExecutor : public duckdb_api::ScanExecutor {
+public:
+	std::unique_ptr<duckdb_api::BatchStream> Open(const duckdb_api::ScanPlan &,
+	                                              duckdb_api::ExecutionControl &) const override {
+		return std::unique_ptr<duckdb_api::BatchStream>();
+	}
+};
+
+std::shared_ptr<duckdb_api_test::LifecycleProbe> Register(duckdb::DuckDB &database,
+                                                          std::unique_ptr<ScenarioFactory> factory) {
 	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_test");
 	auto connector = duckdb_api::BuildCompiledConnector(factory->ContentDigest());
-	duckdb::RegisterDuckdbApi(loader, std::move(connector), duckdb_api::BuildFixtureScanExecutor(factory));
+	auto probe = factory->probe;
+	duckdb::RegisterDuckdbApi(loader, std::move(connector), duckdb_api::BuildFixtureScanExecutor(std::move(factory)));
+	return probe;
 }
 
 std::string QueryError(duckdb::Connection &connection, const std::string &sql) {
@@ -41,10 +56,9 @@ std::string QueryError(duckdb::Connection &connection, const std::string &sql) {
 
 void TestSuccessAndOfflineBind() {
 	duckdb::DuckDB database(nullptr);
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
-	Register(database, factory);
+	auto probe = Register(database, NewScenario(FixtureScenario::SUCCESS));
 	duckdb::Connection connection(database);
-	Require(factory->probe->factory_digest_reads.load(std::memory_order_relaxed) == 1,
+	Require(probe->factory_digest_reads.load(std::memory_order_relaxed) == 1,
 	        "registration did not capture fixture identity exactly once");
 
 	auto describe =
@@ -52,9 +66,9 @@ void TestSuccessAndOfflineBind() {
 	if (describe->HasError()) {
 		throw std::runtime_error("bind-only describe failed: " + describe->GetError());
 	}
-	Require(factory->probe->sources_opened.load(std::memory_order_relaxed) == 0, "bind opened a fixture source");
-	Require(factory->probe->sources_read.load(std::memory_order_relaxed) == 0, "bind read fixture bytes");
-	Require(factory->probe->factory_digest_reads.load(std::memory_order_relaxed) == 1,
+	Require(probe->sources_opened.load(std::memory_order_relaxed) == 0, "bind opened a fixture source");
+	Require(probe->sources_read.load(std::memory_order_relaxed) == 0, "bind read fixture bytes");
+	Require(probe->factory_digest_reads.load(std::memory_order_relaxed) == 1,
 	        "bind consulted mutable fixture-factory identity");
 
 	auto result = connection.Query(ACCEPTED_SQL);
@@ -72,11 +86,11 @@ void TestSuccessAndOfflineBind() {
 	Require(chunk->GetValue(0, 2).GetValue<int64_t>() == 3, "row 3 id mismatch");
 	Require(chunk->GetValue(1, 2).ToString() == "gamma", "row 3 name mismatch");
 	Require(chunk->GetValue(2, 2).GetValue<bool>(), "row 3 active mismatch");
-	Require(factory->probe->batches.load(std::memory_order_relaxed) == 2, "success did not use two bounded batches");
-	Require(factory->probe->rows.load(std::memory_order_relaxed) == 3, "success batch rows mismatch");
+	Require(probe->batches.load(std::memory_order_relaxed) == 2, "success did not use two bounded batches");
+	Require(probe->rows.load(std::memory_order_relaxed) == 3, "success batch rows mismatch");
 	result.reset();
-	Require(factory->probe->streams_opened.load(std::memory_order_relaxed) == 1, "success stream open mismatch");
-	Require(factory->probe->streams_closed.load(std::memory_order_relaxed) == 1, "success stream did not close");
+	Require(probe->streams_opened.load(std::memory_order_relaxed) == 1, "success stream open mismatch");
+	Require(probe->streams_closed.load(std::memory_order_relaxed) == 1, "success stream did not close");
 
 	auto filtered = connection.Query(
 	    "SELECT id FROM duckdb_api_scan(connector := 'example', relation := 'items') WHERE NOT active");
@@ -111,11 +125,9 @@ void TestSuccessAndOfflineBind() {
 	Require(dependent_chunk && dependent_chunk->size() == 1 && dependent_chunk->GetValue(0, 0).GetValue<int64_t>() == 3,
 	        "DuckDB did not preserve filter-before-limit ownership");
 	dependent.reset();
-	Require(factory->probe->streams_opened.load(std::memory_order_relaxed) == 5,
-	        "repeated scan did not open independently");
-	Require(factory->probe->streams_closed.load(std::memory_order_relaxed) == 5,
-	        "repeated scan did not close independently");
-	Require(factory->probe->factory_digest_reads.load(std::memory_order_relaxed) == 6,
+	Require(probe->streams_opened.load(std::memory_order_relaxed) == 5, "repeated scan did not open independently");
+	Require(probe->streams_closed.load(std::memory_order_relaxed) == 5, "repeated scan did not close independently");
+	Require(probe->factory_digest_reads.load(std::memory_order_relaxed) == 6,
 	        "execution did not verify fixture identity exactly once per scan");
 
 	const auto unknown_connector =
@@ -126,41 +138,55 @@ void TestSuccessAndOfflineBind() {
 	    QueryError(connection, "SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'other')");
 	Require(unknown_relation.find("unknown relation identifier") != std::string::npos,
 	        "unknown relation did not fail during bind");
-	Require(factory->probe->streams_opened.load(std::memory_order_relaxed) == 5, "bind failure opened execution state");
+	Require(probe->streams_opened.load(std::memory_order_relaxed) == 5, "bind failure opened execution state");
 }
 
 void TestFrozenConnectorMetadata() {
 	duckdb::DuckDB database(nullptr);
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
-	Register(database, factory);
-	Require(factory->probe->factory_digest_reads.load(std::memory_order_relaxed) == 1,
-	        "registration did not capture connector metadata");
-	factory->digest = "mutated-after-registration";
+	auto factory = NewScenario(FixtureScenario::SUCCESS);
+	factory->digest = "runtime-provider-digest";
+	factory->source_digest = factory->digest;
+	auto probe = factory->probe;
+	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_test");
+	duckdb::RegisterDuckdbApi(loader, duckdb_api::BuildCompiledConnector("frozen-registration-digest"),
+	                          duckdb_api::BuildFixtureScanExecutor(std::move(factory)));
 	duckdb::Connection connection(database);
 	auto describe =
 	    connection.Query("DESCRIBE SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'items')");
-	Require(!describe->HasError(), "frozen connector metadata did not survive fixture-factory mutation");
-	Require(factory->probe->factory_digest_reads.load(std::memory_order_relaxed) == 1,
-	        "bind rebuilt connector metadata from the mutated factory");
+	Require(!describe->HasError(), "bind did not use frozen connector metadata");
+	Require(probe->factory_digest_reads.load(std::memory_order_relaxed) == 0,
+	        "bind rebuilt connector metadata from the runtime provider");
 	const auto error = QueryError(connection, ACCEPTED_SQL);
 	Require(error.find("[duckdb_api][policy] connector=example relation=items: fixture identity does not match the "
 	                   "immutable scan plan") != std::string::npos,
 	        "execution did not reject a fixture identity that drifted after registration");
-	Require(factory->probe->sources_opened.load(std::memory_order_relaxed) == 0,
+	Require(probe->sources_opened.load(std::memory_order_relaxed) == 0,
 	        "identity drift opened a fixture source before rejection");
+}
+
+void TestMissingRuntimeStreamIsRedacted() {
+	duckdb::DuckDB database(nullptr);
+	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_test");
+	auto executor = std::shared_ptr<const duckdb_api::ScanExecutor>(new NullStreamExecutor());
+	duckdb::RegisterDuckdbApi(loader, duckdb_api::BuildCompiledConnector("test-only-fixture-digest"), executor);
+	duckdb::Connection connection(database);
+	const auto error = QueryError(connection, ACCEPTED_SQL);
+	Require(error.find("[duckdb_api][internal] connector=example relation=items: unexpected execution failure") !=
+	                std::string::npos &&
+	            error.find("scan executor returned no stream") == std::string::npos,
+	        "adapter did not contain and redact a missing runtime stream");
 }
 
 void TestFailure(FixtureScenario scenario, const std::string &expected, const std::string &forbidden,
                  const std::string &custom_body = "") {
 	duckdb::DuckDB database(nullptr);
-	auto factory = std::make_shared<ScenarioFactory>(scenario, custom_body);
-	Register(database, factory);
+	auto probe = Register(database, NewScenario(scenario, custom_body));
 	duckdb::Connection connection(database);
 	const auto error = QueryError(connection, ACCEPTED_SQL);
 	Require(error.find(expected) != std::string::npos, "failure category or safe context mismatch: " + error);
 	Require(error.find(forbidden) == std::string::npos, "failure leaked rejected input: " + error);
-	Require(factory->probe->streams_opened.load(std::memory_order_relaxed) == 1, "failure stream open mismatch");
-	Require(factory->probe->streams_closed.load(std::memory_order_relaxed) == 1, "failure stream did not close once");
+	Require(probe->streams_opened.load(std::memory_order_relaxed) == 1, "failure stream open mismatch");
+	Require(probe->streams_closed.load(std::memory_order_relaxed) == 1, "failure stream did not close once");
 }
 
 void TestFailuresAndRedaction() {
@@ -177,10 +203,10 @@ void TestFailuresAndRedaction() {
 
 void TestProviderHookFailuresAreContained() {
 	duckdb::DuckDB open_database(nullptr);
-	auto open_factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
+	auto open_factory = NewScenario(FixtureScenario::SUCCESS);
 	open_factory->failures.stream_open = true;
 	open_factory->failures.close = true;
-	Register(open_database, open_factory);
+	auto open_probe = Register(open_database, std::move(open_factory));
 	duckdb::Connection open_connection(open_database);
 	auto error = QueryError(open_connection, ACCEPTED_SQL);
 	Require(error.find("[duckdb_api][internal] connector=example relation=items: unexpected execution failure") !=
@@ -188,14 +214,14 @@ void TestProviderHookFailuresAreContained() {
 	            error.find("top-secret-open-hook-failure") == std::string::npos &&
 	            error.find("top-secret-close-hook-failure") == std::string::npos,
 	        "adapter leaked or replaced an open-hook failure");
-	Require(open_factory->probe->streams_closed.load(std::memory_order_relaxed) == 1,
+	Require(open_probe->streams_closed.load(std::memory_order_relaxed) == 1,
 	        "adapter open-hook failure did not trigger contained cleanup");
 
 	duckdb::DuckDB read_database(nullptr);
-	auto read_factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
+	auto read_factory = NewScenario(FixtureScenario::SUCCESS);
 	read_factory->failures.read = true;
 	read_factory->failures.close = true;
-	Register(read_database, read_factory);
+	auto read_probe = Register(read_database, std::move(read_factory));
 	duckdb::Connection read_connection(read_database);
 	error = QueryError(read_connection, ACCEPTED_SQL);
 	Require(error.find("[duckdb_api][internal] connector=example relation=items: unexpected execution failure") !=
@@ -203,15 +229,15 @@ void TestProviderHookFailuresAreContained() {
 	            error.find("top-secret-read-hook-failure") == std::string::npos &&
 	            error.find("top-secret-close-hook-failure") == std::string::npos,
 	        "adapter leaked or replaced a read-hook failure");
-	Require(read_factory->probe->streams_closed.load(std::memory_order_relaxed) == 1,
+	Require(read_probe->streams_closed.load(std::memory_order_relaxed) == 1,
 	        "adapter read-hook failure did not close exactly once");
 }
 
 void TestEarlyCloseAndConnectionShutdown() {
 	duckdb::DuckDB database(nullptr);
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
+	auto factory = NewScenario(FixtureScenario::SUCCESS);
 	factory->failures.close = true;
-	Register(database, factory);
+	auto probe = Register(database, std::move(factory));
 	{
 		duckdb::Connection connection(database);
 		auto result = connection.SendQuery(
@@ -223,7 +249,7 @@ void TestEarlyCloseAndConnectionShutdown() {
 		result.reset();
 		auto barrier = connection.Query("SELECT 42");
 		Require(!barrier->HasError(), "connection did not settle after early stream close");
-		Require(factory->probe->streams_closed.load(std::memory_order_relaxed) == 1,
+		Require(probe->streams_closed.load(std::memory_order_relaxed) == 1,
 		        "early consumer close did not close the stream");
 	}
 	std::unique_ptr<duckdb::QueryResult> result;
@@ -237,15 +263,14 @@ void TestEarlyCloseAndConnectionShutdown() {
 		connection.reset();
 	}
 	result.reset();
-	Require(factory->probe->streams_opened.load(std::memory_order_relaxed) == 2 &&
-	            factory->probe->streams_closed.load(std::memory_order_relaxed) == 2,
+	Require(probe->streams_opened.load(std::memory_order_relaxed) == 2 &&
+	            probe->streams_closed.load(std::memory_order_relaxed) == 2,
 	        "connection shutdown did not close its active stream exactly once");
 }
 
 void TestConcurrentScansOwnIndependentState() {
 	duckdb::DuckDB database(nullptr);
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::SUCCESS);
-	Register(database, factory);
+	auto probe = Register(database, NewScenario(FixtureScenario::SUCCESS));
 	duckdb::Connection first_connection(database);
 	duckdb::Connection second_connection(database);
 	std::string first_error;
@@ -268,17 +293,17 @@ void TestConcurrentScansOwnIndependentState() {
 	second.join();
 	Require(first_error.empty(), "first concurrent scan failed: " + first_error);
 	Require(second_error.empty(), "second concurrent scan failed: " + second_error);
-	Require(factory->probe->streams_opened.load(std::memory_order_relaxed) == 2 &&
-	            factory->probe->streams_closed.load(std::memory_order_relaxed) == 2,
+	Require(probe->streams_opened.load(std::memory_order_relaxed) == 2 &&
+	            probe->streams_closed.load(std::memory_order_relaxed) == 2,
 	        "concurrent scans shared or leaked stream state");
 }
 
 void TestSynchronizedCancellation() {
 	duckdb::DuckDB database(nullptr);
-	auto factory = std::make_shared<ScenarioFactory>(FixtureScenario::BLOCKING);
+	auto factory = NewScenario(FixtureScenario::BLOCKING);
 	factory->failures.interruption = true;
 	factory->failures.close = true;
-	Register(database, factory);
+	auto probe = Register(database, std::move(factory));
 	duckdb::Connection connection(database);
 	std::string error;
 	std::thread worker([&]() {
@@ -291,9 +316,9 @@ void TestSynchronizedCancellation() {
 	});
 
 	{
-		std::unique_lock<std::mutex> guard(factory->probe->mutex);
-		const auto ready = factory->probe->condition.wait_for(guard, std::chrono::seconds(5), [&]() {
-			return factory->probe->active_waiters.load(std::memory_order_relaxed) == 1;
+		std::unique_lock<std::mutex> guard(probe->mutex);
+		const auto ready = probe->condition.wait_for(guard, std::chrono::seconds(5), [&]() {
+			return probe->active_waiters.load(std::memory_order_relaxed) == 1;
 		});
 		if (!ready) {
 			connection.Interrupt();
@@ -305,12 +330,48 @@ void TestSynchronizedCancellation() {
 	worker.join();
 	Require(error.find("Interrupt") != std::string::npos || error.find("interrupt") != std::string::npos,
 	        "blocking scan did not report interruption: " + error);
-	Require(factory->probe->active_waiters.load(std::memory_order_relaxed) == 0,
-	        "cancellation left an active fixture waiter");
-	Require(factory->probe->interruptions.load(std::memory_order_relaxed) >= 1,
+	Require(probe->active_waiters.load(std::memory_order_relaxed) == 0, "cancellation left an active fixture waiter");
+	Require(probe->interruptions.load(std::memory_order_relaxed) == 1,
 	        "fixture execution did not observe cancellation");
-	Require(factory->probe->streams_opened.load(std::memory_order_relaxed) == 1, "cancel stream open mismatch");
-	Require(factory->probe->streams_closed.load(std::memory_order_relaxed) == 1, "cancel stream did not close once");
+	Require(probe->streams_opened.load(std::memory_order_relaxed) == 1, "cancel stream open mismatch");
+	Require(probe->streams_closed.load(std::memory_order_relaxed) == 1, "cancel stream did not close once");
+}
+
+void TestCancellationAfterRuntimeBatch() {
+	duckdb::DuckDB database(nullptr);
+	auto factory = NewScenario(FixtureScenario::SUCCESS);
+	factory->failures.batch_block = true;
+	auto probe = Register(database, std::move(factory));
+	duckdb::Connection connection(database);
+	std::string error;
+	std::thread worker([&]() {
+		auto result = connection.Query(ACCEPTED_SQL);
+		error = result->HasError() ? result->GetError() : "post-batch cancellation unexpectedly succeeded";
+	});
+	{
+		std::unique_lock<std::mutex> guard(probe->mutex);
+		const auto ready = probe->condition.wait_for(guard, std::chrono::seconds(5), [&]() {
+			return probe->active_waiters.load(std::memory_order_relaxed) == 1;
+		});
+		if (!ready) {
+			connection.Interrupt();
+			probe->release_batches.store(true, std::memory_order_relaxed);
+			probe->condition.notify_all();
+			guard.unlock();
+			worker.join();
+			throw std::runtime_error("fixture did not reach its post-batch cancellation point");
+		}
+	}
+	connection.Interrupt();
+	probe->release_batches.store(true, std::memory_order_relaxed);
+	probe->condition.notify_all();
+	worker.join();
+	Require(error.find("Interrupt") != std::string::npos || error.find("interrupt") != std::string::npos,
+	        "post-batch cancellation did not report DuckDB interruption: " + error);
+	Require(probe->interruptions.load(std::memory_order_relaxed) == 1,
+	        "adapter-side Cancel did not report provider interruption exactly once");
+	Require(probe->streams_closed.load(std::memory_order_relaxed) == 1,
+	        "post-batch cancellation did not close exactly once");
 }
 
 } // namespace
@@ -319,11 +380,13 @@ int main() {
 	try {
 		TestSuccessAndOfflineBind();
 		TestFrozenConnectorMetadata();
+		TestMissingRuntimeStreamIsRedacted();
 		TestFailuresAndRedaction();
 		TestProviderHookFailuresAreContained();
 		TestEarlyCloseAndConnectionShutdown();
 		TestConcurrentScansOwnIndependentState();
 		TestSynchronizedCancellation();
+		TestCancellationAfterRuntimeBatch();
 		std::cout << "DuckDB adapter tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

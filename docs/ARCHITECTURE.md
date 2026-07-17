@@ -238,7 +238,9 @@ loader, or runtime file-path capability.
 The native adapter obtains each stream through a private protocol-neutral
 `ScanExecutor` service. Native example composition supplies the immutable
 connector and executor; the adapter does not retain the concrete fixture
-factory or source. At global initialization and each scan callback, the adapter
+factory or source. The executor takes exclusive ownership of its concrete
+provider, so no caller can mutate fixture behavior behind frozen provenance.
+At global initialization and each scan callback, the adapter
 passes a non-owning `ExecutionControl` view that can report DuckDB
 interruption. Runtime code checkpoints that view but never retains it or
 imports `ClientContext`. A runtime cancellation marker is translated to

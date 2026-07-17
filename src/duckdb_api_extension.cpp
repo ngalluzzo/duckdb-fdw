@@ -15,6 +15,8 @@
 namespace duckdb {
 namespace {
 
+// Call-scoped DuckDB coupling. Runtime receives only the non-owning control
+// interface and cannot retain ClientContext or throw a DuckDB exception.
 class DuckdbExecutionControl : public duckdb_api::ExecutionControl {
 public:
 	explicit DuckdbExecutionControl(ClientContext &context_p) : context(context_p) {
@@ -32,6 +34,8 @@ private:
 	ClientContext &context;
 };
 
+// Registration state is immutable and contains only connector metadata plus
+// the abstract runtime service supplied by example composition.
 struct DuckdbApiFunctionInfo : public TableFunctionInfo {
 	DuckdbApiFunctionInfo(duckdb_api::CompiledConnector connector_p,
 	                      std::shared_ptr<const duckdb_api::ScanExecutor> executor_p)
@@ -42,6 +46,8 @@ struct DuckdbApiFunctionInfo : public TableFunctionInfo {
 	const std::shared_ptr<const duckdb_api::ScanExecutor> executor;
 };
 
+// Bind state freezes the side-effect-free request and plan for the later
+// global-init callback. No concrete source or provider crosses this boundary.
 struct DuckdbApiBindData : public TableFunctionData {
 	DuckdbApiBindData(duckdb_api::ScanRequest request_p, duckdb_api::ScanPlan plan_p,
 	                  std::shared_ptr<const duckdb_api::ScanExecutor> executor_p)
@@ -53,6 +59,8 @@ struct DuckdbApiBindData : public TableFunctionData {
 	const std::shared_ptr<const duckdb_api::ScanExecutor> executor;
 };
 
+// One DuckDB source task exclusively owns one mutable stream. Close is a
+// non-throwing finalizer for success, failure, early close, and destruction.
 struct DuckdbApiGlobalState : public GlobalTableFunctionState {
 	explicit DuckdbApiGlobalState(std::unique_ptr<duckdb_api::BatchStream> stream_p) : stream(std::move(stream_p)) {
 	}
@@ -139,6 +147,8 @@ unique_ptr<FunctionData> DuckdbApiBind(ClientContext &, TableFunctionBindInput &
 		throw InternalException("duckdb_api table function is missing its scan executor");
 	}
 
+	// Bind performs deterministic metadata planning only; source acquisition is
+	// deferred to DuckdbApiInit.
 	auto request = duckdb_api::BuildConservativeScanRequest();
 	auto plan = duckdb_api::BuildConservativeScanPlan(function_info.connector, request);
 
@@ -153,7 +163,11 @@ unique_ptr<GlobalTableFunctionState> DuckdbApiInit(ClientContext &context, Table
 	auto &bind_data = input.bind_data->Cast<DuckdbApiBindData>();
 	try {
 		DuckdbExecutionControl control(context);
-		return make_uniq<DuckdbApiGlobalState>(bind_data.executor->Open(bind_data.plan, control));
+		auto stream = bind_data.executor->Open(bind_data.plan, control);
+		if (!stream) {
+			throw std::logic_error("scan executor returned no stream");
+		}
+		return make_uniq<DuckdbApiGlobalState>(std::move(stream));
 	} catch (const duckdb_api::ExecutionCancelled &) {
 		ThrowCancellation(nullptr);
 	} catch (const duckdb_api::ExecutionError &error) {
@@ -169,6 +183,8 @@ unique_ptr<GlobalTableFunctionState> DuckdbApiInit(ClientContext &context, Table
 
 void DuckdbApiScan(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
 	auto &state = input.global_state->Cast<DuckdbApiGlobalState>();
+	// Rows are callback-local and copied into DuckDB-owned vectors before Next
+	// returns control to the engine.
 	std::vector<duckdb_api::ItemRow> rows;
 	try {
 		DuckdbExecutionControl control(context);

@@ -88,7 +88,9 @@ replacement for the intended portable Rust runtime.
 The native adapter receives an immutable `ScanExecutor` from example
 composition and asks it to open each `BatchStream`. The executor owns concrete
 fixture-provider state; the adapter retains no `FixtureFactory` or
-`FixtureSource`. A call-scoped `ExecutionControl` supplies a non-throwing
+`FixtureSource`, and construction transfers exclusive provider ownership so no
+external mutable alias can change content behind the frozen fixture digest. A
+call-scoped `ExecutionControl` supplies a non-throwing
 cancellation query to executor open and stream pull. Runtime code must not
 retain that view. It reports cancellation through a runtime marker that the
 adapter translates to DuckDB interruption, so `ClientContext` and DuckDB
@@ -1548,7 +1550,9 @@ decoder. Runtime checkpoints combine the view with their own deadline and
 idempotent canceled state. A runtime-owned cancellation marker crosses to the
 adapter, which converts it once to DuckDB interruption. Concrete fixture
 source and factory APIs remain behind `ScanExecutor` and are available only to
-runtime implementation and direct runtime tests.
+runtime implementation and direct runtime tests. Native construction transfers
+exclusive factory ownership into the executor; callers may retain observation
+probes but not a mutable provider alias.
 
 Native `Cancel`, `Close`, and runtime interface destructors are non-throwing.
 If source acquisition or an open hook fails after a resource is acquired, the

@@ -99,6 +99,9 @@ bool TryParseLosslessInt64(const std::string &token, int64_t &result) {
 	return true;
 }
 
+// Strict single-document decoder for the accepted fixture response. It checks
+// cancellation and deadline through the shared buffer while separating JSON
+// representation errors from extraction and lossless-conversion failures.
 class JsonParser {
 public:
 	JsonParser(const std::string &input_p, FixtureReadBuffer &checkpoint_p, const ResourceBudgets &budgets_p)

@@ -10,6 +10,8 @@
 namespace duckdb_api {
 namespace {
 
+// Internal content-addressed product evidence. This provider is deliberately
+// not a package loader or a public connector-authoring surface.
 class EmbeddedFixtureSource : public FixtureSource {
 public:
 	const std::string &ContentDigest() const override {
@@ -37,7 +39,9 @@ public:
 } // namespace
 
 ExampleComposition BuildEmbeddedExampleComposition() {
-	auto factory = std::shared_ptr<FixtureFactory>(new EmbeddedFixtureFactory());
+	// This is the sole production construction point that knows both the
+	// embedded asset provider and the connector provenance derived from it.
+	auto factory = std::unique_ptr<FixtureFactory>(new EmbeddedFixtureFactory());
 	ExampleComposition result;
 	result.connector = BuildCompiledConnector(factory->ContentDigest());
 	result.executor = BuildFixtureScanExecutor(std::move(factory));

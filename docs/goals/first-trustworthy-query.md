@@ -136,8 +136,8 @@ compatibility promise is part of this goal.
 
 ### Structural correction before release completion
 
-RFC 0002's responsibility pass found that the behavioral slice is green but
-its production design has not reached the team-interaction exits claimed by
+RFC 0002's responsibility pass found that the behavioral slice was green but
+its production design had not reached the team-interaction exits claimed by
 RFC 0001. This correction is part of `0.1.0`: do not tag it or begin the next
 roadmap outcome while the source and test dependencies still require routine
 cross-boundary knowledge.
@@ -147,12 +147,12 @@ cross-boundary knowledge.
 | Responsibility | Producer and consumers | Production home | Primary reason to change |
 | --- | --- | --- | --- |
 | Internal example connector metadata | Connector Experience provides an immutable `CompiledConnector` to planning, the DuckDB adapter, and composition | `connector.hpp` and `connector.cpp` | The internal `example.items` identifiers, complete schema/nullability/extractors, operation declaration, fixture provenance, or snapshot changes |
-| Adapter request contract | Query Experience creates `AdapterCapabilities` and `ScanRequest`; Relational Semantics consumes them | `scan_request.hpp` and a small request-construction implementation at the adapter edge | DuckDB capabilities or their conservative unavailable values change |
+| Adapter request contract | Query Experience creates `AdapterCapabilities` and `ScanRequest`; Relational Semantics consumes them | `scan_request.hpp` and `scan_request.cpp` | DuckDB capabilities or their conservative unavailable values change |
 | Relational planning | Relational Semantics consumes connector metadata and a request, then provides an immutable `ScanPlan` to execution | `scan_plan.hpp` and `scan_planner.cpp` | Operation selection, ownership, projection closure, conservative fallback, budgets in the accepted plan, or plan explanation changes |
 | Fixture decoding | Remote Runtime converts the accepted fixture representation into strict typed rows for streaming | private decoder declarations and `fixture_decoder.cpp` | JSON validity, extraction, lossless conversion, schema failure classification, or decode resource checks change |
-| Bounded stream runtime | Remote Runtime consumes an authorized plan and provides `BatchStream` | `batch_stream.hpp` and `fixture_batch_stream.cpp` | Source opening, resource authority, batching, deadlines, cancellation, concurrency, error staging, or deterministic close changes |
-| DuckDB adapter | Query Experience consumes connector, planner, and stream-provider APIs | `duckdb_adapter.cpp` behind `duckdb_api_extension.hpp` | Registration, bind/init/scan state, `DataChunk` output, DuckDB error translation, exception containment, or host compatibility changes |
-| Native example composition | Query Experience wires the repository-owned example connector and embedded fixture provider into the adapter | `embedded_example.cpp` plus the existing content-addressed asset declaration | The native example asset or composition changes; this is the only production location allowed to know both connector identity and the concrete embedded fixture provider |
+| Bounded stream runtime | Remote Runtime consumes an authorized plan and provides `BatchStream` | `execution.hpp`, private `internal/fixture_runtime.hpp`, and `fixture_runtime.cpp` | Source opening, resource authority, batching, deadlines, cancellation, concurrency, error staging, or deterministic close changes |
+| DuckDB adapter | Query Experience consumes connector, planner, and stream-provider APIs | `duckdb_api_extension.cpp` behind `duckdb_api_extension.hpp` | Registration, bind/init/scan state, `DataChunk` output, DuckDB error translation, exception containment, or host compatibility changes |
+| Native example composition | Query Experience wires the repository-owned example connector and embedded fixture provider into the adapter | `example_composition.hpp`, `example_composition.cpp`, and the content-addressed asset declaration | The native example asset or composition changes; this is the only production location allowed to know both connector identity and the concrete embedded fixture provider |
 
 The filenames are implementation targets, not a metric. Co-location remains
 valid where code shares the same invariants and reason to change; changing a
@@ -227,7 +227,7 @@ changes a reserved public, compatibility, security, or outcome decision.
 | Connector identity, full schema/nullability/extractors, provenance, immutability, and snapshot | `connector_contract_tests.cpp`; builds with connector implementation only |
 | Conservative request, complete plan snapshots, mutation rejection, and relational ownership laws | `scan_planner_tests.cpp`; builds without adapter or runtime implementation |
 | JSON validity, Unicode, lossless `BIGINT`, extraction, strict conversion, budgets, and decode/schema staging | `fixture_decoder_tests.cpp`; uses runtime-owned test inputs without DuckDB registration |
-| Source-open ordering, bounded batches, deadline, cancellation, idempotent close, failure cleanup, and independent concurrent scans | `batch_stream_tests.cpp`; uses reusable scenarios and lifecycle probes from `test/cpp/support/` without adapter registration |
+| Source-open ordering, bounded batches, deadline, cancellation, idempotent close, failure cleanup, and independent concurrent scans | `fixture_stream_tests.cpp`; uses reusable scenarios and lifecycle probes from `test/cpp/support/` without adapter registration |
 | Registration, offline bind, immutable bound state, one-time error translation, chunk output, early close, and connection shutdown | `duckdb_adapter_tests.cpp`; contains only cross-layer behavior that requires DuckDB |
 | Accepted SQL, schema, DuckDB-local filter/order/limit ownership, and bind diagnostics | Existing SQL suite remains the public relational oracle |
 | Loadable artifact identity and public inventory | Existing Python artifact suite remains unchanged |
@@ -302,15 +302,15 @@ the move easier.
 
 | Perspective | Design disposition | Current interaction status and exit evidence |
 | --- | --- | --- |
-| Query Experience | Approved after making adapter callback ownership and runner migration explicit | Open: the adapter still retains provider internals, the focused stream/cancellation RFC is unresolved, and release evidence is incomplete |
-| Connector Experience | Approved; structured schema/provenance and an independently linked connector oracle restore RFC 0001 without creating public package compatibility | Open: current schema and extractors remain duplicated in snapshot/bind code and connector tests still link the whole product |
-| Remote Runtime | Approved; runtime control, stream acquisition, cancellation, resource, error, and lifecycle decisions are correctly gated by a focused RFC | Open: runtime APIs still expose `ClientContext`, the adapter retains `FixtureFactory`, and runtime tests require adapter registration |
-| Relational Semantics | Approved; planner ownership, budget recording, independent oracles, and the ban on runtime reclassification match the accepted contract | Open: planning shares the catch-all module and runtime still rechecks planner-owned relational meaning |
-| Engineering Enablement | Approved after requiring atomic migration of every native and sanitizer target/runner reference | Open: Query Experience has not yet implemented and independently owned the migrated gates |
+| Query Experience | Approved after making adapter callback ownership and runner migration explicit | Satisfied for the structural correction: registration and bind retain only immutable connector/request/plan data plus `ScanExecutor`; global state owns one checked non-null stream; adapter tests own DuckDB translation, late cancellation, close, and provider-failure containment |
+| Connector Experience | Approved; structured schema/provenance and an independently linked connector oracle restore RFC 0001 without creating public package compatibility | Satisfied: the compiled connector owns complete schema/nullability/extractors and provenance, snapshots derive from that data, adapter schema derives from the connector, and the connector target links only connector production code |
+| Remote Runtime | Approved; runtime control, stream acquisition, cancellation, resource, error, and lifecycle decisions are correctly gated by a focused RFC | Satisfied: runtime declarations are DuckDB-free; the executor exclusively owns its provider; direct tests cover pre-open rejection, decoding/read cancellation, post-acquisition cleanup, late cancel reporting, fault containment, deadlines, and independent streams |
+| Relational Semantics | Approved; planner ownership, budget recording, independent oracles, and the ban on runtime reclassification match the accepted contract | Satisfied: planning links independently and runtime authorization ignores planner-only `duckdb_owned_operations` while rejecting unsupported executable work |
+| Engineering Enablement | Approved after requiring atomic migration of every native and sanitizer target/runner reference | Satisfied for the structural correction: CMake and both runners name all five focused targets, sanitizer verification maps every production object in each target, and the fresh native product cell executes the same inventory without Enablement intervention |
 
-Approval means the correction map is ready to execute; it does not satisfy an
-interaction exit. Each row remains Open until the implementation and evidence
-named here exist.
+The statuses above record the post-implementation exit audit. They close the
+structural collaboration introduced by RFC 0002; they do not complete the
+separate tagged-release and durable-evidence work still required by this goal.
 
 #### Correction acceptance evidence
 
@@ -329,8 +329,8 @@ named here exist.
   end-to-end path without reading the integration tests.
 - Independent review covers relational semantics, resource bounds,
   concurrency, native lifecycle, diagnostics, and the final dependency audit.
-- All five topology interactions remain Open until their recorded source,
-  test, release-evidence, and self-sufficiency conditions are actually proven.
+- The implementation exit audit records all five structural interactions as
+  satisfied; tagged release evidence remains an explicit goal-level gate.
 
 This tracked brief is the approved working record for the `0.1.0` goal. Stable
 behavior is authoritative only after it is propagated to the contracts and
@@ -343,10 +343,12 @@ suite, public SQL and inventory oracles, pinned product-cell runner, release
 manifest/canaries, sanitizer launcher, and runbook are implemented. Fresh
 debug and release-profile product builds pass on the declared macOS arm64 cell.
 
-RFCs 0002 and 0003 are accepted and the responsibility map above is the active
-correction plan. The process, skill, and shared execution-boundary decisions
-are complete; product code has not yet been restructured, so the topology exits
-remain Open.
+RFCs 0002 and 0003 are accepted. The correction is implemented in focused
+connector, request/planner, decoder, stream-runtime, example-composition, and
+DuckDB-adapter modules with independently linked oracle homes. The monolithic
+`contracts.hpp`, `duckdb_api_core.cpp`, and contract-test target are removed;
+all five structural topology exits are satisfied after adversarial review and
+the fresh native product cell preserves the accepted behavior digest.
 
 The goal remains active until the same clean source commit passes the native
 Linux amd64 ASan/UBSan cell, receives durable evidence custody, is tagged once
