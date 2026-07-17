@@ -38,6 +38,8 @@ complete until every affected layer, example, diagnostic, and test agrees.
 
 ## Required skills
 
+- Use `$draft-product-goal` when turning product-manager direction into a new,
+  split, clarified, or materially revised product goal before activation.
 - Use `$delivery-loop` for nontrivial implementation, refactoring, bug-fixing,
   integration, or repository setup.
 - Use `$contract-change` whenever behavior crosses architecture, connector
@@ -69,9 +71,9 @@ Do not weaken an invariant to make an implementation or test easier.
 
 ## Delivery workflow
 
-1. For a product goal, follow `docs/PRODUCT_DELIVERY.md`; make the persistent
-   goal reference that document and state its outcome, evidence, and
-   guardrails.
+1. For a product goal, use `$draft-product-goal` and follow
+   `docs/PRODUCT_DELIVERY.md`; make the persistent goal reference that document
+   and state its outcome, evidence, and guardrails.
 2. Inspect the current worktree and authoritative contracts.
 3. Translate the request into observable acceptance evidence.
 4. Identify uncertain external facts and verify them from primary sources.

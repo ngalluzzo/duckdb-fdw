@@ -48,10 +48,10 @@ demonstrated, accepted, or rejected separately.
 1. **Brief.** The product manager supplies the PM brief from the template
    below. Unknown details can remain unknown when they do not change the
    product outcome or a reserved decision.
-2. **Shape.** The lead agent reads the relevant contracts, confirms the
-   observable interpretation, identifies the cheapest convincing evidence,
-   and completes the agent commitment. It raises only material product
-   decisions.
+2. **Shape.** The lead agent uses `$draft-product-goal`, reads the relevant
+   contracts, confirms the observable interpretation, identifies the cheapest
+   convincing evidence, and completes the agent commitment. It raises only
+   material product decisions.
 3. **Activate.** The persistent goal explicitly says to follow this document
    and records the approved outcome and completion evidence. For example:
 

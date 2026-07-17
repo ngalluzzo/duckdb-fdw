@@ -1,0 +1,4 @@
+interface:
+  display_name: "Draft Product Goal"
+  short_description: "Shape product outcomes into verifiable agent goals"
+  default_prompt: "Use $draft-product-goal to turn this product outcome into a complete goal brief."
