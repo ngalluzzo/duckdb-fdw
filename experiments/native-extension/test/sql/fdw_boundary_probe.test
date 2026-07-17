@@ -1,0 +1,81 @@
+# name: test/sql/fdw_boundary_probe.test
+# description: native DuckDB boundary decision evidence
+# group: [native_boundary]
+
+statement error
+SELECT * FROM fdw_boundary_probe(1, 1, 0, -1);
+----
+Catalog Error: Table Function with name fdw_boundary_probe does not exist!
+
+require fdw_boundary_probe
+
+# Deterministic typed output spans 40 explicitly bounded chunks.
+query IIII producer
+SELECT count(*), sum(row_id), min(batch_id), max(batch_id)
+FROM fdw_boundary_probe(5000, 128, 0, -1);
+----
+5000	12497500	0	39
+
+query TT producer
+SELECT min(payload), max(payload)
+FROM fdw_boundary_probe(3, 2, 0, -1);
+----
+row-0	row-2
+
+# Observe cleanup from a separate connection. A follow-up statement on the
+# producer connection could itself trigger deferred pending-query cleanup and
+# create a false-positive lifecycle oracle.
+query IIII observer
+SELECT opened, closed, chunks, interruptions
+FROM fdw_boundary_probe_stats();
+----
+2	2	42	0
+
+# Invalid bounds fail at bind without opening execution state.
+statement error producer
+SELECT count(*) FROM fdw_boundary_probe(10, 0, 0, -1);
+----
+Invalid Input Error: boundary probe batch_size must be between 1 and 2048
+
+query II observer
+SELECT opened, closed FROM fdw_boundary_probe_stats();
+----
+2	2
+
+# An execution failure after partial production still destroys global state.
+statement error producer
+SELECT count(*) FROM fdw_boundary_probe(1000, 100, 0, 350);
+----
+Invalid Input Error: boundary probe injected execution failure after 350 rows
+
+query IIII observer
+SELECT opened, closed, chunks, interruptions
+FROM fdw_boundary_probe_stats();
+----
+3	3	46	0
+
+# A failure boundary at the end of a non-empty scan must fail rather than be
+# mistaken for ordinary end-of-stream.
+statement error producer
+SELECT count(*) FROM fdw_boundary_probe(10, 5, 0, 10);
+----
+Invalid Input Error: boundary probe injected execution failure after 10 rows
+
+query IIII observer
+SELECT opened, closed, chunks, interruptions
+FROM fdw_boundary_probe_stats();
+----
+4	4	48	0
+
+# The zero-row endpoint has the same failure semantics and opens no loophole
+# through the ordinary empty-stream path.
+statement error producer
+SELECT count(*) FROM fdw_boundary_probe(0, 1, 0, 0);
+----
+Invalid Input Error: boundary probe injected execution failure after 0 rows
+
+query IIII observer
+SELECT opened, closed, chunks, interruptions
+FROM fdw_boundary_probe_stats();
+----
+5	5	48	0

@@ -1,6 +1,7 @@
 # Rust and native build output
 /target/
 /build/
+/.build/
 
 # Local DuckDB state
 *.duckdb
