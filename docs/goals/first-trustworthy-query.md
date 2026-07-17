@@ -109,8 +109,10 @@ compatibility promise is part of this goal.
   sanitizer, manifest, compatibility, tamper-canary, and reproduction gates.
   Exit when Query Experience owns and independently runs the documented
   release path.
-- RFC: RFC 0001, `Establish the first trustworthy query contract`, is Accepted
-  and governs delivery.
+- RFC 0001, `Establish the first trustworthy query contract`, governs public
+  behavior; RFC 0002, `Establish production design and code documentation
+  practice`, governs the correction; and RFC 0003, `Define the native scan
+  execution boundary`, is Accepted for cancellation and stream acquisition.
 
 ### Unknowns and first trial
 
@@ -341,9 +343,10 @@ suite, public SQL and inventory oracles, pinned product-cell runner, release
 manifest/canaries, sanitizer launcher, and runbook are implemented. Fresh
 debug and release-profile product builds pass on the declared macOS arm64 cell.
 
-RFC 0002 is accepted and the responsibility map above is the active correction
-plan. The process and skill update is complete; product code has not yet been
-restructured, so the topology exits remain Open.
+RFCs 0002 and 0003 are accepted and the responsibility map above is the active
+correction plan. The process, skill, and shared execution-boundary decisions
+are complete; product code has not yet been restructured, so the topology exits
+remain Open.
 
 The goal remains active until the same clean source commit passes the native
 Linux amd64 ASan/UBSan cell, receives durable evidence custody, is tagged once

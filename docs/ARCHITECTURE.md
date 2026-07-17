@@ -235,6 +235,18 @@ hard fixture-byte, record, field-size, wall-time, and concurrency ceilings.
 There is no network, credential, retry, cache, pagination, provider, package
 loader, or runtime file-path capability.
 
+The native adapter obtains each stream through a private protocol-neutral
+`ScanExecutor` service. Native example composition supplies the immutable
+connector and executor; the adapter does not retain the concrete fixture
+factory or source. At global initialization and each scan callback, the adapter
+passes a non-owning `ExecutionControl` view that can report DuckDB
+interruption. Runtime code checkpoints that view but never retains it or
+imports `ClientContext`. A runtime cancellation marker is translated to
+DuckDB's interruption type once at the adapter boundary. Runtime-owned
+deadlines and idempotent, non-throwing cancel, close, and destruction remain
+independent of the host signal. Cleanup failure cannot mask an interruption or
+escape connection destruction.
+
 The supported compatibility cell is DuckDB 1.5.4 at commit `08e34c447b` with
 platform `osx_arm64`, macOS 26.5.1 on Apple Silicon arm64, Apple clang 17 in
 C++11 mode, CMake 4.1.2, and Ninja 1.13.0. Installation is a clean source build

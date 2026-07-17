@@ -85,6 +85,15 @@ replacement for the intended portable Rust runtime.
 | `ScanPlan` | Fixed `GET /items` and `$.items[*]` fixture executor; `TRUE` remote and runtime residuals; DuckDB ownership of filtering, ordering, limit, and offset; explicit hard budgets |
 | `BatchStream` | Synchronous single-task pull stream with two-row internal batches, strict conversion, cancellation checks, and idempotent close |
 
+The native adapter receives an immutable `ScanExecutor` from example
+composition and asks it to open each `BatchStream`. The executor owns concrete
+fixture-provider state; the adapter retains no `FixtureFactory` or
+`FixtureSource`. A call-scoped `ExecutionControl` supplies a non-throwing
+cancellation query to executor open and stream pull. Runtime code must not
+retain that view. It reports cancellation through a runtime marker that the
+adapter translates to DuckDB interruption, so `ClientContext` and DuckDB
+exceptions remain outside runtime interfaces.
+
 No connector compiler, package loader, protocol registry, network transport,
 secret capability, provider pipeline, pagination, retry, cache, async runtime,
 or cross-language FFI exists in this profile. The embedded snapshot is built
@@ -698,11 +707,11 @@ or Rust wrapper may vary, but the runtime lifecycle remains:
 | Bind | Resolve relation arguments and bind its schema. |
 | Scan-metadata collection | Collect only projection, filter, ordering, limit, offset, progress, and cancellation information exposed by the adapter capability profile. |
 | Scan planning | Build a conservative `ScanRequest`; invoke the shared planner to obtain `ScanPlan`. |
-| Global initialization | Create execution context and open `BatchStream`. |
+| Global initialization | Create a call-scoped execution-control view and ask `ScanExecutor` to open `BatchStream`. |
 | Local initialization | Create local DuckDB scan state, if parallel local consumption is supported. |
 | Repeated scan | Pull rows from `BatchStream` into `DataChunk`. |
 | Progress hook | Read execution progress from shared scan state. |
-| Cancellation | Signal the scan executor and abort authorized transport requests. |
+| Cancellation | Translate the host signal through execution control, signal the scan executor, and abort authorized transport requests. |
 | Completion | Flush telemetry, release capabilities, and persist safe observations. |
 
 ```mermaid
@@ -1469,6 +1478,14 @@ pub trait ScanExecutor: Send + Sync {
 }
 ```
 
+The native preview maps this service to an immutable C++ `ScanExecutor` whose
+`Open` method accepts the immutable `ScanPlan` and a call-scoped
+`ExecutionControl`, then returns one independently owned `BatchStream`. The
+fixture implementation validates its supported execution capability envelope,
+fixture identity, and hard budgets before opening a source. It may reject
+runtime work it cannot perform, but it does not recompute residual ownership,
+ordering, limit safety, or any other relational decision.
+
 The executor:
 
 1. Opens the base operation source stream.
@@ -1523,6 +1540,23 @@ conversion.
 connection destruction, and extension shutdown all reach the same close path.
 The native preview implements this interface synchronously without a worker,
 queue, or async runtime and uses RAII destruction as a final close guarantee.
+
+For the native preview, `BatchStream::Next` accepts a non-owning
+`ExecutionControl` instead of a DuckDB host object. The control view is valid
+only for that open or pull call and must not be stored by a stream, source, or
+decoder. Runtime checkpoints combine the view with their own deadline and
+idempotent canceled state. A runtime-owned cancellation marker crosses to the
+adapter, which converts it once to DuckDB interruption. Concrete fixture
+source and factory APIs remain behind `ScanExecutor` and are available only to
+runtime implementation and direct runtime tests.
+
+Native `Cancel`, `Close`, and runtime interface destructors are non-throwing.
+If source acquisition or an open hook fails after a resource is acquired, the
+executor performs best-effort non-throwing cleanup and preserves the original
+failure. Failures from interruption and close hooks are contained; they cannot
+mask `ExecutionCancelled`, a structured execution error, or the unknown error
+that the adapter will redact. This rule is required because connection
+destruction invokes close outside an ordinary scan-callback error path.
 
 ### 18.1 Async bridge
 
@@ -2291,6 +2325,17 @@ When the adapter exposes a cancellation signal, it is propagated from DuckDB
 through every execution layer. Every profile also cancels on scan teardown and
 enforces request and wall-time deadlines; it does not claim interactive
 DuckDB cancellation unless the capability is verified.
+
+The native preview represents the host signal with a call-scoped,
+protocol-neutral `ExecutionControl`. Global initialization checks it before
+opening a fixture source, and fixture reading, JSON decoding, conversion, and
+batch emission checkpoint it during synchronous pull. The control view is not
+an owned future cancellation token and cannot outlive the adapter callback.
+The stream's `Cancel` and `Close` operations remain idempotent and runtime
+owned, and both are non-throwing. Host interruption is never reported as a
+retryable or public project error. Once runtime observes cancellation, a
+provider interruption or cleanup-hook failure cannot replace the cancellation
+marker translated by the adapter.
 
 ```mermaid
 flowchart LR
