@@ -1,0 +1,101 @@
+# Remote Runtime plan: permanent bounded HTTPS execution
+
+## Outcome and status
+
+Provide Query Experience with the permanent DuckDB-free execution service for
+RFC 0005's one fixed live REST relation. The service consumes the immutable
+Relational Semantics plan, performs at most one policy-authorized HTTP/1.1
+request, strictly decodes schema-aligned typed batches, and exposes bounded,
+cancelable, redacted stream behavior. This workstream owns no DuckDB adapter,
+product composition, connector declaration, or relational classification.
+
+The branch is `goal/0.3-live-rest/runtime` in the isolated
+`.worktrees/first-live-rest/runtime` worktree. Provider commits from Connector
+Experience and Relational Semantics are cherry-picked unchanged before runtime
+implementation consumes their declarations.
+
+## Permanent module ownership
+
+| Artifact | Remote Runtime responsibility |
+| --- | --- |
+| `src/include/duckdb_api/execution.hpp` and `src/execution_error.cpp` | DuckDB-free typed values, schema-aligned batches, execution control, pull stream, executor, and redacted structured error contract |
+| `src/include/duckdb_api/http_runtime.hpp` and `src/http_runtime.cpp` | Process-lifetime libcurl capability verification, checked pre-registration initialization, balanced teardown, and the production executor factory for the fixed installed authority |
+| `src/include/duckdb_api/internal/http_transport.hpp` | Protocol-neutral one-attempt request/response boundary used by the executor and private deterministic tests |
+| `src/include/duckdb_api/internal/curl_http_transport.hpp` and `src/curl_http_transport.cpp` | HTTPS GET execution, HTTP/1.1 pinning, TLS verification, redirect/proxy/auth/cookie/netrc disablement, post-DNS socket policy, body/header/deadline ceilings, and cancellation |
+| `src/include/duckdb_api/internal/network_policy.hpp` and `src/network_policy.cpp` | Address parsing and denial of loopback, private, link-local, multicast, unspecified, reserved, mapped, and transition destinations after DNS resolution |
+| `src/include/duckdb_api/internal/json_decoder.hpp` and `src/json_decoder.cpp` | Strict JSON syntax, `$.items[*]` selection, required non-null lossless field conversion, nesting/string/record/memory exhaustion, and schema-safe errors |
+| `src/include/duckdb_api/internal/http_scan_executor.hpp` and `src/http_scan_executor.cpp` | Executable-plan capability validation, one-request stream state, whole-response bounded decode, batch backpressure, cancellation, progress, and idempotent non-throwing close |
+| `test/cpp/execution_contract_tests.cpp` | Typed batch and stable redacted error contract oracles |
+| `test/cpp/network_policy_tests.cpp` | Public and denied IPv4/IPv6 address-class oracles, including mapped and transition forms |
+| `test/cpp/json_decoder_tests.cpp` | Strict syntax, field conversion, and every decode-budget boundary |
+| `test/cpp/http_scan_executor_tests.cpp` | Attempt, batching, cancellation, plan-capability rejection, failure staging, and close/recovery oracles |
+| `test/cpp/curl_http_transport_tests.cpp` | Curl option, transfer cancellation, deadline, status, body/header ceiling, and redaction oracles against private loopback composition |
+| `test/cpp/support/controlled_http_transport.hpp` and `.cpp` | Non-installable scripted transport and observations used only by focused runtime tests |
+| `test/python/support/http_service.py` and `test/python/runtime_http_service.py` | Private controlled loopback server and process-level transfer/lifecycle scenarios; never linked or selectable from installed product code |
+
+Build graph, root scripts, release identities, product composition, DuckDB
+adapter code, public SQL, and durable product documentation belong to the lead,
+Engineering Enablement, or Query Experience integration packages and are not
+edited in this worktree.
+
+## Provider boundary and dependency direction
+
+Remote Runtime consumes `duckdb_api/scan_plan.hpp` as the only source of
+executable authority. Relational Semantics owns operation selection, the base
+domain, predicates, residual ownership, ordering, and limits. Runtime validates
+only executable facts needed for safe I/O: the supported operation and schema,
+fixed request structure, applied network/resource ceilings, and disabled
+capabilities. It neither reconstructs a canonical plan nor reclassifies
+relational meaning.
+
+Connector Experience owns the immutable declarations from which Semantics
+builds the plan. Runtime does not parse packages, select relations, or retain
+connector implementation objects. Query Experience receives a documented
+`ScanExecutor`/`BatchStream` service and schema-aligned typed batches without
+curl, JSON parser, DNS-policy, or connector knowledge.
+
+The production factory contains the sole installed authority and has no URL,
+environment, SQL, DuckDB-setting, file, mutable-global, or loopback override.
+The protocol-neutral transport constructor is private implementation surface;
+only test-owned composition may supply the controlled loopback transport.
+
+## Security, resource, and lifecycle oracles
+
+- The production executor accepts only the exact RFC 0005 HTTPS host, path,
+  ordered query, headers, schema, and applied policy; mutation fails before I/O.
+- Every resolved address is checked immediately before socket connection.
+  Redirects, proxy discovery, credentials, netrc, cookies, filesystem access,
+  process authority, connection reuse, HTTP/2, retry, pagination, and cache are
+  absent or explicitly disabled.
+- One stream owns at most one wire attempt. Response, header, decompressed,
+  record, string, nesting, decoded-memory, batch-row, wall-time, and concurrency
+  ceilings fail closed at their exact boundaries.
+- Cancellation is polled by transfer and decoding. `Cancel`, `Close`, and
+  destructors are idempotent and non-throwing; no failure crosses the native
+  boundary with URL, authority, response bytes, or dependency text.
+- Before registration, the process runtime verifies libcurl 8.7.1, the pinned
+  SSL-backend identity, and `CURL_VERSION_THREADSAFE`, then performs exactly one
+  checked `curl_global_init(CURL_GLOBAL_DEFAULT)`. Initialization is never
+  query-lazy. The service remains resident and calls one balanced
+  `curl_global_cleanup()` at process teardown after all streams have ended.
+- Focused deterministic tests prove success, exact request observations,
+  status/redirect/malformed/oversized/disconnect/deadline/cancellation failures,
+  recovery, active-stream teardown ordering, and redaction. Public GitHub is
+  compatibility evidence only and is not a correctness oracle.
+
+## Interaction exit
+
+- **Relational Semantics — Collaboration, then X-as-a-Service:** Open until
+  runtime compiles against and executes the immutable provider `ScanPlan`
+  without importing planner internals or duplicating classification.
+- **Query Experience — Collaboration, then X-as-a-Service:** Open until Query
+  consumes only `ScanExecutor`, `BatchStream`, typed batches, execution control,
+  structured errors, and the production runtime factory without runtime-
+  internal knowledge.
+- **Engineering Enablement — Facilitation:** Open until the permanent build
+  links only transport-bearing targets to the pinned platform libcurl and the
+  fresh identity/lifecycle gates are maintained outside this workstream.
+
+The Remote Runtime interaction exits are satisfied only after focused tests,
+the private controlled-service path, installed-artifact seam canaries, and the
+combined fresh product gate agree with the final source dependency graph.
