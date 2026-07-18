@@ -22,6 +22,27 @@ feat(runtime): add bounded cursor pagination
 fix(auth)!: reject cross-host token redirects
 ```
 
+## Native developer workflow
+
+On the exact supported cell documented in the
+[README](README.md#supported-cell), the repository root is the public
+source-development boundary:
+
+```sh
+make demo
+make test
+```
+
+The first command performs an incremental source build as needed and directly
+loads the artifact in the pinned clean Python host. The second runs the focused
+native, SQL, artifact-inventory, and direct-load oracles. Use `make help` to
+discover `bootstrap`, `build`, `paths`, and profile overrides.
+
+Developer state is reusable and therefore is not release evidence. Before
+handoff, run `make verify`; it allocates a new root and executes the complete
+fresh product cell. The tagged release and sanitizer procedure remains the
+[0.1.0 evidence runbook](docs/releases/0.1.0.md).
+
 ## Documentation conventions
 
 - Keep architecture, connector syntax, and runtime contracts in their

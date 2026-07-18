@@ -2,6 +2,11 @@
 
 set -euo pipefail
 
+# Ambient Python overrides can affect repository scripts reached through their
+# shebang before an explicit `-I` flag is available. The developer cell owns
+# its Python identity, so remove those inherited search/prefix controls here.
+unset PYTHONHOME PYTHONPATH PYTHONSTARTUP PYTHONUSERBASE
+
 readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Environment bootstrap and build operations have different change drivers.
@@ -18,7 +23,7 @@ DuckDB API native developer commands
   make test PROFILE=debug|release   run native, SQL, inventory, and demo oracles
   make demo PROFILE=debug|release   run the first query in a pinned clean host
   make paths PROFILE=debug|release  print exact developer host and artifact paths
-  make verify PROFILE=debug|release run the unchanged fresh product test runner
+  make verify PROFILE=debug|release run the fresh product test runner
 
 PROFILE defaults to debug. DUCKDB_API_DEV_ROOT overrides the developer state root:
   ${DEFAULT_DEV_ROOT}

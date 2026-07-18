@@ -3,6 +3,10 @@
 /build/
 /.build/
 
+# Python interpreter caches
+__pycache__/
+*.py[cod]
+
 # Local DuckDB state
 *.duckdb
 *.duckdb.wal

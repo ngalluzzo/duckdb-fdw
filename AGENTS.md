@@ -182,6 +182,21 @@ git diff --check
 git diff --cached --check
 ```
 
+For the ordinary source-development loop on the supported product cell, use
+the pinned reusable developer environment:
+
+```sh
+make build
+make test
+make demo
+```
+
+These commands may reuse `.build/dev` and are not release evidence. Use
+`PROFILE=release` to select the release profile or
+`DUCKDB_API_DEV_ROOT=/absolute/path` to isolate another developer cell. Run
+`make help` for the complete interface and `make paths` for the exact pinned
+Python host, loadable artifact, and statically linked test-CLI paths.
+
 Changes to product source, fixtures, build configuration, or release evidence
 must additionally pass:
 
@@ -192,8 +207,10 @@ scripts/run-native-product-tests.sh /absolute/new/build-root debug
 
 The first command is the fast content and version identity gate. The second
 performs a fresh pinned DuckDB build, private C++ contract tests, SQLLogicTests,
-loadable-artifact inventory, and pristine-host public behavior tests on the
-supported product cell. Use a new build root on every run.
+loadable-artifact inventory, and the same clean-host direct-load contract used
+by `make demo` on the supported product cell. Use a new build root on every
+run. `make verify` is the convenience wrapper that allocates that new root; it
+does not reuse developer state.
 
 The authoritative `0.1.0` release and sanitizer commands are intentionally
 stricter:

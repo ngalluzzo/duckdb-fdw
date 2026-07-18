@@ -1,9 +1,12 @@
-PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+PROJ_DIR := $(CURDIR)/
 
 EXT_NAME=duckdb_api
 EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 
-EXTENSION_TEMPLATE_MAKEFILE := $(PROJ_DIR)extension-ci-tools/makefiles/duckdb_extension.Makefile
+# Keep discovery relative to CURDIR so GNU Make does not split an absolute
+# include path when a checkout directory contains spaces. Supported entry
+# points invoke this Makefile from its own directory, directly or with `-C`.
+EXTENSION_TEMPLATE_MAKEFILE := extension-ci-tools/makefiles/duckdb_extension.Makefile
 
 ifneq ($(wildcard $(EXTENSION_TEMPLATE_MAKEFILE)),)
 include $(EXTENSION_TEMPLATE_MAKEFILE)

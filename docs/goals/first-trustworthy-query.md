@@ -302,11 +302,11 @@ the move easier.
 
 | Perspective | Design disposition | Current interaction status and exit evidence |
 | --- | --- | --- |
-| Query Experience | Approved after making adapter callback ownership and runner migration explicit | Satisfied for the structural correction: registration and bind retain only immutable connector/request/plan data plus `ScanExecutor`; global state owns one checked non-null stream; adapter tests own DuckDB translation, late cancellation, close, and provider-failure containment |
+| Query Experience | Approved after making adapter callback ownership and runner migration explicit | Satisfied for the structural correction and source-build handoff: registration and bind retain only immutable connector/request/plan data plus `ScanExecutor`; global state owns one checked non-null stream; adapter tests own DuckDB translation, late cancellation, close, and provider-failure containment; the Query-owned example and isolated oracle consume only the documented Make surface, pinned Python path, and loadable artifact path |
 | Connector Experience | Approved; structured schema/provenance and an independently linked connector oracle restore RFC 0001 without creating public package compatibility | Satisfied: the compiled connector owns complete schema/nullability/extractors and provenance, snapshots derive from that data, adapter schema derives from the connector, and the connector target links only connector production code |
 | Remote Runtime | Approved; runtime control, stream acquisition, cancellation, resource, error, and lifecycle decisions are correctly gated by a focused RFC | Satisfied: runtime declarations are DuckDB-free; the executor exclusively owns its provider; direct tests cover pre-open rejection, decoding/read cancellation, post-acquisition cleanup, late cancel reporting, fault containment, deadlines, and independent streams |
 | Relational Semantics | Approved; planner ownership, budget recording, independent oracles, and the ban on runtime reclassification match the accepted contract | Satisfied: planning links independently and runtime authorization ignores planner-only `duckdb_owned_operations` while rejecting unsupported executable work |
-| Engineering Enablement | Approved after requiring atomic migration of every native and sanitizer target/runner reference | Satisfied for the structural correction: CMake and both runners name all five focused targets, sanitizer verification maps every production object in each target, and the fresh native product cell executes the same inventory without Enablement intervention |
+| Engineering Enablement | Approved after requiring atomic migration of every native and sanitizer target/runner reference | Satisfied for the structural correction and facilitation handoff: CMake and both runners name all five focused targets, sanitizer verification maps every production object in each target, and the pinned root Make workflow hides template/tool paths while the fresh product cell executes the Query-owned direct-load contract without reusing developer state |
 
 The statuses above record the post-implementation exit audit. They close the
 structural collaboration introduced by RFC 0002; they do not complete the
@@ -342,6 +342,18 @@ The native vertical slice, contract propagation, private scenario/lifecycle
 suite, public SQL and inventory oracles, pinned product-cell runner, release
 manifest/canaries, sanitizer launcher, and runbook are implemented. Fresh
 debug and release-profile product builds pass on the declared macOS arm64 cell.
+
+The product-facing source journey is now explicit: `make demo` bootstraps a
+pinned reusable developer cell, incrementally builds the extension, directly
+loads it in a clean DuckDB 1.5.4 Python host, and proves the accepted schema and
+rows. `make test` owns the focused developer oracles, while `make verify`
+allocates a fresh root and runs that same Query-owned direct-load contract as
+part of the complete pre-tag product gate. The statically linked template CLI
+is labeled test infrastructure and is never presented as direct-load evidence.
+The team-owned delivery records are
+[`query-experience/plan.md`](first-trustworthy-query/query-experience/plan.md)
+and
+[`engineering-enablement/plan.md`](first-trustworthy-query/engineering-enablement/plan.md).
 
 RFCs 0002 and 0003 are accepted. The correction is implemented in focused
 connector, request/planner, decoder, stream-runtime, example-composition, and

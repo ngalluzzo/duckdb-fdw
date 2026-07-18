@@ -2,13 +2,17 @@
 
 set -euo pipefail
 
+# The fresh product cell must not inherit workstation Python search or prefix
+# overrides, including in repository scripts invoked through their shebangs.
+unset PYTHONHOME PYTHONPATH PYTHONSTARTUP PYTHONUSERBASE
+
 if [[ "$#" -lt 1 || "$#" -gt 2 ]]; then
     echo "usage: run-native-product-tests.sh NEW_BUILD_ROOT [debug|release]" >&2
     exit 2
 fi
 
 readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly BUILD_ROOT="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$1")"
+readonly BUILD_ROOT="$(python3 -I -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$1")"
 readonly BUILD_PROFILE="${2:-debug}"
 readonly TEMPLATE_COMMIT="cfaf3e236008e782d27f4341b0ee036002d0a449"
 readonly DUCKDB_COMMIT="08e34c447bae34eaee3723cac61f2878b6bdf787"
@@ -40,7 +44,7 @@ if [[ "$(sw_vers -productVersion)" != "26.5.1" ]]; then
     echo "native product test requires macOS 26.5.1" >&2
     exit 1
 fi
-if [[ "$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" != "3.14" ]]; then
+if [[ "$(python3 -I -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" != "3.14" ]]; then
     echo "native product test requires Python 3.14 for its pinned DuckDB wheel" >&2
     exit 1
 fi
@@ -131,11 +135,15 @@ readonly NATIVE_TEST_ROOT="${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/extension/duc
 )
 "${REPOSITORY_ROOT}/scripts/verify-loadable-inventory.sh" "${ARTIFACT}"
 
-python3 -m venv "${PYTHON_ENV}"
-"${PYTHON_ENV}/bin/python3" -m pip install --disable-pip-version-check --no-deps \
+python3 -I -m venv "${PYTHON_ENV}"
+"${PYTHON_ENV}/bin/python3" -I -m pip install --disable-pip-version-check --no-deps \
     --require-hashes -r "${REPOSITORY_ROOT}/test/python/requirements-macos-py314.txt"
-"${PYTHON_ENV}/bin/python3" "${REPOSITORY_ROOT}/test/python/artifact_contract.py" "${ARTIFACT}"
+"${PYTHON_ENV}/bin/python3" -I "${REPOSITORY_ROOT}/test/python/artifact_contract.py" "${ARTIFACT}"
+python3 -I "${REPOSITORY_ROOT}/test/python/source_demo_contract.py" \
+    "${PYTHON_ENV}/bin/python3" "${ARTIFACT}"
 
 echo "native product tests passed"
+echo "pinned_python=${PYTHON_ENV}/bin/python3"
+echo "static_test_cli=${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/duckdb"
 echo "artifact=${ARTIFACT}"
 echo "artifact_sha256=$(shasum -a 256 "${ARTIFACT}" | awk '{print $1}')"

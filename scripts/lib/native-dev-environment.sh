@@ -7,7 +7,7 @@ readonly DEFAULT_DEV_ROOT="${REPOSITORY_ROOT}/.build/dev"
 readonly TEMPLATE_URL="https://github.com/duckdb/extension-template.git"
 
 pin_value() {
-    python3 - "${PINS_FILE}" "$1" <<'PY'
+    python3 -I - "${PINS_FILE}" "$1" <<'PY'
 import json
 import pathlib
 import sys
@@ -40,7 +40,7 @@ readonly EXPECTED_CMAKE="$(pin_value product_cell.cmake)"
 readonly EXPECTED_NINJA="$(pin_value product_cell.ninja)"
 readonly DUCKDB_PLATFORM="$(pin_value product_cell.duckdb_platform)"
 
-readonly DEV_ROOT="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' \
+readonly DEV_ROOT="$(python3 -I -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' \
     "${DUCKDB_API_DEV_ROOT:-${DEFAULT_DEV_ROOT}}")"
 readonly OWNER_MARKER="${DEV_ROOT}/.duckdb-api-native-dev"
 readonly LOCK_ROOT="${DEV_ROOT}/.lock"
@@ -142,7 +142,7 @@ verify_host() {
         echo "native developer cell requires ${EXPECTED_HOST}; found ${actual_host}" >&2
         exit 1
     fi
-    actual_python="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    actual_python="$(python3 -I -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
     if [[ "${actual_python}" != "3.14" ]]; then
         echo "native developer cell requires Python 3.14; found ${actual_python}" >&2
         exit 1
@@ -178,7 +178,8 @@ bootstrap_tools() {
     local temporary
     download_verified "${CMAKE_URL}" "${CMAKE_SHA256}" "${CMAKE_ARCHIVE}"
     download_verified "${NINJA_URL}" "${NINJA_SHA256}" "${NINJA_ARCHIVE}"
-    if [[ ! -x "${CMAKE_BIN}" ]]; then
+    if [[ ! -x "${CMAKE_BIN}" ]] ||
+       [[ "$("${CMAKE_BIN}" --version 2>/dev/null | head -n 1)" != "cmake version ${EXPECTED_CMAKE}" ]]; then
         temporary="${CMAKE_ROOT}.extract.$$"
         TEMP_ROOTS+=("${temporary}")
         mkdir -p "${temporary}"
@@ -186,7 +187,8 @@ bootstrap_tools() {
         rm -rf "${CMAKE_ROOT}"
         mv "${temporary}" "${CMAKE_ROOT}"
     fi
-    if [[ ! -x "${NINJA_BIN}" ]]; then
+    if [[ ! -x "${NINJA_BIN}" ]] ||
+       [[ "$("${NINJA_BIN}" --version 2>/dev/null)" != "${EXPECTED_NINJA}" ]]; then
         temporary="${NINJA_ROOT}.extract.$$"
         TEMP_ROOTS+=("${temporary}")
         mkdir -p "${temporary}"
@@ -277,7 +279,7 @@ bootstrap_python() {
     local requirements_digest
     requirements_digest="$(shasum -a 256 "${REQUIREMENTS_FILE}" | awk '{print $1}')"
     if [[ -x "${PINNED_PYTHON}" ]]; then
-        actual_identity="$("${PINNED_PYTHON}" - "${DEV_ROOT}" <<'PY' 2>/dev/null || true
+        actual_identity="$("${PINNED_PYTHON}" -I - "${DEV_ROOT}" <<'PY' 2>/dev/null || true
 import pathlib
 import sys
 
@@ -296,10 +298,10 @@ PY
           "$(cat "${PYTHON_REQUIREMENTS_STATE}" 2>/dev/null || true)" != "${requirements_digest}" ||
           "${actual_identity}" != "v${DUCKDB_VERSION}|${DUCKDB_COMMIT:0:10}" ]]; then
         rm -rf "${PYTHON_ENV}"
-        python3 -m venv "${PYTHON_ENV}"
-        "${PINNED_PYTHON}" -m pip install --disable-pip-version-check --no-deps \
+        python3 -I -m venv "${PYTHON_ENV}"
+        "${PINNED_PYTHON}" -I -m pip install --disable-pip-version-check --no-deps \
             --require-hashes -r "${REQUIREMENTS_FILE}"
-        actual_identity="$("${PINNED_PYTHON}" -c \
+        actual_identity="$("${PINNED_PYTHON}" -I -c \
             'import duckdb; v=duckdb.connect().execute("PRAGMA version").fetchone(); print(f"{v[0]}|{v[1]}")')"
         if [[ "${actual_identity}" != "v${DUCKDB_VERSION}|${DUCKDB_COMMIT:0:10}" ]]; then
             echo "pinned Python DuckDB host identity mismatch" >&2

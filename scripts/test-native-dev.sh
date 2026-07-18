@@ -28,19 +28,22 @@ if ! grep -F "profile must be debug or release" "${TEMP_ROOT}/invalid.out" >/dev
     exit 1
 fi
 
-mkdir -p "${TEMP_ROOT}/template/extension-ci-tools/makefiles"
-cp "${REPOSITORY_ROOT}/Makefile" "${TEMP_ROOT}/template/Makefile"
-cat >"${TEMP_ROOT}/template/extension-ci-tools/makefiles/duckdb_extension.Makefile" <<'MAKE'
+readonly TEMPLATE_PROBE_ROOT="${TEMP_ROOT}/template with spaces"
+mkdir -p "${TEMPLATE_PROBE_ROOT}/extension-ci-tools/makefiles"
+cp "${REPOSITORY_ROOT}/Makefile" "${TEMPLATE_PROBE_ROOT}/Makefile"
+cat >"${TEMPLATE_PROBE_ROOT}/extension-ci-tools/makefiles/duckdb_extension.Makefile" <<'MAKE'
 .PHONY: template-mode-probe
 template-mode-probe:
+	@test "$(PROJ_DIR)" = "$(CURDIR)/"
+	@test "$(EXT_CONFIG)" = "$(CURDIR)/extension_config.cmake"
 	@echo template-mode-ok
 MAKE
-if [[ "$(make -s -C "${TEMP_ROOT}/template" template-mode-probe)" != "template-mode-ok" ]]; then
-    echo "root Makefile did not delegate in extension-template mode" >&2
+if [[ "$(make -s -C "${TEMPLATE_PROBE_ROOT}" template-mode-probe)" != "template-mode-ok" ]]; then
+    echo "root Makefile did not delegate from a space-containing template path" >&2
     exit 1
 fi
 
-python3 - "${REPOSITORY_ROOT}" <<'PY'
+python3 -I - "${REPOSITORY_ROOT}" <<'PY'
 import json
 import pathlib
 import sys

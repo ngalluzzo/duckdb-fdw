@@ -2,7 +2,7 @@
 # This file is sourced after scripts/lib/native-dev-environment.sh.
 
 tree_digest() {
-    python3 - "$1" <<'PY'
+    python3 -I - "$1" <<'PY'
 import hashlib
 import pathlib
 import sys
@@ -20,17 +20,17 @@ print(result.hexdigest())
 PY
 }
 
-tree_digest_projection() {
+tree_digest_projection() (
     local stage
     stage="$(mktemp -d "${DEV_ROOT}/projection.XXXXXX")"
-    TEMP_ROOTS+=("${stage}")
+    trap 'rm -rf "${stage}"' EXIT
     rsync -a "${TEMPLATE_ROOT}/src/" "${stage}/src/"
     rsync -a "${TEMPLATE_ROOT}/test/" "${stage}/test/"
     rsync -a "${TEMPLATE_ROOT}/fixtures/" "${stage}/fixtures/"
     cp "${TEMPLATE_ROOT}/CMakeLists.txt" "${TEMPLATE_ROOT}/Makefile" \
         "${TEMPLATE_ROOT}/extension_config.cmake" "${stage}/"
     tree_digest "${stage}"
-}
+)
 
 sync_sources() {
     local destination_digest
@@ -133,20 +133,27 @@ run_tests() {
         "./build/${PROFILE}/test/unittest" --require duckdb_api 'test/*'
     )
     "${REPOSITORY_ROOT}/scripts/verify-loadable-inventory.sh" "${ARTIFACT}"
-    if [[ -f "${contract}" ]]; then
-        python3 "${contract}" "${PINNED_PYTHON}" "${ARTIFACT}"
-    else
-        echo "query-owned source demo contract is not present; skipped"
+    if [[ ! -f "${contract}" ]]; then
+        echo "required Query Experience demo contract is missing: ${contract}" >&2
+        exit 1
     fi
+    python3 -I "${contract}" "${PINNED_PYTHON}" "${ARTIFACT}"
 }
 
 run_demo() {
     local demo="${REPOSITORY_ROOT}/examples/first_trustworthy_query.py"
+    local isolated
     if [[ ! -f "${demo}" ]]; then
         echo "query-owned first-query demo is not present: ${demo}" >&2
         exit 1
     fi
-    "${PINNED_PYTHON}" "${demo}" "${ARTIFACT}"
+    isolated="$(mktemp -d "${DEV_ROOT}/demo.XXXXXX")"
+    TEMP_ROOTS+=("${isolated}")
+    mkdir -p "${isolated}/home" "${isolated}/tmp" "${isolated}/cache" "${isolated}/config"
+    env -i HOME="${isolated}/home" TMPDIR="${isolated}/tmp" \
+        XDG_CACHE_HOME="${isolated}/cache" XDG_CONFIG_HOME="${isolated}/config" \
+        PATH="$(dirname "${PINNED_PYTHON}"):/usr/bin:/bin" \
+        "${PINNED_PYTHON}" -I "${demo}" "${ARTIFACT}"
 }
 
 run_verify() {

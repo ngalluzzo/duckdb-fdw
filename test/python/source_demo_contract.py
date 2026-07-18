@@ -77,12 +77,30 @@ def main() -> int:
         (isolated / "connector.yaml").write_text("top-secret-source-demo", encoding="utf-8")
         (isolated / "items.json").write_text("top-secret-source-demo", encoding="utf-8")
 
+        home = isolated / "home"
+        temporary = isolated / "tmp"
+        cache = isolated / "cache"
+        config = isolated / "config"
+        poisoned_python_path = isolated / "python-path-poison"
+        for path in (home, temporary, cache, config, poisoned_python_path):
+            path.mkdir()
+        (poisoned_python_path / "duckdb.py").write_text(
+            "raise RuntimeError('ambient PYTHONPATH was imported')\n",
+            encoding="utf-8",
+        )
+
         environment = os.environ.copy()
+        environment["HOME"] = str(home)
+        environment["TMPDIR"] = str(temporary)
+        environment["XDG_CACHE_HOME"] = str(cache)
+        environment["XDG_CONFIG_HOME"] = str(config)
+        environment["PYTHONHOME"] = str(isolated / "missing-python-home")
+        environment["PYTHONPATH"] = str(poisoned_python_path)
         environment["DUCKDB_API_CONNECTOR_PATH"] = "/top-secret-source-demo/connector.yaml"
         environment["DUCKDB_API_FIXTURE_SCENARIO"] = "malformed-top-secret-source-demo"
 
         success = run(
-            [str(pinned_python), str(example_runner), str(artifact), "--json"],
+            [str(pinned_python), "-I", str(example_runner), str(artifact), "--json"],
             isolated,
             environment,
         )
@@ -97,7 +115,7 @@ def main() -> int:
             raise AssertionError(f"first-query example drifted: {summary!r}")
 
         failure = run(
-            [str(pinned_python), "-c", FAILURE_PROGRAM],
+            [str(pinned_python), "-I", "-c", FAILURE_PROGRAM],
             isolated,
             environment,
         )

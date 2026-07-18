@@ -53,8 +53,9 @@ surface and path labels.
   prints the accepted extension identity, direct-load mode, schema, and three
   rows.
 - `source_demo_contract.py` copies the artifact into an empty directory, adds
-  decoy local inputs and private-looking environment values, then proves that
-  the example still returns the embedded fixture.
+  decoy local inputs, private-looking environment values, and poisoned ambient
+  Python paths, then proves that the isolated pinned host still returns the
+  embedded fixture.
 - The same oracle requires an unknown relation to exit nonzero with
   `[duckdb_api][bind] connector=example: unknown relation identifier` and no
   decoy value or local path.
@@ -88,6 +89,6 @@ integrated and the combined gates pass.
 - Query owns only the artifacts listed above.
 - Expected overlap: none. Makefile, scripts, and their guard tests are the
   Engineering Enablement package; the lead owns integration and final history.
-- Narrow oracle: `python3 test/python/source_demo_contract.py PINNED_PYTHON ARTIFACT`.
+- Narrow oracle: `python3 -I test/python/source_demo_contract.py PINNED_PYTHON ARTIFACT`.
 - Integration evidence: focused oracle, repository asset validation, source
   identity verification, whitespace checks, and the combined provider gate.
