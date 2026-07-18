@@ -152,7 +152,8 @@ void TestTypedImmutableLivePlan() {
 	            plan.RuntimeOffset() == duckdb_api::RelationalDelegation::NONE,
 	        "ScanPlan claimed hidden ordering or bounds");
 	Require(plan.Pagination() == duckdb_api::FeatureState::DISABLED &&
-	            plan.Providers() == duckdb_api::FeatureState::DISABLED && plan.Retry() == duckdb_api::FeatureState::DISABLED &&
+	            plan.Providers() == duckdb_api::FeatureState::DISABLED &&
+	            plan.Retry() == duckdb_api::FeatureState::DISABLED &&
 	            plan.Cache() == duckdb_api::FeatureState::DISABLED &&
 	            plan.Authentication() == duckdb_api::FeatureState::DISABLED,
 	        "ScanPlan enabled an excluded feature");

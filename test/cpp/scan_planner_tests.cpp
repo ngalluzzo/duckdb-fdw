@@ -35,8 +35,8 @@ void RequireRequestRejected(duckdb_api::ScanRequest request, const std::string &
 }
 
 void RequireBudgetFieldBounded(const duckdb_api::ResourceBudgets &baseline,
-	                           std::uint64_t duckdb_api::ResourceBudgets::*field, std::uint64_t semantic_cap,
-	                           const std::string &name) {
+                               std::uint64_t duckdb_api::ResourceBudgets::*field, std::uint64_t semantic_cap,
+                               const std::string &name) {
 	auto invalid = baseline;
 	invalid.*field = 0;
 	Require(!invalid.IsWithinLiveRestBounds(), "zero " + name + " budget was accepted");
