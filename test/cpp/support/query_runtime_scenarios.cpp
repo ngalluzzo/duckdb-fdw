@@ -144,6 +144,14 @@ public:
 			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::INTERNAL, "top-secret-open-field",
 			                                 "top-secret-open-structured-detail");
 		}
+		if (scenario == QueryRuntimeScenario::OPEN_POLICY_ERROR) {
+			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::POLICY, "authority",
+			                                 "request is outside the approved policy");
+		}
+		if (scenario == QueryRuntimeScenario::OPEN_RESOURCE_ERROR) {
+			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "response_bytes",
+			                                 "response exceeds its byte budget");
+		}
 		if (scenario == QueryRuntimeScenario::OPEN_UNKNOWN_EXCEPTION) {
 			throw std::runtime_error("top-secret-open-unknown-detail");
 		}

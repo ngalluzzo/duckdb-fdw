@@ -163,6 +163,31 @@ void TestStructuredFailuresAndBatchValidation() {
 }
 
 void TestOpenStageFailuresDoNotAcquireStream() {
+	struct StructuredOpenCase {
+		QueryRuntimeScenario scenario;
+		const char *expected;
+	};
+	const StructuredOpenCase structured_cases[] = {
+	    {QueryRuntimeScenario::OPEN_POLICY_ERROR,
+	     "Invalid Input Error: [duckdb_api][policy] connector=github relation=duckdb_login_search_page "
+	     "field=authority: request is outside the approved policy"},
+	    {QueryRuntimeScenario::OPEN_RESOURCE_ERROR,
+	     "Invalid Input Error: [duckdb_api][resource] connector=github relation=duckdb_login_search_page "
+	     "field=response_bytes: response exceeds its byte budget"},
+	};
+	for (const auto &entry : structured_cases) {
+		duckdb::DuckDB database(nullptr);
+		auto probe = Register(database, entry.scenario);
+		duckdb::Connection connection(database);
+		const auto error = QueryError(connection, ACCEPTED_LIVE_SQL);
+		Require(error == entry.expected, "Open failure misclassified a structured execution error: " + error);
+		Require(probe->streams_opened.load(std::memory_order_relaxed) == 0 &&
+		            probe->next_calls.load(std::memory_order_relaxed) == 0 &&
+		            probe->cancellations.load(std::memory_order_relaxed) == 0 &&
+		            probe->streams_closed.load(std::memory_order_relaxed) == 0,
+		        "structured Open failure acquired or finalized a stream");
+	}
+
 	const std::string internal_error = "Invalid Input Error: [duckdb_api][internal] connector=github "
 	                                   "relation=duckdb_login_search_page: unexpected execution failure";
 	const QueryRuntimeScenario internal_scenarios[] = {QueryRuntimeScenario::OPEN_INTERNAL_ERROR,
