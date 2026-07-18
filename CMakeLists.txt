@@ -107,6 +107,14 @@ function(configure_duckdb_api_cpp_target target)
   target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -Wno-unused-parameter)
 endfunction()
 
+add_executable(
+  duckdb_api_native_dependency_identity
+  test/cpp/native_dependency_identity.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_native_dependency_identity)
+target_link_libraries(
+  duckdb_api_native_dependency_identity
+  CURL::libcurl)
+
 foreach(target ${TARGET_NAME}_extension ${TARGET_NAME}_loadable_extension)
   configure_duckdb_api_cpp_target(${target})
 endforeach()

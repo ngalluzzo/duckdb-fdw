@@ -229,6 +229,7 @@ class NativeDependencyTests(unittest.TestCase):
             ("version", "8.7.2"),
             ("version_num", "0x080702"),
             ("ssl_version", "OpenSSL/3.3.6"),
+            ("ssl_version", "libcurl/8.7.1 (SecureTransport) LibreSSL/3.3.6"),
             ("features", curl["runtime_features"] + 1),
         ):
             changed = dict(record)
@@ -242,6 +243,29 @@ class NativeDependencyTests(unittest.TestCase):
         changed["features"] &= ~curl["threadsafe_feature_mask"]
         with self.assertRaisesRegex(AssertionError, "CURL_VERSION_THREADSAFE"):
             VERIFIER.verify_runtime(self.pins, changed)
+
+    def test_linkage_requires_exact_system_install_name_only_where_authorized(self) -> None:
+        ordinary = ["/usr/lib/libc++.1.dylib", "/usr/lib/libSystem.B.dylib"]
+        curl = self.pins["system_dependencies"]["system_libcurl"]["install_name"]
+        transport = ordinary + [curl]
+        self.assertEqual(
+            VERIFIER.verify_linkage(self.pins, transport, True),
+            {"dependencies": transport, "requires_curl": True},
+        )
+        self.assertEqual(
+            VERIFIER.verify_linkage(self.pins, ordinary, False),
+            {"dependencies": ordinary, "requires_curl": False},
+        )
+        for dependencies, requires_curl, message in (
+            (ordinary, True, "does not name exactly"),
+            (transport + [curl], True, "does not name exactly"),
+            (ordinary + ["/opt/homebrew/lib/libcurl.4.dylib"], True, "does not name exactly"),
+            (transport, False, "unexpectedly links"),
+        ):
+            with self.subTest(
+                dependencies=dependencies, requires_curl=requires_curl
+            ), self.assertRaisesRegex(AssertionError, message):
+                VERIFIER.verify_linkage(self.pins, dependencies, requires_curl)
 
     def test_malformed_pin_and_observation_records_fail_closed(self) -> None:
         malformed = copy.deepcopy(self.pins)

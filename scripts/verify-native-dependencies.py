@@ -6,6 +6,7 @@ import hashlib
 import json
 import pathlib
 import re
+import subprocess
 import sys
 from typing import Any
 
@@ -293,13 +294,54 @@ def verify_runtime(pins: dict[str, Any], record: dict[str, Any]) -> dict[str, An
     return record
 
 
+def verify_linkage(
+    pins: dict[str, Any], dependencies: list[str], requires_curl: bool
+) -> dict[str, Any]:
+    _, _, curl = validate_pins(pins)
+    if not dependencies or any(not isinstance(value, str) or not value for value in dependencies):
+        raise fail("artifact dependency record is empty or malformed")
+    curl_dependencies = [value for value in dependencies if "libcurl" in value]
+    if requires_curl:
+        if curl_dependencies != [curl["install_name"]]:
+            raise fail(
+                "transport-bearing artifact does not name exactly the pinned system libcurl"
+            )
+    elif curl_dependencies:
+        raise fail("curl-free artifact unexpectedly links libcurl")
+    return {"dependencies": dependencies, "requires_curl": requires_curl}
+
+
+def observed_macos_dependencies(artifact: pathlib.Path) -> list[str]:
+    artifact = artifact.resolve(strict=True)
+    completed = subprocess.run(
+        ["otool", "-L", str(artifact)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise fail(f"otool could not inspect artifact: {completed.stderr.strip()}")
+    lines = completed.stdout.splitlines()
+    if not lines or not lines[0].rstrip().endswith(":"):
+        raise fail("otool emitted a malformed dependency inventory")
+    dependencies: list[str] = []
+    for line in lines[1:]:
+        stripped = line.strip()
+        match = re.fullmatch(r"(.+?) \(compatibility version .+\)", stripped)
+        if match is None:
+            raise fail(f"otool emitted a malformed dependency: {stripped!r}")
+        dependencies.append(match.group(1))
+    return dependencies
+
+
 def usage() -> str:
     return (
         "usage:\n"
         "  verify-native-dependencies.py inputs PINS SDK_ROOT HOST_VERSION "
         "HOST_BUILD ARCH SDK_VERSION SDK_BUILD\n"
         "  verify-native-dependencies.py configuration PINS SDK_ROOT RECORD\n"
-        "  verify-native-dependencies.py runtime PINS RECORD"
+        "  verify-native-dependencies.py runtime PINS RECORD\n"
+        "  verify-native-dependencies.py linkage PINS transport|curl-free ARTIFACT"
     )
 
 
@@ -330,6 +372,15 @@ def main() -> int:
             pins = load_object(pathlib.Path(sys.argv[2]), "pins")
             result = verify_runtime(
                 pins, load_object(pathlib.Path(sys.argv[3]), "runtime record")
+            )
+        elif command == "linkage" and len(sys.argv) == 5:
+            if sys.argv[3] not in ("transport", "curl-free"):
+                raise SystemExit(usage())
+            pins = load_object(pathlib.Path(sys.argv[2]), "pins")
+            result = verify_linkage(
+                pins,
+                observed_macos_dependencies(pathlib.Path(sys.argv[4])),
+                sys.argv[3] == "transport",
             )
         else:
             raise SystemExit(usage())
