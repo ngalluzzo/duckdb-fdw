@@ -115,18 +115,70 @@ by `AGENTS.md`.
 
 ### Delivered
 
-Pending.
+- A distinct source-built loadable DuckDB extension whose ordinary table scan
+  performs one bounded unauthenticated HTTPS request and returns strict
+  `BIGINT`, `VARCHAR`, and `BOOLEAN` rows.
+- Separate offline plan, JSON decoder, one-attempt batch stream, post-DNS
+  network policy, libcurl transport, DuckDB adapter, and responsibility-matched
+  native and integration test modules.
+- Query Experience, Remote Runtime, and Relational Semantics plans that record
+  artifact ownership, dependencies, parallel boundaries, acceptance evidence,
+  and open interaction exits.
+- A reproducible clean runner and durable experiment results on the recorded
+  DuckDB 1.5.4 `osx_arm64` cell.
+- A corrected roadmap that makes the live remote relation the `0.3.0` product
+  outcome and moves declarative connector compilation to the `0.9.0` public
+  authoring/API-candidate phase.
 
 ### Evidence
 
-Pending.
+- The complete `run-live-rest-product-proof.sh --real` runner passed from a
+  fresh build tree against pinned DuckDB, extension template, extension CI
+  tools, Python host, and configured/native libcurl identities.
+- Focused native plan, JSON decoder, HTTP scan runtime, and resolved-address
+  policy binaries passed under C++11 with warning-as-error extension targets.
+- Controlled success performed two scans and exactly two requests: one ordinary
+  query and one prepared query whose immutable bound authority survived an
+  invalid environment change.
+- Public compatibility returned three correctly typed rows from the GitHub
+  HTTPS endpoint through the same extension execution path.
+- Ten controlled failure/lifecycle requests proved status, redirect,
+  malformed, oversized, disconnect, hard wall deadline, sub-second interrupt,
+  peer abort, recovery, and connection-close deadline behavior without
+  exposing the response canary, URL, authority, or dependency diagnostics.
+- Three fresh adversarial reviews covered transport/security, DuckDB lifecycle,
+  and test-oracle false positives. Post-fix review reported no remaining
+  actionable P0-P3 findings.
 
 ### Material decisions and deviations
 
 - Connector YAML and package distribution were removed from the active path.
   They depend on a working remote query mechanism and are not prerequisites
   for proving it.
+- DuckDB 1.5.4's built-in native client proved the controlled HTTP path but not
+  public HTTPS. The recorded macOS libcurl cell proved HTTPS; that is dependency
+  evidence, not a production selection.
+- HTTP/1.1 is pinned to prevent libcurl's internal refused-HTTP/2-stream replay
+  from violating the plan's one-request/no-retry invariant.
+- The public authority is rechecked after DNS resolution. The controlled
+  authority permits only literal `127.0.0.1`; public execution permits only
+  globally routable unicast addresses.
+- On the recorded DuckDB Python host, `connection.close()` waits for the hard
+  five-second query deadline rather than initiating cancellation. The trial
+  records that bounded behavior and does not claim prompt close-driven cancel.
+- The trial remains outside a release contract. Its extension/function names,
+  schema, endpoint, C++ interfaces, and unsigned load path are disposable.
 
 ### Product options discovered
 
-Pending.
+- Promote the proven plan/runtime/adapter responsibilities into team-owned
+  product modules through an accepted RFC, retaining one native compiled
+  relation before general authoring.
+- Compare the proven libcurl cell with another portable HTTPS transport before
+  accepting the production dependency and support matrix.
+- Decide whether prompt connection-close cancellation is required or whether
+  DuckDB interruption plus a hard execution deadline is the supported preview
+  lifecycle contract.
+- Keep authentication, traversal, relational pushdown, protocol breadth, and
+  analytical workflows ahead of public connector compilation, then use the
+  proven product contracts as the compiler target near `0.9.0`.

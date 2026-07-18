@@ -85,38 +85,42 @@ platform target, an end-to-end query oracle, bounded execution, cancellation
 and teardown checks, version introspection, an inventory of the preview public
 surface, and immutable release artifacts.
 
-### `0.2.0` — repeatable installation
+### `0.2.0` — reproducible source build
 
-A new user can obtain or build a reproducible artifact in a clean environment,
-install it, load it, identify its version, and execute the `0.1.0` query on the
-first declared compatibility target. An incompatible DuckDB host, platform, or
-artifact fails with an actionable diagnostic.
+A contributor can build a byte-reproducible extension artifact in a clean
+environment, install it into an isolated DuckDB home, load it by name, identify
+its version, and execute the `0.1.0` query on the first declared compatibility
+target. An incompatible DuckDB host, platform, or artifact fails with an
+actionable diagnostic.
 
-The ordinary-user channel is DuckDB Community Extensions. `0.2.0` supports the
-latest stable DuckDB release at release time and only the exact Community CI
-platform rows that pass the complete release oracle; all other cells are
-unclaimed. Local unsigned loading remains explicitly a development or
-controlled-preview path.
+This release proves artifact reproducibility and compatibility enforcement; it
+does not require publication through an ordinary-user channel. Local unsigned
+loading remains explicitly a contributor or controlled-preview path. The
+selected ordinary-user distribution, signature, and trust path is exercised
+only after the remote-query product has earned a public surface.
 
 Release evidence includes an immutable source ref, artifact checksums and
-provenance, exact DuckDB and platform identities, Community-managed build and
-signature evidence, and clean installation, restart, load-by-name, version,
-query, and incompatible-cell tests on every claimed row. Before `1.0`, fixes
-move forward without a backport commitment. Project releases are immutable;
-Community rollback and historical availability are not guaranteed. Support is
-best-effort through GitHub Issues.
+provenance, exact DuckDB and platform identities, clean installation, restart,
+load-by-name, version, query, byte-reproduction, and incompatible-cell tests on
+every claimed row. Before `1.0`, fixes move forward without a backport
+commitment. Project releases are immutable and support is best-effort through
+GitHub Issues.
 
-### `0.3.0` — trusted connector authoring
+### `0.3.0` — first live REST relation
 
-A connector author can validate, compile, explain, fixture-test, and load a
-versioned declarative connector package. Equivalent inputs produce equivalent
-compiled output and diagnostics. Unsupported connector-spec versions or
-extractor dialects fail explicitly rather than being silently reinterpreted.
+A DuckDB user can query one native, compiled-in, unauthenticated HTTPS REST
+relation and receive strictly typed rows through the complete offline-bind,
+plan, transport, JSON-decode, bounded-batch, and DuckDB-output path. This
+release proves the central remote-query mechanism before declarative authoring
+or package distribution becomes product work.
 
-Release evidence includes a schema-backed validator, source-located
-diagnostics, deterministic compile and explain oracles, offline fixtures,
-package digest identity, connector package SemVer guidance, and compatibility
-tests for supported and unsupported specification identifiers.
+Release evidence includes a deterministic controlled HTTP oracle, one current
+public-service compatibility demonstration, exact request and typed-row
+checks, immutable prepared plans, post-DNS destination policy, hard response
+and time budgets, cancellation, teardown, redacted status/network/decode
+failures, and proof that bind and planning perform no network I/O. The native
+connector identity and SQL spelling remain preview surfaces until the public
+API candidate.
 
 ### `0.4.0` — safe authenticated APIs
 
@@ -176,19 +180,27 @@ collisions, atomic reload, immutable in-flight plans, queue draining, worker
 joining, shutdown, FFI panic containment, and leak and resource-exhaustion
 checks across the declared compatibility matrix.
 
-### `0.9.0` — public API candidate
+### `0.9.0` — public connector authoring and API candidate
 
-The intended `1.0.0` public contract is enumerated and frozen for compatibility
-testing. It includes normative SQL and extension naming, configuration,
-diagnostics, explain and version surfaces, a stable connector-spec candidate,
-migration and deprecation rules, supported compatibility cells, the chosen
-distribution path, and explicit exclusions. No intentional public break
-remains planned.
+A connector author can validate, compile, explain, fixture-test, and load a
+versioned declarative connector package against the product mechanisms proven
+in earlier releases. Equivalent inputs produce equivalent compiled output and
+diagnostics. Unsupported connector-spec versions or extractor dialects fail
+explicitly rather than being silently reinterpreted.
 
-Release evidence includes the public API inventory, connector-spec migration
-fixtures, prior-package and prior-SQL compatibility tests, a green declared
-DuckDB support matrix, installation and upgrade narratives, release and
-support policies, and reproducible artifacts.
+At the same time, the intended `1.0.0` public contract is enumerated and frozen
+for compatibility testing. It includes normative SQL and extension naming,
+configuration, diagnostics, explain and version surfaces, a stable
+connector-spec candidate, migration and deprecation rules, supported
+compatibility cells, the chosen distribution path, and explicit exclusions.
+No intentional public break remains planned.
+
+Release evidence includes a schema-backed validator, source-located
+diagnostics, deterministic compile and explain oracles, offline fixtures,
+package digest identity, connector package SemVer guidance, the public API
+inventory, connector-spec migration fixtures, prior-package and prior-SQL
+compatibility tests, a green declared DuckDB support matrix, installation and
+upgrade narratives, release and support policies, and reproducible artifacts.
 
 ### `1.0.0-rc.N` — compatibility rehearsal
 
