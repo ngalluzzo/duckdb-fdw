@@ -21,7 +21,8 @@ implementation consumes their declarations.
 | `src/include/duckdb_api/execution.hpp` and `src/execution_error.cpp` | DuckDB-free typed values, schema-aligned batches, execution control, pull stream, executor, and redacted structured error contract |
 | `src/include/duckdb_api/http_runtime.hpp` and `src/http_runtime.cpp` | Process-lifetime libcurl capability verification, checked pre-registration initialization, balanced teardown, and the production executor factory for the fixed installed authority |
 | `src/include/duckdb_api/internal/http_transport.hpp` | Protocol-neutral one-attempt request/response boundary used by the executor and private deterministic tests |
-| `src/include/duckdb_api/internal/curl_http_transport.hpp` and `src/curl_http_transport.cpp` | HTTPS GET execution, HTTP/1.1 pinning, TLS verification, redirect/proxy/auth/cookie/netrc disablement, post-DNS socket policy, body/header/deadline ceilings, and cancellation |
+| `src/include/duckdb_api/internal/curl_transfer.hpp` and `src/curl_transfer.cpp` | Shared one-attempt curl algorithm: HTTP/1.1 pinning, TLS verification, redirect/proxy/auth/cookie/netrc disablement, post-DNS socket callback, body/header/deadline ceilings, cancellation, and redaction |
+| `src/include/duckdb_api/internal/curl_http_transport.hpp` and `src/curl_http_transport.cpp` | Installed HTTPS-only fixed-authority composition and public-address/port policy; contains no caller-selected authority or loopback path |
 | `src/include/duckdb_api/internal/network_policy.hpp` and `src/network_policy.cpp` | Address parsing and denial of loopback, private, link-local, multicast, unspecified, reserved, mapped, and transition destinations after DNS resolution |
 | `src/include/duckdb_api/internal/json_decoder.hpp` and `src/json_decoder.cpp` | Strict JSON syntax, `$.items[*]` selection, required non-null lossless field conversion, nesting/string/record/memory exhaustion, and schema-safe errors |
 | `src/include/duckdb_api/internal/http_scan_executor.hpp` and `src/http_scan_executor.cpp` | Executable-plan capability validation, one-request stream state, whole-response bounded decode, batch backpressure, cancellation, progress, and idempotent non-throwing close |
@@ -31,7 +32,7 @@ implementation consumes their declarations.
 | `test/cpp/http_scan_executor_tests.cpp` | Attempt, batching, cancellation, plan-capability rejection, failure staging, and close/recovery oracles |
 | `test/cpp/curl_http_transport_tests.cpp` | Curl option, transfer cancellation, deadline, status, body/header ceiling, and redaction oracles against private loopback composition |
 | `test/cpp/support/controlled_http_transport.hpp` and `.cpp` | Non-installable scripted transport and observations used only by focused runtime tests |
-| `test/python/support/http_service.py` and `test/python/runtime_http_service.py` | Private controlled loopback server and process-level transfer/lifecycle scenarios; never linked or selectable from installed product code |
+| `test/cpp/support/loopback_curl_runtime.hpp` and `.cpp` | Non-installable numeric-loopback composition that exercises the shared curl algorithm and executor; the implementation and its permissive socket policy are excluded from every loadable target |
 
 Build graph, root scripts, release identities, product composition, DuckDB
 adapter code, public SQL, and durable product documentation belong to the lead,
@@ -73,11 +74,13 @@ only test-owned composition may supply the controlled loopback transport.
 - Cancellation is polled by transfer and decoding. `Cancel`, `Close`, and
   destructors are idempotent and non-throwing; no failure crosses the native
   boundary with URL, authority, response bytes, or dependency text.
-- Before registration, the process runtime verifies libcurl 8.7.1, the pinned
-  SSL-backend identity, and `CURL_VERSION_THREADSAFE`, then performs exactly one
-  checked `curl_global_init(CURL_GLOBAL_DEFAULT)`. Initialization is never
-  query-lazy. The service remains resident and calls one balanced
-  `curl_global_cleanup()` at process teardown after all streams have ended.
+- The dependency gate proves libcurl 8.7.1, the pinned SSL-backend identity,
+  and `CURL_VERSION_THREADSAFE` out of process. Before registration, the process
+  runtime performs exactly one checked `curl_global_init(CURL_GLOBAL_DEFAULT)`,
+  then safely verifies the initialized identity. Rejection balances cleanup
+  immediately. Initialization is never query-lazy; an accepted service remains
+  resident and calls one balanced `curl_global_cleanup()` at process teardown
+  after all streams have ended.
 - Focused deterministic tests prove success, exact request observations,
   status/redirect/malformed/oversized/disconnect/deadline/cancellation failures,
   recovery, active-stream teardown ordering, and redaction. Public GitHub is
