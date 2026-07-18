@@ -15,20 +15,14 @@ bool HasIpv4Prefix(uint32_t address, uint32_t prefix, uint32_t mask) noexcept {
 }
 
 bool IsGloballyRoutableIpv4(uint32_t address) noexcept {
-	return !HasIpv4Prefix(address, 0x00000000U, 0xff000000U) &&
-	       !HasIpv4Prefix(address, 0x0a000000U, 0xff000000U) &&
-	       !HasIpv4Prefix(address, 0x64400000U, 0xffc00000U) &&
-	       !HasIpv4Prefix(address, 0x7f000000U, 0xff000000U) &&
-	       !HasIpv4Prefix(address, 0xa9fe0000U, 0xffff0000U) &&
-	       !HasIpv4Prefix(address, 0xac100000U, 0xfff00000U) &&
-	       !HasIpv4Prefix(address, 0xc0000000U, 0xffffff00U) &&
-	       !HasIpv4Prefix(address, 0xc0000200U, 0xffffff00U) &&
-	       !HasIpv4Prefix(address, 0xc0586300U, 0xffffff00U) &&
-	       !HasIpv4Prefix(address, 0xc0a80000U, 0xffff0000U) &&
-	       !HasIpv4Prefix(address, 0xc6120000U, 0xfffe0000U) &&
-	       !HasIpv4Prefix(address, 0xc6336400U, 0xffffff00U) &&
-	       !HasIpv4Prefix(address, 0xcb007100U, 0xffffff00U) &&
-	       !HasIpv4Prefix(address, 0xe0000000U, 0xf0000000U) && address < 0xf0000000U;
+	return !HasIpv4Prefix(address, 0x00000000U, 0xff000000U) && !HasIpv4Prefix(address, 0x0a000000U, 0xff000000U) &&
+	       !HasIpv4Prefix(address, 0x64400000U, 0xffc00000U) && !HasIpv4Prefix(address, 0x7f000000U, 0xff000000U) &&
+	       !HasIpv4Prefix(address, 0xa9fe0000U, 0xffff0000U) && !HasIpv4Prefix(address, 0xac100000U, 0xfff00000U) &&
+	       !HasIpv4Prefix(address, 0xc0000000U, 0xffffff00U) && !HasIpv4Prefix(address, 0xc0000200U, 0xffffff00U) &&
+	       !HasIpv4Prefix(address, 0xc0586300U, 0xffffff00U) && !HasIpv4Prefix(address, 0xc0a80000U, 0xffff0000U) &&
+	       !HasIpv4Prefix(address, 0xc6120000U, 0xfffe0000U) && !HasIpv4Prefix(address, 0xc6336400U, 0xffffff00U) &&
+	       !HasIpv4Prefix(address, 0xcb007100U, 0xffffff00U) && !HasIpv4Prefix(address, 0xe0000000U, 0xf0000000U) &&
+	       address < 0xf0000000U;
 }
 
 bool IsIpv4MappedIpv6(const in6_addr &address) noexcept {
@@ -56,8 +50,7 @@ bool HasIpv6Prefix(const in6_addr &address, const uint8_t *prefix, std::size_t p
 }
 
 uint32_t ReadMappedIpv4(const in6_addr &address) noexcept {
-	return static_cast<uint32_t>(address.s6_addr[12]) << 24U |
-	       static_cast<uint32_t>(address.s6_addr[13]) << 16U |
+	return static_cast<uint32_t>(address.s6_addr[12]) << 24U | static_cast<uint32_t>(address.s6_addr[13]) << 16U |
 	       static_cast<uint32_t>(address.s6_addr[14]) << 8U | static_cast<uint32_t>(address.s6_addr[15]);
 }
 

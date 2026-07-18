@@ -50,7 +50,7 @@ std::vector<duckdb_api::TypedRow> Decode(const std::string &body, ManualControl 
 }
 
 void RequireError(const std::function<void()> &action, duckdb_api::ErrorStage stage, const std::string &field,
-	              const std::string &forbidden = "") {
+                  const std::string &forbidden = "") {
 	bool rejected = false;
 	try {
 		action();
@@ -61,8 +61,7 @@ void RequireError(const std::function<void()> &action, duckdb_api::ErrorStage st
 		Require(!error.SafeMessage().empty() && error.SafeMessage().size() <= 128,
 		        "decoder error was empty or unbounded");
 		if (!forbidden.empty()) {
-			Require(error.SafeMessage().find(forbidden) == std::string::npos,
-			        "decoder error exposed response content");
+			Require(error.SafeMessage().find(forbidden) == std::string::npos, "decoder error exposed response content");
 		}
 	}
 	Require(rejected, "expected a structured decoder error");
@@ -74,16 +73,14 @@ std::string OneRow(const std::string &fields) {
 
 void TestTypedRowsAndCompleteValidation() {
 	ManualControl control;
-	const auto rows = Decode(
-	    "{\"ignored\":{\"nested\":[true,null,3.5]},\"items\":["
-	    "{\"id\":11,\"login\":\"duckdb\",\"site_admin\":false,\"ignored\":1},"
-	    "{\"site_admin\":true,\"login\":\"duck\\u0064b-fdw\",\"id\":-22},"
-	    "{\"id\":33,\"login\":\"three\",\"site_admin\":false}]}",
-	    control);
+	const auto rows = Decode("{\"ignored\":{\"nested\":[true,null,3.5]},\"items\":["
+	                         "{\"id\":11,\"login\":\"duckdb\",\"site_admin\":false,\"ignored\":1},"
+	                         "{\"site_admin\":true,\"login\":\"duck\\u0064b-fdw\",\"id\":-22},"
+	                         "{\"id\":33,\"login\":\"three\",\"site_admin\":false}]}",
+	                         control);
 	Require(rows.size() == 3, "decoder did not return all bounded records");
-	Require(rows[0].values[0].kind == duckdb_api::ValueKind::BIGINT &&
-	            rows[0].values[0].bigint_value == 11 && rows[0].values[1].varchar_value == "duckdb" &&
-	            !rows[0].values[2].boolean_value,
+	Require(rows[0].values[0].kind == duckdb_api::ValueKind::BIGINT && rows[0].values[0].bigint_value == 11 &&
+	            rows[0].values[1].varchar_value == "duckdb" && !rows[0].values[2].boolean_value,
 	        "first schema-aligned row was decoded incorrectly");
 	Require(rows[1].values[0].bigint_value == -22 && rows[1].values[1].varchar_value == "duckdb-fdw" &&
 	            rows[1].values[2].boolean_value,
@@ -92,8 +89,8 @@ void TestTypedRowsAndCompleteValidation() {
 
 void TestMalformedAndInvalidUtf8() {
 	ManualControl control;
-	std::vector<std::string> malformed = {
-	    "", "{", "{\"items\":[],\"ignored\":[1,]}", "{\"items\":[]}}", "{\"items\":[] true}"};
+	std::vector<std::string> malformed = {"", "{", "{\"items\":[],\"ignored\":[1,]}", "{\"items\":[]}}",
+	                                      "{\"items\":[] true}"};
 	malformed.push_back(std::string("{\"items\":[]}") + std::string(1, '\0'));
 	malformed.push_back(std::string("{\"items\":[],\"bad\":\"") + std::string(1, static_cast<char>(0xff)) + "\"}");
 	for (std::size_t index = 0; index < malformed.size(); index++) {
@@ -124,8 +121,8 @@ void TestRequiredShapeAndStrictTypes() {
 	    {OneRow("\"id\":1,\"login\":null,\"site_admin\":false"), "login"},
 	    {OneRow("\"id\":1,\"login\":\"duckdb\",\"site_admin\":0"), "site_admin"}};
 	for (std::size_t index = 0; index < cases.size(); index++) {
-		RequireError([&]() { Decode(cases[index].body, control); }, duckdb_api::ErrorStage::SCHEMA,
-		             cases[index].field, "9223372036854775808");
+		RequireError([&]() { Decode(cases[index].body, control); }, duckdb_api::ErrorStage::SCHEMA, cases[index].field,
+		             "9223372036854775808");
 	}
 }
 
@@ -140,11 +137,10 @@ void TestExactResourceBoundaries() {
 	RequireError([&]() { duckdb_api::internal::DecodeJsonRows(long_string, plan, control); },
 	             duckdb_api::ErrorStage::RESOURCE, "login");
 
-	const std::string four_rows =
-	    "{\"items\":[{\"id\":1,\"login\":\"a\",\"site_admin\":false},"
-	    "{\"id\":2,\"login\":\"b\",\"site_admin\":false},"
-	    "{\"id\":3,\"login\":\"c\",\"site_admin\":false},"
-	    "{\"id\":4,\"login\":\"d\",\"site_admin\":false}]}";
+	const std::string four_rows = "{\"items\":[{\"id\":1,\"login\":\"a\",\"site_admin\":false},"
+	                              "{\"id\":2,\"login\":\"b\",\"site_admin\":false},"
+	                              "{\"id\":3,\"login\":\"c\",\"site_admin\":false},"
+	                              "{\"id\":4,\"login\":\"d\",\"site_admin\":false}]}";
 	RequireError([&]() { duckdb_api::internal::DecodeJsonRows(four_rows, Plan(), control); },
 	             duckdb_api::ErrorStage::RESOURCE, "items");
 
@@ -154,8 +150,8 @@ void TestExactResourceBoundaries() {
 	Require(duckdb_api::internal::DecodeJsonRows(exact_nesting, plan, control).empty(),
 	        "exact nesting boundary was rejected");
 	const std::string deep = "{\"ignored\":[[0]],\"items\":[]}";
-	RequireError([&]() { duckdb_api::internal::DecodeJsonRows(deep, plan, control); },
-	             duckdb_api::ErrorStage::RESOURCE, "json_nesting");
+	RequireError([&]() { duckdb_api::internal::DecodeJsonRows(deep, plan, control); }, duckdb_api::ErrorStage::RESOURCE,
+	             "json_nesting");
 
 	plan = Plan();
 	plan.max_decoded_memory_bytes = 1;

@@ -30,8 +30,7 @@ struct JsonDecodePlan {
 // complete document, requires each declared non-null field exactly once,
 // retains JSON numeric spelling through BIGINT conversion, and checkpoints
 // cancellation/deadline and every decode budget. It has no request authority.
-std::vector<TypedRow> DecodeJsonRows(const std::string &body, const JsonDecodePlan &plan,
-                                     ExecutionControl &control);
+std::vector<TypedRow> DecodeJsonRows(const std::string &body, const JsonDecodePlan &plan, ExecutionControl &control);
 
 } // namespace internal
 } // namespace duckdb_api

@@ -52,8 +52,7 @@ class HttpTransport {
 public:
 	virtual ~HttpTransport() noexcept {
 	}
-	virtual HttpResponse Get(const HttpRequest &request, const HttpLimits &limits,
-	                         ExecutionControl &control) const = 0;
+	virtual HttpResponse Get(const HttpRequest &request, const HttpLimits &limits, ExecutionControl &control) const = 0;
 };
 
 } // namespace internal
