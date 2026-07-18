@@ -9,10 +9,15 @@ namespace internal {
 
 class CurlProcessLifetime;
 
-// Constructs the production transport after checked process-global libcurl
-// initialization. The lifetime token keeps cleanup after every easy handle and
-// stream even during process teardown.
-std::unique_ptr<HttpTransport> BuildCurlHttpTransport(std::shared_ptr<const CurlProcessLifetime> lifetime);
+// Performs one checked process-global initialization, then safely inspects the
+// initialized runtime identity. A rejected identity is balanced immediately;
+// an accepted owner is intentionally process-resident and is never destroyed
+// by service or extension teardown.
+const CurlProcessLifetime *AcquireCurlProcessLifetime();
+
+// Constructs the production fixed-authority transport. The process-lifetime
+// token proves initialization completed before any easy handle can be built.
+std::unique_ptr<HttpTransport> BuildCurlHttpTransport(const CurlProcessLifetime *lifetime);
 
 } // namespace internal
 } // namespace duckdb_api

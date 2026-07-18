@@ -7,7 +7,9 @@
 #include <chrono>
 #include <cstddef>
 #include <memory>
+#include <mutex>
 #include <new>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -27,10 +29,21 @@ bool HasExpectedColumns(const std::vector<PlannedColumn> &columns) {
 	       !columns[2].nullable && columns[2].extractor == "$.site_admin";
 }
 
-bool HasExpectedOperation(const PlannedRestOperation &operation) {
+const char *SchemeName(PlannedUrlScheme scheme) {
+	switch (scheme) {
+	case PlannedUrlScheme::HTTP:
+		return "http";
+	case PlannedUrlScheme::HTTPS:
+		return "https";
+	}
+	throw ExecutionError(ErrorStage::POLICY, "", "execution profile contains an unknown URL scheme");
+}
+
+bool HasExpectedOperation(const PlannedRestOperation &operation, const HttpExecutionProfile &profile) {
 	return operation.operation_name == "github_search_duckdb_login_page" && operation.protocol == PlannedProtocol::REST &&
 	       operation.method == PlannedHttpMethod::GET && operation.cardinality == PlannedCardinality::ZERO_TO_MANY &&
-	       operation.replay_safety == PlannedReplaySafety::SAFE && operation.base_url == "https://api.github.com" &&
+	       operation.replay_safety == PlannedReplaySafety::SAFE && operation.origin.scheme == profile.scheme &&
+	       operation.origin.host == profile.host && operation.origin.port == profile.port &&
 	       operation.path == "/search/users" && operation.query_parameters.size() == 2 &&
 	       operation.query_parameters[0].name == "q" &&
 	       operation.query_parameters[0].encoded_value == "duckdb+in%3Alogin" &&
@@ -43,24 +56,25 @@ bool HasExpectedOperation(const PlannedRestOperation &operation) {
 	       operation.headers[2].value == "2022-11-28" && operation.records_extractor == "$.items[*]";
 }
 
-bool HasExpectedNetwork(const NetworkCapability &network) {
-	return network.allowed_schemes.size() == 1 && network.allowed_schemes[0] == "https" &&
-	       network.allowed_hosts.size() == 1 && network.allowed_hosts[0] == "api.github.com" &&
-	       !network.redirects_enabled && !network.private_addresses_enabled && !network.link_local_addresses_enabled &&
-	       !network.loopback_addresses_enabled;
+bool HasExpectedNetwork(const NetworkCapability &network, const HttpExecutionProfile &profile) {
+	return network.allowed_schemes.size() == 1 && network.allowed_schemes[0] == SchemeName(profile.scheme) &&
+	       network.allowed_hosts.size() == 1 && network.allowed_hosts[0] == profile.host &&
+	       !network.redirects_enabled && network.private_addresses_enabled == profile.private_addresses_enabled &&
+	       network.link_local_addresses_enabled == profile.link_local_addresses_enabled &&
+	       network.loopback_addresses_enabled == profile.loopback_addresses_enabled;
 }
 
-void ValidateExecutablePlan(const ScanPlan &plan) {
+void ValidateExecutablePlan(const ScanPlan &plan, const HttpExecutionProfile &profile) {
 	// Deliberately do not read SourceSnapshot, predicates, relational ownership,
 	// ordering/limit delegation, or ClassificationReason. Relational Semantics
 	// owns those facts; runtime validates only capability needed for safe I/O and
 	// strict decoding.
 	if (plan.ConnectorName() != "github" || plan.ConnectorVersion() != "0.3.0" ||
-	    plan.RelationName() != "duckdb_login_search_page" || !HasExpectedOperation(plan.Operation()) ||
+	    plan.RelationName() != "duckdb_login_search_page" || !HasExpectedOperation(plan.Operation(), profile) ||
 	    !HasExpectedColumns(plan.OutputColumns()) || plan.Pagination() != FeatureState::DISABLED ||
 	    plan.Providers() != FeatureState::DISABLED || plan.Retry() != FeatureState::DISABLED ||
 	    plan.Cache() != FeatureState::DISABLED || plan.Authentication() != FeatureState::DISABLED ||
-	    !HasExpectedNetwork(plan.Network()) || !plan.Budgets().IsLiveRestBudget()) {
+	    !HasExpectedNetwork(plan.Network(), profile) || !plan.Budgets().IsWithinLiveRestBounds()) {
 		throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
 	}
 }
@@ -68,9 +82,9 @@ void ValidateExecutablePlan(const ScanPlan &plan) {
 HttpRequest BuildRequest(const PlannedRestOperation &operation) {
 	HttpRequest request;
 	request.method = "GET";
-	request.scheme = "https";
-	request.host = "api.github.com";
-	request.port = 443;
+	request.scheme = operation.origin.scheme == PlannedUrlScheme::HTTPS ? "https" : "http";
+	request.host = operation.origin.host;
+	request.port = operation.origin.port;
 	request.target = operation.path + "?" + operation.query_parameters[0].name + "=" +
 	                 operation.query_parameters[0].encoded_value + "&" + operation.query_parameters[1].name + "=" +
 	                 operation.query_parameters[1].encoded_value;
@@ -131,6 +145,12 @@ public:
 	}
 
 	bool Next(ExecutionControl &control, TypedBatch &batch) override {
+		std::unique_lock<std::mutex> state_guard;
+		try {
+			state_guard = std::unique_lock<std::mutex>(state_mutex);
+		} catch (...) {
+			throw ExecutionError(ErrorStage::INTERNAL, "", "scan stream synchronization failed");
+		}
 		batch.Clear();
 		if (closed || failed) {
 			return false;
@@ -216,18 +236,29 @@ public:
 	}
 
 	void Close() noexcept override {
-		if (closed) {
-			return;
-		}
-		closed = true;
+		// Publish cancellation before waiting for an active Next. The active
+		// transfer/decode owns the same bounded deadline and releases the mutex
+		// before Close clears stream state, so concurrent Close is race-free and
+		// cannot extend work beyond the execution envelope.
 		cancelled.store(true, std::memory_order_release);
-		decoded.clear();
-		offset = 0;
+		try {
+			std::lock_guard<std::mutex> state_guard(state_mutex);
+			if (closed) {
+				return;
+			}
+			closed = true;
+			decoded.clear();
+			offset = 0;
+		} catch (...) {
+			// Cancellation remains published even if platform synchronization
+			// itself fails; Close must never cross the native boundary.
+		}
 	}
 
 private:
 	const ScanPlan plan;
 	const std::shared_ptr<const HttpTransport> transport;
+	mutable std::mutex state_mutex;
 	std::atomic<bool> cancelled;
 	bool closed;
 	bool attempted;
@@ -238,12 +269,13 @@ private:
 
 class HttpScanExecutor final : public ScanExecutor {
 public:
-	explicit HttpScanExecutor(std::shared_ptr<const HttpTransport> transport_p) : transport(std::move(transport_p)) {
+	HttpScanExecutor(std::shared_ptr<const HttpTransport> transport_p, HttpExecutionProfile profile_p)
+	    : transport(std::move(transport_p)), profile(std::move(profile_p)) {
 	}
 
 	std::unique_ptr<BatchStream> Open(const ScanPlan &plan, ExecutionControl &control) const override {
 		CheckCancellation(control);
-		ValidateExecutablePlan(plan);
+		ValidateExecutablePlan(plan, profile);
 		CheckCancellation(control);
 		try {
 			return std::unique_ptr<BatchStream>(new HttpBatchStream(plan, transport));
@@ -259,17 +291,27 @@ public:
 
 private:
 	const std::shared_ptr<const HttpTransport> transport;
+	const HttpExecutionProfile profile;
 };
 
 } // namespace
 
 std::shared_ptr<const ScanExecutor> BuildHttpScanExecutor(std::unique_ptr<HttpTransport> transport) {
+	const HttpExecutionProfile public_profile {PlannedUrlScheme::HTTPS, "api.github.com", 443, false, false, false};
+	return BuildHttpScanExecutorForProfile(std::move(transport), public_profile);
+}
+
+std::shared_ptr<const ScanExecutor> BuildHttpScanExecutorForProfile(std::unique_ptr<HttpTransport> transport,
+                                                                    const HttpExecutionProfile &profile) {
 	if (!transport) {
 		throw ExecutionError(ErrorStage::INTERNAL, "", "HTTP executor requires a transport");
 	}
+	if (profile.host.empty() || profile.host.find_first_of("/:@?#\r\n") != std::string::npos || profile.port == 0) {
+		throw ExecutionError(ErrorStage::POLICY, "", "HTTP executor profile is invalid");
+	}
 	try {
 		std::shared_ptr<const HttpTransport> shared(std::move(transport));
-		return std::shared_ptr<const ScanExecutor>(new HttpScanExecutor(std::move(shared)));
+		return std::shared_ptr<const ScanExecutor>(new HttpScanExecutor(std::move(shared), profile));
 	} catch (const ExecutionError &) {
 		throw;
 	} catch (const std::bad_alloc &) {
