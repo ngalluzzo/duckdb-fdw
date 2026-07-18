@@ -137,6 +137,16 @@ public:
 		if (control.IsCancellationRequested()) {
 			throw duckdb_api::ExecutionCancelled();
 		}
+		if (scenario == QueryRuntimeScenario::OPEN_EXECUTION_CANCELLED) {
+			throw duckdb_api::ExecutionCancelled();
+		}
+		if (scenario == QueryRuntimeScenario::OPEN_INTERNAL_ERROR) {
+			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::INTERNAL, "top-secret-open-field",
+			                                 "top-secret-open-structured-detail");
+		}
+		if (scenario == QueryRuntimeScenario::OPEN_UNKNOWN_EXCEPTION) {
+			throw std::runtime_error("top-secret-open-unknown-detail");
+		}
 		if (scenario == QueryRuntimeScenario::NULL_STREAM) {
 			return std::unique_ptr<duckdb_api::BatchStream>();
 		}

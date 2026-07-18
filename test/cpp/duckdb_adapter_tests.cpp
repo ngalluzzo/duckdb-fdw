@@ -162,7 +162,39 @@ void TestStructuredFailuresAndBatchValidation() {
 	}
 }
 
-void TestEarlyCloseAndConnectionShutdown() {
+void TestOpenStageFailuresDoNotAcquireStream() {
+	const std::string internal_error = "Invalid Input Error: [duckdb_api][internal] connector=github "
+	                                   "relation=duckdb_login_search_page: unexpected execution failure";
+	const QueryRuntimeScenario internal_scenarios[] = {QueryRuntimeScenario::OPEN_INTERNAL_ERROR,
+	                                                   QueryRuntimeScenario::OPEN_UNKNOWN_EXCEPTION};
+	for (const auto scenario : internal_scenarios) {
+		duckdb::DuckDB database(nullptr);
+		auto probe = Register(database, scenario);
+		duckdb::Connection connection(database);
+		const auto error = QueryError(connection, ACCEPTED_LIVE_SQL);
+		Require(error == internal_error, "Open failure did not use the exact redacted diagnostic: " + error);
+		Require(error.find("top-secret") == std::string::npos, "Open failure leaked provider detail: " + error);
+		Require(probe->streams_opened.load(std::memory_order_relaxed) == 0 &&
+		            probe->next_calls.load(std::memory_order_relaxed) == 0 &&
+		            probe->cancellations.load(std::memory_order_relaxed) == 0 &&
+		            probe->streams_closed.load(std::memory_order_relaxed) == 0,
+		        "Open failure acquired or finalized a stream");
+	}
+
+	duckdb::DuckDB database(nullptr);
+	auto probe = Register(database, QueryRuntimeScenario::OPEN_EXECUTION_CANCELLED);
+	duckdb::Connection connection(database);
+	const auto error = QueryError(connection, ACCEPTED_LIVE_SQL);
+	Require(error.find("Interrupt") != std::string::npos || error.find("interrupt") != std::string::npos,
+	        "Open cancellation did not become DuckDB interruption: " + error);
+	Require(probe->streams_opened.load(std::memory_order_relaxed) == 0 &&
+	            probe->next_calls.load(std::memory_order_relaxed) == 0 &&
+	            probe->cancellations.load(std::memory_order_relaxed) == 0 &&
+	            probe->streams_closed.load(std::memory_order_relaxed) == 0,
+	        "Open cancellation acquired or finalized a stream");
+}
+
+void TestEarlyResultCloseAndLastOwnerTeardown() {
 	duckdb::DuckDB database(nullptr);
 	auto probe = Register(database, QueryRuntimeScenario::STREAMING);
 	const std::string streaming_sql =
@@ -174,30 +206,47 @@ void TestEarlyCloseAndConnectionShutdown() {
 		Require(!result->HasError(), "streaming scan failed before early close");
 		auto first = result->Fetch();
 		Require(first && first->size() == 2, "streaming scan did not preserve its bounded first batch");
+		Require(probe->streams_opened.load(std::memory_order_relaxed) == 1 &&
+		            probe->cancellations.load(std::memory_order_relaxed) == 0 &&
+		            probe->streams_closed.load(std::memory_order_relaxed) == 0,
+		        "unfinished stream changed lifecycle before the consumer closed its result");
 		result->Cast<duckdb::StreamQueryResult>().Close();
+		Require(probe->cancellations.load(std::memory_order_relaxed) == 0 &&
+		            probe->streams_closed.load(std::memory_order_relaxed) == 0,
+		        "StreamQueryResult::Close unexpectedly claimed DuckDB pipeline teardown");
 		result.reset();
+		Require(probe->cancellations.load(std::memory_order_relaxed) == 0 &&
+		            probe->streams_closed.load(std::memory_order_relaxed) == 0,
+		        "closed result destruction unexpectedly claimed connection-owned pipeline teardown");
 		auto cleanup = connection.Query("SELECT 1");
 		Require(!cleanup->HasError(), "connection did not release the early-closed scan");
+		Require(probe->streams_opened.load(std::memory_order_relaxed) == 1 &&
+		            probe->cancellations.load(std::memory_order_relaxed) == 1 &&
+		            probe->streams_closed.load(std::memory_order_relaxed) == 1,
+		        "the next query did not settle the early-closed pipeline exactly once");
 	}
-	Require(probe->streams_opened.load(std::memory_order_relaxed) == 1 &&
-	            probe->cancellations.load(std::memory_order_relaxed) == 1 &&
-	            probe->streams_closed.load(std::memory_order_relaxed) == 1,
-	        "early result close did not cancel and close its unfinished stream");
 
 	std::unique_ptr<duckdb::QueryResult> result;
 	{
 		std::unique_ptr<duckdb::Connection> connection(new duckdb::Connection(database));
 		result = connection->SendQuery(streaming_sql);
-		Require(!result->HasError(), "streaming scan failed before connection shutdown");
+		Require(!result->HasError(), "streaming scan failed before releasing its Connection owner");
 		auto first = result->Fetch();
-		Require(first && first->size() == 2, "connection-shutdown scan did not preserve its bounded first batch");
+		Require(first && first->size() == 2, "last-owner scan did not preserve its bounded first batch");
+		Require(probe->streams_opened.load(std::memory_order_relaxed) == 2 &&
+		            probe->cancellations.load(std::memory_order_relaxed) == 1 &&
+		            probe->streams_closed.load(std::memory_order_relaxed) == 1,
+		        "second unfinished stream changed lifecycle before Connection release");
 		connection.reset();
+		Require(probe->cancellations.load(std::memory_order_relaxed) == 1 &&
+		            probe->streams_closed.load(std::memory_order_relaxed) == 1,
+		        "Connection destruction finalized a stream still retained by StreamQueryResult");
 	}
 	result.reset();
 	Require(probe->streams_opened.load(std::memory_order_relaxed) == 2 &&
 	            probe->cancellations.load(std::memory_order_relaxed) == 2 &&
 	            probe->streams_closed.load(std::memory_order_relaxed) == 2,
-	        "connection shutdown did not cancel and close its unfinished stream");
+	        "last StreamQueryResult/ClientContext owner did not finalize its unfinished stream");
 }
 
 void TestIndependentConcurrentScans() {
@@ -211,6 +260,19 @@ void TestIndependentConcurrentScans() {
 		auto query_result = active.Query(ACCEPTED_LIVE_SQL);
 		if (query_result->HasError()) {
 			error = query_result->GetError();
+			return;
+		}
+		auto chunk = query_result->Fetch();
+		if (!chunk || chunk->size() != 3 || chunk->GetValue(0, 0).GetValue<int64_t>() != 1 ||
+		    chunk->GetValue(1, 0).ToString() != "duck" || chunk->GetValue(2, 0).GetValue<bool>() ||
+		    chunk->GetValue(0, 1).GetValue<int64_t>() != 2 || chunk->GetValue(1, 1).ToString() != "other" ||
+		    !chunk->GetValue(2, 1).GetValue<bool>() || chunk->GetValue(0, 2).GetValue<int64_t>() != 3 ||
+		    chunk->GetValue(1, 2).ToString() != "duckdb" || !chunk->GetValue(2, 2).GetValue<bool>()) {
+			error = "concurrent scan returned the wrong independent typed rows";
+			return;
+		}
+		if (query_result->Fetch()) {
+			error = "concurrent scan returned an unexpected additional chunk";
 		}
 	};
 	std::thread second_worker([&]() { query(second, second_error); });
@@ -262,7 +324,8 @@ int main() {
 		TestDuckdbRetainsRelationalOperators();
 		TestBindFailuresDoNotOpenRuntime();
 		TestStructuredFailuresAndBatchValidation();
-		TestEarlyCloseAndConnectionShutdown();
+		TestOpenStageFailuresDoNotAcquireStream();
+		TestEarlyResultCloseAndLastOwnerTeardown();
 		TestIndependentConcurrentScans();
 		TestSynchronizedCancellation();
 		std::cout << "DuckDB adapter tests passed" << std::endl;

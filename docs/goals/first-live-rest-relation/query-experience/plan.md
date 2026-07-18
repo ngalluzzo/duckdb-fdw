@@ -43,7 +43,7 @@ edited by this workstream.
 | Artifact | Query Experience responsibility |
 | --- | --- |
 | `test/cpp/scan_request_tests.cpp` | Provider-independent request identity, full-projection closure, conservative capability, determinism, and connector-derived-value oracles |
-| `test/cpp/duckdb_adapter_tests.cpp` | Provider-fake adapter oracles for offline bind, bind-data copy, schema, typed batches, cancellation/error translation, early close, connection destruction, repeated and concurrent scans, and DuckDB-owned relational operators |
+| `test/cpp/duckdb_adapter_tests.cpp` | Provider-fake adapter oracles for offline bind, bind-data copy, schema, typed batches, cancellation/error translation, early close, final result/context-owner teardown, repeated and concurrent scans, and DuckDB-owned relational operators |
 | `test/cpp/support/query_runtime_scenarios.hpp` and `.cpp` | DuckDB-free fake `ScanExecutor`/`BatchStream` implementations and lifecycle probes used only by adapter tests; no HTTP behavior or provider policy is recreated |
 | `test/cpp/support/controlled_product_composition.hpp` and `.cpp` | Private non-installable composition of the accepted controlled compiled snapshot, the public planner, and a Runtime-owned controlled executor service; Query does not construct a `ScanPlan` or import transport internals |
 | `test/cpp/controlled_duckdb_api_extension.cpp` | Test-only DuckDB extension entry point that calls the same production registration/adapter code with the controlled composition |
@@ -128,9 +128,11 @@ The installed-artifact oracle must prove all of the following:
   earlier nonmatching row.
 - Runtime cancellation is translated exactly once to DuckDB interruption,
   with a sub-second controlled interrupt. Success, failure, cancellation,
-  early result close, repeated scans, independent concurrent scans, connection
-  destruction, and the accepted five-second bounded active close reach
-  idempotent non-throwing cleanup without masking the primary outcome.
+  early result close, repeated scans, independent concurrent scans, final
+  `StreamQueryResult`/`ClientContext` owner teardown, and the accepted
+  five-second bounded active close reach idempotent non-throwing cleanup
+  without masking the primary outcome. Releasing a `Connection` while its
+  result retains the context does not claim an earlier teardown boundary.
 - Unknown connector/relation names fail during bind with safe actionable
   diagnostics and no executor open. Structured execution stages map once to
   the accepted connector/relation-aware DuckDB messages; unknown exceptions
