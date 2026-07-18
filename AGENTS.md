@@ -212,6 +212,15 @@ by `make demo` on the supported product cell. Use a new build root on every
 run. `make verify` is the convenience wrapper that allocates that new root; it
 does not reuse developer state.
 
+The authoritative `0.2.0` source-identity, Community Query, and Community
+Enablement gates are:
+
+```sh
+scripts/verify-source-identities.py
+python3 -I -B test/python/community_installation/test_community_installation.py
+scripts/test-community-enablement.sh
+```
+
 The authoritative `0.1.0` release and sanitizer commands are intentionally
 stricter:
 
