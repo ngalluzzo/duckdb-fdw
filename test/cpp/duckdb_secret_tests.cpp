@@ -10,12 +10,12 @@ int main() {
 		RunTest("registered surface", TestRegisteredSurfaceIsTemporaryConfigAndRedacted);
 		RunTest("creation validation", TestCreationRejectsImplicitPersistenceAndMalformedOptions);
 		RunTest("resolution validation", TestResolutionValidatesTypeProviderShapeAndToken);
-		RunTest("resolution lifecycle", TestResolutionObservesReplacementDropStorageAndAmbiguity);
+		RunTest("resolution lifecycle", TestResolutionObservesReplacementDropAndMemoryIsolation);
 		RunTest("current transaction", TestResolutionUsesCurrentTransaction);
 		RunTest("independent storage validation", TestResolutionRequiresTemporaryMemoryIndependently);
 		RunTest("active transaction", TestResolutionRequiresAnActiveTransaction);
-		RunTest("host interruption", TestResolutionPreservesHostInterruption);
-		RunTest("host failure", TestResolutionClassifiesOtherHostFailuresAsInternal);
+		RunTest("excluded interruption", TestResolutionDoesNotQueryExcludedInterruptingStorage);
+		RunTest("excluded storage failure", TestResolutionDoesNotQueryExcludedFaultingStorages);
 		RunTest("registration failure", TestFailedProviderRegistrationNeverPublishesScan);
 		std::cout << "duckdb secret tests passed" << std::endl;
 		return EXIT_SUCCESS;

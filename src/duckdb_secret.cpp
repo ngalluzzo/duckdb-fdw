@@ -1,7 +1,6 @@
 #include "duckdb_api/duckdb_secret.hpp"
 
 #include "duckdb/catalog/catalog_transaction.hpp"
-#include "duckdb/common/error_data.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/common/types/value.hpp"
@@ -56,40 +55,22 @@ unique_ptr<BaseSecret> CreateDuckdbApiSecret(ClientContext &, CreateSecretInput 
 	return std::move(secret);
 }
 
-bool IsPinnedExactNameAmbiguity(const InvalidConfigurationException &error, const std::string &logical_name) {
-	const auto expected = Exception::ConstructMessage(
-	    "Ambiguity detected for secret name '%s', secret occurs in multiple storage backends.", logical_name);
-	const ErrorData data(error);
-	return data.Type() == ExceptionType::INVALID_CONFIGURATION && data.RawMessage() == expected;
-}
-
 std::string ResolveToken(ClientContext &context, const std::string &logical_name) {
 	if (logical_name.empty()) {
 		ThrowResolutionError("a non-empty named duckdb_api secret is required");
 	}
 
 	unique_ptr<SecretEntry> entry;
-	bool ambiguous = false;
 	try {
 		auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
 		auto &manager = SecretManager::Get(context);
-		// Force storage initialization outside the ambiguity catch. DuckDB's
-		// all-storage exact-name overload uses InvalidConfigurationException for
-		// both initialization defects and name collisions.
-		(void)manager.GetSecretByName(transaction, logical_name, SecretManager::TEMPORARY_STORAGE_NAME);
-		try {
-			entry = manager.GetSecretByName(transaction, logical_name);
-		} catch (const InvalidConfigurationException &error) {
-			// Pinned DuckDB reports an exact-name collision across secret
-			// storages with this exception, but storage implementations can use
-			// the same class. Match the pinned manager's complete diagnostic before
-			// classifying it as a credential-selection failure; a storage defect
-			// propagates to the outer host-failure boundary.
-			if (!IsPinnedExactNameAmbiguity(error, logical_name)) {
-				throw;
-			}
-			ambiguous = true;
-		}
+		// The storage selector is part of credential authority, not a
+		// post-lookup validation. DuckDB's all-storage lookup may lazily open and
+		// deserialize a same-named local-file secret before returning it. Query
+		// therefore asks only the exact temporary-memory backend; excluded
+		// persistent or alternate storages cannot satisfy or interfere with the
+		// selection.
+		entry = manager.GetSecretByName(transaction, logical_name, SecretManager::TEMPORARY_STORAGE_NAME);
 	} catch (const OutOfMemoryException &) {
 		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "secret",
 		                                 "named secret resolution exceeded available memory");
@@ -106,9 +87,6 @@ std::string ResolveToken(ClientContext &context, const std::string &logical_name
 		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::INTERNAL, "", "named secret resolution failed");
 	}
 
-	if (ambiguous) {
-		ThrowResolutionError("named secret could not be resolved unambiguously");
-	}
 	if (!entry || !entry->secret) {
 		ThrowResolutionError("named duckdb_api secret was not found");
 	}
@@ -129,10 +107,14 @@ std::string ResolveToken(ClientContext &context, const std::string &logical_name
 	}
 	Value token;
 	if (!key_value->TryGetValue(DUCKDB_API_TOKEN_KEY, token) || token.IsNull() ||
-	    token.type().id() != LogicalTypeId::VARCHAR || StringValue::Get(token).empty()) {
+	    token.type().id() != LogicalTypeId::VARCHAR) {
 		ThrowResolutionError("named duckdb_api secret has no usable token");
 	}
-	return StringValue::Get(token);
+	auto token_snapshot = StringValue::Get(token);
+	if (token_snapshot.empty()) {
+		ThrowResolutionError("named duckdb_api secret has no usable token");
+	}
+	return token_snapshot;
 }
 
 } // namespace

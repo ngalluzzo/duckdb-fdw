@@ -45,20 +45,18 @@ struct DuckdbApiFunctionInfo : public TableFunctionInfo {
 	const std::shared_ptr<const duckdb_api::ScanExecutor> executor;
 };
 
-// Bind state freezes Query's conservative request and the complete provider
-// plan. Copy preserves prepared-statement meaning without consulting metadata,
-// environment, runtime state, or the network again.
+// Bind state retains one authoritative immutable plan and executor. The plan
+// owns the copied logical secret name; Query does not retain a second request
+// or resolve catalog state until each execution's global initialization.
 struct DuckdbApiBindData : public TableFunctionData {
-	DuckdbApiBindData(duckdb_api::ScanRequest request_p, duckdb_api::ScanPlan plan_p,
-	                  std::shared_ptr<const duckdb_api::ScanExecutor> executor_p)
-	    : request(std::move(request_p)), plan(std::move(plan_p)), executor(std::move(executor_p)) {
+	DuckdbApiBindData(duckdb_api::ScanPlan plan_p, std::shared_ptr<const duckdb_api::ScanExecutor> executor_p)
+	    : plan(std::move(plan_p)), executor(std::move(executor_p)) {
 	}
 
 	unique_ptr<FunctionData> Copy() const override {
-		return make_uniq<DuckdbApiBindData>(request, plan, executor);
+		return make_uniq<DuckdbApiBindData>(plan, executor);
 	}
 
-	const duckdb_api::ScanRequest request;
 	const duckdb_api::ScanPlan plan;
 	const std::shared_ptr<const duckdb_api::ScanExecutor> executor;
 };
@@ -101,7 +99,45 @@ std::string RequiredNamedString(TableFunctionBindInput &input, const std::string
 	if (entry == input.named_parameters.end() || entry->second.IsNull()) {
 		throw BinderException("[duckdb_api][bind] required named argument %s is missing", name);
 	}
-	return StringValue::Get(entry->second);
+	const auto value = StringValue::Get(entry->second);
+	if (value.empty()) {
+		throw BinderException("[duckdb_api][bind] required named argument %s must not be empty", name);
+	}
+	return value;
+}
+
+duckdb_api::LogicalSecretReference BindSecretReference(TableFunctionBindInput &input,
+                                                       duckdb_api::CompiledCredentialRequirement requirement,
+                                                       const std::string &connector_name,
+                                                       const std::string &relation_name) {
+	const auto entry = input.named_parameters.find("secret");
+	if (entry == input.named_parameters.end()) {
+		if (requirement == duckdb_api::CompiledCredentialRequirement::REQUIRED) {
+			throw BinderException(
+			    "[duckdb_api][bind] connector=%s relation=%s: required named argument secret is missing",
+			    connector_name, relation_name);
+		}
+		return duckdb_api::LogicalSecretReference();
+	}
+	if (entry->second.IsNull()) {
+		throw BinderException(
+		    "[duckdb_api][bind] connector=%s relation=%s: named argument secret must not be NULL or empty",
+		    connector_name, relation_name);
+	}
+	const auto logical_name = StringValue::Get(entry->second);
+	if (logical_name.empty()) {
+		throw BinderException(
+		    "[duckdb_api][bind] connector=%s relation=%s: named argument secret must not be NULL or empty",
+		    connector_name, relation_name);
+	}
+	if (requirement == duckdb_api::CompiledCredentialRequirement::NONE) {
+		throw BinderException("[duckdb_api][bind] connector=%s relation=%s: named argument secret is not accepted",
+		                      connector_name, relation_name);
+	}
+	if (requirement != duckdb_api::CompiledCredentialRequirement::REQUIRED) {
+		throw InternalException("duckdb_api relation has an unsupported credential requirement");
+	}
+	return duckdb_api::LogicalSecretReference::Named(logical_name);
 }
 
 const char *ErrorStageName(duckdb_api::ErrorStage stage) {
@@ -192,10 +228,11 @@ unique_ptr<FunctionData> DuckdbApiBind(ClientContext &, TableFunctionBindInput &
 		throw InternalException("duckdb_api table function is missing immutable function information");
 	}
 	auto &function_info = input.info->Cast<DuckdbApiFunctionInfo>();
-	if (connector_name != function_info.connector.connector_name) {
+	if (connector_name != function_info.connector.ConnectorName()) {
 		throw BinderException("[duckdb_api][bind] unknown connector identifier");
 	}
-	if (relation_name != function_info.connector.relation_name) {
+	const auto *relation = function_info.connector.FindRelation(relation_name);
+	if (!relation) {
 		throw BinderException("[duckdb_api][bind] connector=%s: unknown relation identifier", connector_name);
 	}
 	if (!function_info.executor) {
@@ -204,21 +241,47 @@ unique_ptr<FunctionData> DuckdbApiBind(ClientContext &, TableFunctionBindInput &
 
 	// Bind performs deterministic metadata planning only. Executor open and all
 	// network authority remain deferred until DuckdbApiInit.
-	auto request = duckdb_api::BuildConservativeScanRequest(function_info.connector);
+	auto secret_reference =
+	    BindSecretReference(input, relation->Authentication().Requirement(), connector_name, relation_name);
+	auto request =
+	    duckdb_api::BuildConservativeScanRequest(function_info.connector, relation_name, std::move(secret_reference));
 	auto plan = duckdb_api::BuildConservativeScanPlan(function_info.connector, request);
 
 	for (const auto &column : plan.OutputColumns()) {
 		names.push_back(column.name);
 		return_types.push_back(PlannedLogicalType(column));
 	}
-	return make_uniq<DuckdbApiBindData>(std::move(request), std::move(plan), function_info.executor);
+	return make_uniq<DuckdbApiBindData>(std::move(plan), function_info.executor);
+}
+
+std::unique_ptr<duckdb_api::BatchStream> OpenAuthorizedStream(const DuckdbApiBindData &bind_data,
+                                                              ClientContext &context, DuckdbExecutionControl &control) {
+	// Every global initialization resolves a fresh execution-scoped capability.
+	// Query never reads its token alternative: it moves the closed authorization
+	// directly into Runtime, which owns validation, use, and destruction.
+	if (control.IsCancellationRequested()) {
+		throw duckdb_api::ExecutionCancelled();
+	}
+	if (bind_data.plan.Authentication() == duckdb_api::FeatureState::ENABLED) {
+		const auto &reference = bind_data.plan.SecretReference();
+		if (!reference.IsPresent()) {
+			throw std::logic_error("authenticated scan plan has no logical secret reference");
+		}
+		auto authorization = ResolveDuckdbApiSecret(context, reference.Name());
+		return bind_data.executor->OpenWithAuthorization(bind_data.plan, std::move(authorization), control);
+	}
+	if (bind_data.plan.Authentication() != duckdb_api::FeatureState::DISABLED) {
+		throw std::logic_error("scan plan has an unknown authentication state");
+	}
+	return bind_data.executor->OpenWithAuthorization(bind_data.plan, duckdb_api::ScanAuthorization::Anonymous(),
+	                                                 control);
 }
 
 unique_ptr<GlobalTableFunctionState> DuckdbApiInit(ClientContext &context, TableFunctionInitInput &input) {
 	auto &bind_data = input.bind_data->Cast<DuckdbApiBindData>();
 	try {
 		DuckdbExecutionControl control(context);
-		auto stream = bind_data.executor->Open(bind_data.plan, control);
+		auto stream = OpenAuthorizedStream(bind_data, context, control);
 		if (!stream) {
 			throw std::logic_error("scan executor returned no stream");
 		}
@@ -304,6 +367,7 @@ void RegisterDuckdbApi(ExtensionLoader &loader, duckdb_api::CompiledConnector co
 	TableFunction scan("duckdb_api_scan", {}, DuckdbApiScan, DuckdbApiBind, DuckdbApiInit);
 	scan.named_parameters["connector"] = LogicalType::VARCHAR;
 	scan.named_parameters["relation"] = LogicalType::VARCHAR;
+	scan.named_parameters["secret"] = LogicalType::VARCHAR;
 	scan.projection_pushdown = false;
 	scan.filter_pushdown = false;
 	scan.filter_prune = false;

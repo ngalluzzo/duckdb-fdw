@@ -38,6 +38,10 @@ enum class QueryRuntimeScenario {
 };
 
 struct QueryLifecycleProbe {
+	std::atomic<uint64_t> legacy_open_calls;
+	std::atomic<uint64_t> authorization_open_calls;
+	std::atomic<uint64_t> anonymous_authorizations;
+	std::atomic<uint64_t> github_bearer_authorizations;
 	std::atomic<uint64_t> streams_opened;
 	std::atomic<uint64_t> next_calls;
 	std::atomic<uint64_t> batches;

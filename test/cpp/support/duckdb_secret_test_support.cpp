@@ -95,16 +95,6 @@ void RequireInternalFailure(const std::function<void()> &action, const std::stri
 	Require(rejected, "host secret failure did not fail closed");
 }
 
-void RequireCancellation(const std::function<void()> &action) {
-	bool cancelled = false;
-	try {
-		action();
-	} catch (const duckdb_api::ExecutionCancelled &) {
-		cancelled = true;
-	}
-	Require(cancelled, "DuckDB interruption did not remain execution cancellation");
-}
-
 void RequireCanaryAbsentFromInventory(duckdb::Connection &connection, const std::string &canary) {
 	auto inventory = connection.Query("SELECT secret_string FROM duckdb_secrets()");
 	Require(!inventory->HasError(), "secret inventory preflight failed");

@@ -12,6 +12,8 @@
 #include "duckdb_api/duckdb_secret.hpp"
 #include "support/require.hpp"
 
+#include <atomic>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,15 +22,26 @@ namespace duckdb_api_test {
 namespace duckdb_secret {
 namespace {
 
-// These no-filesystem storages isolate persistence, storage, ambiguity, and
-// host-failure behavior without writing credential artifacts.
+// These no-filesystem storages prove that resolution asks only DuckDB's
+// temporary-memory backend. Excluded persistence and fault behavior cannot
+// influence credential selection.
 class PersistentMemoryTestStorage final : public duckdb::CatalogSetSecretStorage {
 public:
-	PersistentMemoryTestStorage(duckdb::DatabaseInstance &database, const std::string &name)
-	    : CatalogSetSecretStorage(database, name, LOCAL_FILE_STORAGE_OFFSET + 10) {
+	PersistentMemoryTestStorage(duckdb::DatabaseInstance &database, const std::string &name,
+	                            std::shared_ptr<std::atomic<uint64_t>> lookups_p)
+	    : CatalogSetSecretStorage(database, name, LOCAL_FILE_STORAGE_OFFSET + 10), lookups(std::move(lookups_p)) {
 		secrets = duckdb::make_uniq<duckdb::CatalogSet>(duckdb::Catalog::GetSystemCatalog(database));
 		persistent = true;
 	}
+
+	duckdb::unique_ptr<duckdb::SecretEntry>
+	GetSecretByName(const std::string &name, duckdb::optional_ptr<duckdb::CatalogTransaction> transaction) override {
+		lookups->fetch_add(1, std::memory_order_relaxed);
+		return CatalogSetSecretStorage::GetSecretByName(name, transaction);
+	}
+
+private:
+	std::shared_ptr<std::atomic<uint64_t>> lookups;
 };
 
 class TemporaryAlternateTestStorage final : public duckdb::CatalogSetSecretStorage {
@@ -91,7 +104,7 @@ void RegisterStoredSecret(duckdb::Connection &connection, duckdb::unique_ptr<con
 } // namespace
 
 // These cases own exact-name resolution, current-transaction visibility,
-// lifecycle semantics, storage validation, and host-failure containment.
+// lifecycle semantics, and exact temporary-memory storage authority.
 void TestResolutionValidatesTypeProviderShapeAndToken() {
 	duckdb::DuckDB database(nullptr);
 	RegisterSecrets(database);
@@ -124,11 +137,13 @@ void TestResolutionValidatesTypeProviderShapeAndToken() {
 	RequireAuthenticationFailure([&]() { (void)Resolve(connection, "integer_stored_token"); });
 }
 
-void TestResolutionObservesReplacementDropStorageAndAmbiguity() {
+void TestResolutionObservesReplacementDropAndMemoryIsolation() {
 	duckdb::DuckDB database(nullptr);
 	RegisterSecrets(database);
 	auto &manager = duckdb::SecretManager::Get(*database.instance);
-	manager.LoadSecretStorage(duckdb::make_uniq<PersistentMemoryTestStorage>(*database.instance, "query_persistent"));
+	auto persistent_lookups = std::shared_ptr<std::atomic<uint64_t>>(new std::atomic<uint64_t>(0));
+	manager.LoadSecretStorage(
+	    duckdb::make_uniq<PersistentMemoryTestStorage>(*database.instance, "query_persistent", persistent_lookups));
 	duckdb::Connection connection(database);
 	const auto token_a = TokenCanary('A');
 	const auto token_b = TokenCanary('B');
@@ -164,12 +179,17 @@ void TestResolutionObservesReplacementDropStorageAndAmbiguity() {
 	RegisterStoredSecret(connection, StoredSecret("duckdb_api", "config", "persistent_only", &token),
 	                     duckdb::SecretPersistType::PERSISTENT, "query_persistent");
 	RequireAuthenticationFailure([&]() { (void)Resolve(connection, "persistent_only"); }, token_a);
+	Require(persistent_lookups->load(std::memory_order_relaxed) == 0,
+	        "persistent-only resolution queried the excluded credential storage");
 
-	const std::string escaped_ambiguous = "ambiguous\"\\name";
-	RegisterStoredSecret(connection, StoredSecret("duckdb_api", "config", escaped_ambiguous, &token));
-	RegisterStoredSecret(connection, StoredSecret("duckdb_api", "config", escaped_ambiguous, &token),
+	const std::string shadowed_name = "shadowed\"\\name";
+	RegisterStoredSecret(connection, StoredSecret("duckdb_api", "config", shadowed_name, &token));
+	RegisterStoredSecret(connection, StoredSecret("duckdb_api", "config", shadowed_name, &token),
 	                     duckdb::SecretPersistType::PERSISTENT, "query_persistent");
-	RequireAuthenticationFailure([&]() { (void)Resolve(connection, escaped_ambiguous); }, token_a);
+	Require(Resolve(connection, shadowed_name) != nullptr,
+	        "same-named persistent state interfered with the temporary-memory secret");
+	Require(persistent_lookups->load(std::memory_order_relaxed) == 0,
+	        "temporary-memory resolution queried the excluded persistent credential storage");
 }
 
 void TestResolutionUsesCurrentTransaction() {
@@ -245,17 +265,17 @@ void TestResolutionRequiresAnActiveTransaction() {
 	RequireInternalFailure([&]() { (void)duckdb::ResolveDuckdbApiSecret(*connection.context, "outside_transaction"); });
 }
 
-void TestResolutionPreservesHostInterruption() {
+void TestResolutionDoesNotQueryExcludedInterruptingStorage() {
 	duckdb::DuckDB database(nullptr);
 	RegisterSecrets(database);
 	auto &manager = duckdb::SecretManager::Get(*database.instance);
 	manager.LoadSecretStorage(
 	    duckdb::make_uniq<FaultingTestStorage>(*database.instance, "query_interrupting", StorageFailure::INTERRUPT));
 	duckdb::Connection connection(database);
-	RequireCancellation([&]() { (void)Resolve(connection, "interrupt_me"); });
+	RequireAuthenticationFailure([&]() { (void)Resolve(connection, "interrupt_me"); });
 }
 
-void TestResolutionClassifiesOtherHostFailuresAsInternal() {
+void TestResolutionDoesNotQueryExcludedFaultingStorages() {
 	for (const auto failure : {StorageFailure::HOST, StorageFailure::INVALID_CONFIGURATION}) {
 		duckdb::DuckDB database(nullptr);
 		RegisterSecrets(database);
@@ -271,7 +291,7 @@ void TestResolutionClassifiesOtherHostFailuresAsInternal() {
 		}
 		manager.LoadSecretStorage(duckdb::make_uniq<FaultingTestStorage>(*database.instance, "query_faulting", failure,
 		                                                                 std::move(diagnostic)));
-		RequireInternalFailure([&]() { (void)Resolve(connection, "host_failure"); }, token_canary);
+		RequireAuthenticationFailure([&]() { (void)Resolve(connection, "host_failure"); }, token_canary);
 	}
 }
 

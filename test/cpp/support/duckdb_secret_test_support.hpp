@@ -27,7 +27,6 @@ void RequireQueryFailure(duckdb::Connection &connection, const std::string &sql,
                          const std::string &forbidden = "");
 void RequireAuthenticationFailure(const std::function<void()> &action, const std::string &forbidden = "");
 void RequireInternalFailure(const std::function<void()> &action, const std::string &forbidden = "");
-void RequireCancellation(const std::function<void()> &action);
 void RequireCanaryAbsentFromInventory(duckdb::Connection &connection, const std::string &canary);
 std::unique_ptr<duckdb_api::ScanAuthorization> Resolve(duckdb::Connection &connection, const std::string &logical_name);
 void RunTest(const char *name, const std::function<void()> &test);
@@ -37,12 +36,12 @@ void TestRegisteredSurfaceIsTemporaryConfigAndRedacted();
 void TestCreationRejectsImplicitPersistenceAndMalformedOptions();
 void TestFailedProviderRegistrationNeverPublishesScan();
 void TestResolutionValidatesTypeProviderShapeAndToken();
-void TestResolutionObservesReplacementDropStorageAndAmbiguity();
+void TestResolutionObservesReplacementDropAndMemoryIsolation();
 void TestResolutionUsesCurrentTransaction();
 void TestResolutionRequiresTemporaryMemoryIndependently();
 void TestResolutionRequiresAnActiveTransaction();
-void TestResolutionPreservesHostInterruption();
-void TestResolutionClassifiesOtherHostFailuresAsInternal();
+void TestResolutionDoesNotQueryExcludedInterruptingStorage();
+void TestResolutionDoesNotQueryExcludedFaultingStorages();
 
 } // namespace duckdb_secret
 } // namespace duckdb_api_test

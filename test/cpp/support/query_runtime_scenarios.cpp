@@ -47,8 +47,10 @@ void ThrowScenarioError(QueryRuntimeScenario scenario) {
 
 class QueryScenarioStream : public duckdb_api::BatchStream {
 public:
-	QueryScenarioStream(QueryRuntimeScenario scenario_p, std::shared_ptr<QueryLifecycleProbe> probe_p)
-	    : scenario(scenario_p), probe(std::move(probe_p)), offset(0), cancelled(false), closed(false) {
+	QueryScenarioStream(QueryRuntimeScenario scenario_p, bool authenticated_p,
+	                    std::shared_ptr<QueryLifecycleProbe> probe_p)
+	    : scenario(scenario_p), authenticated(authenticated_p), probe(std::move(probe_p)), offset(0), cancelled(false),
+	      closed(false) {
 	}
 
 	~QueryScenarioStream() noexcept override {
@@ -75,6 +77,16 @@ public:
 
 		batch.column_kinds = {duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR,
 		                      duckdb_api::ValueKind::BOOLEAN};
+		if (authenticated) {
+			if (offset != 0) {
+				return false;
+			}
+			batch.rows.push_back(Row(42, "authenticated", true));
+			offset = 1;
+			probe->batches.fetch_add(1, std::memory_order_relaxed);
+			probe->rows.fetch_add(1, std::memory_order_relaxed);
+			return true;
+		}
 		if (scenario == QueryRuntimeScenario::STREAMING) {
 			const auto first_id = static_cast<int64_t>(offset + 1);
 			batch.rows.push_back(Row(first_id, "stream", false));
@@ -126,6 +138,7 @@ public:
 
 private:
 	QueryRuntimeScenario scenario;
+	const bool authenticated;
 	std::shared_ptr<QueryLifecycleProbe> probe;
 	std::size_t offset;
 	std::atomic<bool> cancelled;
@@ -139,7 +152,32 @@ public:
 	}
 
 	std::unique_ptr<duckdb_api::BatchStream> Open(const duckdb_api::ScanPlan &,
-	                                              duckdb_api::ExecutionControl &control) const override {
+	                                              duckdb_api::ExecutionControl &) const override {
+		probe->legacy_open_calls.fetch_add(1, std::memory_order_relaxed);
+		throw std::logic_error("Query adapter invoked the legacy executor entry point");
+	}
+
+protected:
+	std::unique_ptr<duckdb_api::BatchStream>
+	OpenAuthorizationEnvelope(const duckdb_api::ScanPlan &plan, duckdb_api::ScanAuthorization authorization,
+	                          duckdb_api::ExecutionControl &control) const override {
+		probe->authorization_open_calls.fetch_add(1, std::memory_order_relaxed);
+		const auto alternative = AlternativeOf(authorization);
+		const bool authenticated = alternative == AuthorizationAlternative::GITHUB_USER_BEARER;
+		if (!authenticated) {
+			probe->anonymous_authorizations.fetch_add(1, std::memory_order_relaxed);
+		} else {
+			probe->github_bearer_authorizations.fetch_add(1, std::memory_order_relaxed);
+		}
+		if (authenticated && (plan.RelationName() != "authenticated_user" ||
+		                      plan.Authentication() != duckdb_api::FeatureState::ENABLED ||
+		                      plan.Domain() != duckdb_api::BaseDomain::SUCCESSFUL_ROOT_OBJECT ||
+		                      plan.Operation().cardinality != duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS)) {
+			throw std::logic_error("bearer authorization received the wrong planned relation");
+		}
+		if (!authenticated && plan.Authentication() != duckdb_api::FeatureState::DISABLED) {
+			throw std::logic_error("anonymous authorization received an authenticated scan plan");
+		}
 		if (control.IsCancellationRequested()) {
 			throw duckdb_api::ExecutionCancelled();
 		}
@@ -165,7 +203,7 @@ public:
 			return std::unique_ptr<duckdb_api::BatchStream>();
 		}
 		probe->streams_opened.fetch_add(1, std::memory_order_relaxed);
-		return std::unique_ptr<duckdb_api::BatchStream>(new QueryScenarioStream(scenario, probe));
+		return std::unique_ptr<duckdb_api::BatchStream>(new QueryScenarioStream(scenario, authenticated, probe));
 	}
 
 private:
@@ -176,7 +214,8 @@ private:
 } // namespace
 
 QueryLifecycleProbe::QueryLifecycleProbe()
-    : streams_opened(0), next_calls(0), batches(0), rows(0), cancellations(0), streams_closed(0), active_waiters(0) {
+    : legacy_open_calls(0), authorization_open_calls(0), anonymous_authorizations(0), github_bearer_authorizations(0),
+      streams_opened(0), next_calls(0), batches(0), rows(0), cancellations(0), streams_closed(0), active_waiters(0) {
 }
 
 std::shared_ptr<const duckdb_api::ScanExecutor> BuildQueryScenarioExecutor(QueryRuntimeScenario scenario,

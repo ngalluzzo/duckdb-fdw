@@ -23,9 +23,11 @@ void RegisterDuckdbApiSecrets(ExtensionLoader &loader);
 
 // Resolve the current case-insensitive exact name through DuckDB's system-
 // catalog transaction and return one opaque Runtime capability. Resolution
-// accepts only a `duckdb_api/config` KeyValueSecret whose host entry is
-// explicitly temporary and stored in `memory`; missing, ambiguous, malformed,
-// or differently typed or stored entries fail closed without exposing values.
+// queries only the exact `memory` storage and accepts a `duckdb_api/config`
+// KeyValueSecret whose host entry is explicitly temporary. Persistent or
+// alternate-storage entries cannot satisfy or make that selection ambiguous;
+// missing, malformed, or differently typed entries fail closed without
+// exposing values.
 //
 // The ClientContext, CatalogTransaction, SecretEntry, and plaintext token are
 // call-scoped. The DuckDB objects are destroyed before this function transfers

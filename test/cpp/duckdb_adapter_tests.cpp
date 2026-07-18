@@ -5,6 +5,7 @@
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/main/stream_query_result.hpp"
 #include "duckdb_api/connector.hpp"
+#include "support/duckdb_adapter_auth_test_support.hpp"
 #include "support/query_runtime_scenarios.hpp"
 #include "support/require.hpp"
 
@@ -356,6 +357,8 @@ int main() {
 		TestEarlyResultCloseAndLastOwnerTeardown();
 		TestIndependentConcurrentScans();
 		TestSynchronizedCancellation();
+		duckdb_api_test::RunDuckdbAdapterAuthBindTests();
+		duckdb_api_test::RunDuckdbAdapterAuthLifecycleTests();
 		std::cout << "DuckDB adapter tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {
