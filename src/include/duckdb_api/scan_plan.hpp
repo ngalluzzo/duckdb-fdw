@@ -25,6 +25,7 @@ enum class PlannedProtocol { REST };
 enum class PlannedHttpMethod { GET };
 enum class PlannedCardinality { ZERO_TO_MANY };
 enum class PlannedReplaySafety { SAFE };
+enum class PlannedUrlScheme { HTTP, HTTPS };
 
 // The fixed request defines the complete base relation for this preview. Its
 // q and per_page fields are source constants, not SQL predicate or limit
@@ -53,6 +54,15 @@ struct PlannedHttpHeader {
 	std::string value;
 };
 
+// An exact executable origin copied from Connector's validated typed origin.
+// Keeping scheme, host, and port separate prevents Runtime from reparsing a
+// URL to recover authority.
+struct PlannedRestOrigin {
+	PlannedUrlScheme scheme;
+	std::string host;
+	std::uint16_t port;
+};
+
 // The complete protocol operation assigned to Remote Runtime. Runtime may
 // reject facts outside its executable capability, but it must not derive
 // relational ownership from these request fields.
@@ -62,7 +72,7 @@ struct PlannedRestOperation {
 	PlannedHttpMethod method;
 	PlannedCardinality cardinality;
 	PlannedReplaySafety replay_safety;
-	std::string base_url;
+	PlannedRestOrigin origin;
 	std::string path;
 	std::vector<PlannedQueryParameter> query_parameters;
 	std::vector<PlannedHttpHeader> headers;
@@ -105,7 +115,9 @@ struct ResourceBudgets {
 	uint64_t wall_milliseconds;
 	uint64_t concurrency;
 
-	bool IsLiveRestBudget() const;
+	// True for any nonzero effective envelope at or below host caps. Request
+	// and concurrency remain exactly one for the single-attempt preview.
+	bool IsWithinLiveRestBounds() const;
 };
 
 // Complete immutable handoff from Relational Semantics to Query Experience

@@ -1,6 +1,7 @@
 #include "duckdb_api/scan_plan.hpp"
 
 #include <algorithm>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -39,6 +40,36 @@ const char *ReplaySafetyName(PlannedReplaySafety replay_safety) {
 		return "safe";
 	}
 	throw std::logic_error("scan plan contains an unknown replay-safety classification");
+}
+
+const char *UrlSchemeName(PlannedUrlScheme scheme) {
+	switch (scheme) {
+	case PlannedUrlScheme::HTTP:
+		return "http";
+	case PlannedUrlScheme::HTTPS:
+		return "https";
+	}
+	throw std::logic_error("scan plan contains an unknown URL scheme");
+}
+
+const char *UrlSchemeName(CompiledUrlScheme scheme) {
+	switch (scheme) {
+	case CompiledUrlScheme::HTTP:
+		return "http";
+	case CompiledUrlScheme::HTTPS:
+		return "https";
+	}
+	throw std::logic_error("compiled connector contains an unknown URL scheme");
+}
+
+PlannedUrlScheme PlanUrlScheme(CompiledUrlScheme scheme) {
+	switch (scheme) {
+	case CompiledUrlScheme::HTTP:
+		return PlannedUrlScheme::HTTP;
+	case CompiledUrlScheme::HTTPS:
+		return PlannedUrlScheme::HTTPS;
+	}
+	throw std::logic_error("compiled connector contains an unknown URL scheme");
 }
 
 const char *BaseDomainName(BaseDomain domain) {
@@ -104,35 +135,42 @@ bool HasDuplicateName(const std::vector<VALUE> &values) {
 	return false;
 }
 
-std::string UrlScheme(const std::string &base_url) {
-	const auto delimiter = base_url.find("://");
-	if (delimiter == std::string::npos || delimiter == 0) {
-		return std::string();
-	}
-	return base_url.substr(0, delimiter);
+bool ContainsUrlStructure(const std::string &value) {
+	return value.find_first_of("?#\r\n") != std::string::npos;
 }
 
-std::string UrlHost(const std::string &base_url) {
-	const auto delimiter = base_url.find("://");
-	if (delimiter == std::string::npos) {
-		return std::string();
+bool HasInvalidQueryStructure(const std::vector<CompiledQueryParameter> &query_parameters) {
+	for (const auto &parameter : query_parameters) {
+		if (parameter.name.find_first_of("=&?#\r\n") != std::string::npos || parameter.encoded_value.empty() ||
+		    parameter.encoded_value.find_first_of("&=?#\r\n") != std::string::npos) {
+			return true;
+		}
 	}
-	const auto authority_start = delimiter + 3;
-	const auto authority_end = base_url.find('/', authority_start);
-	const auto authority = base_url.substr(authority_start, authority_end - authority_start);
-	if (authority.empty() || authority.find('@') != std::string::npos) {
-		return std::string();
-	}
-	if (authority[0] == '[') {
-		const auto close = authority.find(']');
-		return close == std::string::npos ? std::string() : authority.substr(1, close - 1);
-	}
-	const auto port = authority.find(':');
-	return authority.substr(0, port);
+	return false;
 }
 
-bool Contains(const std::vector<std::string> &values, const std::string &expected) {
-	return std::find(values.begin(), values.end(), expected) != values.end();
+bool HasInvalidHeaderStructure(const std::vector<CompiledHttpHeader> &headers) {
+	for (const auto &header : headers) {
+		if (header.value.empty() || header.name.find_first_of(": \t\r\n") != std::string::npos ||
+		    header.value.find_first_of("\r\n") != std::string::npos) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool HasExactPolicyEntry(const std::vector<std::string> &values, const std::string &expected) {
+	return values.size() == 1 && values[0] == expected;
+}
+
+bool IsSupportedOriginPort(const CompiledRestOrigin &origin, const CompiledNetworkPolicy &policy) {
+	if (origin.port == 0) {
+		return false;
+	}
+	if (origin.scheme == CompiledUrlScheme::HTTPS) {
+		return origin.port == 443 && !policy.loopback_addresses_enabled;
+	}
+	return origin.scheme == CompiledUrlScheme::HTTP && policy.loopback_addresses_enabled;
 }
 
 std::vector<std::string> ProjectedColumnNames(const std::vector<CompiledColumn> &columns) {
@@ -166,16 +204,20 @@ void ValidateConnector(const CompiledConnector &connector) {
 	    operation.authentication_enabled || operation.pagination_enabled || operation.records_extractor.empty()) {
 		throw std::logic_error("live planner received an unsupported base-row operation");
 	}
-	if (operation.request.base_url.empty() || operation.request.path.empty() || operation.request.path[0] != '/' ||
-	    operation.request.path.find('?') != std::string::npos || operation.request.path.find('#') != std::string::npos ||
-	    HasDuplicateName(operation.request.query_parameters) || HasDuplicateName(operation.request.headers)) {
+	if (operation.request.path.empty() || operation.request.path[0] != '/' ||
+	    ContainsUrlStructure(operation.request.path) || HasDuplicateName(operation.request.query_parameters) ||
+	    HasInvalidQueryStructure(operation.request.query_parameters) || HasDuplicateName(operation.request.headers) ||
+	    HasInvalidHeaderStructure(operation.request.headers)) {
 		throw std::logic_error("live planner received invalid structural REST metadata");
 	}
 
-	const auto scheme = UrlScheme(operation.request.base_url);
-	const auto host = UrlHost(operation.request.base_url);
-	if (scheme.empty() || host.empty() || !Contains(connector.network_policy.allowed_schemes, scheme) ||
-	    !Contains(connector.network_policy.allowed_hosts, host) || connector.network_policy.redirects_enabled ||
+	const auto &origin = operation.request.origin;
+	const auto scheme = UrlSchemeName(origin.scheme);
+	const auto &host = origin.host.Value();
+	if (!HasExactPolicyEntry(connector.network_policy.allowed_schemes, scheme) ||
+	    !HasExactPolicyEntry(connector.network_policy.allowed_hosts, host) ||
+	    !IsSupportedOriginPort(origin, connector.network_policy) || connector.network_policy.redirects_enabled ||
+	    connector.network_policy.private_addresses_enabled || connector.network_policy.link_local_addresses_enabled ||
 	    connector.network_policy.max_response_bytes == 0 || connector.resource_ceilings.max_records == 0 ||
 	    connector.resource_ceilings.max_extracted_string_bytes == 0) {
 		throw std::logic_error("live planner received an unsupported network or resource declaration");
@@ -223,19 +265,22 @@ void AppendColumns(std::ostringstream &result, const std::vector<PlannedColumn> 
 		if (index > 0) {
 			result << ',';
 		}
-		result << columns[index].name << ':' << columns[index].logical_type
-		       << (columns[index].nullable ? '?' : '!') << ':' << columns[index].extractor;
+		result << columns[index].name << ':' << columns[index].logical_type << (columns[index].nullable ? '?' : '!')
+		       << ':' << columns[index].extractor;
 	}
 }
 
 } // namespace
 
-bool ResourceBudgets::IsLiveRestBudget() const {
-	return request_attempts == HOST_MAX_REQUEST_ATTEMPTS && response_bytes == HOST_MAX_RESPONSE_BYTES &&
-	       header_bytes == HOST_MAX_HEADER_BYTES && decompressed_bytes == HOST_MAX_DECOMPRESSED_BYTES &&
-	       decoded_records == 3 && extracted_string_bytes == HOST_MAX_EXTRACTED_STRING_BYTES &&
-	       json_nesting == HOST_MAX_JSON_NESTING && decoded_memory_bytes == HOST_MAX_DECODED_MEMORY_BYTES &&
-	       batch_rows == OUTPUT_BATCH_ROWS && wall_milliseconds == MAX_EXECUTION_MILLISECONDS &&
+bool ResourceBudgets::IsWithinLiveRestBounds() const {
+	return request_attempts == HOST_MAX_REQUEST_ATTEMPTS && response_bytes > 0 &&
+	       response_bytes <= HOST_MAX_RESPONSE_BYTES && header_bytes > 0 && header_bytes <= HOST_MAX_HEADER_BYTES &&
+	       decompressed_bytes > 0 && decompressed_bytes <= HOST_MAX_DECOMPRESSED_BYTES && decoded_records > 0 &&
+	       decoded_records <= HOST_MAX_DECODED_RECORDS && extracted_string_bytes > 0 &&
+	       extracted_string_bytes <= HOST_MAX_EXTRACTED_STRING_BYTES && json_nesting > 0 &&
+	       json_nesting <= HOST_MAX_JSON_NESTING && decoded_memory_bytes > 0 &&
+	       decoded_memory_bytes <= HOST_MAX_DECODED_MEMORY_BYTES && batch_rows > 0 && batch_rows <= OUTPUT_BATCH_ROWS &&
+	       wall_milliseconds > 0 && wall_milliseconds <= MAX_EXECUTION_MILLISECONDS &&
 	       concurrency == HOST_MAX_CONCURRENCY;
 }
 
@@ -344,12 +389,14 @@ const std::string &ScanPlan::ClassificationReason() const {
 
 std::string ScanPlan::Snapshot() const {
 	std::ostringstream result;
+	result.imbue(std::locale::classic());
 	result << "connector=" << connector_name << ";version=" << connector_version << ";relation=" << relation_name
 	       << ";source_snapshot=[" << source_snapshot << "];domain=" << BaseDomainName(domain)
 	       << ";operation=" << operation.operation_name << ':' << CardinalityName(operation.cardinality) << ':'
 	       << ProtocolName(operation.protocol) << ':' << MethodName(operation.method) << ':'
-	       << ReplaySafetyName(operation.replay_safety) << ";request=base:" << operation.base_url
-	       << ",path:" << operation.path << ",query:[";
+	       << ReplaySafetyName(operation.replay_safety)
+	       << ";request=origin:[scheme:" << UrlSchemeName(operation.origin.scheme) << ",host:" << operation.origin.host
+	       << ",port:" << operation.origin.port << "],path:" << operation.path << ",query:[";
 	AppendQuery(result, operation.query_parameters);
 	result << "],headers:[";
 	AppendHeaders(result, operation.headers);
@@ -362,10 +409,8 @@ std::string ScanPlan::Snapshot() const {
 	       << ",offset:" << OwnerName(ownership.offset)
 	       << ";delegation=remote_ordering:" << DelegationName(remote_ordering)
 	       << ",runtime_ordering:" << DelegationName(runtime_ordering)
-	       << ",remote_limit:" << DelegationName(remote_limit)
-	       << ",remote_offset:" << DelegationName(remote_offset)
-	       << ",runtime_limit:" << DelegationName(runtime_limit)
-	       << ",runtime_offset:" << DelegationName(runtime_offset)
+	       << ",remote_limit:" << DelegationName(remote_limit) << ",remote_offset:" << DelegationName(remote_offset)
+	       << ",runtime_limit:" << DelegationName(runtime_limit) << ",runtime_offset:" << DelegationName(runtime_offset)
 	       << ";features=pagination:" << FeatureName(pagination) << ",providers:" << FeatureName(providers)
 	       << ",retry:" << FeatureName(retry) << ",cache:" << FeatureName(cache)
 	       << ",authentication:" << FeatureName(authentication) << ";network=schemes:[";
@@ -401,7 +446,9 @@ ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const Sca
 	result.operation.method = PlannedHttpMethod::GET;
 	result.operation.cardinality = PlannedCardinality::ZERO_TO_MANY;
 	result.operation.replay_safety = PlannedReplaySafety::SAFE;
-	result.operation.base_url = connector.operation.request.base_url;
+	result.operation.origin = {PlanUrlScheme(connector.operation.request.origin.scheme),
+	                           connector.operation.request.origin.host.Value(),
+	                           connector.operation.request.origin.port};
 	result.operation.path = connector.operation.request.path;
 	for (const auto &query : connector.operation.request.query_parameters) {
 		result.operation.query_parameters.push_back({query.name, query.encoded_value});
@@ -441,8 +488,7 @@ ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const Sca
 	                  HOST_MAX_HEADER_BYTES,
 	                  HOST_MAX_DECOMPRESSED_BYTES,
 	                  std::min(connector.resource_ceilings.max_records, HOST_MAX_DECODED_RECORDS),
-	                  std::min(connector.resource_ceilings.max_extracted_string_bytes,
-	                           HOST_MAX_EXTRACTED_STRING_BYTES),
+	                  std::min(connector.resource_ceilings.max_extracted_string_bytes, HOST_MAX_EXTRACTED_STRING_BYTES),
 	                  HOST_MAX_JSON_NESTING,
 	                  HOST_MAX_DECODED_MEMORY_BYTES,
 	                  OUTPUT_BATCH_ROWS,
