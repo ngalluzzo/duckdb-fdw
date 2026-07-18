@@ -7,11 +7,9 @@
 namespace duckdb_api {
 
 ProductComposition BuildProductComposition() {
-	ProductComposition result;
-	result.connector = BuildNativeGithubConnector();
+	auto connector = BuildNativeGithubConnector();
 	auto runtime = InitializeHttpRuntime();
-	result.executor = std::move(runtime.executor);
-	return result;
+	return {std::move(connector), std::move(runtime.executor)};
 }
 
 } // namespace duckdb_api
