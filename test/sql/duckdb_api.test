@@ -1,5 +1,5 @@
 # name: test/sql/duckdb_api.test
-# description: static duckdb_api SQL contract preserved by 0.3.0
+# description: static public SQL and secret contract for 0.4.0
 # group: [duckdb_api]
 
 statement error
@@ -14,9 +14,16 @@ SELECT extension_version
 FROM duckdb_extensions()
 WHERE extension_name = 'duckdb_api';
 ----
-0.3.0
+0.4.0
 
-# DESCRIBE binds and plans the sole live relation without executing its source.
+query TT
+SELECT type, default_provider
+FROM duckdb_secret_types()
+WHERE type = 'duckdb_api';
+----
+duckdb_api	config
+
+# DESCRIBE binds and plans the anonymous relation without executing its source.
 query TTTTTT
 DESCRIBE SELECT *
 FROM duckdb_api_scan(
@@ -40,6 +47,83 @@ ORDER BY id;
 
 statement ok
 DEALLOCATE live_scan;
+
+# Authenticated bind, describe, explain, and prepare retain only this logical
+# name. They do not resolve the missing secret or acquire network authority.
+query TTTTTT
+DESCRIBE SELECT *
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_user',
+    secret := 'offline_secret'
+);
+----
+id	BIGINT	YES	NULL	NULL	NULL
+login	VARCHAR	YES	NULL	NULL	NULL
+site_admin	BOOLEAN	YES	NULL	NULL	NULL
+
+statement ok
+EXPLAIN SELECT *
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_user',
+    secret := 'offline_secret'
+);
+
+statement ok
+PREPARE authenticated_scan AS
+SELECT id, login, site_admin
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_user',
+    secret := 'offline_secret'
+);
+
+statement ok
+DEALLOCATE authenticated_scan;
+
+statement ok
+CREATE TEMPORARY SECRET sql_contract (
+    TYPE duckdb_api,
+    PROVIDER config,
+    TOKEN 'sql-contract-sentinel'
+);
+
+query TTTTT
+SELECT type, provider, storage, persistent, secret_string
+FROM duckdb_secrets()
+WHERE name = 'sql_contract';
+----
+duckdb_api	config	memory	false	name=sql_contract;type=duckdb_api;provider=config;serializable=true;scope;token=redacted
+
+statement ok
+DROP SECRET sql_contract;
+
+statement error
+CREATE SECRET persistent_contract (
+    TYPE duckdb_api,
+    PROVIDER config,
+    TOKEN 'rejected'
+);
+----
+Invalid Input Error: [duckdb_api][authentication] duckdb_api secrets require explicit CREATE TEMPORARY SECRET
+
+statement error
+SELECT * FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_user'
+);
+----
+Binder Error: [duckdb_api][bind] connector=github relation=authenticated_user: required named argument secret is missing
+
+statement error
+SELECT * FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'duckdb_login_search_page',
+    secret := 'rejected'
+);
+----
+Binder Error: [duckdb_api][bind] connector=github relation=duckdb_login_search_page: named argument secret is not accepted
 
 statement error
 SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'items');

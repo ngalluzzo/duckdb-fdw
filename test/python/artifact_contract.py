@@ -14,7 +14,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.3.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.4.0", True, False, "NOT_INSTALLED")
 EXPECTED_SCHEMA = [
     ("id", "BIGINT"),
     ("login", "VARCHAR"),
@@ -79,7 +79,7 @@ def main() -> int:
 
     repository_root = pathlib.Path(__file__).resolve().parents[2]
     expected_behavior = json.loads(
-        (repository_root / "release/0.3.0/public_contract.json").read_text()
+        (repository_root / "release/0.4.0/public_contract.json").read_text()
     )
     source_artifact = pathlib.Path(sys.argv[1]).resolve(strict=True)
     artifact_bytes = source_artifact.read_bytes()
@@ -173,6 +173,7 @@ def main() -> int:
         if len(functions) != 1 or set(zip(functions[0][0], functions[0][1])) != {
             ("connector", "VARCHAR"),
             ("relation", "VARCHAR"),
+            ("secret", "VARCHAR"),
         }:
             raise AssertionError(f"unexpected named function signature: {functions!r}")
 
@@ -188,6 +189,40 @@ def main() -> int:
         ) - before_types
         if added_types:
             raise AssertionError(f"extension registered types: {added_types!r}")
+
+        secret_types = connection.execute(
+            """
+            SELECT type, default_provider
+            FROM duckdb_secret_types()
+            WHERE type = 'duckdb_api'
+            """
+        ).fetchall()
+        if secret_types != [("duckdb_api", "config")]:
+            raise AssertionError(f"unexpected secret type inventory: {secret_types!r}")
+        secret_sentinel = "artifact-contract-token-sentinel"
+        connection.execute(
+            "CREATE TEMPORARY SECRET artifact_contract "
+            f"(TYPE duckdb_api, PROVIDER config, TOKEN '{secret_sentinel}')"
+        )
+        secret_inventory = connection.execute(
+            """
+            SELECT type, provider, persistent, storage, secret_string
+            FROM duckdb_secrets()
+            WHERE name = 'artifact_contract'
+            """
+        ).fetchone()
+        if secret_inventory != (
+            "duckdb_api",
+            "config",
+            False,
+            "memory",
+            "name=artifact_contract;type=duckdb_api;provider=config;"
+            "serializable=true;scope;token=redacted",
+        ):
+            raise AssertionError(f"secret inventory drifted: {secret_inventory!r}")
+        if secret_sentinel in repr(secret_inventory):
+            raise AssertionError("secret inventory exposed the token")
+        connection.execute("DROP SECRET artifact_contract")
 
         diagnostics = expected_behavior["diagnostics"]
         expect_bind_error(
@@ -205,6 +240,18 @@ def main() -> int:
             "SELECT * FROM duckdb_api_scan(connector := 'github')",
             diagnostics["missing_relation"],
         )
+        expect_bind_error(
+            connection,
+            "SELECT * FROM duckdb_api_scan(connector := 'github', "
+            "relation := 'authenticated_user')",
+            diagnostics["authenticated_secret_missing"],
+        )
+        expect_bind_error(
+            connection,
+            "SELECT * FROM duckdb_api_scan(connector := 'github', "
+            "relation := 'duckdb_login_search_page', secret := 'unused')",
+            diagnostics["anonymous_secret_rejected"],
+        )
 
         description = connection.execute(
             """
@@ -216,6 +263,18 @@ def main() -> int:
         described_schema = [(row[0], row[1]) for row in description]
         if described_schema != EXPECTED_SCHEMA:
             raise AssertionError(f"offline bind schema drifted: {description!r}")
+        authenticated_description = connection.execute(
+            """
+            DESCRIBE SELECT * FROM duckdb_api_scan(
+                connector := 'github', relation := 'authenticated_user',
+                secret := 'not_resolved_during_bind'
+            )
+            """
+        ).fetchall()
+        if [(row[0], row[1]) for row in authenticated_description] != EXPECTED_SCHEMA:
+            raise AssertionError(
+                f"authenticated offline schema drifted: {authenticated_description!r}"
+            )
 
         connection.execute(
             """
@@ -238,28 +297,44 @@ def main() -> int:
         behavior = {
             "added_settings": [],
             "added_types": [],
-            "authority_inputs": [],
+            "authority_inputs": ["explicit_named_temporary_duckdb_secret"],
             "diagnostics": diagnostics,
             "duckdb": list(EXPECTED_DUCKDB[:2]),
-            "extension": ["duckdb_api", "0.3.0"],
+            "extension": ["duckdb_api", "0.4.0"],
             "function": {
                 "name": "duckdb_api_scan",
                 "named_parameters": {
                     "connector": "VARCHAR",
                     "relation": "VARCHAR",
+                    "secret": "VARCHAR",
                 },
             },
-            "relation": {
-                "cardinality": {"maximum": 3, "minimum": 0},
-                "connector": "github",
-                "domain": "single_fixed_github_search_response_page",
-                "duckdb_visible_not_null": False,
-                "name": "duckdb_login_search_page",
-                "public_row_identity": "not_guaranteed",
-                "public_row_order": "not_guaranteed",
-                "required_values": True,
-                "schema": [list(column) for column in EXPECTED_SCHEMA],
-            },
+            "relations": [
+                {
+                    "cardinality": {"maximum": 3, "minimum": 0},
+                    "connector": "github",
+                    "domain": "single_fixed_github_search_response_page",
+                    "duckdb_visible_not_null": False,
+                    "name": "duckdb_login_search_page",
+                    "public_row_identity": "not_guaranteed",
+                    "public_row_order": "not_guaranteed",
+                    "required_values": True,
+                    "schema": [list(column) for column in EXPECTED_SCHEMA],
+                    "secret": "rejected",
+                },
+                {
+                    "cardinality": {"maximum": 1, "minimum": 1},
+                    "connector": "github",
+                    "domain": "successful_authenticated_github_user_response",
+                    "duckdb_visible_not_null": False,
+                    "name": "authenticated_user",
+                    "public_row_identity": "current_secret_principal",
+                    "public_row_order": "single_row",
+                    "required_values": True,
+                    "schema": [list(column) for column in EXPECTED_SCHEMA],
+                    "secret": "required_explicit_name",
+                },
+            ],
             "relational_ownership": {
                 "filter": "duckdb",
                 "limit": "duckdb",
@@ -267,9 +342,18 @@ def main() -> int:
                 "ordering": "duckdb",
             },
             "removed_relations": [{"connector": "example", "relation": "items"}],
+            "secret_type": {
+                "environment_provider": False,
+                "fields": {"TOKEN": "redacted_nonempty_VARCHAR"},
+                "implicit_selection": False,
+                "persistent": False,
+                "provider": "config",
+                "storage": "memory",
+                "type": "duckdb_api",
+            },
         }
         if behavior != expected_behavior:
-            raise AssertionError("observed public inventory disagrees with the 0.3.0 contract")
+            raise AssertionError("observed public inventory disagrees with the 0.4.0 contract")
         print(
             json.dumps(
                 {

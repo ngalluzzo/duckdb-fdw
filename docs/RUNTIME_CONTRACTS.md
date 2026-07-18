@@ -72,7 +72,7 @@ The runtime contracts do not require:
 - Deep optimizer integration through DuckDB internal C++ APIs.
 - Columnar remote-source batches.
 
-### 1.2 Accepted native `0.3.0` mapping
+### 1.2 Accepted native `0.4.0` mapping
 
 RFC 0005 replaces the fixture preview with a bounded live REST subset mapped
 into private native C++ types. Those types are neither a public ABI nor a
@@ -80,10 +80,10 @@ replacement for the intended portable Rust runtime.
 
 | Semantic artifact | Native preview mapping |
 |---|---|
-| `CompiledConnector` | Immutable `github` version `0.3.0` snapshot with the bounded `duckdb_login_search_page` relation, three required columns, one fixed many-row REST operation, typed HTTPS origin, ordered query and headers, extraction paths, and connector-owned ceilings |
-| `ScanRequest` | Full projection closure; `TRUE` predicate; empty ordering; unset limit and offset; no SQL text or I/O capability |
-| `ScanPlan` | Fixed `GET /search/users?q=duckdb+in%3Alogin&per_page=3`, `$.items[*]`, typed destination capability, `TRUE` remote and residual predicates, DuckDB ownership of filtering/order/limit/offset, disabled pagination/retry/cache/auth/providers, and explicit hard budgets |
-| `BatchStream` | Synchronous one-request pull stream with whole-response bounded JSON decode, schema-aligned two-row batches, one deadline initialized by the first execution work and retained across later pulls, cancellation checks, and idempotent close |
+| `CompiledConnector` | Immutable `github` version `0.4.0` snapshot with the bounded anonymous page and exactly-one authenticated-user relations, three required columns, fixed structural REST operations, logical credential policy, typed HTTPS origin, extraction paths, and connector-owned ceilings |
+| `ScanRequest` | Selected relation and optional logical secret reference; full projection closure; `TRUE` predicate; empty ordering; unset limit and offset; no credential bytes, SQL text, or I/O capability |
+| `ScanPlan` | One fixed anonymous search or authenticated root-object operation, typed destination and bearer obligation where required, `TRUE` remote/residual predicates, DuckDB relational ownership, disabled pagination/retry/cache/providers, and explicit hard budgets; no credential bytes |
+| `BatchStream` | Synchronous one-request pull stream owning either the anonymous or opaque GitHub-user authorization alternative, bounded JSON decode, schema-aligned batches, one retained deadline, cancellation checks, and idempotent close |
 
 The native adapter receives an immutable `ScanExecutor` from product
 composition and asks it to open each `BatchStream`. The production executor
@@ -95,7 +95,10 @@ retain that view. It reports cancellation through a runtime marker that the
 adapter translates to DuckDB interruption, so `ClientContext` and DuckDB
 exceptions remain outside runtime interfaces.
 
-No connector compiler, package loader, protocol registry, secret capability,
+Query registers the narrow `duckdb_api/config` secret type and resolves the
+explicit name from temporary `memory` storage once per global initialization.
+Only the move-only authorization capability crosses into Remote Runtime. No
+connector compiler, package loader, protocol registry, general secret reader,
 provider pipeline, pagination, retry, cache, async runtime, or cross-language
 FFI exists in this profile. The snapshot is built from repository metadata at
 extension construction; arbitrary connector syntax is not accepted.
@@ -804,8 +807,9 @@ that records these capabilities. A capability is enabled only after its full
 lifecycle behavior, including teardown and error paths, is verified.
 
 The accepted native profile records projection, filters, ordering, limit,
-offset, progress, and secret-manager access as unavailable. Cancellation is
-verified. It uses one DuckDB source task, requests the full projection closure,
+offset, and progress as unavailable. Its secret-manager coupling is restricted
+to exact-name temporary-memory resolution during global initialization and is
+never exposed to planning or Runtime. Cancellation is verified. It uses one DuckDB source task, requests the full projection closure,
 and leaves every row-removing, ordering, and bounding operation in DuckDB.
 
 An adapter cannot delegate limit, offset, or ordering past an unavailable or
@@ -828,7 +832,7 @@ individual scan. Extension shutdown cancels scans, closes transports, drains
 bounded queues, and joins worker threads. Panics are caught at every FFI
 callback and converted to internal errors; unwinding never crosses the C ABI.
 
-The native `0.3.0` profile has no async worker. Before any version inspection,
+The native `0.4.0` profile has no async worker. Before any version inspection,
 its process owner calls `curl_global_init(CURL_GLOBAL_DEFAULT)`, then verifies
 the exact supported libcurl version, TLS-backend identity, and
 `CURL_VERSION_THREADSAFE` capability. A rejected, unpublished initialization
@@ -1490,7 +1494,8 @@ pub trait ScanExecutor: Send + Sync {
 ```
 
 The native preview maps this service to an immutable C++ `ScanExecutor` whose
-`Open` method accepts the immutable `ScanPlan` and a call-scoped
+`OpenWithAuthorization` method accepts the immutable `ScanPlan`, one closed
+anonymous-or-GitHub-bearer capability envelope, and a call-scoped
 `ExecutionControl`, then returns one independently owned `BatchStream`. The
 live implementation validates the fixed request, typed origin, network
 capability, schema, disabled features, and hard budgets before transport work.
@@ -1922,6 +1927,13 @@ pub struct AuthorizedSecrets {
 A `SecretHandle` is resolved only by an authorized authenticator or request
 builder. It should avoid exposing a cloneable plaintext string broadly.
 
+In the native `0.4.0` profile, Query resolves only an exact logical name in
+DuckDB's temporary `memory` storage. Persistent-only and alternate-storage
+entries are not candidates, and a same-name persistent entry cannot make the
+selection ambiguous. Query destroys DuckDB secret objects before moving one
+opaque token snapshot into Runtime's fixed GitHub bearer capability. Runtime
+cannot use it for another authenticator, placement, host, or operation.
+
 Persistence, at-rest encryption, and filesystem permissions belong to the host
 secret provider. Runtime diagnostics report the storage provider without
 claiming stronger protection than that provider guarantees.
@@ -2250,12 +2262,14 @@ Errors should include:
 - Relevant input and predicate names.
 - Suggested corrective action when possible.
 
-For the native preview, malformed JSON maps to public category `decode`.
+For the native preview, HTTP `401` maps to `authentication`, HTTP `403` maps to
+`authorization`, and malformed JSON maps to public category `decode`.
 Missing extraction, forbidden nulls, duplicate required fields, and strict
 declared-type conversion failures map to `schema`. The DuckDB boundary performs
 that mapping once. It may expose the category, `github`,
 `duckdb_login_search_page`, `items`, and a known schema field, but never the
-rejected scalar, response body, credential, or unrestricted path. Unknown
+rejected scalar, credential, `Authorization` value, response body, or
+unrestricted path. Unknown
 native exceptions become a redacted `internal` error; interruption remains
 DuckDB cancellation.
 

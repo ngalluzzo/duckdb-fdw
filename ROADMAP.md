@@ -24,8 +24,6 @@ shared contract.
   versions and artifacts never change.
 - Patch releases may occur between the releases shown here. The roadmap names
   planned product outcomes, not every maintenance release.
-- The roadmap does not use `MVP` labels. Each release states what becomes
-  meaningfully usable and the evidence required to make that claim.
 - Scope not explicitly promised by a release remains uncommitted, even when a
   design document explores it.
 
@@ -118,21 +116,24 @@ Release evidence includes a deterministic controlled HTTP oracle, one current
 public-service compatibility demonstration, exact request and typed-row
 checks, immutable prepared plans, post-DNS destination policy, hard response
 and time budgets, cancellation, teardown, redacted status/network/decode
-failures, and proof that bind and planning perform no network I/O. The native
-connector identity and SQL spelling remain preview surfaces until the public
-API candidate.
+failures, and proof that bind and planning perform no network I/O.
 
 ### `0.4.0` — safe authenticated APIs
 
-A connector can access an authenticated HTTPS API without granting ambient
-credential or network authority. Users can configure approved connections and
-secrets, while connectors narrow rather than widen host policy. Failures do not
-disclose secret material.
+A DuckDB user can query the fixed `github.authenticated_user` relation through
+one explicitly named temporary `duckdb_api/config` secret without granting
+ambient credential or network authority. Bind and planning retain only the
+logical name; every execution resolves current temporary-memory state and
+moves an opaque capability into Runtime for the fixed bearer placement at
+`api.github.com:443`. The anonymous relation remains credential-free.
 
-Release evidence covers authentication placement, allowed hosts, redirects,
-DNS and resolved-address policy, response and decompression limits, memory and
-deadline budgets, secret redaction, and deterministic denial and exhaustion
-paths.
+Release evidence covers real DuckDB secret registration and resolution,
+offline bind/describe/explain/prepare, prepared replacement and drop, exact
+bearer placement, concurrent credential isolation, `401`/`403`, redirect
+denial, DNS and resolved-address policy, bounded resources, redaction,
+cancellation, close, recovery, and public-artifact canaries. Persistent and
+environment providers, implicit selection, caller-selected authority, OAuth,
+pagination, retry, and caching remain outside this contract.
 
 ### `0.5.0` — bounded real-world traversal
 

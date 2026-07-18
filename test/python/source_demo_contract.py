@@ -18,7 +18,7 @@ EXPECTED_STATIC_SUMMARY = {
         "installed": False,
         "loaded": True,
         "name": "duckdb_api",
-        "version": "0.3.0",
+        "version": "0.4.0",
     },
     "relation": {
         "connector": "github",
@@ -96,6 +96,8 @@ def main() -> int:
 
     repository_root = pathlib.Path(__file__).resolve().parents[2]
     example_runner = repository_root / "examples/first_live_rest_relation.py"
+    authenticated_runner = repository_root / "examples/authenticated_user.py"
+    authenticated_sql = repository_root / "examples/authenticated-user.sql"
 
     with tempfile.TemporaryDirectory(prefix="duckdb-api-source-demo-") as directory:
         isolated = pathlib.Path(directory)
@@ -147,6 +149,31 @@ def main() -> int:
             )
         summary = json.loads(success.stdout)
         validate_summary(summary)
+
+        authenticated_help = run(
+            [str(pinned_python), "-I", str(authenticated_runner), "--help"],
+            isolated,
+            environment,
+        )
+        if authenticated_help.returncode != 0:
+            raise AssertionError(
+                "authenticated example help failed:\n"
+                f"stdout:\n{authenticated_help.stdout}\n"
+                f"stderr:\n{authenticated_help.stderr}"
+            )
+        if "--token" in authenticated_help.stdout or "GITHUB_TOKEN" in authenticated_help.stdout:
+            raise AssertionError("authenticated example exposed a CLI or environment token path")
+        authenticated_source = authenticated_runner.read_text(encoding="utf-8")
+        if "getpass.getpass" not in authenticated_source or "os.environ" in authenticated_source:
+            raise AssertionError("authenticated example does not use only the interactive token path")
+        accepted_sql = authenticated_sql.read_text(encoding="utf-8")
+        for fragment in (
+            "relation := 'authenticated_user'",
+            "secret := 'github_default'",
+            "SELECT id, login, site_admin",
+        ):
+            if fragment not in accepted_sql:
+                raise AssertionError("authenticated example SQL drifted")
 
         failure = run(
             [str(pinned_python), "-I", "-c", FAILURE_PROGRAM],

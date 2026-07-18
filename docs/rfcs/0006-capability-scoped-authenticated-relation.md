@@ -196,10 +196,12 @@ FROM duckdb_api_scan(
 
 For the anonymous relation, supplying `secret` is rejected at bind rather than
 ignored. For `authenticated_user`, omitting `secret`, passing `NULL`, or passing
-an empty name fails at bind without secret lookup. A nonexistent, ambiguous,
-wrong-type, wrong-provider, non-temporary, malformed, or empty stored secret
-fails during execution initialization before network I/O. HTTP `401` and `403`
-are authentication/authorization failures, never empty relations.
+an empty name fails at bind without secret lookup. Resolution queries only
+DuckDB's temporary `memory` storage: a persistent-only name is not found, and a
+same-named persistent or alternate-storage entry is ignored. A nonexistent,
+wrong-type, wrong-provider, malformed, or empty in-memory secret fails during
+execution initialization before network I/O. HTTP `401` and `403` are
+authentication/authorization failures, never empty relations.
 
 `DESCRIBE`, `EXPLAIN`, and `PREPARE` validate the relation and retain only the
 secret name; they neither resolve it nor acquire network authority. Each
@@ -349,8 +351,9 @@ statements remain credential-free.
 
 This is an additive pre-`1.0` minor release. No stored connector packages or
 user data migrate. The new secret type can coexist with other DuckDB secret
-types; a registration-name collision or an ambiguous secret name across
-storage backends fails closed. Only temporary `duckdb_api` secrets are
+types; a registration-name collision fails closed. Lookup is storage-qualified
+to temporary `memory`, so excluded persistent or alternate backends neither
+satisfy nor interfere with the name. Only temporary `duckdb_api` secrets are
 supported, so the extension creates no credential files and makes no at-rest
 encryption promise.
 
@@ -516,6 +519,7 @@ explicitly outside the decision rather than unresolved implementation choices.
 | `auth_rfc_connector_review` | Connector Experience | Approved | The immutable relation catalog and logical bearer/host/header policy preserve Connector's credential-free `CompiledConnector` boundary and do not activate YAML. Delivery must prove stable two-relation metadata, no token or DuckDB secret name in the snapshot, and low-friction consumer use. | Approved. The deterministic metadata oracle, credential-absence checks, and Connector interaction-exit audit are incorporated as acceptance requirements, not objections. |
 | `auth_rfc_semantics_review` | Relational Semantics | Approved | Exactly-one-on-success cardinality, fail-closed auth errors, the opaque secret reference, offline planning, and DuckDB ownership of all relational operators preserve the semantic contract. Delivery must prove both relation plans and that no consumer reclassifies auth or cardinality. | Approved. The planner oracles and Semantics interaction-exit audit are incorporated as acceptance requirements, not objections. |
 | `auth_rfc_runtime_review` | Remote Runtime | Approved | Exact-name execution-time resolution, a move-only per-scan capability, fixed bearer placement at `api.github.com`, redirect denial, and explicit redaction/lifetime limits satisfy least-authority Runtime obligations. Delivery must prove rotation isolation, non-forwarding, cancellation, cleanup, and sentinel absence. | Approved. The security/lifecycle oracles and Runtime interaction-exit audit are incorporated as acceptance requirements, not objections. |
+| `runtime_rfc_memory_lookup_review` | Remote Runtime | Approved | Storage-qualified temporary-`memory` lookup is the least-authority Query-to-Runtime source: persistent-only entries are not found, same-name persistent state is ignored, and only the opaque move-only capability crosses the boundary. Focused resolution and adapter tests prove excluded storages are never queried and rejected secrets never enter Runtime. | Approved as a post-acceptance clarification correcting two contradictory ambiguity clauses. The decision is narrowed, not changed; existing regression oracles remain required, and the Runtime interaction exit is satisfied for this boundary. |
 
 All required perspectives approved the decision. The lead agent accepts their
 delivery conditions as verification and interaction-exit requirements; RFC

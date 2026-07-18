@@ -1,0 +1,111 @@
+{
+  "added_settings": [],
+  "added_types": [],
+  "authority_inputs": [
+    "explicit_named_temporary_duckdb_secret"
+  ],
+  "diagnostics": {
+    "anonymous_secret_rejected": "[duckdb_api][bind] connector=github relation=duckdb_login_search_page: named argument secret is not accepted",
+    "authenticated_secret_missing": "[duckdb_api][bind] connector=github relation=authenticated_user: required named argument secret is missing",
+    "missing_relation": "[duckdb_api][bind] required named argument relation is missing",
+    "unknown_connector": "[duckdb_api][bind] unknown connector identifier",
+    "unknown_relation": "[duckdb_api][bind] connector=github: unknown relation identifier"
+  },
+  "duckdb": [
+    "v1.5.4",
+    "08e34c447b"
+  ],
+  "extension": [
+    "duckdb_api",
+    "0.4.0"
+  ],
+  "function": {
+    "name": "duckdb_api_scan",
+    "named_parameters": {
+      "connector": "VARCHAR",
+      "relation": "VARCHAR",
+      "secret": "VARCHAR"
+    }
+  },
+  "relational_ownership": {
+    "filter": "duckdb",
+    "limit": "duckdb",
+    "offset": "duckdb",
+    "ordering": "duckdb"
+  },
+  "relations": [
+    {
+      "cardinality": {
+        "maximum": 3,
+        "minimum": 0
+      },
+      "connector": "github",
+      "domain": "single_fixed_github_search_response_page",
+      "duckdb_visible_not_null": false,
+      "name": "duckdb_login_search_page",
+      "public_row_identity": "not_guaranteed",
+      "public_row_order": "not_guaranteed",
+      "required_values": true,
+      "schema": [
+        [
+          "id",
+          "BIGINT"
+        ],
+        [
+          "login",
+          "VARCHAR"
+        ],
+        [
+          "site_admin",
+          "BOOLEAN"
+        ]
+      ],
+      "secret": "rejected"
+    },
+    {
+      "cardinality": {
+        "maximum": 1,
+        "minimum": 1
+      },
+      "connector": "github",
+      "domain": "successful_authenticated_github_user_response",
+      "duckdb_visible_not_null": false,
+      "name": "authenticated_user",
+      "public_row_identity": "current_secret_principal",
+      "public_row_order": "single_row",
+      "required_values": true,
+      "schema": [
+        [
+          "id",
+          "BIGINT"
+        ],
+        [
+          "login",
+          "VARCHAR"
+        ],
+        [
+          "site_admin",
+          "BOOLEAN"
+        ]
+      ],
+      "secret": "required_explicit_name"
+    }
+  ],
+  "removed_relations": [
+    {
+      "connector": "example",
+      "relation": "items"
+    }
+  ],
+  "secret_type": {
+    "environment_provider": false,
+    "fields": {
+      "TOKEN": "redacted_nonempty_VARCHAR"
+    },
+    "implicit_selection": false,
+    "persistent": false,
+    "provider": "config",
+    "storage": "memory",
+    "type": "duckdb_api"
+  }
+}

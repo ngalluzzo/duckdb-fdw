@@ -4,9 +4,9 @@
 > semantic pushdown, bounded streaming execution, pagination, enrichment,
 > shared auth and transport infrastructure, and an escape hatch for custom code.
 
-**Status:** Design proposal, revision 0.4; the live `0.3.0` native preview
-profile is accepted by RFC 0005 and the distribution policy is accepted by
-RFC 0004
+**Status:** Design proposal, revision 0.4; the authenticated `0.4.0` native
+preview is accepted by RFC 0006, its live REST base by RFC 0005, and the
+distribution policy by RFC 0004
 
 **Integration profiles:** A source-built native C++ preview, portable C
 Extension API table functions, and an optional deep DuckDB catalog/optimizer
@@ -47,8 +47,9 @@ The design deliberately separates:
 5. **Connector authoring** — declarative specifications for common APIs and
    trusted Rust or sandboxed WASM for exceptional cases.
 
-The accepted `0.3.0` preview uses a native C++ table function to query one
-fixed live HTTPS relation on one exact DuckDB and platform-dependency cell.
+The accepted `0.4.0` preview uses a native C++ table function to query one
+anonymous and one explicitly authenticated fixed HTTPS relation on one exact
+DuckDB and platform-dependency cell.
 The intended portable profile uses a Rust table-function extension. A custom
 attached catalog and logical-plan optimizer are an optional integration
 profile, not a requirement of the connector contract.
@@ -202,9 +203,10 @@ flowchart TB
 
 ### 5.0 Accepted native C++ preview
 
-RFC 0005 defines the current deliberately narrow native profile. It is a
-source-built DuckDB C++ extension named `duckdb_api`, version `0.3.0`, with
-exactly one project-defined SQL function and one compiled-in relation:
+RFCs 0005 and 0006 define the current deliberately narrow native profile. It
+is a source-built DuckDB C++ extension named `duckdb_api`, version `0.4.0`,
+with one project-defined SQL function and two compiled-in relations. The
+anonymous relation remains:
 
 ```sql
 SELECT id, login, site_admin
@@ -214,7 +216,7 @@ FROM duckdb_api_scan(
 );
 ```
 
-The relation's complete base-row domain is the zero-to-three `items` in one
+Its complete base-row domain is the zero-to-three `items` in one
 fixed response from
 `https://api.github.com/search/users?q=duckdb+in%3Alogin&per_page=3`; it is not
 the domain of all GitHub users or all matching search results. The fixed `q`
@@ -222,6 +224,31 @@ and `per_page` fields define the source and are not DuckDB predicate or limit
 pushdown. Required `id`, `login`, and `site_admin` values decode strictly as
 `BIGINT`, `VARCHAR`, and `BOOLEAN`; this extraction requirement does not claim
 DuckDB-visible `NOT NULL` metadata.
+
+The authenticated relation uses an explicitly named temporary DuckDB secret:
+
+```sql
+CREATE TEMPORARY SECRET github_default (
+    TYPE duckdb_api,
+    PROVIDER config,
+    TOKEN 'github-token-value'
+);
+
+SELECT id, login, site_admin
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_user',
+    secret := 'github_default'
+);
+```
+
+Each successful fixed `GET /user` response produces exactly one required
+`BIGINT`, `VARCHAR`, `BOOLEAN` row. Bind, `DESCRIBE`, `EXPLAIN`, and `PREPARE`
+retain only the logical secret name. Global scan initialization resolves that
+name from DuckDB's temporary `memory` storage only; a persistent-only name is
+not found, and a same-named persistent entry is ignored. Each execution sees
+the current value, so replacement or drop affects the next execution of an
+already prepared statement without changing a running scan.
 
 The implementation is native C++ end to end and introduces neither Rust nor a
 cross-language FFI. Connector Experience supplies immutable compiled native
@@ -236,7 +263,8 @@ ownership. Query remains the only DuckDB-aware layer and translates batches
 and structured errors at the adapter edge.
 
 The native capability profile exposes no projection, filter, ordering, limit,
-offset, progress, or secret-manager delegation. Its adapter therefore requests
+offset, or progress delegation. Its adapter has only the narrow DuckDB secret
+access above and therefore requests
 the full three-column projection, records `TRUE` as both remote and residual
 predicate relative to the bounded response-page domain, leaves ordering and
 bounds undelegated, and assigns every filter, ordering, limit, and offset to
@@ -246,7 +274,11 @@ host decoder has a larger general ceiling. Ordinary bind, `DESCRIBE`, prepare,
 and planning read only immutable metadata and acquire no network authority.
 
 Execution opens one synchronous pull stream and one wire attempt for the exact
-unauthenticated HTTPS authority `api.github.com:443`. Remote Runtime enforces
+HTTPS authority `api.github.com:443`. The anonymous relation sends no
+credential. The authenticated relation moves one opaque scan-scoped
+authorization capability into Remote Runtime, which alone validates the
+plan-declared bearer authenticator, `Authorization` placement, and final
+destination before request decoration. Remote Runtime enforces
 post-DNS destination policy, TLS verification, strict JSON extraction, one
 five-second wall-time budget across execution, response/header/decompressed
 byte ceilings, three decoded records, 256 bytes per extracted string, bounded
@@ -255,7 +287,7 @@ transfer. DuckDB interruption reaches transfer and decoding. Stream cancel,
 close, and destruction are idempotent and non-throwing; connection close is
 bounded by the hard execution deadline but is not promised to cancel promptly.
 
-The installed composition contains only the fixed public HTTPS connector and
+The installed composition contains only the two fixed public HTTPS relations and
 runtime service. Deterministic correctness evidence uses a separate private,
 non-installable composition whose compiled connector selects a controlled
 loopback service; it traverses the same registration, bind/copy, planning,
@@ -265,9 +297,10 @@ seams are absent from the installed artifact. The public GitHub execution is
 upstream compatibility evidence only; changing live row identity or order
 cannot invalidate the controlled relational oracle.
 
-The profile adds no caller-selected URL, credentials, proxy, redirect,
-pagination, retry, cache, provider, GraphQL, connector-package loader, YAML
-compiler, runtime file path, or public native ABI. It intentionally replaces
+The profile adds no token table-function argument, implicit secret selection,
+persistent or environment secret source, caller-selected URL or header, proxy,
+redirect, pagination, retry, cache, provider, GraphQL, connector-package
+loader, YAML compiler, runtime file path, or public native ABI. It intentionally replaces
 the historical `example.items` fixture relation rather than shipping a second
 product relation. The `0.1.0`/`0.2.0` fixture behavior remains historical
 release evidence, not a fallback: a live failure returns a bounded diagnostic
@@ -1655,7 +1688,7 @@ Reuse as a concrete source of API patterns:
 
 | Area                       | Decision                                                               |
 | -------------------------- | ---------------------------------------------------------------------- |
-| Native preview             | `duckdb_api` 0.3.0 fixed GitHub REST relation on one exact source-built cell |
+| Native preview             | `duckdb_api` 0.4.0 fixed anonymous and capability-scoped authenticated GitHub relations on one exact source-built cell |
 | Portable integration       | Pure-Rust C Extension API table functions                              |
 | Deep integration           | Optional thin C++ catalog/optimizer shell                              |
 | Core abstraction           | `ScanRequest` → explicit `ScanPlan` → `BatchStream`                    |

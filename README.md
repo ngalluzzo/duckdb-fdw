@@ -29,15 +29,15 @@ API. Its public contract is DuckDB-native.
 - [0.1.0 release notes](docs/releases/0.1.0-notes.md) preserve the historical
   fixture-preview contract.
 
-[RFC 0005](docs/rfcs/0005-promote-live-rest-relation.md) is the accepted
-decision for the source-built `0.3.0` live REST preview. The declarative
-connector specification remains `duckdb_api/draft`: `0.3.0` compiles one native
-product relation and does not publish connector authoring compatibility.
+[RFC 0006](docs/rfcs/0006-capability-scoped-authenticated-relation.md) is the
+accepted decision for the source-built `0.4.0` authenticated preview, on top of
+RFC 0005's live REST base. The declarative connector specification remains
+`duckdb_api/draft`: this release compiles two native product relations and does
+not publish connector authoring compatibility.
 
-## 0.3.0 live REST preview
+## 0.4.0 authenticated REST preview
 
-Version `0.3.0` replaces the embedded `example.items` fixture with one bounded,
-compiled-in public GitHub relation:
+Version `0.4.0` preserves the bounded, compiled-in public GitHub relation:
 
 ```sql
 SELECT id, login, site_admin
@@ -61,6 +61,33 @@ Public-service row identity and service order are not guaranteed. The
 controlled test service is the deterministic correctness oracle; the public
 GitHub query is current-service compatibility evidence.
 
+It also adds one fixed authenticated relation. A user creates one explicitly
+named temporary secret and queries the identity authorized by its current
+token:
+
+```sql
+CREATE TEMPORARY SECRET github_default (
+    TYPE duckdb_api,
+    PROVIDER config,
+    TOKEN 'github-token-value'
+);
+
+SELECT id, login, site_admin
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_user',
+    secret := 'github_default'
+);
+```
+
+The secret name is validated at bind, but its value is resolved from DuckDB's
+temporary `memory` storage only when each execution initializes. Preparing,
+describing, and explaining the query do not resolve the secret or perform
+network I/O. Replacing or dropping the secret affects the next execution of an
+existing prepared statement. Persistent and environment-backed secrets,
+implicit selection, token arguments, caller-selected URLs or headers, and
+redirects are not supported.
+
 ### Supported cell
 
 The supported product cell is DuckDB 1.5.4 at commit `08e34c447b`,
@@ -75,7 +102,7 @@ cells, and load modes are unsupported even if they happen to work. The
 artifact is loaded directly as an unsigned local source build; it is not a
 published installable extension.
 
-### Run the live query
+### Run the anonymous live query
 
 From the repository root on the supported cell:
 
@@ -95,6 +122,25 @@ The demo requires DNS and outbound HTTPS access to `api.github.com`. It does
 not use credentials, proxy environment variables, `.netrc`, `.curlrc`, or a
 caller-selected URL. GitHub availability and anonymous rate limits can still
 cause a bounded, redacted query failure.
+
+### Run the authenticated live query
+
+Build the artifact, print its path, then run the authenticated example with the
+pinned Python host reported by `make paths`:
+
+```sh
+make build
+make paths
+/absolute/pinned_python -I examples/authenticated_user.py /absolute/duckdb_api.duckdb_extension
+```
+
+The runner reads a short-lived GitHub token from a hidden interactive prompt;
+it does not accept a token argument, environment variable, or file. It creates
+only a temporary secret, runs
+[`examples/authenticated-user.sql`](examples/authenticated-user.sql), and
+prints the one typed identity row. The token and returned identity are not
+written to repository evidence. HTTP `401` and `403` remain distinct redacted
+authentication and authorization failures.
 
 ### Developer commands
 
@@ -128,14 +174,17 @@ product-development gate.
 
 ### Preview limitations
 
-- Only the compiled-in `github.duckdb_login_search_page` relation exists.
-  `example.items` was removed in `0.3.0`.
+- Only the compiled-in `github.duckdb_login_search_page` and
+  `github.authenticated_user` relations exist. `example.items` was removed in
+  `0.3.0`.
 - The relation represents one fixed public response page, not every GitHub user
   or every matching search result. Public row identity, order, and availability
   are not product guarantees.
-- There is no authentication, secret injection, caller-selected URL,
-  pagination, retry, caching, provider expansion, GraphQL execution, or custom
-  explain surface.
+- Authentication is limited to one explicit temporary `duckdb_api/config`
+  bearer secret for `github.authenticated_user`. There is no persistent or
+  environment provider, implicit selection, OAuth, caller-selected URL or
+  header, pagination, retry, caching, provider expansion, GraphQL execution,
+  or custom explain surface.
 - Connector YAML/package loading, registries, signing, binary publication,
   automatic installation, and update support remain excluded.
 - The `duckdb_api/draft` connector shape is design material, not a stable

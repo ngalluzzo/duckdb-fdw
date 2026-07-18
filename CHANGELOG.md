@@ -8,6 +8,41 @@ This file records user-visible changes to duckdb-fdw.
 
 - The project is now distributed under the MIT License.
 
+## 0.4.0 — 2026-07-18
+
+### Added
+
+- The fixed `github.authenticated_user` relation, returning one required
+  `id BIGINT`, `login VARCHAR`, and `site_admin BOOLEAN` row for the current
+  GitHub bearer-token principal.
+- A temporary-only `duckdb_api` secret type with the `config` provider and one
+  redacted, nonempty `TOKEN VARCHAR` field. The table function accepts the
+  explicit logical name through `secret VARCHAR` only for the authenticated
+  relation.
+- Deterministic controlled-product evidence for exact bearer placement,
+  offline bind/describe/explain/prepare, prepared replacement and drop,
+  concurrent credential isolation, `401`/`403`, redirect denial, redaction,
+  cancellation, close, and recovery.
+
+### Changed
+
+- The native connector snapshot and installed extension identity advance to
+  `0.4.0`; the anonymous `github.duckdb_login_search_page` relation remains
+  available without a secret and rejects a supplied secret.
+- Each authenticated execution resolves the named secret from DuckDB's
+  temporary `memory` storage. Persistent-only entries are not found and
+  same-name persistent entries are ignored.
+
+### Limitations
+
+- Authentication is limited to the fixed bearer-authenticated `GET /user`
+  operation at `https://api.github.com:443`. There is no implicit secret
+  selection, persistent or environment provider, token argument, OAuth,
+  caller-selected URL or header, redirect, pagination, retry, or cache.
+- Secret plaintext necessarily exists in the user's creation statement,
+  DuckDB's temporary secret entry, and transient request buffers. The release
+  does not claim hostile-process protection or secure memory zeroization.
+
 ## 0.3.0 — 2026-07-18
 
 ### Added

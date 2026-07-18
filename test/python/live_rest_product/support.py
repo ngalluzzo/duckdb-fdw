@@ -20,6 +20,7 @@ import duckdb
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
 EXPECTED_PATH = "/search/users?q=duckdb+in%3Alogin&per_page=3"
+AUTHENTICATED_PATH = "/user"
 EXPECTED_SCHEMA = [
     ("id", "BIGINT"),
     ("login", "VARCHAR"),
@@ -54,6 +55,8 @@ class OracleServer(ThreadingHTTPServer):
         self.handler_exited = threading.Event()
         self.peer_disconnected = threading.Event()
         self.release_blocked = threading.Event()
+        self.concurrent_ready = threading.Event()
+        self.concurrent_arrivals = 0
 
     def record(self, handler: BaseHTTPRequestHandler) -> None:
         with self.requests_lock:
@@ -86,6 +89,21 @@ class OracleServer(ThreadingHTTPServer):
         self.peer_disconnected.clear()
         self.release_blocked.clear()
 
+    def prepare_delayed_success_request(self) -> None:
+        """Hold one accepted request after Runtime has fixed its auth snapshot."""
+
+        self.mode = "delayed_success"
+        self.request_started.clear()
+        self.handler_exited.clear()
+        self.release_blocked.clear()
+
+    def prepare_concurrent_requests(self) -> None:
+        """Require two in-flight requests before either receives a response."""
+
+        self.mode = "concurrent"
+        self.concurrent_arrivals = 0
+        self.concurrent_ready.clear()
+
 
 class OracleHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -117,7 +135,45 @@ class OracleHandler(BaseHTTPRequestHandler):
             self.oracle.handler_exited.set()
 
     def _respond_for_mode(self, mode: str) -> None:
+        authenticated = self.path == AUTHENTICATED_PATH
+        if mode == "delayed_success":
+            if not self.oracle.release_blocked.wait(2):
+                self._send_body(500, b'{"message":"delayed request timed out"}')
+                return
+            self._respond_for_mode("success")
+            return
+        if mode == "concurrent":
+            with self.oracle.requests_lock:
+                self.oracle.concurrent_arrivals += 1
+                if self.oracle.concurrent_arrivals == 2:
+                    self.oracle.concurrent_ready.set()
+            if not self.oracle.concurrent_ready.wait(2):
+                self._send_body(500, b'{"message":"concurrent request timed out"}')
+                return
+            self._respond_for_mode("success")
+            return
         if mode == "success":
+            if authenticated:
+                authorization = self.headers.get("Authorization", "")
+                identities = {
+                    "Bearer query-product-token-a": (101, "principal-a", False),
+                    "Bearer query-product-token-b": (202, "principal-b", True),
+                }
+                identity = identities.get(authorization)
+                if identity is None:
+                    self._send_body(401, b'{"message":"unauthorized"}')
+                    return
+                body = json.dumps(
+                    {
+                        "id": identity[0],
+                        "login": identity[1],
+                        "site_admin": identity[2],
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                self._send_body(200, body)
+                return
             body = json.dumps(
                 {
                     "total_count": 3,
@@ -134,6 +190,12 @@ class OracleHandler(BaseHTTPRequestHandler):
             return
         if mode == "status":
             self._send_body(503, f'{{"message":"{RESPONSE_SECRET}"}}'.encode())
+            return
+        if mode == "unauthorized":
+            self._send_body(401, f'{{"message":"{RESPONSE_SECRET}"}}'.encode())
+            return
+        if mode == "forbidden":
+            self._send_body(403, f'{{"message":"{RESPONSE_SECRET}"}}'.encode())
             return
         if mode == "redirect":
             body = f'{{"message":"{RESPONSE_SECRET}"}}'.encode()
@@ -153,6 +215,12 @@ class OracleHandler(BaseHTTPRequestHandler):
                 self.oracle.peer_disconnected.set()
             return
         if mode == "malformed":
+            if authenticated:
+                self._send_body(
+                    200,
+                    ('{"id":1,"login":"' + RESPONSE_SECRET + '","site_admin":tru').encode(),
+                )
+                return
             self._send_body(
                 200,
                 (
@@ -163,20 +231,35 @@ class OracleHandler(BaseHTTPRequestHandler):
             )
             return
         if mode == "schema_missing":
-            self._send_body(200, b'{"items":[{"id":1,"site_admin":false}]}')
+            body = (
+                b'{"id":1,"site_admin":false}'
+                if authenticated
+                else b'{"items":[{"id":1,"site_admin":false}]}'
+            )
+            self._send_body(200, body)
             return
         if mode == "schema_null":
+            if authenticated:
+                self._send_body(200, b'{"id":1,"login":null,"site_admin":false}')
+                return
             self._send_body(
                 200,
                 b'{"items":[{"id":1,"login":null,"site_admin":false}]}',
             )
             return
         if mode == "schema_incompatible":
-            body = (
-                '{"items":[{"id":"'
-                + RESPONSE_SECRET
-                + '","login":"duckdb","site_admin":false}]}'
-            ).encode()
+            if authenticated:
+                body = (
+                    '{"id":"'
+                    + RESPONSE_SECRET
+                    + '","login":"duckdb","site_admin":false}'
+                ).encode()
+            else:
+                body = (
+                    '{"items":[{"id":"'
+                    + RESPONSE_SECRET
+                    + '","login":"duckdb","site_admin":false}]}'
+                ).encode()
             self._send_body(200, body)
             return
         if mode == "oversized":
@@ -202,7 +285,11 @@ class OracleHandler(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.end_headers()
             try:
-                partial = f'{{"items":[{{"login":"{RESPONSE_SECRET}'.encode()
+                partial = (
+                    f'{{"id":1,"login":"{RESPONSE_SECRET}'.encode()
+                    if authenticated
+                    else f'{{"items":[{{"login":"{RESPONSE_SECRET}'.encode()
+                )
                 self.wfile.write(partial)
                 self.wfile.flush()
                 while not self.oracle.release_blocked.wait(0.02):
@@ -280,7 +367,7 @@ def assert_exact_request(server: OracleServer) -> None:
     required = {
         "host": [f"127.0.0.1:{server.server_port}"],
         "accept": ["application/vnd.github+json"],
-        "user-agent": ["duckdb-api/0.3.0"],
+        "user-agent": ["duckdb-api/0.4.0"],
         "x-github-api-version": ["2022-11-28"],
     }
     for name, expected in required.items():
