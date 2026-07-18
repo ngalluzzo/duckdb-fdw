@@ -30,13 +30,13 @@ implementation consumes their declarations.
 | `test/cpp/network_policy_tests.cpp` | Public and denied IPv4/IPv6 address-class oracles, including mapped and transition forms |
 | `test/cpp/json_decoder_tests.cpp` | Strict syntax, field conversion, and every decode-budget boundary |
 | `test/cpp/http_scan_executor_tests.cpp` | Attempt, batching, persistent-deadline, valid-plan/private-profile record-authority narrowing, invalid-profile construction rejection, cancellation, plan-capability rejection, failure staging, and close/recovery oracles |
-| `test/cpp/curl_http_transport_tests.cpp` | Exact request, hostile ambient-state exclusion, status/redirect/disconnect, resolved-address denial, and one-socket/multiple-address oracles |
+| `test/cpp/curl_http_transport_tests.cpp` | Exact request, real hostile proxy/netrc exclusion, exact private option inventory, response-cookie isolation across fresh scans, status/redirect/disconnect, resolved-address denial, and one-socket/multiple-address oracles |
 | `test/cpp/curl_http_budget_tests.cpp` | Malformed JSON, wire/header ceilings, and compressed exact/+1 decompressed-byte oracles |
 | `test/cpp/curl_http_lifecycle_tests.cpp` | Concurrent checked initialization, fixed five-second transfer deadline, concurrent close, and recovery oracles |
 | `test/cpp/curl_tls_security_tests.cpp` and `test/python/runtime_curl_tls_tests.py` | Real-curl trusted-peer success plus untrusted-peer and hostname-mismatch TLS counterexamples against an isolated Python TLS service |
 | `test/cpp/support/controlled_http_transport.hpp` and `.cpp` | Non-installable scripted transport and observations used only by focused runtime tests |
 | `test/cpp/support/loopback_curl_runtime.hpp` and `.cpp` | Non-installable numeric-loopback composition that exercises the shared curl algorithm and executor; the implementation and its permissive socket policy are excluded from every loadable target |
-| `test/cpp/support/controlled_socket_service.hpp` and `.cpp`, `runtime_http_test_support.hpp` and `.cpp`, and `private_curl_probe.hpp` and `.cpp` | Reusable controlled socket, execution, and private curl-profile support; the private probe and `DUCKDB_API_PRIVATE_CURL_TESTS` definition are excluded from every production object |
+| `test/cpp/support/controlled_socket_service.hpp` and `.cpp`, `runtime_http_test_support.hpp` and `.cpp`, and `private_curl_probe.hpp` and `.cpp` | Reusable controlled socket, execution, and private curl-profile support; the private probe and `DUCKDB_API_PRIVATE_CURL_TESTS` definition are excluded from every production object, and installed/loadable artifacts must not contain marker `duckdb_api_private_curl_option_observer_v1` |
 | `test/fixtures/runtime_tls/` | Deterministic non-production CA/server certificate and base64 PKCS#8 DER key for the isolated TLS harness; excluded from all artifact source inventories |
 
 Build graph, root scripts, release identities, product composition, DuckDB
@@ -90,9 +90,10 @@ only test-owned composition may supply the controlled loopback transport.
   deliberately process-resident and left to OS process reclamation; service,
   extension, DSO, and `atexit` teardown register no cleanup hook because total
   curl-user shutdown ordering is unproved. Dynamic unload/reload is unsupported.
-- Focused deterministic tests prove success, exact request observations,
-  hostile proxy/netrc/auth/cookie exclusion, TLS peer and hostname verification,
-  denied resolved addresses, one-socket multiple-address containment,
+- Focused deterministic tests prove success, exact request observations, real
+  hostile proxy/netrc exclusion, structurally observed auth/cookie option
+  inventory, response-cookie isolation across fresh scans, TLS peer and hostname
+  verification, denied resolved addresses, one-socket multiple-address containment,
   status/redirect/malformed/oversized/gzip/disconnect/deadline/cancellation
   failures, recovery, active-stream teardown ordering, and redaction. Public
   GitHub is compatibility evidence only and is not a correctness oracle.

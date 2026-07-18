@@ -73,6 +73,11 @@ duckdb_api::internal::HttpRequest BuildRequest(const PrivateCurlProbeOptions &op
 	return request;
 }
 
+void ObserveOption(CURLoption option, const char *normalized_value, void *context) {
+	auto &observations = *static_cast<std::vector<PrivateCurlProbeResult::OptionObservation> *>(context);
+	observations.push_back({option, normalized_value ? normalized_value : "<null>"});
+}
+
 } // namespace
 
 PrivateCurlProbeResult PerformPrivateCurlProbe(const PrivateCurlProbeOptions &options,
@@ -80,6 +85,8 @@ PrivateCurlProbeResult PerformPrivateCurlProbe(const PrivateCurlProbeOptions &op
 	(void)duckdb_api::internal::AcquireCurlProcessLifetime();
 	SocketAuthority authority(options.request_port, options.socket_policy);
 	PublishChecks publish_checks(authority, options.completed_socket_policy_checks);
+	std::vector<PrivateCurlProbeResult::OptionObservation> option_observations;
+	option_observations.reserve(48);
 	const auto request = BuildRequest(options);
 	const duckdb_api::internal::HttpLimits limits {
 	    duckdb_api::HOST_MAX_HEADER_BYTES, duckdb_api::HOST_MAX_RESPONSE_BYTES, duckdb_api::HOST_MAX_DECOMPRESSED_BYTES,
@@ -90,9 +97,11 @@ PrivateCurlProbeResult PerformPrivateCurlProbe(const PrivateCurlProbeOptions &op
 	    ApplySocketPolicy,
 	    &authority,
 	    options.trusted_ca_file.empty() ? nullptr : options.trusted_ca_file.c_str(),
-	    options.resolve_entry.empty() ? nullptr : options.resolve_entry.c_str()};
+	    options.resolve_entry.empty() ? nullptr : options.resolve_entry.c_str(),
+	    ObserveOption,
+	    &option_observations};
 	auto response = duckdb_api::internal::PerformCurlTransfer(profile, request, limits, control);
-	return {std::move(response), authority.checks.load(std::memory_order_relaxed)};
+	return {std::move(response), authority.checks.load(std::memory_order_relaxed), std::move(option_observations)};
 }
 
 } // namespace duckdb_api_test

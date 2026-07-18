@@ -12,6 +12,7 @@ namespace duckdb_api_test {
 
 enum class ControlledSocketMode {
 	SUCCESS,
+	SET_COOKIE,
 	STATUS,
 	REDIRECT,
 	MALFORMED,

@@ -9,6 +9,7 @@
 #include <limits>
 #include <new>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 namespace duckdb_api {
@@ -193,6 +194,54 @@ void RequireCurlOption(CURLcode result) {
 	}
 }
 
+// Every easy-handle option is applied through this wrapper so private tests
+// observe exactly the configuration that libcurl receives. Observer fields,
+// normalization, and calls compile out of production objects entirely.
+class CurlOptionSetter {
+public:
+#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
+	CurlOptionSetter(CURL *handle_p, const CurlTransferProfile &profile_p) : handle(handle_p), profile(profile_p) {
+	}
+#else
+	explicit CurlOptionSetter(CURL *handle_p) : handle(handle_p) {
+	}
+#endif
+
+	template <class VALUE>
+	void Set(CURLoption option, VALUE value) const {
+		RequireCurlOption(curl_easy_setopt(handle, option, value));
+#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
+		if (profile.option_observer) {
+			const auto normalized = Normalize(value);
+			profile.option_observer(option, normalized.c_str(), profile.option_observer_context);
+		}
+#endif
+	}
+
+private:
+#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
+	static std::string Normalize(const char *value) {
+		return value ? value : "<null>";
+	}
+
+	template <class VALUE>
+	static typename std::enable_if<std::is_integral<VALUE>::value || std::is_enum<VALUE>::value, std::string>::type
+	Normalize(VALUE value) {
+		return std::to_string(static_cast<long long>(value));
+	}
+
+	template <class VALUE>
+	static typename std::enable_if<std::is_pointer<VALUE>::value, std::string>::type Normalize(VALUE value) {
+		return value ? "<set>" : "<null>";
+	}
+#endif
+
+	CURL *handle;
+#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
+	const CurlTransferProfile &profile;
+#endif
+};
+
 long RemainingMilliseconds(std::chrono::steady_clock::time_point deadline) {
 	const auto now = std::chrono::steady_clock::now();
 	if (now >= deadline) {
@@ -230,6 +279,12 @@ void BuildHeaders(const HttpRequest &request, CurlHeaderList &headers) {
 
 } // namespace
 
+#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
+const char *PrivateCurlOptionObserverCanary() noexcept {
+	return "duckdb_api_private_curl_option_observer_v1";
+}
+#endif
+
 HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpRequest &request,
                                  const HttpLimits &limits, ExecutionControl &control) {
 	ValidateInputs(profile, request, limits);
@@ -247,56 +302,60 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 			throw ExecutionError(ErrorStage::TRANSPORT, "", "HTTP transport is unavailable");
 		}
 		auto *handle = easy.Get();
+#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
+		const CurlOptionSetter options(handle, profile);
+#else
+		const CurlOptionSetter options(handle);
+#endif
 		const auto timeout_milliseconds = RemainingMilliseconds(limits.deadline);
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_URL, profile.url));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_HTTPGET, 1L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_HTTP_VERSION, static_cast<long>(CURL_HTTP_VERSION_1_1)));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_HTTPHEADER, headers.Get()));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_PROTOCOLS_STR, profile.protocols));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_REDIR_PROTOCOLS_STR, profile.protocols));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 0L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_MAXREDIRS, 0L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_AUTOREFERER, 0L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_PROXY, ""));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_PRE_PROXY, ""));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_NETRC, CURL_NETRC_IGNORED));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_HTTPAUTH, CURLAUTH_NONE));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_PROXYAUTH, CURLAUTH_NONE));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_UNRESTRICTED_AUTH, 0L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, 1L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_SSL_VERIFYHOST, 2L));
+		options.Set(CURLOPT_URL, profile.url);
+		options.Set(CURLOPT_HTTPGET, 1L);
+		options.Set(CURLOPT_HTTP_VERSION, static_cast<long>(CURL_HTTP_VERSION_1_1));
+		options.Set(CURLOPT_HTTPHEADER, headers.Get());
+		options.Set(CURLOPT_PROTOCOLS_STR, profile.protocols);
+		options.Set(CURLOPT_REDIR_PROTOCOLS_STR, profile.protocols);
+		options.Set(CURLOPT_FOLLOWLOCATION, 0L);
+		options.Set(CURLOPT_MAXREDIRS, 0L);
+		options.Set(CURLOPT_AUTOREFERER, 0L);
+		options.Set(CURLOPT_PROXY, "");
+		options.Set(CURLOPT_PRE_PROXY, "");
+		options.Set(CURLOPT_NETRC, CURL_NETRC_IGNORED);
+		options.Set(CURLOPT_HTTPAUTH, CURLAUTH_NONE);
+		options.Set(CURLOPT_PROXYAUTH, CURLAUTH_NONE);
+		options.Set(CURLOPT_UNRESTRICTED_AUTH, 0L);
+		options.Set(CURLOPT_SSL_VERIFYPEER, 1L);
+		options.Set(CURLOPT_SSL_VERIFYHOST, 2L);
 #ifdef DUCKDB_API_PRIVATE_CURL_TESTS
 		if (profile.trusted_ca_file) {
-			RequireCurlOption(curl_easy_setopt(handle, CURLOPT_CAINFO, profile.trusted_ca_file));
+			options.Set(CURLOPT_CAINFO, profile.trusted_ca_file);
 		}
 		if (profile.resolve_entry) {
 			if (!resolve_entries.Append(profile.resolve_entry)) {
 				throw ExecutionError(ErrorStage::RESOURCE, "", "test resolution entry exceeded available memory");
 			}
-			RequireCurlOption(curl_easy_setopt(handle, CURLOPT_RESOLVE, resolve_entries.Get()));
+			options.Set(CURLOPT_RESOLVE, resolve_entries.Get());
 		}
 #endif
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, timeout_milliseconds));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT_MS, timeout_milliseconds));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_NOPROGRESS, 0L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_XFERINFOFUNCTION, TransferProgress));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_XFERINFODATA, &state));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, WriteBody));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_WRITEDATA, &state));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, ReadHeader));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_HEADERDATA, &state));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_ACCEPT_ENCODING, ""));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_HTTP_CONTENT_DECODING, 1L));
-		RequireCurlOption(
-		    curl_easy_setopt(handle, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(limits.max_response_bytes)));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_PATH_AS_IS, 1L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_FRESH_CONNECT, 1L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_FORBID_REUSE, 1L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_DNS_CACHE_TIMEOUT, 0L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_HTTP09_ALLOWED, 0L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_OPENSOCKETFUNCTION, OpenPolicySocket));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_OPENSOCKETDATA, &state));
+		options.Set(CURLOPT_TIMEOUT_MS, timeout_milliseconds);
+		options.Set(CURLOPT_CONNECTTIMEOUT_MS, timeout_milliseconds);
+		options.Set(CURLOPT_NOSIGNAL, 1L);
+		options.Set(CURLOPT_NOPROGRESS, 0L);
+		options.Set(CURLOPT_XFERINFOFUNCTION, TransferProgress);
+		options.Set(CURLOPT_XFERINFODATA, &state);
+		options.Set(CURLOPT_WRITEFUNCTION, WriteBody);
+		options.Set(CURLOPT_WRITEDATA, &state);
+		options.Set(CURLOPT_HEADERFUNCTION, ReadHeader);
+		options.Set(CURLOPT_HEADERDATA, &state);
+		options.Set(CURLOPT_ACCEPT_ENCODING, "");
+		options.Set(CURLOPT_HTTP_CONTENT_DECODING, 1L);
+		options.Set(CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(limits.max_response_bytes));
+		options.Set(CURLOPT_PATH_AS_IS, 1L);
+		options.Set(CURLOPT_FRESH_CONNECT, 1L);
+		options.Set(CURLOPT_FORBID_REUSE, 1L);
+		options.Set(CURLOPT_DNS_CACHE_TIMEOUT, 0L);
+		options.Set(CURLOPT_HTTP09_ALLOWED, 0L);
+		options.Set(CURLOPT_OPENSOCKETFUNCTION, OpenPolicySocket);
+		options.Set(CURLOPT_OPENSOCKETDATA, &state);
 
 		const auto transfer_result = curl_easy_perform(handle);
 		if (state.cancelled || control.IsCancellationRequested()) {

@@ -127,9 +127,13 @@ std::string ControlledSocketService::Response() const {
 	const std::string success_body = "{\"items\":[{\"id\":11,\"login\":\"duckdb\",\"site_admin\":false},"
 	                                 "{\"id\":22,\"login\":\"duckdb-fdw\",\"site_admin\":true},"
 	                                 "{\"id\":33,\"login\":\"three\",\"site_admin\":false}]}";
-	if (mode == ControlledSocketMode::SUCCESS) {
+	if (mode == ControlledSocketMode::SUCCESS || mode == ControlledSocketMode::SET_COOKIE) {
+		const std::string cookie_header = mode == ControlledSocketMode::SET_COOKIE
+		                                      ? "Set-Cookie: runtime_cookie=CONTROLLED_COOKIE_SECRET; Path=/\r\n"
+		                                      : "";
 		return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
-		       std::to_string(success_body.size()) + "\r\nConnection: close\r\n\r\n" + success_body;
+		       std::to_string(success_body.size()) + "\r\n" + cookie_header + "Connection: close\r\n\r\n" +
+		       success_body;
 	}
 	if (mode == ControlledSocketMode::STATUS) {
 		const std::string body = "SECRET_STATUS_BODY http://127.0.0.1/private";

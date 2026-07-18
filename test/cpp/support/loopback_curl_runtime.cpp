@@ -66,6 +66,8 @@ public:
 #ifdef DUCKDB_API_PRIVATE_CURL_TESTS
 		                                                             ,
 		                                                         nullptr,
+		                                                         nullptr,
+		                                                         nullptr,
 		                                                         nullptr
 #endif
 		};

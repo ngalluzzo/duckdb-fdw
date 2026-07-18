@@ -21,7 +21,8 @@ struct HttpRuntimeService {
 // Query Experience calls this once before registering any table function. It
 // verifies the exact supported libcurl cell and performs checked process-global
 // initialization. The returned executor has no authority override. A process-
-// resident owner keeps one balanced cleanup after all executors and streams;
+// resident owner deliberately performs no accepted-state cleanup and leaves
+// reclamation to the OS. Only rejected unpublished initialization is balanced;
 // dynamic extension unload/reload is unsupported by the 0.3.0 profile.
 HttpRuntimeService InitializeHttpRuntime();
 

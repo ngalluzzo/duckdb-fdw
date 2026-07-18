@@ -84,7 +84,7 @@ private:
 	std::string path;
 };
 
-void TestRealCurlSuccessAndExactRequestUnderHostileEnvironment() {
+void TestRealCurlSuccessUnderHostileProxyAndNetrcEnvironment() {
 	ControlledHome home;
 	ScopedEnvironment environment;
 	environment.Set("HOME", home.Path());
@@ -97,8 +97,6 @@ void TestRealCurlSuccessAndExactRequestUnderHostileEnvironment() {
 	environment.Set("ALL_PROXY", "http://AMBIENT_PROXY_SECRET@127.0.0.1:1");
 	environment.Set("no_proxy", "");
 	environment.Set("NO_PROXY", "");
-	environment.Set("HTTP_COOKIE", "AMBIENT_COOKIE_SECRET=1");
-	environment.Set("CURL_USERPWD", "AMBIENT_USERPWD_SECRET");
 
 	ControlledSocketService service(ControlledSocketMode::SUCCESS);
 	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
@@ -139,12 +137,127 @@ void TestRealCurlSuccessAndExactRequestUnderHostileEnvironment() {
 	            wire.find("\r\nX-GitHub-Api-Version: 2022-11-28\r\n") != std::string::npos,
 	        "curl fixed request headers drifted");
 	Require(wire.find("Authorization:") == std::string::npos &&
-	            wire.find("Proxy-Authorization:") == std::string::npos && wire.find("Cookie:") == std::string::npos &&
-	            wire.find("AMBIENT_") == std::string::npos,
-	        "curl emitted ambient credentials or state");
+	            wire.find("Proxy-Authorization:") == std::string::npos && wire.find("AMBIENT_") == std::string::npos,
+	        "curl emitted ambient proxy or netrc authority");
 	const auto observation = runtime->Observation();
 	Require(observation.request_count == 1 && observation.socket_policy_checks == 1 && service.ConnectionCount() == 1,
 	        "curl did not perform exactly one policy-checked request attempt");
+}
+
+std::string ObservedValue(const duckdb_api_test::PrivateCurlProbeResult &result, CURLoption option) {
+	std::string value;
+	uint64_t matches = 0;
+	for (std::size_t index = 0; index < result.options.size(); index++) {
+		if (result.options[index].option == option) {
+			value = result.options[index].normalized_value;
+			matches++;
+		}
+	}
+	Require(matches == 1, "required curl option was not configured exactly once");
+	return value;
+}
+
+void TestExactCurlOptionInventory() {
+	Require(std::string(duckdb_api::internal::PrivateCurlOptionObserverCanary()) ==
+	            "duckdb_api_private_curl_option_observer_v1",
+	        "private curl option observer canary drifted");
+	ControlledSocketService service(ControlledSocketMode::SUCCESS);
+	ManualControl control;
+	uint64_t policy_checks = 0;
+	const duckdb_api_test::PrivateCurlProbeOptions options {
+	    "http://127.0.0.1:" + std::to_string(service.Port()) + "/search/users?q=duckdb+in%3Alogin&per_page=3",
+	    "http",
+	    "http",
+	    "127.0.0.1",
+	    service.Port(),
+	    "",
+	    "",
+	    duckdb_api_test::PrivateCurlSocketPolicy::ALLOW_LOOPBACK_PORT,
+	    1000,
+	    &policy_checks};
+	const auto result = duckdb_api_test::PerformPrivateCurlProbe(options, control);
+	const CURLoption expected[] = {CURLOPT_URL,
+	                               CURLOPT_HTTPGET,
+	                               CURLOPT_HTTP_VERSION,
+	                               CURLOPT_HTTPHEADER,
+	                               CURLOPT_PROTOCOLS_STR,
+	                               CURLOPT_REDIR_PROTOCOLS_STR,
+	                               CURLOPT_FOLLOWLOCATION,
+	                               CURLOPT_MAXREDIRS,
+	                               CURLOPT_AUTOREFERER,
+	                               CURLOPT_PROXY,
+	                               CURLOPT_PRE_PROXY,
+	                               CURLOPT_NETRC,
+	                               CURLOPT_HTTPAUTH,
+	                               CURLOPT_PROXYAUTH,
+	                               CURLOPT_UNRESTRICTED_AUTH,
+	                               CURLOPT_SSL_VERIFYPEER,
+	                               CURLOPT_SSL_VERIFYHOST,
+	                               CURLOPT_TIMEOUT_MS,
+	                               CURLOPT_CONNECTTIMEOUT_MS,
+	                               CURLOPT_NOSIGNAL,
+	                               CURLOPT_NOPROGRESS,
+	                               CURLOPT_XFERINFOFUNCTION,
+	                               CURLOPT_XFERINFODATA,
+	                               CURLOPT_WRITEFUNCTION,
+	                               CURLOPT_WRITEDATA,
+	                               CURLOPT_HEADERFUNCTION,
+	                               CURLOPT_HEADERDATA,
+	                               CURLOPT_ACCEPT_ENCODING,
+	                               CURLOPT_HTTP_CONTENT_DECODING,
+	                               CURLOPT_MAXFILESIZE_LARGE,
+	                               CURLOPT_PATH_AS_IS,
+	                               CURLOPT_FRESH_CONNECT,
+	                               CURLOPT_FORBID_REUSE,
+	                               CURLOPT_DNS_CACHE_TIMEOUT,
+	                               CURLOPT_HTTP09_ALLOWED,
+	                               CURLOPT_OPENSOCKETFUNCTION,
+	                               CURLOPT_OPENSOCKETDATA};
+	Require(result.options.size() == sizeof(expected) / sizeof(expected[0]), "curl option inventory size drifted");
+	for (std::size_t index = 0; index < result.options.size(); index++) {
+		Require(result.options[index].option == expected[index], "curl option inventory or ordering drifted");
+	}
+	Require(ObservedValue(result, CURLOPT_PROXY).empty() && ObservedValue(result, CURLOPT_PRE_PROXY).empty(),
+	        "curl proxy disabling options drifted");
+	Require(ObservedValue(result, CURLOPT_NETRC) == "0" && ObservedValue(result, CURLOPT_HTTPAUTH) == "0" &&
+	            ObservedValue(result, CURLOPT_PROXYAUTH) == "0" &&
+	            ObservedValue(result, CURLOPT_UNRESTRICTED_AUTH) == "0",
+	        "curl netrc or authentication disabling options drifted");
+	const CURLoption forbidden[] = {CURLOPT_COOKIE,     CURLOPT_COOKIEFILE, CURLOPT_COOKIEJAR,
+	                                CURLOPT_COOKIELIST, CURLOPT_SHARE,      CURLOPT_USERPWD};
+	for (std::size_t forbidden_index = 0; forbidden_index < sizeof(forbidden) / sizeof(forbidden[0]);
+	     forbidden_index++) {
+		for (std::size_t observed_index = 0; observed_index < result.options.size(); observed_index++) {
+			Require(result.options[observed_index].option != forbidden[forbidden_index],
+			        "curl enabled cookie, share, or user-password state");
+		}
+	}
+}
+
+void TestResponseCookieDoesNotCrossFreshScans() {
+	{
+		ControlledSocketService service(ControlledSocketMode::SET_COOKIE);
+		const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
+		ManualControl control;
+		auto stream = runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(runtime->Connector()), control);
+		duckdb_api::TypedBatch batch;
+		Require(stream->Next(control, batch), "cookie-setting response did not complete its scan");
+		Require(service.WaitForRequest(std::chrono::seconds(2)), "cookie-setting service saw no request");
+		Require(service.Request().find("Cookie:") == std::string::npos,
+		        "first fresh scan unexpectedly emitted a cookie");
+	}
+	{
+		ControlledSocketService service(ControlledSocketMode::SUCCESS);
+		const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
+		ManualControl control;
+		auto stream = runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(runtime->Connector()), control);
+		duckdb_api::TypedBatch batch;
+		Require(stream->Next(control, batch), "second fresh scan did not complete");
+		Require(service.WaitForRequest(std::chrono::seconds(2)), "second fresh service saw no request");
+		const auto wire = service.Request();
+		Require(wire.find("Cookie:") == std::string::npos && wire.find("CONTROLLED_COOKIE_SECRET") == std::string::npos,
+		        "response cookie crossed into a fresh scan");
+	}
 }
 
 void TestStatusRedirectAndTransportFailures() {
@@ -218,7 +331,9 @@ void TestOneSocketAcrossMultipleResolvedAddresses() {
 int main() {
 	(void)std::signal(SIGPIPE, SIG_IGN);
 	try {
-		TestRealCurlSuccessAndExactRequestUnderHostileEnvironment();
+		TestRealCurlSuccessUnderHostileProxyAndNetrcEnvironment();
+		TestExactCurlOptionInventory();
+		TestResponseCookieDoesNotCrossFreshScans();
 		TestStatusRedirectAndTransportFailures();
 		TestDeniedAddressCallbackPreventsConnection();
 		TestOneSocketAcrossMultipleResolvedAddresses();

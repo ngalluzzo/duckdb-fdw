@@ -1,10 +1,11 @@
 #pragma once
 
 #include "duckdb_api/execution.hpp"
-#include "duckdb_api/internal/http_transport.hpp"
+#include "duckdb_api/internal/curl_transfer.hpp"
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace duckdb_api_test {
 
@@ -26,6 +27,11 @@ struct PrivateCurlProbeOptions {
 struct PrivateCurlProbeResult {
 	duckdb_api::internal::HttpResponse response;
 	uint64_t socket_policy_checks;
+	struct OptionObservation {
+		CURLoption option;
+		std::string normalized_value;
+	};
+	std::vector<OptionObservation> options;
 };
 
 // Calls the shared curl algorithm through a private-link-only profile. This
