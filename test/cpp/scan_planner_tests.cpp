@@ -71,6 +71,12 @@ void TestConnectorCeilingsNarrowSemanticAndHostBudgets() {
 	        "valid connector-narrowed budgets were rejected as outside live relation bounds");
 
 	connector = duckdb_api::BuildNativeGithubConnector();
+	connector.resource_ceilings.max_records = 1;
+	const auto minimum = duckdb_api::BuildConservativeScanPlan(connector, BuildLiveScanRequest(connector));
+	Require(minimum.Budgets().decoded_records == 1 && minimum.Budgets().IsWithinLiveRestBounds(),
+	        "minimum nonzero connector record ceiling was not preserved exactly");
+
+	connector = duckdb_api::BuildNativeGithubConnector();
 	connector.network_policy.max_response_bytes = duckdb_api::HOST_MAX_RESPONSE_BYTES + 1;
 	connector.resource_ceilings.max_extracted_string_bytes = duckdb_api::HOST_MAX_EXTRACTED_STRING_BYTES + 1;
 	const auto host_capped = duckdb_api::BuildConservativeScanPlan(connector, BuildLiveScanRequest(connector));
