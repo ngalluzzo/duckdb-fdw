@@ -2253,10 +2253,11 @@ Errors should include:
 For the native preview, malformed JSON maps to public category `decode`.
 Missing extraction, forbidden nulls, duplicate required fields, and strict
 declared-type conversion failures map to `schema`. The DuckDB boundary performs
-that mapping once. It may expose the category, `example`, `items`, and a known
-schema field, but never the rejected scalar, response body, credential, or
-unrestricted path. Unknown native exceptions become a redacted `internal`
-error; interruption remains DuckDB cancellation.
+that mapping once. It may expose the category, `github`,
+`duckdb_login_search_page`, `items`, and a known schema field, but never the
+rejected scalar, response body, credential, or unrestricted path. Unknown
+native exceptions become a redacted `internal` error; interruption remains
+DuckDB cancellation.
 
 ---
 
