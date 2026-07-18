@@ -1,9 +1,9 @@
 # name: test/sql/duckdb_api.test
-# description: accepted duckdb_api SQL contract preserved by 0.2.0
+# description: static duckdb_api SQL contract preserved by 0.3.0
 # group: [duckdb_api]
 
 statement error
-SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'items');
+SELECT * FROM duckdb_api_scan(connector := 'github', relation := 'duckdb_login_search_page');
 ----
 Catalog Error: Table Function with name duckdb_api_scan does not exist!
 
@@ -14,65 +14,44 @@ SELECT extension_version
 FROM duckdb_extensions()
 WHERE extension_name = 'duckdb_api';
 ----
-0.2.0
+0.3.0
 
-query ITI
-SELECT id, name, active
+# DESCRIBE binds and plans the sole live relation without executing its source.
+query TTTTTT
+DESCRIBE SELECT *
 FROM duckdb_api_scan(
-    connector := 'example',
-    relation := 'items'
+    connector := 'github',
+    relation := 'duckdb_login_search_page'
+);
+----
+id	BIGINT	YES	NULL	NULL	NULL
+login	VARCHAR	YES	NULL	NULL	NULL
+site_admin	BOOLEAN	YES	NULL	NULL	NULL
+
+# PREPARE copies immutable bind data but does not acquire network authority.
+statement ok
+PREPARE live_scan AS
+SELECT id, login, site_admin
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'duckdb_login_search_page'
 )
 ORDER BY id;
-----
-1	alpha	true
-2	beta	false
-3	gamma	true
 
-# Each query discriminates one part of DuckDB's retained relational ownership.
-query I
-SELECT id
-FROM duckdb_api_scan(connector := 'example', relation := 'items')
-WHERE NOT active;
-----
-2
-
-query I
-SELECT id
-FROM duckdb_api_scan(connector := 'example', relation := 'items')
-ORDER BY id DESC;
-----
-3
-2
-1
-
-query I
-SELECT id
-FROM duckdb_api_scan(connector := 'example', relation := 'items')
-ORDER BY id
-LIMIT 1 OFFSET 1;
-----
-2
-
-query I
-SELECT id
-FROM duckdb_api_scan(connector := 'example', relation := 'items')
-WHERE active
-ORDER BY id
-LIMIT 1 OFFSET 1;
-----
-3
+statement ok
+DEALLOCATE live_scan;
 
 statement error
-SELECT * FROM duckdb_api_scan(connector := 'other', relation := 'items');
+SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'items');
 ----
 Binder Error: [duckdb_api][bind] unknown connector identifier
 
 statement error
-SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'other');
+SELECT * FROM duckdb_api_scan(connector := 'github', relation := 'items');
 ----
-Binder Error: [duckdb_api][bind] connector=example: unknown relation identifier
+Binder Error: [duckdb_api][bind] connector=github: unknown relation identifier
 
 statement error
-SELECT * FROM duckdb_api_scan(connector := 'example');
+SELECT * FROM duckdb_api_scan(connector := 'github');
 ----
 Binder Error: [duckdb_api][bind] required named argument relation is missing

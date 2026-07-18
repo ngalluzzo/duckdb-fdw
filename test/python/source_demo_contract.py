@@ -11,21 +11,27 @@ import sys
 import tempfile
 
 
-EXPECTED_SUMMARY = {
+EXPECTED_STATIC_SUMMARY = {
     "duckdb": ["v1.5.4", "08e34c447b"],
     "extension": {
         "install_mode": "NOT_INSTALLED",
         "installed": False,
         "loaded": True,
         "name": "duckdb_api",
-        "version": "0.2.0",
+        "version": "0.3.0",
     },
-    "rows": [[1, "alpha", True], [2, "beta", False], [3, "gamma", True]],
-    "schema": [["id", "BIGINT"], ["name", "VARCHAR"], ["active", "BOOLEAN"]],
+    "relation": {
+        "connector": "github",
+        "maximum_rows": 3,
+        "name": "duckdb_login_search_page",
+    },
+    "schema": [
+        ["id", "BIGINT"],
+        ["login", "VARCHAR"],
+        ["site_admin", "BOOLEAN"],
+    ],
 }
-EXPECTED_FAILURE = (
-    "Binder Error: [duckdb_api][bind] connector=example: unknown relation identifier"
-)
+EXPECTED_FAILURE = "Binder Error: [duckdb_api][bind] unknown connector identifier"
 FAILURE_PROGRAM = r'''
 import duckdb
 import sys
@@ -34,7 +40,7 @@ connection = duckdb.connect(config={"allow_unsigned_extensions": "true"})
 connection.execute("LOAD 'duckdb_api.duckdb_extension'")
 try:
     connection.execute(
-        "SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'missing')"
+        "SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'items')"
     ).fetchall()
 except Exception as error:
     print(str(error), file=sys.stderr)
@@ -58,6 +64,27 @@ def run(
     )
 
 
+def validate_summary(summary: object) -> None:
+    if not isinstance(summary, dict):
+        raise AssertionError(f"example did not return a JSON object: {summary!r}")
+    rows = summary.get("rows")
+    static = {key: value for key, value in summary.items() if key != "rows"}
+    if static != EXPECTED_STATIC_SUMMARY:
+        raise AssertionError(f"first-live-relation example drifted: {summary!r}")
+    if not isinstance(rows, list) or len(rows) > 3:
+        raise AssertionError(f"public row cardinality drifted: {rows!r}")
+    for row in rows:
+        if (
+            not isinstance(row, list)
+            or len(row) != 3
+            or isinstance(row[0], bool)
+            or not isinstance(row[0], int)
+            or not isinstance(row[1], str)
+            or not isinstance(row[2], bool)
+        ):
+            raise AssertionError(f"public row type drifted: {row!r}")
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         raise SystemExit("usage: source_demo_contract.py PINNED_PYTHON PATH_TO_EXTENSION")
@@ -68,7 +95,7 @@ def main() -> int:
         raise AssertionError(f"pinned Python is not executable: {pinned_python}")
 
     repository_root = pathlib.Path(__file__).resolve().parents[2]
-    example_runner = repository_root / "examples/first_trustworthy_query.py"
+    example_runner = repository_root / "examples/first_live_rest_relation.py"
 
     with tempfile.TemporaryDirectory(prefix="duckdb-api-source-demo-") as directory:
         isolated = pathlib.Path(directory)
@@ -88,16 +115,24 @@ def main() -> int:
             "raise RuntimeError('ambient PYTHONPATH was imported')\n",
             encoding="utf-8",
         )
+        (home / ".curlrc").write_text(
+            "url = http://127.0.0.1:1/top-secret-source-demo\n", encoding="utf-8"
+        )
 
         environment = os.environ.copy()
+        environment["ALL_PROXY"] = "http://127.0.0.1:1"
+        environment["DUCKDB_API_CONNECTOR_PATH"] = "/top-secret-source-demo/connector.yaml"
+        environment["DUCKDB_API_FIXTURE_SCENARIO"] = "malformed-top-secret-source-demo"
+        environment["DUCKDB_API_LIVE_PROOF_AUTHORITY"] = "http://127.0.0.1:1"
         environment["HOME"] = str(home)
+        environment["HTTPS_PROXY"] = "http://127.0.0.1:1"
+        environment["HTTP_PROXY"] = "http://127.0.0.1:1"
+        environment["NO_PROXY"] = ""
         environment["TMPDIR"] = str(temporary)
         environment["XDG_CACHE_HOME"] = str(cache)
         environment["XDG_CONFIG_HOME"] = str(config)
         environment["PYTHONHOME"] = str(isolated / "missing-python-home")
         environment["PYTHONPATH"] = str(poisoned_python_path)
-        environment["DUCKDB_API_CONNECTOR_PATH"] = "/top-secret-source-demo/connector.yaml"
-        environment["DUCKDB_API_FIXTURE_SCENARIO"] = "malformed-top-secret-source-demo"
 
         success = run(
             [str(pinned_python), "-I", str(example_runner), str(artifact), "--json"],
@@ -106,13 +141,12 @@ def main() -> int:
         )
         if success.returncode != 0:
             raise AssertionError(
-                "first-query example failed:\n"
+                "first-live-relation example failed:\n"
                 f"stdout:\n{success.stdout}\n"
                 f"stderr:\n{success.stderr}"
             )
         summary = json.loads(success.stdout)
-        if summary != EXPECTED_SUMMARY:
-            raise AssertionError(f"first-query example drifted: {summary!r}")
+        validate_summary(summary)
 
         failure = run(
             [str(pinned_python), "-I", "-c", FAILURE_PROGRAM],
@@ -120,10 +154,10 @@ def main() -> int:
             environment,
         )
         if failure.returncode == 0:
-            raise AssertionError("unknown relation unexpectedly succeeded")
+            raise AssertionError("removed fixture relation unexpectedly succeeded")
         diagnostic = failure.stderr.strip()
         if not diagnostic or diagnostic.splitlines()[0] != EXPECTED_FAILURE:
-            raise AssertionError(f"unexpected unknown-relation diagnostic: {diagnostic!r}")
+            raise AssertionError(f"unexpected removed-relation diagnostic: {diagnostic!r}")
         forbidden = (
             "top-secret-source-demo",
             str(isolated),
@@ -132,11 +166,11 @@ def main() -> int:
         )
         if any(value in diagnostic for value in forbidden):
             raise AssertionError(
-                "unknown-relation diagnostic disclosed private context: "
+                "removed-relation diagnostic disclosed private context: "
                 f"{diagnostic!r}"
             )
 
-    print(json.dumps(EXPECTED_SUMMARY, sort_keys=True))
+    print(json.dumps(summary, sort_keys=True))
     return 0
 
 

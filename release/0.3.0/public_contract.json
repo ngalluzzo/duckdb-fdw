@@ -1,0 +1,64 @@
+{
+  "added_settings": [],
+  "added_types": [],
+  "authority_inputs": [],
+  "diagnostics": {
+    "missing_relation": "[duckdb_api][bind] required named argument relation is missing",
+    "unknown_connector": "[duckdb_api][bind] unknown connector identifier",
+    "unknown_relation": "[duckdb_api][bind] connector=github: unknown relation identifier"
+  },
+  "duckdb": [
+    "v1.5.4",
+    "08e34c447b"
+  ],
+  "extension": [
+    "duckdb_api",
+    "0.3.0"
+  ],
+  "function": {
+    "name": "duckdb_api_scan",
+    "named_parameters": {
+      "connector": "VARCHAR",
+      "relation": "VARCHAR"
+    }
+  },
+  "relation": {
+    "cardinality": {
+      "maximum": 3,
+      "minimum": 0
+    },
+    "connector": "github",
+    "domain": "single_fixed_github_search_response_page",
+    "duckdb_visible_not_null": false,
+    "name": "duckdb_login_search_page",
+    "public_row_identity": "not_guaranteed",
+    "public_row_order": "not_guaranteed",
+    "required_values": true,
+    "schema": [
+      [
+        "id",
+        "BIGINT"
+      ],
+      [
+        "login",
+        "VARCHAR"
+      ],
+      [
+        "site_admin",
+        "BOOLEAN"
+      ]
+    ]
+  },
+  "relational_ownership": {
+    "filter": "duckdb",
+    "limit": "duckdb",
+    "offset": "duckdb",
+    "ordering": "duckdb"
+  },
+  "removed_relations": [
+    {
+      "connector": "example",
+      "relation": "items"
+    }
+  ]
+}
