@@ -15,6 +15,7 @@ from .support import (
     SCAN_FROM,
     OracleServer,
     assert_one_request,
+    assert_redacted_diagnostic,
     load_controlled_extension,
 )
 
@@ -58,8 +59,15 @@ def run_relational_contract(
             ).fetchall()
         except duckdb.BinderException as error:
             expected = "Binder Error: [duckdb_api][bind] unknown connector identifier"
-            if str(error) != expected:
+            diagnostic = str(error)
+            first_line, separator, context = diagnostic.partition("\n\n")
+            if (
+                first_line != expected
+                or separator != "\n\n"
+                or not context.startswith("LINE 1:")
+            ):
                 raise AssertionError(f"removed fixture diagnostic drifted: {error!s}") from error
+            assert_redacted_diagnostic(diagnostic, server)
         else:
             raise AssertionError("removed fixture product path still bound")
         if server.request_count() != 0:
