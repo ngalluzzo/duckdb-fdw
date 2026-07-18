@@ -280,17 +280,17 @@ cell.
 
 | Question or claim | Evidence required | Method or fixture | Result and limitations |
 | --- | --- | --- | --- |
-| Can the native extension return live strict rows? | Direct-load HTTPS execution | Live REST product-proof runner against GitHub | Passed with three typed rows; current-service compatibility only |
-| Can correctness avoid public-service drift? | Exact deterministic request/row oracle | Private non-installable composition plus controlled local HTTP service | Passed ordinary and prepared scans with one request each in the trial; permanent seam and installed-artifact exclusion remain delivery evidence |
-| Are failures and work bounded? | Status, redirect, malformed, oversized, disconnect, deadline, interrupt, close, and recovery counterexamples | Controlled failure/lifecycle runner | Passed ten requests; connection close relies on the hard deadline |
-| Is destination policy applied after DNS? | Resolved-address denial and public-address acceptance | Runtime policy tests and curl socket callback | Passed on the recorded trial cell |
+| Can the native extension return live strict rows? | Direct-load HTTPS execution | Permanent source-demo runner against GitHub | Passed on the integrated `0.3.0` artifact with the three declared logical types and a bounded zero-to-three-row result; current-service compatibility only |
+| Can correctness avoid public-service drift? | Exact deterministic request/row oracle | Private non-installable composition plus controlled local HTTP service | Passed on the permanent adapter path: offline bind/prepare, ordinary/prepared equality, exact rows, byte-identical relational variants, and public-artifact exclusion are covered by the controlled 20-request oracle and inventory canaries |
+| Are failures and work bounded? | Status, redirect, malformed, oversized, disconnect, deadline, interrupt, close, and recovery counterexamples | Controlled product lifecycle plus focused Runtime transport/executor tests | Passed on permanent source; prompt interruption and recovery are proven, while connection close retains the accepted five-second deadline boundary |
+| Is destination policy applied after DNS? | Resolved-address denial and public-address acceptance | Runtime network-policy tests and curl socket callback | Passed in focused policy/curl tests and the reusable and fresh product gates on the supported cell |
 | Can DuckDB's bundled client supply HTTPS? | Actual HTTPS execution | DuckDB 1.5.4 native client probe | No; the inspected client path was HTTP-only |
-| Is libcurl production-ready for the claimed cell? | Constrained SDK/header/stub, artifact install-name, runtime version/SSL-backend/thread-safe feature, and clean permanent-build identities | `0.3.0` pins plus dependency/source/artifact/fresh-product gates; init-before-version-info, rejected-init cleanup, and accepted process-resident lifetime contracts | Platform choice decided; exact digest and permanent gate evidence pending implementation ([official init](https://curl.se/libcurl/c/curl_global_init.html), [cleanup](https://curl.se/libcurl/c/curl_global_cleanup.html), and [feature identity](https://curl.se/libcurl/c/curl_version_info.html)) |
-| Does the permanent planner preserve conservative ownership? | Golden plans plus negative/property oracles | Focused planner and differential DuckDB tests | Pending permanent implementation |
+| Is libcurl production-ready for the claimed cell? | Constrained SDK/header/stub, artifact install-name, runtime version/SSL-backend/thread-safe feature, and clean permanent-build identities | `0.3.0` pins plus dependency/source/artifact/fresh-product gates; init-before-version-info, rejected-init cleanup, and accepted process-resident lifetime contracts | Passed: exact dependency identities, lifecycle tests, target-link classification, installed-artifact canaries, and a fresh 618-target product build agree on the selected cell ([official init](https://curl.se/libcurl/c/curl_global_init.html), [cleanup](https://curl.se/libcurl/c/curl_global_cleanup.html), and [feature identity](https://curl.se/libcurl/c/curl_version_info.html)) |
+| Does the permanent planner preserve conservative ownership? | Golden plans plus negative/property oracles | Focused planner and differential DuckDB tests | Passed: the immutable golden plan, narrowed/widened counterexamples, offline ordinary/prepared path, and DuckDB-owned filter/order/limit/offset variants pass on permanent source |
 
-The completed trial is sufficient decision evidence for mechanism feasibility.
-Pending rows above are implementation acceptance evidence rather than reasons
-to keep the shared contract ambiguous.
+The completed trial supplied the original decision evidence for mechanism
+feasibility. The permanent results above now supply the implementation
+acceptance evidence without changing the accepted shared contract.
 
 ## Alternatives considered
 
@@ -384,24 +384,69 @@ declarative authoring rather than runtime configuration.
 - **Interaction exit:** every topology row's exit condition is audited against
   final source dependencies and oracles.
 
+## Implementation completion record
+
+Implementation is **Satisfied** by the permanent product graph integrated at
+`f834eb0`, including Query's final public binder-context correction through
+`ba389a9`. RFC lifecycle status remains `Accepted`: acceptance authorized the
+decision, while this record captures the later delivery and propagation proof.
+
+Fresh closure evidence includes:
+
+- `make test` on the integrated product graph passed every focused Connector,
+  Semantics, Runtime, and Query target; 25 SQLLogicTest assertions; installed-
+  artifact symbol, dependency, and test-control inventory; the controlled
+  product's 20-request relational/lifecycle oracle; and the public GitHub
+  compatibility query.
+- `scripts/verify-source-identities.py` reported native Connector source
+  SHA-256
+  `d9cf66acedb97b0325ca9c9883afceaa91a491fe48e2f6d5d3744137f8d13e86`
+  and public-contract SHA-256
+  `f5d9a5c14ef603fef34bf7154ad2272e86742fec0af994aacfbfec4afe84c8e9`;
+  all 11 deterministic dependency-verifier counterexamples passed.
+- Fresh `make verify PROFILE=debug` rebuilt 618 targets with
+  `developer_cache_reused=false` from exact delivered product tree
+  `f9f11018fa4671faa213ff9999adc9c7c72e9689`. It repeated dependency
+  identity and linkage classification, focused tests, TLS probes,
+  SQLLogicTests, public inventory/direct load, controlled evidence, and the live
+  example. Public artifact SHA-256 was
+  `55371437224cee67a71f3b548643de35ce149c9f94626c25fc071a44c61f9182`;
+  controlled artifact SHA-256 was
+  `8813dff1d2a815a27bacf74c6c08012262f6126e57176e998318c88bcdb2663e`.
+
+The final topology exit audit is:
+
+| Team | Exit status | Final dependency and oracle evidence |
+| --- | --- | --- |
+| Query Experience | Satisfied; accountable outcome complete | The permanent and controlled entry points reuse one DuckDB adapter. Bind constructs only a conservative `ScanRequest`, retains the immutable `ScanPlan`, and opens only the public `ScanExecutor`/`BatchStream` service. Adapter, controlled relational/lifecycle, public contract, and artifact-canary oracles pass. |
+| Connector Experience | Satisfied; X-as-a-Service | The canonical immutable native snapshot and direct contract target remain independent of DuckDB, planner, runtime, transport, YAML, and live-service machinery. Query and Semantics consume its public values without duplicating request authority. |
+| Relational Semantics | Satisfied; X-as-a-Service | Focused plan representation and planner-policy targets independently prove the immutable offline plan and conservative counterexamples. Query constructs only `ScanRequest`; Runtime validates only typed executable facts and neither consumer reconstructs relational ownership. |
+| Remote Runtime | Satisfied; X-as-a-Service | Focused executor, transport, policy, decode, budget, TLS, cancellation, and lifecycle tests remain DuckDB-free. Query consumes only the documented executor, stream, batch, control, and error service; the adapter has no Runtime-internal dependency. |
+| Engineering Enablement | Satisfied; facilitation ended | Responsibility-named source groups, constrained dependency identities, curl-link classification, private/public artifact custody, source identities, stable Make commands, and a fresh product root are maintained as reusable gates without Enablement owning the domain oracles or approving normal delivery. |
+
+No affected-team confirmation remains outstanding for RFC acceptance or these
+recorded interaction exits. A future change to any public/shared contract,
+support cell, or team boundary requires its own routing and affected-team
+review.
+
 ## Contract propagation
 
 | Source of truth or artifact | Impact | Required update | Completion evidence |
 | --- | --- | --- | --- |
-| `docs/ARCHITECTURE.md` | Affected | Replace fixture-only preview mapping with the accepted live native profile and exclusions | Pending implementation change |
-| `docs/CONNECTOR_SPECIFICATIONS.md` | Clarification only | State that the compiled-in live snapshot does not activate draft package authoring | Pending implementation change |
-| `docs/RUNTIME_CONTRACTS.md` | Affected | Define live compiled metadata, typed plan, batches, network/resource policy, diagnostics, and lifetime | Pending implementation change |
-| `docs/TEAM_TOPOLOGY.md` and active charters | Not affected | Existing accountabilities and interfaces already govern the split | Charter review record below |
+| `docs/ARCHITECTURE.md` | Affected | Replace fixture-only preview mapping with the accepted live native profile and exclusions | Complete: Section 5.0 defines the bounded relation, typed team boundaries, conservative DuckDB ownership, runtime policy/lifecycle, controlled/public evidence split, and supported cell; focused and end-to-end tests exercise that mapping |
+| `docs/CONNECTOR_SPECIFICATIONS.md` | Clarification only | State that the compiled-in live snapshot does not activate draft package authoring | Complete: Section 1.4 and the distribution boundary distinguish native `CompiledConnector` metadata from YAML parsing, package loading, author tooling, compatibility, and distribution |
+| `docs/RUNTIME_CONTRACTS.md` | Affected | Define live compiled metadata, typed plan, batches, network/resource policy, diagnostics, and lifetime | Complete: the native `0.3.0` mapping, DuckDB lifecycle, executor/stream, diagnostics, cancellation, and process-resident libcurl sections agree with the private C++ interfaces and permanent failure/lifecycle oracles |
+| `docs/TEAM_TOPOLOGY.md` and active charters | Not affected | Existing accountabilities and interfaces already govern the split | Complete: the accepted review record and final source-dependency audit preserve all five charter boundaries and close each temporary interaction without moving accountability |
 | `docs/PRODUCT_DELIVERY.md`, `AGENTS.md`, and skills | Not affected | Existing trial-graduation and topology rules correctly stopped direct promotion | No update required |
-| Examples, diagnostics, fixtures, and tests | Affected | Replace fixture product example/inventory and add controlled/public live oracles | Pending implementation change |
+| Examples, diagnostics, fixtures, and tests | Affected | Replace fixture product example/inventory and add controlled/public live oracles | Complete: public SQL/Python examples and `0.3.0` inventory expose only the GitHub relation; fixture-era product composition and inputs are retired; focused, controlled, public, source-identity, and artifact-exclusion oracles pass |
 
-## Unresolved questions
+## Deferred boundaries
 
 - The exact canonical SDK header/stub digests and observed SSL-backend string
-  are recorded in `release/0.3.0/pins.json` by the permanent dependency oracle;
-  they instantiate the selected cell and do not reopen the dependency choice.
-- Additional supported build cells require their own complete dependency and
-  product evidence; they do not block the one-cell preview.
+  are recorded and verified through `release/0.3.0/pins.json`; they instantiate
+  the selected cell and do not reopen the dependency choice.
+- Additional supported build cells remain outside this RFC's delivered scope
+  and require their own complete dependency and product evidence.
 
 ## Review record
 

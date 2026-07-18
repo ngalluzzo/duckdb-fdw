@@ -9,12 +9,12 @@ adapter capability reporting, scan initialization, typed-batch transfer into
 `DataChunk`, host cancellation and exception translation, product composition,
 and the user-visible controlled and public query oracles.
 
-Connector Experience has published the immutable native metadata. Query does
-not implement against inferred planning or execution shapes: Relational
-Semantics and Remote Runtime land their final provider commits before Query
-implementation consumes those interfaces. This workstream does not copy the
-trial adapter, construct transport objects, interpret planner fields, or expose
-a selectable authority.
+Status: **Satisfied on `main`**. Commit `f834eb0` integrates the permanent
+Connector, Relational Semantics, Remote Runtime, and Query graph after Query's
+final public binder-context correction in `ba389a9`. Query consumes the
+committed provider interfaces without copying the trial adapter, constructing
+transport objects, reclassifying planner decisions, or exposing a selectable
+authority.
 
 ## Owned production files
 
@@ -24,7 +24,7 @@ a selectable authority.
 | `src/include/duckdb_api/product_composition.hpp` and `src/product_composition.cpp` | Sole installed composition seam; assemble the canonical Connector snapshot and Remote Runtime's production `ScanExecutor` service behind immutable provider interfaces, with no curl, decoder, DNS-policy, or test-authority knowledge |
 | `src/duckdb_api_adapter.cpp` | DuckDB table-function registration, constant named-argument validation, metadata-only bind and planning call, immutable `TableFunctionData::Copy`, single-task global state, execution-control view, stream open/pull/cancel/close, typed-batch validation and `DataChunk` output, and one-time safe error translation |
 | `src/duckdb_api_extension.cpp` and `src/include/duckdb_api_extension.hpp` | Installed extension identity and entry point plus the narrow registration API shared with the private controlled artifact; the installed entry point selects only `BuildProductComposition()` |
-| `src/example_composition.cpp`, `src/include/duckdb_api/example_composition.hpp`, and `src/include/duckdb_api/embedded_example.hpp` | Retire the fixture-only product composition and embedded response after the lead-owned build graph switches to the permanent live composition |
+| Removed `src/example_composition.cpp`, `src/include/duckdb_api/example_composition.hpp`, and `src/include/duckdb_api/embedded_example.hpp` | Retired the fixture-only product composition and embedded response after the lead-owned build graph switched to the permanent live composition |
 
 The adapter may retain only immutable `CompiledConnector`, `ScanRequest`,
 `ScanPlan`, and `ScanExecutor` values in registration or bind state and exactly
@@ -88,9 +88,10 @@ and composition.
   identities, and fresh product cell. Query supplies source and oracle entry
   points but does not edit those gates or pins.
 
-Provider commits are cherry-picked unchanged in dependency order. Any provider
-contract gap is returned to its owner; Query does not add compatibility shims,
-duplicate constants, or reach into an `internal/` header to unblock itself.
+The integrated graph preserves the provider commits and their dependency
+direction. Provider contract gaps were returned to their owners; Query added no
+compatibility shim, duplicate request constant, or `internal/` provider-header
+dependency.
 
 ## Private controlled composition and artifact exclusion
 
@@ -113,7 +114,7 @@ The installed-artifact oracle must prove all of the following:
 - ambient files, environment, Python paths, proxy variables, and DuckDB
   settings cannot change the bound or executed authority.
 
-## Acceptance evidence
+## Completion evidence
 
 - `LOAD`, `DESCRIBE`, and `PREPARE` perform zero controlled-service requests.
   Ordinary and copied prepared bind data freeze equal immutable requests and
@@ -144,25 +145,54 @@ The installed-artifact oracle must prove all of the following:
   compatibility evidence. The demonstration asserts logical types and a
   bounded zero-to-three-row result, not public row identity or ordering.
 
+Fresh current-tree evidence confirms those outcomes. `make test` passed during
+this closure audit on the unchanged `f834eb0` product graph, including every
+focused Connector, Semantics, Runtime, and Query target; 25 SQLLogicTest
+assertions; installed-artifact inventory; the private controlled product's
+20-request relational and lifecycle oracle; and the live public compatibility
+query. Fresh
+`scripts/verify-source-identities.py` reported native Connector source SHA-256
+`d9cf66acedb97b0325ca9c9883afceaa91a491fe48e2f6d5d3744137f8d13e86`
+and public-contract SHA-256
+`f5d9a5c14ef603fef34bf7154ad2272e86742fec0af994aacfbfec4afe84c8e9`;
+the 11 deterministic dependency-verifier counterexamples also passed. The
+recorded fresh `make verify PROFILE=debug` rebuilt 618 targets from the exact
+`f834eb0` product tree and repeated the dependency, focused, controlled,
+artifact, SQL, and public evidence without reusing the developer cache.
+
 ## Interaction exits
 
-- **Connector Experience — X-as-a-Service:** **Open** until Query binds the
-  canonical snapshot without importing connector implementation or duplicating
-  request constants, and the public/controlled narratives agree on schema.
-- **Relational Semantics — Collaboration, then X-as-a-Service:** **Open** until
-  ordinary and prepared Query paths consume the immutable planner result
-  without constructing or reinterpreting it, and the differential DuckDB
-  operator oracle passes.
-- **Remote Runtime — Collaboration, then X-as-a-Service:** **Open** until the
-  adapter includes only public runtime service types, direct runtime tests need
-  no DuckDB source, the controlled composition imports no runtime internals,
-  and cancellation/error/close oracles pass.
-- **Engineering Enablement — Facilitation:** **Open** until the permanent and
-  private artifacts, dependency identities, exclusion canaries, source
-  identities, and fresh product gate are runnable and maintained without
-  Enablement approval.
+- **Connector Experience — Satisfied; X-as-a-Service.** Product composition
+  obtains the canonical immutable snapshot from `BuildNativeGithubConnector`,
+  while Query request construction and bind consume only the public
+  `CompiledConnector` values needed for identity and schema. Query source
+  contains no duplicated request authority or Connector implementation import;
+  focused request, controlled-product, and public-contract oracles agree on the
+  three-column schema.
+- **Relational Semantics — Satisfied; X-as-a-Service.** Ordinary and prepared
+  bind construct only Query's conservative `ScanRequest`, call
+  `BuildConservativeScanPlan`, and retain the returned immutable `ScanPlan`.
+  Query reads output types and execution bounds needed at the adapter edge but
+  neither constructs nor reclassifies predicates, ownership, ordering, limits,
+  or explanation. The controlled differential oracle proves DuckDB-owned
+  filter, ordering, limit/offset, and filter-before-limit behavior against a
+  byte-identical one-request base scan.
+- **Remote Runtime — Satisfied; X-as-a-Service.** The adapter consumes only
+  `ScanExecutor`, `BatchStream`, typed batches, call-scoped execution control,
+  and structured errors. It has no curl, decoder, DNS-policy, or transport
+  dependency. The private composition obtains Runtime's documented loopback
+  service through its test-support factory, and focused plus controlled oracles
+  prove cancellation, error translation, early close, repeated/concurrent
+  scans, recovery, and final owner teardown.
+- **Engineering Enablement — Satisfied; facilitation ended.** The permanent and
+  private artifacts, pinned dependency identities, public-artifact exclusion
+  canaries, source identities, reusable `make test` path, and fresh
+  `make verify PROFILE=debug` path all pass. Query owns its adapter, public
+  contract, and black-box product oracles; Enablement retains the reusable
+  build and identity service without becoming a Query approval queue.
 
-Query Experience's outcome exit is satisfied only when the accepted SQL and
-safe failure narrative pass through permanent source, the public artifact is
-free of the controlled seam, every provider dependency follows the recorded
-direction, and final review/gates support the complete lifecycle contract.
+Query Experience's outcome exit is **Satisfied**. The accepted SQL and safe
+failure narrative pass through permanent source, the installed artifact is
+free of the controlled authority seam, every provider dependency follows the
+recorded direction, and final review corrections plus cached and fresh gates
+support the complete lifecycle contract.
