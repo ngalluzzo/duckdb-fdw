@@ -3,7 +3,7 @@
 ```yaml
 rfc: "0004"
 title: "Select the repeatable installation and trust path"
-status: "Draft"
+status: "Accepted"
 rfc_type: "Product"
 sponsor_team: "Query Experience"
 technical_decision_owner: "Lead agent"
@@ -26,9 +26,13 @@ Target DuckDB Community Extensions as the ordinary-user distribution and
 trust path for `duckdb_api`. Retain source build and a checksum-verified,
 explicitly unsigned local artifact only as development and controlled-preview
 paths. The product manager selected the MIT License and aligned with Community
-Extensions as the target direction. Do not publish or claim the ordinary-user
-path until the remaining compatibility, update, and support boundaries are
-approved and the external path is proved.
+Extensions as the ordinary-user channel. Support only the latest stable DuckDB
+release and the exact Community CI platform cells that pass the `0.2.0`
+delivery oracle. Pre-`1.0` fixes move forward without a backport commitment;
+project releases are immutable; Community rollback and historical availability
+are not guaranteed; and project support is best-effort through GitHub Issues.
+Ordinary-user guidance remains unpublished until the external delivery gates
+prove those claims.
 
 ## Sponsorship and context
 
@@ -59,8 +63,8 @@ at a URL or custom repository would improve acquisition while preserving the
 same trust reduction. DuckDB's documented third-party route to a default-
 trusted artifact is its Community Extensions program, which builds, signs, and
 distributes public open-source extensions. This repository is now licensed
-under MIT, clearing the project-license prerequisite but not the remaining
-product decisions, dependency audit, or external submission evidence.
+under MIT, clearing the project-license prerequisite. The dependency audit and
+external submission evidence remain delivery work.
 
 Observed facts:
 
@@ -76,8 +80,10 @@ Observed facts:
 - Community submission requires public open-source source and a declared
   license. The product manager selected MIT, recorded in the root `LICENSE`.
 
-Unknowns reserved for the product decision are the compatibility support
-window, update/backport policy, and support boundary.
+The product manager approved the compatibility, update, immutability,
+rollback/history, and support boundaries recorded by this decision. The exact
+Community platform rows remain evidence-derived: delivery may claim only rows
+that pass the release oracle.
 
 ## Decision drivers and invariants
 
@@ -95,13 +101,12 @@ window, update/backport policy, and support boundary.
 
 ## Proposed decision
 
-Pursue DuckDB Community Extensions as the normal install channel. Community
+Use DuckDB Community Extensions as the normal install channel. Community
 source descriptors will pin an immutable source ref, extension SemVer, build
 language, project license, and maintainers. The DuckDB-managed pipeline will
 build, sign, and distribute the compatible artifact. Normal user guidance will
 use DuckDB's community repository syntax only after that path passes its
-external build matrix and this repository records the approved product
-boundaries.
+external build matrix and clean-host oracle.
 
 Keep two explicitly non-production paths:
 
@@ -113,10 +118,12 @@ Keep two explicitly non-production paths:
 
 Artifact evidence for every path binds project version, source commit and tree,
 DuckDB version and commit, DuckDB platform, artifact size and checksum, public
-contract identity, and the build/custody method. Published release artifacts
-are immutable. An unsupported DuckDB version or platform must fail before
-extension initialization, and an integrity mismatch must fail before DuckDB is
-invoked.
+contract identity, and the build/custody method. Project versions, source refs,
+and Git tags are immutable; a correction uses a new SemVer. DuckDB governs the
+Community endpoint, cache retention, and served artifacts, so this project does
+not promise their immutability or historical availability. An unsupported
+DuckDB version or platform must fail before extension initialization, and an
+integrity mismatch must fail before DuckDB is invoked.
 
 ### Public behavior
 
@@ -127,11 +134,11 @@ INSTALL duckdb_api FROM community;
 LOAD duckdb_api;
 ```
 
-This Draft does not publish that instruction as currently supported. The
-existing source-built unsigned path and exact `0.1.0` compatibility cell remain
-the only accepted behavior until this RFC is Accepted and its delivery gates
-pass. The SQL query, extension version surface, and query diagnostics do not
-otherwise change.
+This accepted decision does not by itself publish that instruction as currently
+supported. The existing source-built unsigned path and exact `0.1.0`
+compatibility cell remain the only delivered behavior until the `0.2.0`
+delivery gates pass. The SQL query and query diagnostics do not otherwise
+change; the delivered extension version advances to `0.2.0`.
 
 ### Shared interfaces
 
@@ -150,8 +157,11 @@ whether to load native extension code.
 
 Installation is restart-tested because DuckDB does not unload or reload an
 extension within a running process. Repeated installation must not silently
-replace verified bytes. Update, rollback, historical-version selection, and
-backport behavior remain unapproved pending the product decisions below.
+replace verified bytes inside one oracle run. Before `1.0`, fixes ship only in
+new forward project releases; there is no backport commitment. `0.2.0` makes no
+guarantee that Community can select or retain historical versions or provide a
+rollback. Previously cached bytes may remain locally. Project support is
+best-effort through GitHub Issues with no service-level commitment.
 
 ## Topology impact
 
@@ -177,9 +187,10 @@ if the interaction exits as specified.
 - **Replay, retries, caching, and duplicates:** Runtime data behavior is not
   affected. DuckDB installation caching and forced updates must be documented
   separately from scan replay.
-- **Concurrency, immutability, and state ownership:** Published artifacts and
-  source refs are immutable. A new project release produces a new identity;
-  it does not relabel an existing artifact.
+- **Concurrency, immutability, and state ownership:** Project versions, source
+  refs, and tags are immutable. A new project release produces a new identity;
+  it does not relabel an existing release. Community endpoint and cache state
+  remain externally governed.
 - **FFI, initialization, reload, and shutdown:** Native code must not run on a
   rejected artifact. A separate process proves installed load because an
   extension cannot be unloaded or reloaded safely in-process.
@@ -190,22 +201,22 @@ if the interaction exits as specified.
 
 ## Compatibility and migration
 
-No migration is authorized by this Draft. The current accepted path remains
-source build plus direct unsigned local load on DuckDB 1.5.4 `osx_arm64`.
+Until `0.2.0` passes its delivery gates, the current supported path remains the
+source-built direct unsigned load on DuckDB 1.5.4 `osx_arm64`.
 
-Acceptance must state which DuckDB releases and platforms are supported, how
-long a released cell remains supported, whether prior project versions receive
-backports, and how a user selects or rolls back a version. A Community
-Extension update can replace the artifact served for one DuckDB
-version/platform location, so project release immutability and user-selectable
-historical versions cannot be inferred from repository layout. If those needs
-cannot be reconciled, the normal channel must remain unselected or use a
-separately governed distribution design.
+At release time, `0.2.0` supports exactly one DuckDB release: the then-current
+latest stable version. Its release evidence must enumerate the exact DuckDB
+commit and every Community CI platform cell whose build and complete Query
+oracle pass. Failed, excluded, untested, older, nightly, non-Community, or
+otherwise absent rows are unclaimed even if installation happens to work.
 
-Rollback from a failed community publication is limited: previously installed
-cached bytes may remain on user machines. A corrected project version must be
-new and immutable, with explicit release notes; moving or reusing a Git tag is
-forbidden.
+Before `1.0`, fixes move forward in a new immutable project version and do not
+create a backport obligation. The project never moves or reuses a Git tag or
+source ref. A Community update can change what is served for a DuckDB/platform
+location, and cached bytes can remain on user machines; `0.2.0` therefore makes
+no guarantee of rollback, historical-version selection, or continued upstream
+availability. Release notes must state these boundaries at the installation
+instructions.
 
 ## Evidence and bounded trials
 
@@ -216,8 +227,8 @@ forbidden.
 | Incompatible host and platform fail before registration | DuckDB 1.5.3 and documented wrong-platform footer fixtures | Fresh host and extension directories | Passed: diagnostics named both DuckDB versions and both platforms; one exact negative cell each |
 | Corrupted download is stopped before DuckDB | Manifest anchor, size, and SHA-256 mismatch | Body-corrupted copy; host invocation sentinel | Passed: the verifier rejected SHA-256 `363a9183…` with zero Query-host invocations; proves bundle integrity, not publisher authenticity |
 | Release artifact is byte-reproducible | Two independent clean workspaces produce the trusted extension bytes | Independently anchored reproduction evidence and `verify_reproduced_artifacts.py` | Passed: both 4,859,678-byte artifacts equal trusted SHA-256 `4f1a0678…`; one recorded source and product cell only |
-| CI preserves the intended evidence bundle | Downloaded workflow artifact contains manifest and artifact, not only a log | Visible allowlisted custody stage, pinned upload/download actions, inner-evidence verifier, and retention guard | The hidden-`.build` omission is repaired and locally guarded; a new GitHub-hosted workflow round trip remains pending after integration |
-| Community path is accepted by stock DuckDB | DuckDB-managed build, signing, publication, clean community install | Community Extensions submission and matrix | Not run; MIT is selected, but the approved compatibility boundary and external maintainer coordination remain prerequisites |
+| CI preserves the intended evidence bundle | Downloaded workflow artifact contains manifest and artifact, not only a log | Visible allowlisted custody stage, pinned upload/download actions, inner-evidence verifier, and retention guard | Decision evidence passed locally. A GitHub-hosted upload/download round trip remains a `0.2.0` delivery gate |
+| Community path is accepted by stock DuckDB | DuckDB-managed build, signing, publication, clean community install | Community Extensions submission and matrix | Decision evidence is sufficient; descriptor acceptance, matrix build, signing, publication, and the complete Query oracle remain `0.2.0` delivery gates that determine the claimed platform rows |
 
 Primary policy references are DuckDB's [extension security
 guidance](https://duckdb.org/docs/current/operations_manual/securing_duckdb/securing_extensions),
@@ -267,11 +278,12 @@ policy and lowest-friction user experience.
 - The project depends on DuckDB-maintainer review, infrastructure, accepted
   naming, and current community-program rules. Engineering Enablement
   facilitates those mechanics only through a bounded delivery interaction or a
-  reusable gate with an explicit maintenance owner; the product manager owns
-  whether the dependency is acceptable.
+  reusable gate with an explicit maintenance owner. The product manager accepts
+  that dependency; release evidence must expose upstream rejection or drift.
 - Community repository updates and the project's immutable release/version
   expectations may not align. Query Experience owns truthful user guidance;
-  the final RFC must resolve the mismatch before acceptance.
+  guidance must state that `0.2.0` guarantees neither Community rollback nor
+  historical availability.
 - A valid community signature can still cover vulnerable native code. Query
   Experience must not describe signing as security vetting.
 - The community matrix may expose portability defects outside the current
@@ -286,13 +298,16 @@ policy and lowest-friction user experience.
 - **End-to-end demonstration:** Verify the bundle, install into empty state,
   repeat install without byte drift, terminate, restart, load by name, identify
   version, and run the exact query; reject signature, version, platform, and
-  corruption canaries before registration.
+  corruption canaries before registration. For delivery, repeat the successful
+  lifecycle from stock DuckDB through the Community endpoint on every claimed
+  matrix row.
 - **Automated oracle:** `experiments/repeatable-installation/install_oracle.py`
   through `scripts/run-installability-trial.sh` with provider-owned manifest
   verification and negative fixtures.
 - **Quality gates:** Repository asset validation, source-identity validation,
-  focused provider and Query oracles, applicable fresh product evidence, CI
-  artifact download inspection, and Git whitespace checks.
+  dependency-license audit, focused provider and Query oracles, applicable
+  fresh product evidence, Community CI, hosted artifact download inspection,
+  and Git whitespace checks.
 - **Independent review:** Query lifecycle and diagnostic review plus
   Engineering Enablement supply-chain, reproducibility, and custody review;
   adversarial review before the bounded goal closes.
@@ -303,62 +318,65 @@ policy and lowest-friction user experience.
 
 | Source of truth or artifact | Impact | Required update | Completion evidence |
 | --- | --- | --- | --- |
-| `docs/ARCHITECTURE.md` | Not affected by trial | Update only after an accepted public distribution decision requires it | Pending RFC acceptance |
+| `docs/ARCHITECTURE.md` | Distribution, compatibility, update, and support policy | Record the accepted Community channel and exact evidence-derived support boundary | Propagate with RFC acceptance |
 | `docs/CONNECTOR_SPECIFICATIONS.md` | Not affected | None; installation does not change connector semantics | Existing contract identity oracle |
 | `docs/RUNTIME_CONTRACTS.md` | Not affected | None; artifact acquisition grants no runtime network authority | Existing `0.1.0` runtime evidence |
 | `docs/TEAM_TOPOLOGY.md` and active charters | Interaction only | No charter change if facilitation exits | Team plans and exit evidence |
 | `docs/PRODUCT_DELIVERY.md`, `AGENTS.md`, and skills | Not affected | Use the existing bounded-trial and RFC workflow | Goal and review record |
-| Examples, diagnostics, fixtures, and tests | Affected | Add isolated experimental install and failure evidence; publish normal guidance only after acceptance | Bounded trial complete; community proof pending product approval |
-| Release and support documentation | Affected after acceptance | Record channel, license, matrix, updates, rollback, and support window | Pending product approval and delivery |
+| Examples, diagnostics, fixtures, and tests | Affected | Add the stock-DuckDB Community lifecycle oracle and exact passing-row matrix; publish normal guidance only after it passes | Bounded trial complete; Community delivery proof pending |
+| Release and support documentation | Affected | Record MIT, Community channel, exact matrix, forward-only fixes, no guaranteed rollback/history, and best-effort GitHub Issues support | Required for `0.2.0` delivery |
 
 The RFC records rationale; the propagated contracts and executable oracles
 define behavior after acceptance.
 
-## Unresolved questions
+## Unresolved delivery evidence
 
-- Which DuckDB versions, platforms, and architectures will the first supported
-  installation promise include?
-- What are the support window, update cadence, backport policy, rollback story,
-  and user-selectable historical-version requirements?
-- Is dependence on DuckDB Community Extensions acceptable if its current
-  publication behavior cannot provide the required historical-version model?
+- Which exact Community CI platform rows pass the complete `0.2.0` release
+  oracle on the latest stable DuckDB identity at release time?
+- Does the hosted custody workflow preserve the complete intended evidence set
+  after upload and download?
+- Does the dependency-license audit identify every required notice or
+  redistribution condition?
 
-These are decision-critical product questions. They must move into recorded
-decisions before this RFC can enter final decision.
+These questions determine delivery completion and the exact support matrix;
+they do not reopen the accepted product policy.
 
 ## Review record
 
 | Required reviewer | Team | Result | Evidence or objection | Disposition by decision owner |
 | --- | --- | --- | --- | --- |
-| Query Experience perspective | Query Experience | Objected | The controlled unsigned lifecycle oracle passes, but the proposed stock-DuckDB Community path is unrun and its compatibility, update, rollback, and support boundaries are undecided | Keep Draft. Obtain the remaining reserved product decisions, prove the DuckDB-managed build/sign/install path across the approved boundary, and repeat Query review before acceptance |
-| Engineering Enablement perspective | Engineering Enablement | Approved with conditions | Local trial, two-workspace reproduction, custody, identity, and product gates pass. Hosted transfer and Community build are unrun; PM-reserved policy remains unresolved; facilitation exit is still open | Keep Draft, retain the external proofs as delivery evidence, and avoid indefinite Enablement ownership. Exit only after hosted custody proof and demonstrated Query self-sufficiency |
+| Query Experience perspective | Query Experience | Approved | The controlled lifecycle and failure oracle plus primary-source Community mechanics establish the decision facts. The PM resolved compatibility, lifecycle, immutability, rollback/history, backport, and support policy. Community build/sign/install and the exact passing matrix are delivery evidence | No objection. Require the stock-DuckDB Community lifecycle oracle on every claimed row before ordinary-user guidance; the Query–Enablement interaction exit remains open during delivery |
+| Engineering Enablement perspective | Engineering Enablement | Approved | The deterministic local trial, two-workspace reproduction, custody design, negative oracles, and channel comparison establish the decision facts. Hosted custody and Community build/sign/install remain delivery evidence | No objection. Keep facilitation bounded and exit only after hosted custody proof and demonstrated Query self-sufficiency |
 
 ## Decision and rationale
 
 - **Technical decision owner:** Lead agent.
 - **Product license:** MIT, selected by the product manager on 2026-07-17 and
   recorded in the root `LICENSE`.
-- **Distribution and trust direction:** The product manager aligned with DuckDB
-  Community Extensions as the ordinary-user target. Publication remains
-  unauthorized until the RFC gates pass.
-- **Product approval still pending:** Compatibility, updates, rollback,
-  historical-version behavior, backports, and support.
+- **Distribution and trust:** DuckDB Community Extensions is the ordinary-user
+  channel; source build and verified unsigned artifacts remain contributor or
+  controlled-preview paths.
+- **Compatibility:** Support the latest stable DuckDB release at release time
+  and only the exact Community CI platform rows that pass the complete delivery
+  oracle. Every other row is unclaimed.
+- **Lifecycle and support:** Before `1.0`, fixes move forward without a
+  backport commitment. Project releases are immutable. `0.2.0` guarantees no
+  Community rollback or historical availability. Project support is
+  best-effort through GitHub Issues with no SLA.
 - **Rationale:** The bounded trial proves repeatable verified installation and
   deterministic refusal for the exact `0.1.0` cell, while stock DuckDB still
   rejects the self-built artifact under default signature policy. Community
-  Extensions is therefore the lowest-friction candidate that preserves the
-  ordinary trust boundary; acceptance remains gated on the reserved product
-  decisions, external Community evidence, and a repeat Query review.
-- **Material objections:** Query Experience requires a DuckDB-managed
-  build/sign/install demonstration across the approved compatibility boundary
-  before ordinary-user guidance can be accepted. Engineering Enablement's
-  hosted upload/download custody proof, Community build evidence, PM-reserved
-  policy, and facilitation exit also remain open.
+  Extensions is therefore the lowest-friction path that preserves the ordinary
+  trust boundary. Both required teams approve the decision and distinguish the
+  remaining external proofs as delivery acceptance evidence.
+- **Material objections:** None remain for the decision. Community
+  build/sign/publish/install, exact matrix, dependency audit, hosted custody,
+  user guidance, and the facilitation exit remain open delivery gates.
 - **Superseded by:** Not applicable.
 
 ## Follow-on goals
 
 | Outcome or objective | Accountable team | Supporting teams and interaction modes | Activation condition |
 | --- | --- | --- | --- |
-| Deliver the accepted `0.2.0` installation path | Query Experience | Engineering Enablement — Facilitation until Query owns the oracle | RFC 0004 Accepted with product approval and external prerequisites satisfied |
-| Submit and prove the Community Extension path | Query Experience | Engineering Enablement — Facilitation for descriptor, matrix, provenance, and custody | MIT license recorded, accepted RFC, and product manager authorization for external submission |
+| Deliver the accepted `0.2.0` installation path | Query Experience | Engineering Enablement — Facilitation until Query owns the oracle | RFC 0004 Accepted and product boundaries recorded |
+| Submit and prove the Community Extension path | Query Experience | Engineering Enablement — Facilitation for descriptor, matrix, provenance, and custody | Activated `0.2.0` goal and product-manager authorization for external submission |

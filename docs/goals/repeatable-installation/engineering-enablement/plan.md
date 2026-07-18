@@ -307,8 +307,8 @@ No new RFC is required to run this bounded experiment or to repair the existing
 workflow so it retains exactly the evidence it already claims to retain. Both
 are reversible evidence/process work and establish no new user commitment.
 
-RFC 0004 remains mandatory, Query-sponsored, and product-manager-gated before
-any of the following crosses the trial boundary:
+During the bounded trial, RFC 0004 remained mandatory, Query-sponsored, and
+product-manager-gated before any of the following crossed the trial boundary:
 
 - choosing or publishing an ordinary-user download or repository channel;
 - changing the MIT project license or submitting to DuckDB Community Extensions;
@@ -321,7 +321,7 @@ any of the following crosses the trial boundary:
 - changing SQL, diagnostics, extension lifecycle, initialization, reload, or
   native compatibility behavior.
 
-The trial may populate the evidence section and alternatives of Draft RFC
-0004. Engineering Enablement facilitates affected-team review mechanics but
-does not approve the proposal, choose among distribution paths, or disposition
-product-manager-reserved decisions.
+The trial populated the evidence section and alternatives of RFC 0004 without
+approving the proposal. On 2026-07-17, the product manager resolved the policy,
+both required teams approved, and RFC 0004 was Accepted. Community delivery and
+the facilitation exit proceed under the new full `0.2.0` goal.

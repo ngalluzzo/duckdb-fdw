@@ -5,7 +5,7 @@
 > shared auth and transport infrastructure, and an escape hatch for custom code.
 
 **Status:** Design proposal, revision 0.4; the `0.1.0` native preview profile is
-accepted by RFC 0001
+accepted by RFC 0001 and the distribution policy is accepted by RFC 0004
 
 **Integration profiles:** A source-built native C++ preview, portable C
 Extension API table functions, and an optional deep DuckDB catalog/optimizer
@@ -254,6 +254,30 @@ platform `osx_arm64`, macOS 26.5.1 on Apple Silicon arm64, Apple clang 17 in
 C++11 mode, CMake 4.1.2, and Ninja 1.13.0. Installation is a clean source build
 and unsigned direct local load. No public binary distribution or broader
 native ABI compatibility follows from this profile.
+
+#### 5.0.1 Accepted distribution and support policy
+
+RFC 0004 selects DuckDB Community Extensions as the ordinary-user distribution
+and trust channel. Source build remains the contributor path. A verified
+unsigned artifact may be used only for controlled preview and diagnostic work;
+it is not ordinary-user guidance because enabling unsigned extensions weakens
+signature policy for the whole DuckDB process.
+
+For `0.2.0`, the supported compatibility matrix contains only the latest stable
+DuckDB release at release time and the exact Community CI platform rows that
+pass the complete clean-install, restart, load-by-name, version, and accepted
+query oracle. Release evidence records the DuckDB commit and every claimed row.
+Failed, excluded, untested, older, nightly, non-Community, or absent rows remain
+unclaimed even when they happen to work.
+
+Project versions, Git tags, and descriptor source refs are immutable; a fix
+uses a new SemVer. Before `1.0`, the project makes no backport commitment.
+DuckDB governs the Community endpoint, signing pipeline, served artifacts, and
+local-cache behavior, so `0.2.0` guarantees neither Community rollback,
+historical-version selection, nor continued upstream availability. Project
+support is best-effort through GitHub Issues with no service-level commitment.
+These are policy boundaries, not evidence that `0.2.0` has shipped; ordinary
+installation guidance requires the RFC's delivery gates to pass.
 
 ### 5.1 Profile A: portable Rust table-function extension
 

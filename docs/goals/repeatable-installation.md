@@ -157,6 +157,14 @@ license, accept the RFC, or expand the supported cell.
 - Community build, signing, and installation remain unproved until the product
   manager authorizes external submission. The project-license prerequisite is
   now resolved as MIT.
-- Full `0.2.0` delivery remains gated on RFC 0004 acceptance and explicit
-  product decisions for compatibility, update, rollback, history, backports,
-  and support.
+- At trial completion, full `0.2.0` delivery remained gated on RFC 0004 and the
+  reserved compatibility, update, rollback, history, backport, and support
+  decisions.
+
+### Subsequent decision
+
+On 2026-07-17, the product manager approved the remaining boundaries and RFC
+0004 was Accepted. Community build/sign/publish/install, the exact passing
+matrix, dependency audit, hosted custody, user guidance, and the facilitation
+exit moved into the full `0.2.0` delivery goal; they are no longer
+decision-phase blockers.

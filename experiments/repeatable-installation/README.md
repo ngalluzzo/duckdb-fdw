@@ -149,8 +149,9 @@ A checksum and manifest bind the observed bytes to release evidence; they do
 not authenticate an artifact obtained from an untrusted source. DuckDB's
 default signature refusal remains the ordinary trust boundary demonstrated by
 this trial. The project license is MIT. A public distribution, signing path,
-compatibility policy, update policy, and support boundary still require the
-remaining product decisions and an accepted RFC.
+compatibility policy, update policy, and support boundary are now accepted in
+RFC 0004. Community build/sign/publish/install, exact matrix, dependency audit,
+hosted custody, and user guidance remain `0.2.0` delivery gates.
 
 The wrong-platform file is test evidence only. Its canonical inventory binds its
 source and output identities, and Query independently proves that only the

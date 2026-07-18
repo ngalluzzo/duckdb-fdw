@@ -92,10 +92,19 @@ install it, load it, identify its version, and execute the `0.1.0` query on the
 first declared compatibility target. An incompatible DuckDB host, platform, or
 artifact fails with an actionable diagnostic.
 
-Release evidence includes artifact checksums and provenance, source-commit and
-DuckDB-target identity, clean installation tests, and an early distribution
-and signing feasibility result. Local unsigned loading remains explicitly a
-development path rather than an implied production distribution promise.
+The ordinary-user channel is DuckDB Community Extensions. `0.2.0` supports the
+latest stable DuckDB release at release time and only the exact Community CI
+platform rows that pass the complete release oracle; all other cells are
+unclaimed. Local unsigned loading remains explicitly a development or
+controlled-preview path.
+
+Release evidence includes an immutable source ref, artifact checksums and
+provenance, exact DuckDB and platform identities, Community-managed build and
+signature evidence, and clean installation, restart, load-by-name, version,
+query, and incompatible-cell tests on every claimed row. Before `1.0`, fixes
+move forward without a backport commitment. Project releases are immutable;
+Community rollback and historical availability are not guaranteed. Support is
+best-effort through GitHub Issues.
 
 ### `0.3.0` — trusted connector authoring
 

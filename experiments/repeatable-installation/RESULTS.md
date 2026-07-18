@@ -111,9 +111,10 @@ descendants are terminated.
   account. The controlled trial depends on the exact recorded verifier and
   artifact identities.
 - RFC 0004 must compare the source-built, downloadable unsigned, and DuckDB
-  Community Extension paths. MIT and the Community target direction are now
-  selected; compatibility, updates, rollback, history, backports, support, and
-  external proof remain gated.
+  Community Extension paths. RFC 0004 is now Accepted with MIT, Community
+  distribution, evidence-derived compatibility, forward-only pre-`1.0` fixes,
+  immutable project releases, no Community rollback/history guarantee, and
+  best-effort GitHub Issues support. External proof remains a delivery gate.
 - The repaired sanitizer artifact custody path is structurally guarded and
   locally proves exact staged-versus-downloaded byte comparison. A new remote
   GitHub Actions run is still required to prove the hosted upload/download
@@ -123,6 +124,6 @@ Decision-ready recommendation: target DuckDB Community Extensions for the
 ordinary stock-DuckDB path because it preserves default signature enforcement.
 Retain source build and a verified unsigned artifact only for contributors and
 controlled previews. Checksums prove byte integrity and evidence binding, not
-publisher authenticity. RFC 0004 remains Draft until the product manager
-approves compatibility, update, rollback, historical-version, backport, and
-support boundaries and the Community path is proved.
+publisher authenticity. RFC 0004 is Accepted; Community build, signing,
+publication, stock-DuckDB installation, exact passing matrix, dependency audit,
+hosted custody, and ordinary-user guidance remain `0.2.0` delivery evidence.

@@ -211,10 +211,9 @@ decision changes the DuckDB user's installation, trust, compatibility, update,
 and support experience. Engineering Enablement participates as facilitator and
 reviews the delivery and custody consequences.
 
-RFC 0004 must remain Draft until this evidence is recorded. The product manager
-has selected MIT and aligned with Community Extensions as the target direction.
-The RFC cannot be Accepted until the remaining compatibility, lifecycle, and
-support boundaries are approved and the Community path is proved. An unsigned
-local artifact may remain a controlled development or trial path, but this plan
-does not authorize presenting process-wide unsigned extension loading as the
-normal product path.
+During the bounded trial, RFC 0004 remained Draft and this plan did not
+authorize presenting process-wide unsigned extension loading as the normal
+product path. On 2026-07-17, the product manager approved the remaining policy,
+both required teams approved the decision, and RFC 0004 was Accepted. Community
+proof and the Query–Enablement exit now belong to the full `0.2.0` delivery
+goal.
