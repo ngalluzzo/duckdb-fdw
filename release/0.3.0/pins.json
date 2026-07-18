@@ -1,0 +1,75 @@
+{
+  "project": {
+    "extension": "duckdb_api",
+    "tag": "v0.3.0",
+    "version": "0.3.0"
+  },
+  "dependencies": {
+    "duckdb": {
+      "commit": "08e34c447bae34eaee3723cac61f2878b6bdf787",
+      "git_describe": "v1.5.4-0-g08e34c447b",
+      "tree": "33c1f40f6421fd8f79912a6ce96722feca538c61",
+      "version": "1.5.4"
+    },
+    "extension_ci_tools": {
+      "commit": "b777c70d30942cca5bef62d6d4fa23a13362f398",
+      "tree": "d3295344af82907cad620374596c44479f35f410"
+    },
+    "extension_template": {
+      "commit": "cfaf3e236008e782d27f4341b0ee036002d0a449",
+      "tree": "e9d306f3e8b0eed85e3cfc132066769baab9f6d2"
+    }
+  },
+  "identities": {
+    "native_connector_source": {
+      "path": "src/connector.cpp",
+      "sha256": "d9cf66acedb97b0325ca9c9883afceaa91a491fe48e2f6d5d3744137f8d13e86"
+    },
+    "public_contract": {
+      "canonical_json_sha256": "f5d9a5c14ef603fef34bf7154ad2272e86742fec0af994aacfbfec4afe84c8e9",
+      "path": "release/0.3.0/public_contract.json"
+    }
+  },
+  "product_cell": {
+    "architecture": "arm64",
+    "cmake": "4.1.2",
+    "compiler": "Apple clang version 17.0.0",
+    "cxx_standard": "c++11",
+    "duckdb_platform": "osx_arm64",
+    "host": "macOS 26.5.1",
+    "host_build": "25F80",
+    "ninja": "1.13.0"
+  },
+  "system_dependencies": {
+    "macos_sdk": {
+      "build_version": "24F74",
+      "curl_header_root": "usr/include/curl",
+      "curl_headers_sha256": "82b6f38212ed3c50e5c2485f97b9c8e21919fe86a6ce1272f2c6cba4bba102e7",
+      "curl_stub": "usr/lib/libcurl.4.tbd",
+      "curl_stub_sha256": "080b9e030bfed3b77776a91f967029b41f5adab7de1e870ba8bfeed5b52ac9da",
+      "version": "15.5"
+    },
+    "system_libcurl": {
+      "cmake_imported_target": "CURL::libcurl",
+      "compatibility_version": 7,
+      "configured_version": "8.7.1",
+      "current_version": 9,
+      "install_name": "/usr/lib/libcurl.4.dylib",
+      "runtime_features": 1366229917,
+      "runtime_ssl_version": "(SecureTransport) LibreSSL/3.3.6",
+      "runtime_version": "8.7.1",
+      "runtime_version_num": "0x080701",
+      "threadsafe_feature_mask": 1073741824
+    }
+  },
+  "tools": {
+    "cmake_macos_universal": {
+      "sha256": "3be85f5b999e327b1ac7d804cbc9acd767059e9f603c42ec2765f6ab68fbd367",
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-macos-universal.tar.gz"
+    },
+    "ninja_macos": {
+      "sha256": "229314c7ef65e9c11d19f84e5f4bb374105a4f21f64ed55e8f403df765ab52a7",
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.0/ninja-mac.zip"
+    }
+  }
+}
