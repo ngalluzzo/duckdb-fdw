@@ -3,6 +3,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb_api/duckdb_secret.hpp"
 #include "duckdb_api/scan_request.hpp"
 
 #include <memory>
@@ -119,6 +120,10 @@ const char *ErrorStageName(duckdb_api::ErrorStage stage) {
 		return "resource";
 	case duckdb_api::ErrorStage::INTERNAL:
 		return "internal";
+	case duckdb_api::ErrorStage::AUTHENTICATION:
+		return "authentication";
+	case duckdb_api::ErrorStage::AUTHORIZATION:
+		return "authorization";
 	}
 	return "internal";
 }
@@ -291,6 +296,11 @@ void RegisterDuckdbApi(ExtensionLoader &loader, duckdb_api::CompiledConnector co
 	if (!executor) {
 		throw InternalException("duckdb_api registration requires a scan executor");
 	}
+	// DuckDB 1.5.4 cannot atomically register a secret type, provider, and
+	// table function. Publish the scan only after the credential boundary is
+	// complete; a failure may leave an orphan type/provider, but never a scan
+	// function that cannot resolve its declared secret surface.
+	RegisterDuckdbApiSecrets(loader);
 	TableFunction scan("duckdb_api_scan", {}, DuckdbApiScan, DuckdbApiBind, DuckdbApiInit);
 	scan.named_parameters["connector"] = LogicalType::VARCHAR;
 	scan.named_parameters["relation"] = LogicalType::VARCHAR;

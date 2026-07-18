@@ -30,6 +30,12 @@ void ThrowScenarioError(QueryRuntimeScenario scenario) {
 		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::POLICY, "", "request is not authorized");
 	case QueryRuntimeScenario::RESOURCE_ERROR:
 		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "", "response exceeds its byte budget");
+	case QueryRuntimeScenario::AUTHENTICATION_ERROR:
+		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::AUTHENTICATION, "secret",
+		                                 "named credential could not authenticate");
+	case QueryRuntimeScenario::AUTHORIZATION_ERROR:
+		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::AUTHORIZATION, "",
+		                                 "authenticated principal is not authorized");
 	case QueryRuntimeScenario::INTERNAL_ERROR:
 		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::INTERNAL, "", "top-secret-provider-detail");
 	case QueryRuntimeScenario::UNKNOWN_ERROR:

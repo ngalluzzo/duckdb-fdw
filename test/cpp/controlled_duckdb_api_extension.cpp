@@ -53,6 +53,10 @@ const char *InitializationStageName(duckdb_api::ErrorStage stage) {
 		return "resource";
 	case duckdb_api::ErrorStage::INTERNAL:
 		return "internal";
+	case duckdb_api::ErrorStage::AUTHENTICATION:
+		return "authentication";
+	case duckdb_api::ErrorStage::AUTHORIZATION:
+		return "authorization";
 	}
 	return "internal";
 }
