@@ -10,19 +10,28 @@ import sys
 
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from test_support import ProviderFixture, commit, git  # noqa: E402
+from test_support import (  # noqa: E402
+    ProviderFixture,
+    commit,
+    commit_index,
+    git,
+    stage_gitlink,
+)
 
 
 class CandidateAdmissionTest(ProviderFixture):
     def run_candidate(
-        self, audit_root: pathlib.Path, output: pathlib.Path
+        self,
+        audit_root: pathlib.Path,
+        output: pathlib.Path,
+        source_commit: str | None = None,
     ):
         return self.run_script(
             "verify_candidate.py",
             "--repository",
             self.project,
             "--source-commit",
-            self.project_commit,
+            source_commit or self.project_commit,
             "--pins",
             self.pins_path,
             "--descriptor-expectation",
@@ -34,6 +43,17 @@ class CandidateAdmissionTest(ProviderFixture):
             "--output-root",
             output,
         )
+
+    def commit_gitmodules(self, payload: bytes, message: str) -> None:
+        self.project_commit, self.project_tree = commit(
+            self.project, {".gitmodules": payload}, message
+        )
+
+    def assert_layout_rejected(self, label: str, diagnostic: str) -> None:
+        audit = self.run_audit(self.root / f"{label}-audit")
+        result = self.run_candidate(audit, self.root / f"{label}-candidate")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(diagnostic, result.stderr)
 
     def test_exact_candidate_is_anchored_without_support_or_artifact_claim(self) -> None:
         audit = self.run_audit()
@@ -55,6 +75,206 @@ class CandidateAdmissionTest(ProviderFixture):
         self.assertRegex(
             (output / "candidate.sha256").read_text(encoding="utf-8"),
             r"\A[0-9a-f]{64}  candidate\.json\n\Z",
+        )
+
+    def test_missing_gitlink_is_rejected(self) -> None:
+        git(self.project, "rm", "-q", "--cached", "duckdb")
+        self.project_commit, self.project_tree = commit_index(
+            self.project, "missing duckdb gitlink"
+        )
+        self.assert_layout_rejected(
+            "missing-gitlink", "gitlink layout does not match Community pins"
+        )
+
+    def test_extra_gitlink_is_rejected(self) -> None:
+        stage_gitlink(
+            self.project,
+            "unexpected-tools",
+            self.upstream_identities["extension-ci-tools"][0],
+        )
+        self.project_commit, self.project_tree = commit_index(
+            self.project, "extra gitlink"
+        )
+        self.assert_layout_rejected(
+            "extra-gitlink", "gitlink layout does not match Community pins"
+        )
+
+    def test_wrong_gitlink_object_is_rejected(self) -> None:
+        stage_gitlink(
+            self.project, "duckdb", self.upstream_identities["extension-ci-tools"][0]
+        )
+        self.project_commit, self.project_tree = commit_index(
+            self.project, "wrong duckdb gitlink object"
+        )
+        self.assert_layout_rejected(
+            "wrong-gitlink-object", "gitlink layout does not match Community pins"
+        )
+
+    def test_wrong_gitlink_path_is_rejected(self) -> None:
+        git(self.project, "rm", "-q", "--cached", "extension-ci-tools")
+        stage_gitlink(
+            self.project,
+            "renamed-ci-tools",
+            self.upstream_identities["extension-ci-tools"][0],
+        )
+        self.project_commit, self.project_tree = commit_index(
+            self.project, "wrong ci-tools gitlink path"
+        )
+        self.assert_layout_rejected(
+            "wrong-gitlink-path", "gitlink layout does not match Community pins"
+        )
+
+    def test_wrong_gitlink_mode_and_type_are_rejected(self) -> None:
+        git(self.project, "rm", "-q", "--cached", "duckdb")
+        (self.project / "duckdb").write_bytes(b"not a gitlink\n")
+        git(self.project, "add", "--", "duckdb")
+        self.project_commit, self.project_tree = commit_index(
+            self.project, "regular blob in place of duckdb gitlink"
+        )
+        self.assert_layout_rejected(
+            "wrong-gitlink-mode", "gitlink layout does not match Community pins"
+        )
+
+    def test_wrong_gitmodule_urls_paths_and_branches_are_rejected(self) -> None:
+        mutations = (
+            (
+                "duckdb-url",
+                b"https://github.com/duckdb/duckdb",
+                b"https://example.invalid/duckdb",
+            ),
+            (
+                "ci-url",
+                b"https://github.com/duckdb/extension-ci-tools",
+                b"https://example.invalid/ci-tools",
+            ),
+            ("duckdb-path", b"path = duckdb", b"path = vendor/duckdb"),
+            (
+                "ci-path",
+                b"path = extension-ci-tools",
+                b"path = vendor/ci-tools",
+            ),
+            ("duckdb-branch", b"branch = main", b"branch = stable"),
+            ("ci-branch", b"branch = v1.5-variegata", b"branch = main"),
+        )
+        for label, original, replacement in mutations:
+            with self.subTest(label=label):
+                payload = self.gitmodules.replace(original, replacement)
+                self.commit_gitmodules(payload, f"wrong {label}")
+                self.assert_layout_rejected(
+                    label, ".gitmodules metadata does not match Community pins"
+                )
+
+    def test_missing_unexpected_and_duplicate_gitmodule_metadata_is_rejected(self) -> None:
+        duckdb_section, ci_section = self.gitmodules.split(
+            b'[submodule "extension-ci-tools"]\n', 1
+        )
+        ci_section = b'[submodule "extension-ci-tools"]\n' + ci_section
+        mutations = (
+            ("missing-key", self.gitmodules.replace(b"\tbranch = main\n", b"")),
+            ("missing-section", duckdb_section),
+            ("unexpected-key", self.gitmodules + b"\tupdate = checkout\n"),
+            (
+                "unexpected-section",
+                self.gitmodules + b'[submodule "unexpected"]\n\tpath = unexpected\n',
+            ),
+            (
+                "include-section",
+                self.gitmodules + b"[include]\n\tpath = /tmp/ambient-config\n",
+            ),
+            (
+                "duplicate-key",
+                self.gitmodules.replace(
+                    b"\tpath = duckdb\n", b"\tpath = duckdb\n\tpath = duckdb\n"
+                ),
+            ),
+            ("duplicate-section", self.gitmodules + ci_section),
+        )
+        for label, payload in mutations:
+            with self.subTest(label=label):
+                self.commit_gitmodules(payload, label)
+                self.assert_layout_rejected(
+                    label, ".gitmodules metadata does not match Community pins"
+                )
+
+    def test_non_regular_gitmodules_blob_is_rejected(self) -> None:
+        modules = self.project / ".gitmodules"
+        modules.unlink()
+        modules.symlink_to("LICENSE")
+        git(self.project, "add", "--", ".gitmodules")
+        self.project_commit, self.project_tree = commit_index(
+            self.project, "symlink gitmodules"
+        )
+        self.assert_layout_rejected(
+            "symlink-gitmodules", ".gitmodules must be one regular blob"
+        )
+
+    def test_missing_gitmodules_blob_is_rejected(self) -> None:
+        git(self.project, "rm", "-q", "--", ".gitmodules")
+        self.project_commit, self.project_tree = commit_index(
+            self.project, "missing gitmodules"
+        )
+        self.assert_layout_rejected(
+            "missing-gitmodules", ".gitmodules must be one regular blob"
+        )
+
+    def test_exact_commit_ignores_head_index_and_worktree_substitutions(self) -> None:
+        exact_commit = self.project_commit
+        audit = self.run_audit(self.root / "exact-snapshot-audit", exact_commit)
+        self.commit_gitmodules(
+            self.gitmodules.replace(
+                b"https://github.com/duckdb/duckdb",
+                b"https://example.invalid/head",
+            ),
+            "bad head metadata",
+        )
+        stage_gitlink(
+            self.project, "duckdb", self.upstream_identities["extension-ci-tools"][0]
+        )
+        (self.project / ".gitmodules").write_bytes(
+            self.gitmodules.replace(b"branch = main", b"branch = staged")
+        )
+        git(self.project, "add", "--", ".gitmodules")
+        (self.project / ".gitmodules").write_bytes(
+            self.gitmodules.replace(b"branch = main", b"branch = worktree")
+        )
+        result = self.run_candidate(
+            audit, self.root / "exact-snapshot-candidate", exact_commit
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_bad_committed_gitlink_cannot_be_masked_by_good_index(self) -> None:
+        git(self.project, "rm", "-q", "--cached", "duckdb")
+        self.project_commit, self.project_tree = commit_index(
+            self.project, "bad committed gitlink layout"
+        )
+        bad_commit = self.project_commit
+        audit = self.run_audit(self.root / "bad-gitlink-audit", bad_commit)
+        stage_gitlink(
+            self.project, "duckdb", self.upstream_identities["duckdb"][0]
+        )
+        result = self.run_candidate(
+            audit, self.root / "bad-gitlink-candidate", bad_commit
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("gitlink layout does not match Community pins", result.stderr)
+
+    def test_bad_committed_gitmodules_cannot_be_masked_by_good_index_and_worktree(
+        self,
+    ) -> None:
+        self.commit_gitmodules(
+            self.gitmodules.replace(b"branch = main", b"branch = wrong"),
+            "bad committed gitmodules metadata",
+        )
+        bad_commit = self.project_commit
+        audit = self.run_audit(self.root / "bad-gitmodules-audit", bad_commit)
+        (self.project / ".gitmodules").write_bytes(self.gitmodules)
+        git(self.project, "add", "--", ".gitmodules")
+        result = self.run_candidate(
+            audit, self.root / "bad-gitmodules-candidate", bad_commit
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            ".gitmodules metadata does not match Community pins", result.stderr
         )
 
     def test_candidate_version_mismatch_is_rejected(self) -> None:

@@ -45,11 +45,45 @@ def commit(repository: pathlib.Path, files: dict[str, bytes], message: str) -> t
         subprocess.run(["git", "init", "-q", str(repository)], check=True)
         git(repository, "config", "user.name", "Provider Test")
         git(repository, "config", "user.email", "provider@example.invalid")
+    staged_gitlinks = []
+    for entry in git(repository, "ls-files", "--stage").splitlines():
+        metadata, path = entry.split("\t", 1)
+        mode, object_id, stage = metadata.split()
+        if mode == "160000" and stage == "0":
+            staged_gitlinks.append((path, object_id))
     for relative, content in files.items():
         path = repository / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
     git(repository, "add", "-A")
+    for path, object_id in staged_gitlinks:
+        stage_gitlink(repository, path, object_id)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "GIT_AUTHOR_DATE": "2026-01-01T00:00:00Z",
+            "GIT_COMMITTER_DATE": "2026-01-01T00:00:00Z",
+        }
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "commit", "-q", "-m", message],
+        check=True,
+        env=environment,
+    )
+    return git(repository, "rev-parse", "HEAD"), git(repository, "rev-parse", "HEAD^{tree}")
+
+
+def stage_gitlink(repository: pathlib.Path, path: str, object_id: str) -> None:
+    git(
+        repository,
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        f"160000,{object_id},{path}",
+    )
+
+
+def commit_index(repository: pathlib.Path, message: str) -> tuple[str, str]:
     environment = os.environ.copy()
     environment.update(
         {
@@ -76,18 +110,6 @@ class ProviderFixture(unittest.TestCase):
         self.project_license = b"synthetic project MIT license\n"
         self.duckdb_license = b"synthetic DuckDB MIT license\n"
         self.template_license = b"synthetic template MIT license\n"
-        self.project_commit, self.project_tree = commit(
-            self.project,
-            {
-                "LICENSE": self.project_license,
-                "extension_config.cmake": (
-                    b"duckdb_extension_load(duckdb_api\n"
-                    b"    SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}\n"
-                    b"    EXTENSION_VERSION \"0.2.0\"\n)\n"
-                ),
-            },
-            "project candidate",
-        )
         self.upstream_identities: dict[str, tuple[str, str]] = {}
         upstream_files = {
             "duckdb": {"LICENSE": self.duckdb_license, "IDENTITY": b"duckdb\n"},
@@ -102,6 +124,40 @@ class ProviderFixture(unittest.TestCase):
             self.upstream_identities[name] = commit(
                 self.upstreams / name, files, f"{name} fixture"
             )
+        self.gitmodules = (
+            b'[submodule "duckdb"]\n'
+            b"\tpath = duckdb\n"
+            b"\turl = https://github.com/duckdb/duckdb\n"
+            b"\tbranch = main\n"
+            b'[submodule "extension-ci-tools"]\n'
+            b"\tpath = extension-ci-tools\n"
+            b"\turl = https://github.com/duckdb/extension-ci-tools\n"
+            b"\tbranch = v1.5-variegata\n"
+        )
+        commit(
+            self.project,
+            {
+                ".gitmodules": self.gitmodules,
+                "LICENSE": self.project_license,
+                "extension_config.cmake": (
+                    b"duckdb_extension_load(duckdb_api\n"
+                    b"    SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}\n"
+                    b"    EXTENSION_VERSION \"0.2.0\"\n)\n"
+                ),
+            },
+            "project files",
+        )
+        stage_gitlink(
+            self.project, "duckdb", self.upstream_identities["duckdb"][0]
+        )
+        stage_gitlink(
+            self.project,
+            "extension-ci-tools",
+            self.upstream_identities["extension-ci-tools"][0],
+        )
+        self.project_commit, self.project_tree = commit_index(
+            self.project, "project candidate layout"
+        )
         self.pins_path = self.root / "pins.json"
         self.expectations_path = self.root / "dependencies.json"
         self.descriptor_path = self.root / "descriptor.json"
@@ -294,7 +350,9 @@ class ProviderFixture(unittest.TestCase):
             stderr=subprocess.PIPE,
         )
 
-    def run_audit(self, output: pathlib.Path | None = None) -> pathlib.Path:
+    def run_audit(
+        self, output: pathlib.Path | None = None, source_commit: str | None = None
+    ) -> pathlib.Path:
         target = output or self.root / "audit"
         result = self.run_script(
             "audit_dependencies.py",
@@ -305,7 +363,7 @@ class ProviderFixture(unittest.TestCase):
             "--repository",
             self.project,
             "--source-commit",
-            self.project_commit,
+            source_commit or self.project_commit,
             "--upstreams-root",
             self.upstreams,
             "--output-root",

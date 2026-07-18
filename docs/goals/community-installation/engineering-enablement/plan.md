@@ -30,7 +30,7 @@ credentials, absolute runner paths, or unrestricted environment data.
 
 | Interface | Provider inputs | Output consumed by Query or the release gate | Boundary |
 | --- | --- | --- | --- |
-| Candidate admission | Clean source commit, `0.2.0` pins, extension metadata, root MIT license, latest-stable DuckDB identity, and exact Community toolchain refs | `candidate.json` and `candidate.sha256` | Binds source commit/tree, project version, DuckDB identity, descriptor inputs, toolchain refs, and license digest. It contains no supported-platform claim |
+| Candidate admission | Exact source commit, `0.2.0` pins, extension metadata, root MIT license, latest-stable DuckDB identity, and exact Community toolchain layout | `candidate.json` and `candidate.sha256` | Binds source commit/tree, project version, DuckDB identity, descriptor inputs, license digest, the complete pinned gitlink set, and exact `.gitmodules` metadata without consulting `HEAD`, index, or worktree. It contains no supported-platform claim |
 | Dependency audit | Admitted source, actual Community build graph, lock/configuration inputs, and primary license texts | `dependency-audit.json`, notices inventory, and anchor | Requires every compiled, linked, bundled, or redistributed dependency to have identity, provenance, license evidence, and an explicit disposition; ambiguity is a hard failure |
 | Descriptor admission | Exact proposed upstream descriptor bytes, candidate record, repository identity, and approved maintainer metadata | `descriptor.json`, descriptor digest, source ref, and upstream PR/run identifiers | Requires MIT, `duckdb_api`, version `0.2.0`, and the exact immutable candidate commit. It never accepts a branch name or self-reported ref as authority |
 | Community build evidence | Explicit `duckdb/community-extensions` repository, workflow run, descriptor, job inventory, logs, and downloaded outputs | One `community-build.json` and anchor per row, a complete `community-builds.json` inventory, and explicit artifact paths | Records every job conclusion, DuckDB/toolchain/platform identity, artifact size/digest, and Community origin. A build pass is only a candidate row, not product support |
@@ -58,7 +58,7 @@ change.
 | `release/0.2.0/enablement/evidence-allowlist.json` | Exact files allowed through hosted custody and final release binding |
 | `release/0.2.0/enablement/schemas/` | Versioned provider-record schemas only; no Query result or public support schema |
 | `release/0.2.0/enablement/README.md` | Provider command contracts and failure categories for Query and the release gate |
-| `scripts/community/verify_candidate.py` | Candidate source, version, license, DuckDB, and toolchain admission |
+| `scripts/community/verify_candidate.py` | Exact candidate commit/tree, version, license, DuckDB gitlink, and toolchain layout admission |
 | `scripts/community/audit_dependencies.py` | Dependency enumeration and canonical license-evidence production |
 | `scripts/community/verify_descriptor.py` | Proposed upstream descriptor and immutable-ref verification |
 | `scripts/community/collect_build_evidence.py` | Community run/job/output collection and provenance normalization |

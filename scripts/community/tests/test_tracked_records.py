@@ -22,64 +22,6 @@ from verify_descriptor import validate_expectation  # noqa: E402
 
 
 class TrackedRecordTest(unittest.TestCase):
-    def test_community_source_layout_has_exact_toolchain_gitlinks(self) -> None:
-        pins, _pins_digest = load_canonical_object(
-            (ENABLEMENT / "pins.json").resolve(), "tracked Community pins"
-        )
-        validate_pins(pins)
-        expected = {
-            "duckdb": pins["duckdb"]["commit"],
-            "extension-ci-tools": pins["extension_ci_tools"]["commit"],
-        }
-        observed: dict[str, tuple[str, str]] = {}
-        entries = subprocess.check_output(
-            [
-                "git",
-                "-C",
-                str(REPOSITORY),
-                "ls-files",
-                "--stage",
-                "--",
-                *expected,
-            ],
-            text=True,
-        ).splitlines()
-        for entry in entries:
-            metadata, path = entry.split("\t", 1)
-            mode, object_id, stage = metadata.split()
-            self.assertEqual(stage, "0")
-            observed[path] = (mode, object_id)
-        self.assertEqual(
-            observed,
-            {path: ("160000", commit) for path, commit in expected.items()},
-        )
-
-        modules = REPOSITORY / ".gitmodules"
-        configuration = {
-            key: subprocess.check_output(
-                ["git", "config", "-f", str(modules), "--get", key], text=True
-            ).strip()
-            for key in (
-                "submodule.duckdb.path",
-                "submodule.duckdb.url",
-                "submodule.duckdb.branch",
-                "submodule.extension-ci-tools.path",
-                "submodule.extension-ci-tools.url",
-                "submodule.extension-ci-tools.branch",
-            )
-        }
-        self.assertEqual(
-            configuration,
-            {
-                "submodule.duckdb.path": "duckdb",
-                "submodule.duckdb.url": "https://github.com/duckdb/duckdb",
-                "submodule.duckdb.branch": "main",
-                "submodule.extension-ci-tools.path": "extension-ci-tools",
-                "submodule.extension-ci-tools.url": "https://github.com/duckdb/extension-ci-tools",
-                "submodule.extension-ci-tools.branch": "v1.5-variegata",
-            },
-        )
-
     def test_tracked_records_are_canonical_and_mutually_admitted(self) -> None:
         pins, _pins_digest = load_canonical_object(
             (ENABLEMENT / "pins.json").resolve(), "tracked Community pins"

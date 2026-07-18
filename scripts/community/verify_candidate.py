@@ -15,7 +15,7 @@ sys.path.insert(0, str(HERE))
 
 from audit_dependencies import AUDIT_SCHEMA, validate_audit_record  # noqa: E402
 from candidate_pins import validate_pins  # noqa: E402
-from git_snapshot import blob, identity  # noqa: E402
+from git_snapshot import blob, identity, tree_entries  # noqa: E402
 from record_format import (  # noqa: E402
     AdmissionError,
     load_canonical_object,
@@ -30,11 +30,102 @@ from verify_descriptor import validate_expectation  # noqa: E402
 
 
 CANDIDATE_SCHEMA = "duckdb_api/community-candidate/v1"
+GITMODULE_SECTION = re.compile(r'[ \t]*\[submodule[ \t]+"([^"\\]+)"\][ \t]*')
+GITMODULE_ASSIGNMENT = re.compile(
+    r"[ \t]*([A-Za-z][A-Za-z0-9-]*)[ \t]*=[ \t]*(.*?)[ \t]*"
+)
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
     require(isinstance(value, dict), f"{label} must be an object")
     return value
+
+
+def _gitmodules_metadata(payload: bytes) -> dict[str, dict[str, str]]:
+    """Parse the deliberately small, include-free .gitmodules contract.
+
+    Candidate admission accepts only simple submodule sections and assignments,
+    so duplicate sections/keys and Git config include behavior cannot introduce
+    an ambient or ambiguous interpretation.
+    """
+
+    diagnostic = "candidate .gitmodules metadata does not match Community pins"
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise AdmissionError(diagnostic) from error
+    sections: dict[str, dict[str, str]] = {}
+    current: dict[str, str] | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == "" or stripped.startswith(("#", ";")):
+            continue
+        section = GITMODULE_SECTION.fullmatch(line)
+        if section is not None:
+            name = section.group(1)
+            require(name not in sections, diagnostic)
+            current = {}
+            sections[name] = current
+            continue
+        assignment = GITMODULE_ASSIGNMENT.fullmatch(line)
+        require(current is not None and assignment is not None, diagnostic)
+        key = assignment.group(1).lower()
+        require(key not in current, diagnostic)
+        current[key] = assignment.group(2)
+    return sections
+
+
+def _validate_source_layout(
+    repository: pathlib.Path, commit: str, pins: dict[str, Any]
+) -> None:
+    entries = tree_entries(repository, commit)
+    by_path = {entry.path: entry for entry in entries}
+    duckdb = _mapping(pins["duckdb"], "DuckDB pins")
+    ci_tools = _mapping(pins["extension_ci_tools"], "ci-tools pins")
+    expected_links = {
+        "duckdb": ("160000", "commit", duckdb["commit"]),
+        "extension-ci-tools": ("160000", "commit", ci_tools["commit"]),
+    }
+    observed_links = {
+        entry.path: (entry.mode, entry.object_type, entry.object_id)
+        for entry in entries
+        if entry.mode == "160000" or entry.object_type == "commit"
+    }
+    require(
+        observed_links == expected_links
+        and all(
+            path in by_path
+            and (by_path[path].mode, by_path[path].object_type, by_path[path].object_id)
+            == expected_identity
+            for path, expected_identity in expected_links.items()
+        ),
+        "candidate source gitlink layout does not match Community pins",
+    )
+
+    modules = by_path.get(".gitmodules")
+    require(
+        modules is not None
+        and modules.mode in {"100644", "100755"}
+        and modules.object_type == "blob",
+        "candidate .gitmodules must be one regular blob",
+    )
+    metadata = _gitmodules_metadata(blob(repository, commit, ".gitmodules"))
+    require(
+        metadata
+        == {
+            "duckdb": {
+                "path": "duckdb",
+                "url": duckdb["repository"],
+                "branch": "main",
+            },
+            "extension-ci-tools": {
+                "path": "extension-ci-tools",
+                "url": ci_tools["repository"],
+                "branch": ci_tools["ref"],
+            },
+        },
+        "candidate .gitmodules metadata does not match Community pins",
+    )
 
 
 def _bracket_end(text: str, offset: int) -> int | None:
@@ -206,6 +297,7 @@ def candidate_record(
     validate_pins(pins)
     validate_expectation(descriptor, pins)
     commit, tree = identity(repository, source_commit)
+    _validate_source_layout(repository, commit, pins)
     project = _mapping(pins["project"], "project pins")
     require(_extension_version(repository, commit) == project["version"],
             "candidate extension version does not equal 0.2.0")

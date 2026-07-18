@@ -7,11 +7,22 @@ import os
 import pathlib
 import re
 import subprocess
+from dataclasses import dataclass
 
 from record_format import AdmissionError, regular_directory, require
 
 
 HEX40 = re.compile(r"[0-9a-f]{40}")
+
+
+@dataclass(frozen=True)
+class TreeEntry:
+    """One path identity read from an exact immutable Git tree."""
+
+    mode: str
+    object_type: str
+    object_id: str
+    path: str
 
 
 def require_commit(value: object, label: str) -> str:
@@ -58,6 +69,40 @@ def identity(repository: pathlib.Path, commit: str) -> tuple[str, str]:
     assert isinstance(tree, str)
     require_commit(tree, "source tree")
     return exact, tree
+
+
+def tree_entries(repository: pathlib.Path, commit: str) -> list[TreeEntry]:
+    """Return every non-tree entry without consulting the index or worktree."""
+
+    exact = require_commit(commit, "source commit")
+    payload = _git(
+        repository,
+        "ls-tree",
+        "-r",
+        "-z",
+        "--full-tree",
+        exact,
+        binary=True,
+    )
+    assert isinstance(payload, bytes)
+    result: list[TreeEntry] = []
+    observed_paths: set[str] = set()
+    for record in payload.split(b"\0"):
+        if record == b"":
+            continue
+        metadata, separator, encoded_path = record.partition(b"\t")
+        require(separator == b"\t", "Git tree entry metadata is malformed")
+        try:
+            mode, object_type, encoded_id = metadata.decode("ascii").split()
+            path = encoded_path.decode("utf-8")
+        except (UnicodeDecodeError, ValueError) as error:
+            raise AdmissionError("Git tree entry metadata is malformed") from error
+        object_id = require_commit(encoded_id, "Git tree object identity")
+        require(path != "" and path not in observed_paths,
+                "Git tree path identity is ambiguous")
+        observed_paths.add(path)
+        result.append(TreeEntry(mode, object_type, object_id, path))
+    return result
 
 
 def blob(repository: pathlib.Path, commit: str, relative_path: str) -> bytes:

@@ -43,7 +43,12 @@ bounded regular-file descriptor, and its digest and parsed meaning come from
 those same bytes. Both output roots must be new. Candidate admission also
 requires the supplied source commit to contain only the single top-level
 `duckdb_extension_load(duckdb_api ...)` command, declare extension version
-`0.2.0` in that command, and contain the exact pinned root MIT license.
+`0.2.0` in that command, and contain the exact pinned root MIT license. That
+same immutable commit tree must contain exactly the pinned `duckdb` and
+`extension-ci-tools` gitlinks plus a regular `.gitmodules` blob with exactly
+their official repositories, local paths, and expected branches. Neither the
+candidate repository's `HEAD`, index, worktree, nor ambient Git configuration
+participates in those checks.
 
 `candidate.sha256` is exactly one lowercase SHA-256, two spaces,
 `candidate.json`, and one newline. Candidate JSON is canonical UTF-8 with
