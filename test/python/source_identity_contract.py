@@ -83,8 +83,61 @@ class SourceIdentityContractTests(unittest.TestCase):
         historical_pins["identities"]["fixture_sha256"] = "0" * 64
         self.write_json("release/0.2.0/pins.json", historical_pins)
         with self.assertRaisesRegex(
-            AssertionError, "historical 0.2.0 source identities drifted"
+            AssertionError, "historical 0.2.0 pins record drifted"
         ):
+            VERIFIER.verify(self.root)
+
+    def test_rejects_complete_historical_pin_record_drift(self) -> None:
+        mutations = (
+            ("DuckDB tree", "0.2.0", ("dependencies", "duckdb", "tree"), "0" * 40),
+            ("product cell", "0.1.0", ("product_cell", "host"), "changed"),
+            (
+                "sanitizer cell",
+                "0.1.0",
+                ("sanitizer_cell", "base_image"),
+                "docker.io/example/changed@sha256:" + "0" * 64,
+            ),
+            ("tool", "0.1.0", ("tools", "ninja_linux", "sha256"), "0" * 64),
+            (
+                "dependency",
+                "0.1.0",
+                ("dependencies", "extension_template", "tree"),
+                "0" * 40,
+            ),
+        )
+        for label, version, field_path, replacement in mutations:
+            with self.subTest(label=label):
+                relative = f"release/{version}/pins.json"
+                shutil.copyfile(REPOSITORY / relative, self.root / relative)
+                pins = self.json(relative)
+                target = pins
+                for field in field_path[:-1]:
+                    target = target[field]
+                target[field_path[-1]] = replacement
+                self.write_json(relative, pins)
+                with self.assertRaisesRegex(
+                    AssertionError, f"historical {version} pins record drifted"
+                ):
+                    VERIFIER.verify(self.root)
+
+    def test_rejects_connector_leaf_symlink_into_legacy_fixture_tree(self) -> None:
+        legacy = self.root / "fixtures/example"
+        legacy.mkdir(parents=True)
+        shutil.copyfile(REPOSITORY / "src/connector.cpp", legacy / "connector.cpp")
+        connector = self.root / "src/connector.cpp"
+        connector.unlink()
+        connector.symlink_to("../fixtures/example/connector.cpp")
+        with self.assertRaisesRegex(AssertionError, "identity path contains a symlink"):
+            VERIFIER.verify(self.root)
+
+    def test_rejects_connector_parent_symlink_to_external_tree(self) -> None:
+        external_temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(external_temporary.cleanup)
+        external = pathlib.Path(external_temporary.name)
+        shutil.copyfile(REPOSITORY / "src/connector.cpp", external / "connector.cpp")
+        shutil.rmtree(self.root / "src")
+        (self.root / "src").symlink_to(external, target_is_directory=True)
+        with self.assertRaisesRegex(AssertionError, "identity path contains a symlink"):
             VERIFIER.verify(self.root)
 
     def test_rejects_current_public_contract_and_connector_drift(self) -> None:
@@ -115,7 +168,7 @@ class SourceIdentityContractTests(unittest.TestCase):
                 VERIFIER.canonical_digest(contract)
             )
             self.write_json(pins_path, pins)
-        with self.assertRaisesRegex(AssertionError, "historical 0.1.0 source identities"):
+        with self.assertRaisesRegex(AssertionError, "historical 0.1.0 pins record drifted"):
             VERIFIER.verify(self.root)
 
     def test_rejects_project_and_duckdb_identity_drift(self) -> None:
