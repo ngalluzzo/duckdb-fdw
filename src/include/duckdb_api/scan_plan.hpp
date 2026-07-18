@@ -7,6 +7,10 @@
 #include <string>
 #include <vector>
 
+namespace duckdb_api_test {
+class ScanPlanTestAccess;
+}
+
 namespace duckdb_api {
 
 static const uint64_t HOST_MAX_REQUEST_ATTEMPTS = 1;
@@ -154,6 +158,7 @@ public:
 
 private:
 	friend class ScanPlan;
+	friend class duckdb_api_test::ScanPlanTestAccess;
 	friend ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const ScanRequest &request);
 
 	PlannedAuthenticationObligation();
@@ -223,6 +228,7 @@ public:
 
 private:
 	ScanPlan();
+	friend class duckdb_api_test::ScanPlanTestAccess;
 	friend ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const ScanRequest &request);
 
 	std::string connector_name;

@@ -1,0 +1,45 @@
+#include "support/scan_plan_test_access.hpp"
+
+#include <stdexcept>
+
+namespace duckdb_api_test {
+
+duckdb_api::ScanPlan ScanPlanTestAccess::Response(duckdb_api::ScanPlan plan,
+                                                  ResponsePlanCounterexample counterexample) {
+	switch (counterexample) {
+	case ResponsePlanCounterexample::JSON_PATH_RESPONSE_SOURCE:
+		plan.operation.response_source = duckdb_api::PlannedResponseSource::JSON_PATH_MANY;
+		break;
+	case ResponsePlanCounterexample::ZERO_TO_MANY_CARDINALITY:
+		plan.operation.cardinality = duckdb_api::PlannedCardinality::ZERO_TO_MANY;
+		break;
+	case ResponsePlanCounterexample::JSON_PATH_BASE_DOMAIN:
+		plan.domain = duckdb_api::BaseDomain::JSON_PATH_RECORDS;
+		break;
+	case ResponsePlanCounterexample::EMPTY_RECORDS_EXTRACTOR:
+		plan.operation.records_extractor.clear();
+		break;
+	case ResponsePlanCounterexample::EMPTY_SCHEMA_NAME:
+		plan.output_columns.front().name.clear();
+		break;
+	case ResponsePlanCounterexample::UNSUPPORTED_SCHEMA_TYPE:
+		plan.output_columns.front().logical_type = "DOUBLE";
+		break;
+	case ResponsePlanCounterexample::FLIPPED_SCHEMA_NULLABILITY:
+		plan.output_columns.front().nullable = !plan.output_columns.front().nullable;
+		break;
+	case ResponsePlanCounterexample::EMPTY_SCHEMA_EXTRACTOR:
+		plan.output_columns.front().extractor.clear();
+		break;
+	default:
+		throw std::invalid_argument("unknown closed response plan counterexample");
+	}
+	return plan;
+}
+
+duckdb_api::ScanPlan BuildResponsePlanCounterexample(const std::string &exact_logical_secret_name,
+                                                     ResponsePlanCounterexample counterexample) {
+	return ScanPlanTestAccess::Response(BuildValidAuthenticatedPlanFixture(exact_logical_secret_name), counterexample);
+}
+
+} // namespace duckdb_api_test
