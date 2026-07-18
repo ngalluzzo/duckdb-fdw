@@ -98,19 +98,41 @@ only test-owned composition may supply the controlled loopback transport.
   failures, recovery, active-stream teardown ordering, and redaction. Public
   GitHub is compatibility evidence only and is not a correctness oracle.
 
-## Interaction exit
+## Interaction exits
 
-- **Relational Semantics — Collaboration, then X-as-a-Service:** Open until
-  runtime compiles against and executes the immutable provider `ScanPlan`
-  without importing planner internals or duplicating classification.
-- **Query Experience — Collaboration, then X-as-a-Service:** Open until Query
-  consumes only `ScanExecutor`, `BatchStream`, typed batches, execution control,
-  structured errors, and the production runtime factory without runtime-
-  internal knowledge.
-- **Engineering Enablement — Facilitation:** Open until the permanent build
-  links only transport-bearing targets to the pinned platform libcurl and the
-  fresh identity/lifecycle gates are maintained outside this workstream.
+- **Relational Semantics — Satisfied; X-as-a-Service.** The integrated graph
+  keeps immutable `ScanPlan` representation and planner validation in the
+  Semantics source group, and the planner and plan-contract targets prove that
+  boundary independently. Runtime includes the public plan contract and its
+  focused executor target consumes the accepted operation, schema, fixed
+  request, and applied ceilings without importing planner implementation or
+  recomputing predicate, residual, ordering, or limit ownership. Semantics
+  retains relational classification and plan ownership; Runtime owns only
+  fail-closed executable-policy validation and execution.
+- **Query Experience — Satisfied; X-as-a-Service.** The integrated DuckDB
+  adapter retains only the immutable connector and plan plus `ScanExecutor`,
+  `BatchStream`, typed batches, execution control, and structured errors. It
+  has no curl, JSON-decoder, DNS-policy, or transport dependency; permanent
+  composition obtains the executor through `InitializeHttpRuntime()`. The
+  private controlled product reuses that adapter and proves cancellation,
+  error, early-close, and teardown behavior through the same service boundary.
+  Query retains registration, bind, DuckDB value transfer, and diagnostic
+  translation; Runtime retains transport, decoding, bounds, cancellation, and
+  stream cleanup.
+- **Engineering Enablement — Satisfied; facilitation ended.** The permanent
+  CMake graph names Runtime interface, implementation, and private curl-test
+  source groups explicitly. Only transport-bearing production, controlled,
+  identity, and Runtime curl/TLS targets link the pinned platform libcurl; the
+  focused adapter target remains curl-free. Cached and fresh product scripts
+  run the direct executor, request, budget, concurrent-initialization,
+  fixed-deadline, concurrent-close/recovery, and TLS oracles. They require the
+  private option-observer marker in its private test target and reject it from
+  installed and loadable artifacts. Runtime owns those lifecycle and security
+  contracts; Enablement retains the reusable dependency-identity, build, and
+  artifact-inventory gates without becoming Runtime's quality owner or a
+  permanent approval queue.
 
-The Remote Runtime interaction exits are satisfied only after focused tests,
-the private controlled-service path, installed-artifact seam canaries, and the
-combined fresh product gate agree with the final source dependency graph.
+All three interactions are closed by the integrated product graph at
+`f834eb0`. The focused Semantics, Runtime, and Query targets, the private
+controlled-service path, the installed-artifact seam canaries, and the fresh
+native product gate now agree with the final source and link dependencies.
