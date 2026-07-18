@@ -4,8 +4,9 @@
 > semantic pushdown, bounded streaming execution, pagination, enrichment,
 > shared auth and transport infrastructure, and an escape hatch for custom code.
 
-**Status:** Design proposal, revision 0.4; the `0.1.0` native preview profile is
-accepted by RFC 0001 and the distribution policy is accepted by RFC 0004
+**Status:** Design proposal, revision 0.4; the live `0.3.0` native preview
+profile is accepted by RFC 0005 and the distribution policy is accepted by
+RFC 0004
 
 **Integration profiles:** A source-built native C++ preview, portable C
 Extension API table functions, and an optional deep DuckDB catalog/optimizer
@@ -46,11 +47,11 @@ The design deliberately separates:
 5. **Connector authoring** — declarative specifications for common APIs and
    trusted Rust or sandboxed WASM for exceptional cases.
 
-The accepted `0.1.0` preview uses a native C++ table function to prove the
-semantic boundaries on one exact DuckDB build. The intended portable profile
-uses a Rust table-function extension. A custom attached catalog and
-logical-plan optimizer are an optional integration profile, not a requirement
-of the connector contract.
+The accepted `0.3.0` preview uses a native C++ table function to query one
+fixed live HTTPS relation on one exact DuckDB and platform-dependency cell.
+The intended portable profile uses a Rust table-function extension. A custom
+attached catalog and logical-plan optimizer are an optional integration
+profile, not a requirement of the connector contract.
 
 ---
 
@@ -171,12 +172,13 @@ levels. They should not be conflated.
 
 ```mermaid
 flowchart TB
-    CORE[Shared Rust connector core]
+    CORE[Intended portable Rust connector core]
 
     subgraph P[Accepted native preview]
         NATIVE[DuckDB native C++ extension]
         DISPATCH[duckdb_api_scan dispatcher]
-        NATIVE --> DISPATCH
+        LIVE[Fixed GitHub REST relation]
+        NATIVE --> DISPATCH --> LIVE
     end
 
     subgraph A[Profile A — portable table functions]
@@ -200,54 +202,76 @@ flowchart TB
 
 ### 5.0 Accepted native C++ preview
 
-RFC 0001 defines a deliberately narrow native profile for the first published
-product contract. It is a source-built DuckDB C++ extension named `duckdb_api`,
-version `0.1.0`, with exactly one project-defined SQL function:
+RFC 0005 defines the current deliberately narrow native profile. It is a
+source-built DuckDB C++ extension named `duckdb_api`, version `0.3.0`, with
+exactly one project-defined SQL function and one compiled-in relation:
 
 ```sql
-SELECT id, name, active
+SELECT id, login, site_admin
 FROM duckdb_api_scan(
-    connector := 'example',
-    relation := 'items'
-)
-ORDER BY id;
+    connector := 'github',
+    relation := 'duckdb_login_search_page'
+);
 ```
 
-The profile recognizes only the immutable `example.items` relation and returns
-the three typed rows recorded in the repository fixture. Its implementation is
-native C++ end to end and introduces neither Rust nor a cross-language FFI.
-It preserves the same semantic `CompiledConnector → ScanRequest → ScanPlan →
-BatchStream` boundaries so the preview does not turn native adapter details
-into a future public ABI.
+The relation's complete base-row domain is the zero-to-three `items` in one
+fixed response from
+`https://api.github.com/search/users?q=duckdb+in%3Alogin&per_page=3`; it is not
+the domain of all GitHub users or all matching search results. The fixed `q`
+and `per_page` fields define the source and are not DuckDB predicate or limit
+pushdown. Required `id`, `login`, and `site_admin` values decode strictly as
+`BIGINT`, `VARCHAR`, and `BOOLEAN`; this extraction requirement does not claim
+DuckDB-visible `NOT NULL` metadata.
+
+The implementation is native C++ end to end and introduces neither Rust nor a
+cross-language FFI. Connector Experience supplies immutable compiled native
+metadata with a typed `{scheme, host, port}` origin and structural request
+fields. Query Experience supplies a conservative, protocol-neutral
+`ScanRequest`. Relational Semantics validates those values without I/O and
+returns the only constructible immutable `ScanPlan`, whose typed executable
+operation is separate from its safe explanation snapshot. Remote Runtime
+consumes the executable plan facts through `ScanExecutor`; it may reject an
+unsupported capability but does not rebuild the plan or reinterpret relational
+ownership. Query remains the only DuckDB-aware layer and translates batches
+and structured errors at the adapter edge.
 
 The native capability profile exposes no projection, filter, ordering, limit,
 offset, progress, or secret-manager delegation. Its adapter therefore requests
-the full three-column projection, uses `TRUE` for remote and runtime residual
-predicates, leaves ordering empty and bounds unset, and lets DuckDB retain every
-filter, ordering, limit, and offset. Cancellation is the one verified lifecycle
-capability. Ordinary bind and planning read only immutable embedded metadata
-and cannot open the fixture executor.
+the full three-column projection, records `TRUE` as both remote and residual
+predicate relative to the bounded response-page domain, leaves ordering and
+bounds undelegated, and assigns every filter, ordering, limit, and offset to
+DuckDB. The plan grants no remote or runtime limit. Connector record ceilings
+may narrow below three but cannot widen past the fixed domain even though the
+host decoder has a larger general ceiling. Ordinary bind, `DESCRIBE`, prepare,
+and planning read only immutable metadata and acquire no network authority.
 
-Execution is a single-task synchronous fixture-backed REST-shaped stream. It
-validates the fixed `GET /items` plan and `$.items[*]` extractor, strictly
-converts JSON records, emits at most two rows per internal batch, and enforces
-hard fixture-byte, record, field-size, wall-time, and concurrency ceilings.
-There is no network, credential, retry, cache, pagination, provider, package
-loader, or runtime file-path capability.
+Execution opens one synchronous pull stream and one wire attempt for the exact
+unauthenticated HTTPS authority `api.github.com:443`. Remote Runtime enforces
+post-DNS destination policy, TLS verification, strict JSON extraction, one
+five-second wall-time budget across execution, response/header/decompressed
+byte ceilings, three decoded records, 256 bytes per extracted string, bounded
+decode memory and nesting, two rows per output batch, and one concurrent
+transfer. DuckDB interruption reaches transfer and decoding. Stream cancel,
+close, and destruction are idempotent and non-throwing; connection close is
+bounded by the hard execution deadline but is not promised to cancel promptly.
 
-The native adapter obtains each stream through a private protocol-neutral
-`ScanExecutor` service. Native example composition supplies the immutable
-connector and executor; the adapter does not retain the concrete fixture
-factory or source. The executor takes exclusive ownership of its concrete
-provider, so no caller can mutate fixture behavior behind frozen provenance.
-At global initialization and each scan callback, the adapter
-passes a non-owning `ExecutionControl` view that can report DuckDB
-interruption. Runtime code checkpoints that view but never retains it or
-imports `ClientContext`. A runtime cancellation marker is translated to
-DuckDB's interruption type once at the adapter boundary. Runtime-owned
-deadlines and idempotent, non-throwing cancel, close, and destruction remain
-independent of the host signal. Cleanup failure cannot mask an interruption or
-escape connection destruction.
+The installed composition contains only the fixed public HTTPS connector and
+runtime service. Deterministic correctness evidence uses a separate private,
+non-installable composition whose compiled connector selects a controlled
+loopback service; it traverses the same registration, bind/copy, planning,
+executor, stream, error-translation, and `DataChunk` path. Artifact inventory
+and negative canaries prove that loopback metadata and authority-selection
+seams are absent from the installed artifact. The public GitHub execution is
+upstream compatibility evidence only; changing live row identity or order
+cannot invalidate the controlled relational oracle.
+
+The profile adds no caller-selected URL, credentials, proxy, redirect,
+pagination, retry, cache, provider, GraphQL, connector-package loader, YAML
+compiler, runtime file path, or public native ABI. It intentionally replaces
+the historical `example.items` fixture relation rather than shipping a second
+product relation. The `0.1.0`/`0.2.0` fixture behavior remains historical
+release evidence, not a fallback: a live failure returns a bounded diagnostic
+and never fixture rows.
 
 The supported compatibility cell is DuckDB 1.5.4 at commit `08e34c447b` with
 platform `osx_arm64`, macOS 26.5.1 on Apple Silicon arm64, Apple clang 17 in
@@ -1472,10 +1496,13 @@ Useful properties include:
 - Pagination emits every fixture item exactly once in stable sources.
 - Projection changes requests but not values of retained columns.
 
-### 20.4 Live tests
+### 20.4 Controlled and live tests
 
-A separate, opt-in live suite verifies current API behavior. It should use
-low-privilege credentials, strict budgets, and no hard dependency in normal CI.
+Deterministic controlled services are the correctness oracle for exact
+requests, rows, relational operators, failures, cancellation, and teardown.
+Separate live tests verify current upstream compatibility under strict budgets;
+they are not the primary correctness oracle and normal CI must not depend on
+changing public row identity or order.
 
 ---
 
@@ -1628,7 +1655,7 @@ Reuse as a concrete source of API patterns:
 
 | Area                       | Decision                                                               |
 | -------------------------- | ---------------------------------------------------------------------- |
-| Native preview             | `duckdb_api` 0.1.0 C++ table function on one exact source-built cell  |
+| Native preview             | `duckdb_api` 0.3.0 fixed GitHub REST relation on one exact source-built cell |
 | Portable integration       | Pure-Rust C Extension API table functions                              |
 | Deep integration           | Optional thin C++ catalog/optimizer shell                              |
 | Core abstraction           | `ScanRequest` → explicit `ScanPlan` → `BatchStream`                    |
