@@ -20,8 +20,6 @@ SPEC.loader.exec_module(VERIFIER)
 
 SOURCE_PATHS = (
     "extension_config.cmake",
-    "fixtures/example/compiled_connector.snapshot",
-    "fixtures/example/items.json",
     "release/0.1.0/pins.json",
     "release/0.1.0/public_contract.json",
     "release/0.2.0/pins.json",
@@ -29,7 +27,6 @@ SOURCE_PATHS = (
     "release/0.3.0/pins.json",
     "release/0.3.0/public_contract.json",
     "src/connector.cpp",
-    "src/include/duckdb_api/embedded_example.hpp",
 )
 
 
@@ -52,8 +49,9 @@ class SourceIdentityContractTests(unittest.TestCase):
             json.dumps(value, indent=2, sort_keys=True) + "\n"
         )
 
-    def test_selects_current_version_and_preserves_historical_contract(self) -> None:
+    def test_selects_current_version_without_legacy_fixture_sources(self) -> None:
         result = VERIFIER.verify(self.root)
+        self.assertFalse((self.root / "fixtures").exists())
         self.assertEqual(result["version"], "0.3.0")
         self.assertEqual(result["duckdb_version"], "1.5.4")
         self.assertEqual(
@@ -78,6 +76,15 @@ class SourceIdentityContractTests(unittest.TestCase):
         historical_pins["identities"]["public_contract_sha256"] = "0" * 64
         self.write_json("release/0.1.0/pins.json", historical_pins)
         with self.assertRaisesRegex(AssertionError, "historical 0.1"):
+            VERIFIER.verify(self.root)
+
+    def test_rejects_historical_source_identity_pin_drift(self) -> None:
+        historical_pins = self.json("release/0.2.0/pins.json")
+        historical_pins["identities"]["fixture_sha256"] = "0" * 64
+        self.write_json("release/0.2.0/pins.json", historical_pins)
+        with self.assertRaisesRegex(
+            AssertionError, "historical 0.2.0 source identities drifted"
+        ):
             VERIFIER.verify(self.root)
 
     def test_rejects_current_public_contract_and_connector_drift(self) -> None:
@@ -108,7 +115,7 @@ class SourceIdentityContractTests(unittest.TestCase):
                 VERIFIER.canonical_digest(contract)
             )
             self.write_json(pins_path, pins)
-        with self.assertRaisesRegex(AssertionError, "historical 0.1 adjacent pin"):
+        with self.assertRaisesRegex(AssertionError, "historical 0.1.0 source identities"):
             VERIFIER.verify(self.root)
 
     def test_rejects_project_and_duckdb_identity_drift(self) -> None:

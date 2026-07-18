@@ -1,1 +1,0 @@
-connector=example;version=0.1.0;relation=items;schema=id:BIGINT!:$.id,name:VARCHAR!:$.name,active:BOOLEAN!:$.active;operation=items_list:fallback:many:REST:GET:/items:$.items[*];fixture=1b789738607ae9a74d24b07cacc09e98531c0de5ae9a822e78cabe9c8fc0eb39
