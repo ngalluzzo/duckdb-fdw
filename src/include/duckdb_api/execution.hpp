@@ -11,16 +11,16 @@
 namespace duckdb_api {
 
 // Stable, redacted failure categories crossing from Remote Runtime into the
-// DuckDB adapter. Raw response values and provider exceptions must not appear
-// in safe_message.
-enum class ErrorStage : uint8_t { DECODE, SCHEMA, POLICY, INTERNAL };
+// DuckDB adapter. Raw response values, destinations, and dependency exceptions
+// must never appear in field or safe_message.
+enum class ErrorStage : uint8_t { TRANSPORT, HTTP_STATUS, DECODE, SCHEMA, POLICY, RESOURCE, INTERNAL };
 
 class ExecutionError : public std::exception {
 public:
 	ExecutionError(ErrorStage stage, std::string field, std::string safe_message);
 
 	const char *what() const noexcept override;
-	ErrorStage Stage() const;
+	ErrorStage Stage() const noexcept;
 	const std::string &Field() const;
 	const std::string &SafeMessage() const;
 
@@ -45,10 +45,35 @@ public:
 	virtual bool IsCancellationRequested() const noexcept = 0;
 };
 
-struct ItemRow {
-	int64_t id;
-	std::string name;
-	bool active;
+// DuckDB-free scalar kinds supported by the native preview runtime. Values are
+// never nullable in RFC 0005's required schema; adding nullability is a shared
+// interface change rather than an adapter convention.
+enum class ValueKind : uint8_t { BIGINT, VARCHAR, BOOLEAN };
+
+struct TypedValue {
+	static TypedValue BigInt(int64_t value);
+	static TypedValue Varchar(std::string value);
+	static TypedValue Boolean(bool value);
+
+	ValueKind kind;
+	int64_t bigint_value;
+	std::string varchar_value;
+	bool boolean_value;
+};
+
+struct TypedRow {
+	std::vector<TypedValue> values;
+};
+
+// A batch declares the ordered scalar kinds matching ScanPlan::output_columns.
+// Every row has exactly that arity and kind sequence. The adapter may translate
+// these values into DuckDB vectors but runtime code owns strict conversion.
+struct TypedBatch {
+	std::vector<ValueKind> column_kinds;
+	std::vector<TypedRow> rows;
+
+	void Clear();
+	bool IsSchemaAligned() const noexcept;
 };
 
 // One independently owned scan. Next replaces rows with at most the planned
@@ -56,7 +81,7 @@ struct ItemRow {
 class BatchStream {
 public:
 	virtual ~BatchStream() noexcept;
-	virtual bool Next(ExecutionControl &control, std::vector<ItemRow> &rows) = 0;
+	virtual bool Next(ExecutionControl &control, TypedBatch &batch) = 0;
 	virtual void Cancel() noexcept = 0;
 	virtual void Close() noexcept = 0;
 };
