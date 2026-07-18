@@ -1,0 +1,77 @@
+{
+  "deferred_release_evidence": [
+    "per-platform compiler runtime and operating-system library closure",
+    "per-row Community artifact inventory",
+    "notices required by dependencies discovered only in Community outputs"
+  ],
+  "dependencies": [
+    {
+      "license": {
+        "path": "LICENSE",
+        "sha256": "7e17fd31249fa875cb3b1c5e05c6c3e99b75509f6a2804ca176c217834de1dcb",
+        "spdx": "MIT",
+        "status": "present"
+      },
+      "local_name": "duckdb",
+      "name": "duckdb",
+      "notice_required": true,
+      "pin": "duckdb",
+      "redistributed_by_project": false,
+      "role": "compiled_host_api"
+    },
+    {
+      "license": {
+        "candidate_paths": [
+          "COPYING",
+          "COPYING.md",
+          "COPYING.txt",
+          "LICENSE",
+          "LICENSE.md",
+          "LICENSE.txt"
+        ],
+        "status": "absent_at_pinned_commit"
+      },
+      "local_name": "community-extensions",
+      "name": "community_extensions",
+      "notice_required": false,
+      "pin": "community_extensions",
+      "redistributed_by_project": false,
+      "role": "upstream_distribution_service"
+    },
+    {
+      "license": {
+        "path": "LICENSE",
+        "sha256": "a457b2e4e0dafab867e52b8deeaac344681706c5020b91556f69d90dbc973894",
+        "spdx": "MIT",
+        "status": "present"
+      },
+      "local_name": "extension-template",
+      "name": "extension_template",
+      "notice_required": false,
+      "pin": "extension_template",
+      "redistributed_by_project": false,
+      "role": "build_template"
+    },
+    {
+      "license": {
+        "candidate_paths": [
+          "COPYING",
+          "COPYING.md",
+          "COPYING.txt",
+          "LICENSE",
+          "LICENSE.md",
+          "LICENSE.txt"
+        ],
+        "status": "absent_at_pinned_commit"
+      },
+      "local_name": "extension-ci-tools",
+      "name": "extension_ci_tools",
+      "notice_required": false,
+      "pin": "extension_ci_tools",
+      "redistributed_by_project": false,
+      "role": "upstream_build_tool"
+    }
+  ],
+  "schema": "duckdb_api/dependency-expectations/v1",
+  "scope": "candidate source and Community build inputs only"
+}

@@ -1,0 +1,18 @@
+{
+  "authority": "none",
+  "expected": {
+    "build_language": "C++",
+    "extension": "duckdb_api",
+    "license": "MIT",
+    "maintainers": [],
+    "maintainers_status": "pending",
+    "repository": "https://github.com/ngalluzzo/duckdb-fdw",
+    "source_commit": null,
+    "source_ref": null,
+    "version": "0.2.0"
+  },
+  "publication_status": "not_submitted",
+  "schema": "duckdb_api/community-descriptor-expectation/v1",
+  "status": "pending_non_authoritative",
+  "support_claims": []
+}

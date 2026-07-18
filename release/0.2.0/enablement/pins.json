@@ -1,0 +1,54 @@
+{
+  "community_extensions": {
+    "commit": "3a9af37016c909a7fb01510d1b63eda1e177da8a",
+    "ref": "main",
+    "ref_type": "branch",
+    "repository": "https://github.com/duckdb/community-extensions",
+    "tree": "c473c0dd5f8f3bb0fc68a38497bf8fb5d665f58c"
+  },
+  "dependency_expectations_sha256": "2dc99a538d1c6d2819c8ce16f9507e7fd79b08b4a2e47eea88ca0a6855cada51",
+  "duckdb": {
+    "commit": "08e34c447bae34eaee3723cac61f2878b6bdf787",
+    "license": {
+      "path": "LICENSE",
+      "sha256": "7e17fd31249fa875cb3b1c5e05c6c3e99b75509f6a2804ca176c217834de1dcb",
+      "spdx": "MIT"
+    },
+    "ref": "v1.5.4",
+    "ref_type": "tag",
+    "repository": "https://github.com/duckdb/duckdb",
+    "tree": "33c1f40f6421fd8f79912a6ce96722feca538c61",
+    "version": "1.5.4"
+  },
+  "extension_ci_tools": {
+    "commit": "72e76e99cd7fee45a99739cd118ec2db64e034ec",
+    "ref": "v1.5-variegata",
+    "ref_type": "branch",
+    "repository": "https://github.com/duckdb/extension-ci-tools",
+    "tree": "210c8914ae51bee2fc9b6e37558c7dcd4b7bf20e"
+  },
+  "extension_template": {
+    "commit": "cfaf3e236008e782d27f4341b0ee036002d0a449",
+    "license": {
+      "path": "LICENSE",
+      "sha256": "a457b2e4e0dafab867e52b8deeaac344681706c5020b91556f69d90dbc973894",
+      "spdx": "MIT"
+    },
+    "ref": "cfaf3e236008e782d27f4341b0ee036002d0a449",
+    "ref_type": "commit",
+    "repository": "https://github.com/duckdb/extension-template",
+    "tree": "e9d306f3e8b0eed85e3cfc132066769baab9f6d2"
+  },
+  "project": {
+    "extension": "duckdb_api",
+    "license": {
+      "path": "LICENSE",
+      "sha256": "3a959b6278bc64b63b5d71ee344a572d59e6a0bf9bb652f13b053939007dae59",
+      "spdx": "MIT"
+    },
+    "repository": "https://github.com/ngalluzzo/duckdb-fdw",
+    "tag": "v0.2.0",
+    "version": "0.2.0"
+  },
+  "schema": "duckdb_api/community-enablement-pins/v1"
+}
