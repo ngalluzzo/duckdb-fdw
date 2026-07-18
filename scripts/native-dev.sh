@@ -20,7 +20,7 @@ DuckDB API native developer commands
 
   make bootstrap                    prepare the pinned reusable developer cell
   make build PROFILE=debug|release  incrementally build the extension
-  make test PROFILE=debug|release   run native, SQL, inventory, and demo oracles
+  make test PROFILE=debug|release   run native, controlled, SQL, inventory, and demo oracles
   make demo PROFILE=debug|release   run the first query in a pinned clean host
   make paths PROFILE=debug|release  print exact developer host and artifact paths
   make verify PROFILE=debug|release run the fresh product test runner

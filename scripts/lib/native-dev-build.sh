@@ -26,7 +26,6 @@ tree_digest_projection() (
     trap 'rm -rf "${stage}"' EXIT
     rsync -a "${TEMPLATE_ROOT}/src/" "${stage}/src/"
     rsync -a "${TEMPLATE_ROOT}/test/" "${stage}/test/"
-    rsync -a "${TEMPLATE_ROOT}/fixtures/" "${stage}/fixtures/"
     cp "${TEMPLATE_ROOT}/CMakeLists.txt" "${TEMPLATE_ROOT}/Makefile" \
         "${TEMPLATE_ROOT}/extension_config.cmake" "${stage}/"
     tree_digest "${stage}"
@@ -38,7 +37,7 @@ sync_sources() {
     local stage
     local status
     status="$(git -C "${REPOSITORY_ROOT}" status --porcelain --untracked-files=all -- \
-        src test fixtures CMakeLists.txt Makefile extension_config.cmake | sed -n '/^??/p')"
+        src test CMakeLists.txt Makefile extension_config.cmake | sed -n '/^??/p')"
     if [[ -n "${status}" ]]; then
         echo "native developer sync accepts tracked files only; add or remove:" >&2
         echo "${status}" >&2
@@ -47,7 +46,7 @@ sync_sources() {
     stage="$(mktemp -d "${DEV_ROOT}/sync.XXXXXX")"
     TEMP_ROOTS+=("${stage}")
     git -C "${REPOSITORY_ROOT}" ls-files -z -- \
-        src test fixtures CMakeLists.txt Makefile extension_config.cmake |
+        src test CMakeLists.txt Makefile extension_config.cmake |
         rsync -a --from0 --files-from=- "${REPOSITORY_ROOT}/" "${stage}/"
     source_digest="$(tree_digest "${stage}")"
     if [[ -f "${SOURCE_STATE}" && "$(cat "${SOURCE_STATE}")" == "${source_digest}" ]]; then
@@ -60,7 +59,7 @@ sync_sources() {
     rm -f "${SOURCE_STATE}"
     rsync -a --delete "${stage}/src/" "${TEMPLATE_ROOT}/src/"
     rsync -a --delete "${stage}/test/" "${TEMPLATE_ROOT}/test/"
-    rsync -a --delete "${stage}/fixtures/" "${TEMPLATE_ROOT}/fixtures/"
+    rm -rf "${TEMPLATE_ROOT}/fixtures"
     cp "${stage}/CMakeLists.txt" "${stage}/Makefile" "${stage}/extension_config.cmake" "${TEMPLATE_ROOT}/"
     "${CMAKE_BIN}" -E rm -f "${TEMPLATE_ROOT}/vcpkg.json"
     destination_digest="$(tree_digest_projection "${TEMPLATE_ROOT}")"
@@ -79,11 +78,13 @@ build_paths() {
     STATIC_TEST_CLI="${BUILD_ROOT}/duckdb"
     ARTIFACT="${BUILD_ROOT}/extension/duckdb_api/duckdb_api.duckdb_extension"
     NATIVE_TEST_ROOT="${BUILD_ROOT}/extension/duckdb_api"
+    CONTROLLED_ARTIFACT="${BUILD_ROOT}/private/duckdb_api_controlled.duckdb_extension"
 }
 
 run_build() {
     local extra_flags_name
     local profile="$1"
+    local target
     prepare_cell
     build_paths "${profile}"
     "${REPOSITORY_ROOT}/scripts/verify-source-identities.py" >/dev/null
@@ -94,6 +95,14 @@ run_build() {
         extra_flags_name="EXT_RELEASE_FLAGS"
     fi
     mkdir -p "${DEV_ROOT}/home" "${DEV_ROOT}/tmp" "${DEV_ROOT}/cache"
+    # Repair reusable cells created before the controlled artifact moved out of
+    # DuckDB's install-repository glob. Removing the generated output makes
+    # Ninja rebuild it only at the private path below.
+    if [[ -d "${BUILD_ROOT}" ]]; then
+        find "${BUILD_ROOT}" -type f \
+            -name 'duckdb_api_controlled.duckdb_extension' \
+            ! -path "${CONTROLLED_ARTIFACT}" -delete
+    fi
     env -i HOME="${DEV_ROOT}/home" TMPDIR="${DEV_ROOT}/tmp" XDG_CACHE_HOME="${DEV_ROOT}/cache" \
         PATH="${CMAKE_ROOT}/CMake.app/Contents/bin:${NINJA_ROOT}:$(dirname "$(command -v python3)"):/usr/bin:/bin:/usr/sbin:/sbin" \
         GEN=ninja DISABLE_SANITIZER=1 DUCKDB_PLATFORM="${DUCKDB_PLATFORM}" \
@@ -109,9 +118,60 @@ run_build() {
         echo "native build did not produce expected loadable artifact: ${ARTIFACT}" >&2
         exit 1
     fi
+    if [[ ! -f "${CONTROLLED_ARTIFACT}" ]]; then
+        echo "native build did not produce expected private controlled artifact: ${CONTROLLED_ARTIFACT}" >&2
+        exit 1
+    fi
+    if find "${BUILD_ROOT}/repository" -type f \
+        -name 'duckdb_api_controlled.duckdb_extension' -print -quit | grep -q .; then
+        echo "private controlled artifact entered DuckDB's install repository" >&2
+        exit 1
+    fi
     python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
         configuration "${PINS_FILE}" "${SDK_ROOT}" \
         "${NATIVE_TEST_ROOT}/duckdb_api_native_dependencies.json" >/dev/null
+    "${NATIVE_TEST_ROOT}/duckdb_api_native_dependency_identity" \
+        >"${DEV_ROOT}/observed-native-runtime.json"
+    python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
+        runtime "${PINS_FILE}" "${DEV_ROOT}/observed-native-runtime.json" >/dev/null
+    python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
+        linkage "${PINS_FILE}" transport \
+        "${NATIVE_TEST_ROOT}/duckdb_api_native_dependency_identity" >/dev/null
+    python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
+        linkage "${PINS_FILE}" transport "${CONTROLLED_ARTIFACT}" >/dev/null
+    for target in \
+        duckdb_api_connector_tests \
+        duckdb_api_scan_request_tests \
+        duckdb_api_scan_planner_tests \
+        duckdb_api_scan_plan_contract_tests \
+        duckdb_api_execution_contract_tests \
+        duckdb_api_network_policy_tests \
+        duckdb_api_json_decoder_tests \
+        duckdb_api_http_scan_executor_tests \
+        duckdb_api_adapter_tests; do
+        python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
+            linkage "${PINS_FILE}" curl-free "${NATIVE_TEST_ROOT}/${target}" >/dev/null
+    done
+    for target in \
+        duckdb_api_curl_http_transport_tests \
+        duckdb_api_curl_http_budget_tests \
+        duckdb_api_curl_http_lifecycle_tests \
+        duckdb_api_curl_tls_security_tests; do
+        python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
+            linkage "${PINS_FILE}" transport "${NATIVE_TEST_ROOT}/${target}" >/dev/null
+    done
+    if ! strings "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_transport_tests" |
+        grep -F 'duckdb_api_private_curl_option_observer_v1' >/dev/null; then
+        echo "private curl option observer canary is missing from its focused target" >&2
+        exit 1
+    fi
+    for target in "${ARTIFACT}" "${CONTROLLED_ARTIFACT}" "${STATIC_TEST_CLI}"; do
+        if strings "${target}" |
+            grep -F 'duckdb_api_private_curl_option_observer_v1' >/dev/null; then
+            echo "private curl option observer canary entered a product artifact" >&2
+            exit 1
+        fi
+    done
 }
 
 print_paths() {
@@ -122,6 +182,7 @@ print_paths() {
     printf 'pinned_python=%s\n' "${PINNED_PYTHON}"
     printf 'static_test_cli=%s\n' "${STATIC_TEST_CLI}"
     printf 'artifact=%s\n' "${ARTIFACT}"
+    printf 'controlled_artifact=%s\n' "${CONTROLLED_ARTIFACT}"
     echo "developer_evidence=non-release"
 }
 
@@ -129,15 +190,29 @@ run_tests() {
     local contract="${REPOSITORY_ROOT}/test/python/source_demo_contract.py"
     python3 -I -B "${REPOSITORY_ROOT}/scripts/test-native-dependencies.py"
     "${NATIVE_TEST_ROOT}/duckdb_api_connector_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"
-    "${NATIVE_TEST_ROOT}/duckdb_api_fixture_decoder_tests"
-    "${NATIVE_TEST_ROOT}/duckdb_api_fixture_stream_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_contract_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_execution_contract_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_network_policy_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_json_decoder_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_transport_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_budget_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_lifecycle_tests"
+    "${PINNED_PYTHON}" -I -B \
+        "${REPOSITORY_ROOT}/test/python/runtime_curl_tls_tests.py" \
+        "${NATIVE_TEST_ROOT}/duckdb_api_curl_tls_security_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_adapter_tests"
     (
         cd "${TEMPLATE_ROOT}"
         "./build/${PROFILE}/test/unittest" --require duckdb_api 'test/*'
     )
-    "${REPOSITORY_ROOT}/scripts/verify-loadable-inventory.sh" "${ARTIFACT}"
+    "${REPOSITORY_ROOT}/scripts/verify-loadable-inventory.sh" \
+        "${ARTIFACT}" "${PINS_FILE}" transport
+    "${PINNED_PYTHON}" -I -B \
+        "${REPOSITORY_ROOT}/test/python/live_rest_product_contract.py" \
+        "${CONTROLLED_ARTIFACT}"
     if [[ ! -f "${contract}" ]]; then
         echo "required Query Experience demo contract is missing: ${contract}" >&2
         exit 1
@@ -146,10 +221,10 @@ run_tests() {
 }
 
 run_demo() {
-    local demo="${REPOSITORY_ROOT}/examples/first_trustworthy_query.py"
+    local demo="${REPOSITORY_ROOT}/examples/first_live_rest_relation.py"
     local isolated
     if [[ ! -f "${demo}" ]]; then
-        echo "query-owned first-query demo is not present: ${demo}" >&2
+        echo "query-owned live REST demo is not present: ${demo}" >&2
         exit 1
     fi
     isolated="$(mktemp -d "${DEV_ROOT}/demo.XXXXXX")"

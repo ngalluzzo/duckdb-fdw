@@ -75,26 +75,55 @@ find_package(Threads REQUIRED)
 
 include_directories(src/include)
 
-set(CONNECTOR_SOURCES src/connector.cpp)
-set(PLANNING_SOURCES
+set(CONNECTOR_METADATA_SOURCES src/connector.cpp)
+set(RELATIONAL_PLANNING_SOURCES
     src/scan_request.cpp
+    src/scan_plan.cpp
     src/scan_planner.cpp)
-set(RUNTIME_SOURCES
-    src/execution_error.cpp
-    src/fixture_decoder.cpp
-    src/fixture_runtime.cpp)
-set(COMPOSITION_SOURCES src/example_composition.cpp)
-set(ADAPTER_SOURCES src/duckdb_api_extension.cpp)
-set(TEST_SUPPORT_SOURCES test/cpp/support/fixture_scenarios.cpp)
+set(REMOTE_RUNTIME_INTERFACE_SOURCES src/execution_error.cpp)
+set(REMOTE_RUNTIME_SOURCES
+    src/json_decoder.cpp
+    src/http_scan_executor.cpp
+    src/network_policy.cpp
+    src/curl_transfer.cpp
+    src/curl_http_transport.cpp
+    src/http_runtime.cpp)
+set(REMOTE_RUNTIME_CURL_TEST_SUPPORT_SOURCES
+    test/cpp/support/controlled_socket_service.cpp
+    test/cpp/support/loopback_curl_runtime.cpp
+    test/cpp/support/runtime_http_test_support.cpp
+    test/cpp/support/private_curl_probe.cpp)
+set(QUERY_PRODUCT_COMPOSITION_SOURCES src/product_composition.cpp)
+set(QUERY_DUCKDB_ADAPTER_SOURCES
+    src/duckdb_api_adapter.cpp
+    src/duckdb_api_extension.cpp)
+set(QUERY_TEST_SUPPORT_SOURCES test/cpp/support/query_runtime_scenarios.cpp)
+set(QUERY_CONTROLLED_COMPOSITION_SOURCES
+    test/cpp/support/loopback_curl_runtime.cpp
+    test/cpp/support/controlled_product_composition.cpp
+    test/cpp/controlled_duckdb_api_extension.cpp)
 set(PRODUCTION_SOURCES
-    ${CONNECTOR_SOURCES}
-    ${PLANNING_SOURCES}
-    ${RUNTIME_SOURCES}
-    ${COMPOSITION_SOURCES}
-    ${ADAPTER_SOURCES})
+    ${CONNECTOR_METADATA_SOURCES}
+    ${RELATIONAL_PLANNING_SOURCES}
+    ${REMOTE_RUNTIME_INTERFACE_SOURCES}
+    ${REMOTE_RUNTIME_SOURCES}
+    ${QUERY_PRODUCT_COMPOSITION_SOURCES}
+    ${QUERY_DUCKDB_ADAPTER_SOURCES})
+set(CONTROLLED_PRODUCT_SOURCES
+    ${CONNECTOR_METADATA_SOURCES}
+    ${RELATIONAL_PLANNING_SOURCES}
+    ${REMOTE_RUNTIME_INTERFACE_SOURCES}
+    ${REMOTE_RUNTIME_SOURCES}
+    src/duckdb_api_adapter.cpp
+    ${QUERY_CONTROLLED_COMPOSITION_SOURCES})
 
 build_static_extension(${TARGET_NAME} ${PRODUCTION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${PRODUCTION_SOURCES})
+# This private artifact is a deterministic product oracle, not an installable
+# extension. Its entry/composition replace the installed entry/composition and
+# are intentionally omitted from every install rule.
+set(DUCKDB_EXTENSION_DUCKDB_API_CONTROLLED_EXT_VERSION "0.3.0")
+build_loadable_extension(duckdb_api_controlled " " ${CONTROLLED_PRODUCT_SOURCES})
 
 function(configure_duckdb_api_cpp_target target)
   set_target_properties(
@@ -117,54 +146,139 @@ target_link_libraries(
 
 foreach(target ${TARGET_NAME}_extension ${TARGET_NAME}_loadable_extension)
   configure_duckdb_api_cpp_target(${target})
+  target_link_libraries(${target} CURL::libcurl Threads::Threads)
 endforeach()
+
+configure_duckdb_api_cpp_target(duckdb_api_controlled_loadable_extension)
+set_target_properties(
+  duckdb_api_controlled_loadable_extension
+  PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/private")
+target_include_directories(duckdb_api_controlled_loadable_extension PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_controlled_loadable_extension
+  CURL::libcurl
+  Threads::Threads)
 
 add_executable(
   duckdb_api_connector_tests
   test/cpp/connector_contract_tests.cpp
-  ${CONNECTOR_SOURCES})
+  ${CONNECTOR_METADATA_SOURCES})
 configure_duckdb_api_cpp_target(duckdb_api_connector_tests)
 target_compile_definitions(
   duckdb_api_connector_tests
   PRIVATE DUCKDB_API_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_executable(
+  duckdb_api_scan_request_tests
+  test/cpp/scan_request_tests.cpp
+  ${CONNECTOR_METADATA_SOURCES}
+  src/scan_request.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_scan_request_tests)
+
+add_executable(
   duckdb_api_scan_planner_tests
   test/cpp/scan_planner_tests.cpp
-  ${CONNECTOR_SOURCES}
-  ${PLANNING_SOURCES})
+  ${CONNECTOR_METADATA_SOURCES}
+  ${RELATIONAL_PLANNING_SOURCES})
 configure_duckdb_api_cpp_target(duckdb_api_scan_planner_tests)
 
 add_executable(
-  duckdb_api_fixture_decoder_tests
-  test/cpp/fixture_decoder_tests.cpp
-  ${CONNECTOR_SOURCES}
-  ${PLANNING_SOURCES}
-  ${RUNTIME_SOURCES}
-  ${TEST_SUPPORT_SOURCES})
-configure_duckdb_api_cpp_target(duckdb_api_fixture_decoder_tests)
-target_link_libraries(duckdb_api_fixture_decoder_tests Threads::Threads)
+  duckdb_api_scan_plan_contract_tests
+  test/cpp/scan_plan_contract_tests.cpp
+  ${CONNECTOR_METADATA_SOURCES}
+  ${RELATIONAL_PLANNING_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_scan_plan_contract_tests)
+target_include_directories(duckdb_api_scan_plan_contract_tests PRIVATE test/cpp)
 
 add_executable(
-  duckdb_api_fixture_stream_tests
-  test/cpp/fixture_stream_tests.cpp
-  ${CONNECTOR_SOURCES}
-  ${PLANNING_SOURCES}
-  ${RUNTIME_SOURCES}
-  ${TEST_SUPPORT_SOURCES})
-configure_duckdb_api_cpp_target(duckdb_api_fixture_stream_tests)
-target_link_libraries(duckdb_api_fixture_stream_tests Threads::Threads)
+  duckdb_api_execution_contract_tests
+  test/cpp/execution_contract_tests.cpp
+  ${REMOTE_RUNTIME_INTERFACE_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_execution_contract_tests)
+
+add_executable(
+  duckdb_api_network_policy_tests
+  test/cpp/network_policy_tests.cpp
+  src/network_policy.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_network_policy_tests)
+target_include_directories(duckdb_api_network_policy_tests PRIVATE test/cpp)
+
+add_executable(
+  duckdb_api_json_decoder_tests
+  test/cpp/json_decoder_tests.cpp
+  ${REMOTE_RUNTIME_INTERFACE_SOURCES}
+  src/json_decoder.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_json_decoder_tests)
+target_include_directories(duckdb_api_json_decoder_tests PRIVATE test/cpp)
+
+add_executable(
+  duckdb_api_http_scan_executor_tests
+  test/cpp/http_scan_executor_tests.cpp
+  test/cpp/support/controlled_http_transport.cpp
+  ${CONNECTOR_METADATA_SOURCES}
+  ${RELATIONAL_PLANNING_SOURCES}
+  ${REMOTE_RUNTIME_INTERFACE_SOURCES}
+  src/json_decoder.cpp
+  src/http_scan_executor.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_http_scan_executor_tests)
+target_include_directories(duckdb_api_http_scan_executor_tests PRIVATE test/cpp)
+target_link_libraries(duckdb_api_http_scan_executor_tests Threads::Threads)
+
+function(add_duckdb_api_private_curl_test target source)
+  add_executable(
+    ${target}
+    ${source}
+    ${REMOTE_RUNTIME_CURL_TEST_SUPPORT_SOURCES}
+    ${CONNECTOR_METADATA_SOURCES}
+    ${RELATIONAL_PLANNING_SOURCES}
+    ${REMOTE_RUNTIME_INTERFACE_SOURCES}
+    ${REMOTE_RUNTIME_SOURCES})
+  configure_duckdb_api_cpp_target(${target})
+  target_include_directories(${target} PRIVATE test/cpp)
+  target_compile_definitions(${target} PRIVATE DUCKDB_API_PRIVATE_CURL_TESTS)
+  target_link_libraries(${target} CURL::libcurl Threads::Threads)
+endfunction()
+
+add_duckdb_api_private_curl_test(
+  duckdb_api_curl_http_transport_tests
+  test/cpp/curl_http_transport_tests.cpp)
+add_duckdb_api_private_curl_test(
+  duckdb_api_curl_http_budget_tests
+  test/cpp/curl_http_budget_tests.cpp)
+add_duckdb_api_private_curl_test(
+  duckdb_api_curl_http_lifecycle_tests
+  test/cpp/curl_http_lifecycle_tests.cpp)
+
+add_executable(
+  duckdb_api_curl_tls_security_tests
+  test/cpp/curl_tls_security_tests.cpp
+  test/cpp/support/runtime_http_test_support.cpp
+  test/cpp/support/private_curl_probe.cpp
+  ${CONNECTOR_METADATA_SOURCES}
+  ${RELATIONAL_PLANNING_SOURCES}
+  ${REMOTE_RUNTIME_INTERFACE_SOURCES}
+  ${REMOTE_RUNTIME_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_curl_tls_security_tests)
+target_include_directories(duckdb_api_curl_tls_security_tests PRIVATE test/cpp)
+target_compile_definitions(
+  duckdb_api_curl_tls_security_tests PRIVATE DUCKDB_API_PRIVATE_CURL_TESTS)
+target_link_libraries(
+  duckdb_api_curl_tls_security_tests CURL::libcurl Threads::Threads)
 
 add_executable(
   duckdb_api_adapter_tests
   test/cpp/duckdb_adapter_tests.cpp
-  ${PRODUCTION_SOURCES})
+  ${CONNECTOR_METADATA_SOURCES}
+  ${RELATIONAL_PLANNING_SOURCES}
+  ${REMOTE_RUNTIME_INTERFACE_SOURCES}
+  src/duckdb_api_adapter.cpp
+  ${QUERY_TEST_SUPPORT_SOURCES})
 target_link_libraries(
   duckdb_api_adapter_tests
   dummy_static_extension_loader
   duckdb_static
   Threads::Threads)
-target_sources(duckdb_api_adapter_tests PRIVATE ${TEST_SUPPORT_SOURCES})
+target_include_directories(duckdb_api_adapter_tests PRIVATE test/cpp)
 configure_duckdb_api_cpp_target(duckdb_api_adapter_tests)
 
 install(

@@ -41,6 +41,7 @@ readonly NINJA_ROOT="${TOOL_ROOT}/ninja"
 readonly CMAKE_BIN="${CMAKE_ROOT}/CMake.app/Contents/bin/cmake"
 readonly NINJA_BIN="${NINJA_ROOT}/ninja"
 readonly ARTIFACT="${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/extension/duckdb_api/duckdb_api.duckdb_extension"
+readonly CONTROLLED_ARTIFACT="${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/private/duckdb_api_controlled.duckdb_extension"
 readonly PYTHON_ENV="${BUILD_ROOT}/python-1.5.4"
 readonly PROJECT_SOURCE="${BUILD_ROOT}/project-source"
 
@@ -135,7 +136,7 @@ python3 -I "${REPOSITORY_ROOT}/scripts/write-observed-dependencies.py" \
 
 rsync -a --delete "${PROJECT_SOURCE}/src/" "${TEMPLATE_ROOT}/src/"
 rsync -a --delete "${PROJECT_SOURCE}/test/" "${TEMPLATE_ROOT}/test/"
-rsync -a --delete "${PROJECT_SOURCE}/fixtures/" "${TEMPLATE_ROOT}/fixtures/"
+rm -rf "${TEMPLATE_ROOT}/fixtures"
 cp "${PROJECT_SOURCE}/CMakeLists.txt" "${PROJECT_SOURCE}/Makefile" \
     "${PROJECT_SOURCE}/extension_config.cmake" "${TEMPLATE_ROOT}/"
 "${CMAKE_BIN}" -E rm -f "${TEMPLATE_ROOT}/vcpkg.json"
@@ -161,20 +162,82 @@ env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}
         "${BUILD_PROFILE}"
 
 readonly NATIVE_TEST_ROOT="${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/extension/duckdb_api"
+if [[ ! -f "${ARTIFACT}" || ! -f "${CONTROLLED_ARTIFACT}" ]]; then
+    echo "native build omitted the public or private controlled loadable artifact" >&2
+    exit 1
+fi
+if find "${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/repository" -type f \
+    -name 'duckdb_api_controlled.duckdb_extension' -print -quit | grep -q .; then
+    echo "private controlled artifact entered DuckDB's install repository" >&2
+    exit 1
+fi
 python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
     configuration "${PINS_FILE}" "${VERIFIED_SDK_ROOT}" \
     "${NATIVE_TEST_ROOT}/duckdb_api_native_dependencies.json" >/dev/null
+"${NATIVE_TEST_ROOT}/duckdb_api_native_dependency_identity" \
+    >"${BUILD_ROOT}/observed-native-runtime.json"
+python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
+    runtime "${PINS_FILE}" "${BUILD_ROOT}/observed-native-runtime.json" >/dev/null
+python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
+    linkage "${PINS_FILE}" transport \
+    "${NATIVE_TEST_ROOT}/duckdb_api_native_dependency_identity" >/dev/null
+python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
+    linkage "${PINS_FILE}" transport "${CONTROLLED_ARTIFACT}" >/dev/null
+for target in \
+    duckdb_api_connector_tests \
+    duckdb_api_scan_request_tests \
+    duckdb_api_scan_planner_tests \
+    duckdb_api_scan_plan_contract_tests \
+    duckdb_api_execution_contract_tests \
+    duckdb_api_network_policy_tests \
+    duckdb_api_json_decoder_tests \
+    duckdb_api_http_scan_executor_tests \
+    duckdb_api_adapter_tests; do
+    python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
+        linkage "${PINS_FILE}" curl-free "${NATIVE_TEST_ROOT}/${target}" >/dev/null
+done
+for target in \
+    duckdb_api_curl_http_transport_tests \
+    duckdb_api_curl_http_budget_tests \
+    duckdb_api_curl_http_lifecycle_tests \
+    duckdb_api_curl_tls_security_tests; do
+    python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
+        linkage "${PINS_FILE}" transport "${NATIVE_TEST_ROOT}/${target}" >/dev/null
+done
+if ! strings "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_transport_tests" |
+    grep -F 'duckdb_api_private_curl_option_observer_v1' >/dev/null; then
+    echo "private curl option observer canary is missing from its focused target" >&2
+    exit 1
+fi
+for target in "${ARTIFACT}" "${CONTROLLED_ARTIFACT}" \
+    "${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/duckdb"; do
+    if strings "${target}" |
+        grep -F 'duckdb_api_private_curl_option_observer_v1' >/dev/null; then
+        echo "private curl option observer canary entered a product artifact" >&2
+        exit 1
+    fi
+done
 python3 -I -B "${PROJECT_SOURCE}/scripts/test-native-dependencies.py"
 "${NATIVE_TEST_ROOT}/duckdb_api_connector_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_fixture_decoder_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_fixture_stream_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_contract_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_execution_contract_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_network_policy_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_json_decoder_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_curl_http_transport_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_curl_http_budget_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_curl_http_lifecycle_tests"
+python3 -I -B "${PROJECT_SOURCE}/test/python/runtime_curl_tls_tests.py" \
+    "${NATIVE_TEST_ROOT}/duckdb_api_curl_tls_security_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_adapter_tests"
 (
     cd "${TEMPLATE_ROOT}"
     "./build/${BUILD_PROFILE}/test/unittest" --require duckdb_api 'test/*'
 )
-"${REPOSITORY_ROOT}/scripts/verify-loadable-inventory.sh" "${ARTIFACT}"
+"${PROJECT_SOURCE}/scripts/verify-loadable-inventory.sh" \
+    "${ARTIFACT}" "${PROJECT_SOURCE}/release/0.3.0/pins.json" transport
 
 env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}" \
     PATH="${PYTHON_DIR}:/usr/bin:/bin:/usr/sbin:/sbin" \
@@ -188,6 +251,10 @@ env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}
     "${PYTHON_ENV}/bin/python3" -I "${PROJECT_SOURCE}/test/python/artifact_contract.py" "${ARTIFACT}"
 env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}" \
     PATH="${PYTHON_ENV}/bin:${PYTHON_DIR}:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "${PYTHON_ENV}/bin/python3" -I -B \
+    "${PROJECT_SOURCE}/test/python/live_rest_product_contract.py" "${CONTROLLED_ARTIFACT}"
+env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}" \
+    PATH="${PYTHON_ENV}/bin:${PYTHON_DIR}:/usr/bin:/bin:/usr/sbin:/sbin" \
     python3 -I "${PROJECT_SOURCE}/test/python/source_demo_contract.py" \
     "${PYTHON_ENV}/bin/python3" "${ARTIFACT}"
 
@@ -195,4 +262,6 @@ echo "native product tests passed"
 echo "pinned_python=${PYTHON_ENV}/bin/python3"
 echo "static_test_cli=${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/duckdb"
 echo "artifact=${ARTIFACT}"
+echo "controlled_artifact=${CONTROLLED_ARTIFACT}"
 echo "artifact_sha256=$(shasum -a 256 "${ARTIFACT}" | awk '{print $1}')"
+echo "controlled_artifact_sha256=$(shasum -a 256 "${CONTROLLED_ARTIFACT}" | awk '{print $1}')"
