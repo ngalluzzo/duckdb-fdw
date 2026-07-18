@@ -52,21 +52,36 @@ machine-local paths.
 | DuckDB registration and lifecycle portability | `src/duckdb_api_extension.cpp`, `src/include/duckdb_api_extension.hpp`, and `test/cpp/duckdb_adapter_tests.cpp` | A passing Community row requires an evidence-backed adapter compatibility, callback, state, diagnostic, or exception-boundary correction; no speculative platform shim is allowed |
 | Accepted public behavior | `release/0.2.0/public_contract.json`, `test/sql/duckdb_api.test`, and existing artifact/source-demo contract tests | Extension identity advances to `0.2.0` while the function, parameters, schema, rows, DuckDB-owned relational behavior, and diagnostics remain unchanged |
 | Community lifecycle composition | `test/python/community_installation/oracle.py` | The documented command, input admission, scenario ordering, and final success/failure outcome change |
-| One stock-host process action | `test/python/community_installation/host_action.py` | DuckDB process invocation, minimal environment, output/time bounds, catalog observations, or teardown changes |
+| Stock host inventory, private launcher, and argv | `test/python/community_installation/launcher.py` | The explicit executable, virtual-environment configuration, DuckDB native module/package metadata inventory, private staging, or default signature-policy arguments change |
+| Descriptor-stable host file admission | `test/python/community_installation/file_admission.py` | Bounded no-follow input reads, exact artifact size/digest admission, or O_EXCL staging changes |
+| Caller roots and minimal environment | `test/python/community_installation/host_environment.py` | New real root admission or the child environment allowlist changes |
+| Descriptor-bound persistent state | `test/python/community_installation/state_capability.py` | Named state admission, hidden child leaves, atomic restore, retained directory identity, or published-state containment changes |
+| Bounded child-process lifecycle | `test/python/community_installation/process_lifecycle.py` | Output/time bounds, process-group cancellation, direct-child reaping, or teardown guarantees change |
+| Stock-host process framing and safe observations | `test/python/community_installation/host_protocol.py` | Versioned JSON framing, exact row identity, bounded diagnostic vocabulary, or path redaction changes |
+| One child-only DuckDB action | `test/python/community_installation/duckdb_action.py` | Stock DuckDB connection settings, Community install/load SQL, catalog observations, or exact query behavior changes |
+| One stock-host process action | `test/python/community_installation/host_action.py` | Composition of an admitted launcher, state capability, bounded child action, and one framed observation changes |
 | Install/repeat/restart/load/failure assertions | `test/python/community_installation/scenarios.py` | The user-visible lifecycle or required success and refusal observations change |
 | Exact support-row admission | `test/python/community_installation/matrix.py` | The accepted candidate/build/query identity join or the rule that only complete passing rows are claimable changes |
 | Canonical Query evidence | `test/python/community_installation/evidence.py` | The versioned, bounded, path-normalized result schema changes |
-| Responsibility-matched unit oracles | `test/python/community_installation/test_*.py` with `test_support.py` limited to shared deterministic fixtures | The corresponding Query module's contract changes; provider build and custody behavior is never mocked as Query logic |
+| Responsibility-matched unit oracles | `test_state_capability.py`, `test_host_action.py`, the boundary `test_duckdb_action.py`, the install/refusal/query action suites, and other `test_*.py`, with explicit test-support modules limited to shared deterministic fixtures | The corresponding Query module's contract changes; provider build and custody behavior is never mocked as Query logic |
 | Published compatibility statement | `release/0.2.0/support-matrix.json` | The final exact DuckDB commit and Community platform rows change after complete evidence, never from a build result alone |
 | Ordinary-user narrative | `README.md`, `CHANGELOG.md`, `docs/releases/0.2.0-notes.md`, and `examples/community-installation.sql` | Installation, version, support, update, history, or diagnostic guidance changes |
 
 `oracle.py` is a thin composition root. `matrix.py` decides whether already
 admitted provider and Query results name the same claimable row; it never
-builds an extension or validates a toolchain. `host_action.py` performs one
-bounded action and contains no support-policy decision. `scenarios.py` owns
-state transitions and assertions, while `evidence.py` receives completed
-observations and cannot authorize execution. Production code never imports
-these test modules.
+builds an extension or validates a toolchain. `host_action.py` composes the
+separate launcher, file-admission, state-capability, environment,
+process-lifecycle, protocol, and child-action responsibilities for one bounded
+action and contains no support-policy decision. `state_capability.py` alone
+owns state-directory descriptors, private execution leaves, restoration, and
+inode revalidation; its mirrored tests contain the filesystem-race oracles.
+The child-action tests separate protocol/configuration, install, refusal, and
+catalog/query responsibilities around one shared deterministic connection
+fixture. `scenarios.py` owns state transitions and requires an
+independent, content-identified initialization probe before a refusal can
+pass; empty DuckDB catalogs alone do not prove that native initialization was
+absent. `evidence.py` receives completed observations and cannot authorize
+execution. Production code never imports these test modules.
 
 No Query work may reinterpret connector metadata, relational plans, remote
 runtime behavior, or the `0.1.0` release record. If Community evidence exposes
@@ -84,8 +99,13 @@ Query accepts only explicit, content-identified inputs:
   artifact path and exact row identity;
 - a canonical hosted-custody inventory and anchor that bind the supplied
   records and artifacts; and
-- an explicit stock DuckDB executable or launcher for each scenario and a
-  caller-owned output path for the opaque Query result.
+- an explicit stock DuckDB executable or launcher plus its full content digest
+  for each scenario, the incompatible artifact's exact size and digest, an
+  artifact-specific independent initialization probe, and a caller-owned
+  output path for the opaque Query result. Each launcher input also carries a
+  canonical stock-host inventory digest; Query independently remeasures and
+  privately stages the executable, `pyvenv.cfg`, DuckDB native module, Python
+  package, and package metadata before a passing observation can be composed.
 
 Query validates required shape, identity agreement, uniqueness, containment,
 and the accepted `0.2.0` public contract. Enablement owns source admission,
@@ -105,8 +125,10 @@ lifecycle assertions, diagnostics, or support-row eligibility.
   `0.1.0` behavior.
 - **Host boundary:** focused tests prove minimal environment construction,
   absence of unsigned-policy flags, one action per process, timeout and output
-  bounds, unconditional process-group cleanup, JSON framing, and diagnostic
-  path normalization.
+  bounds, unconditional process-group cleanup, retained-directory state
+  isolation through an explicit child-protocol directory descriptor without
+  parent-side pre-exec callbacks, JSON framing, and diagnostic path
+  normalization.
 - **Lifecycle:** deterministic fake-host tests prove install is distinct from
   load, repeated install cannot satisfy restart/load assertions, each process
   observes the required DuckDB and row identity, and a rejected input leaves

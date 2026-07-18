@@ -9,17 +9,17 @@ from typing import Iterable
 
 try:
     from .input_admission import Candidate, DuckDbIdentity, admit_candidate
-    from .lifecycle import ExtensionObservation, HostObservation
-    from .matrix import RowIdentity
+    from .lifecycle import ExtensionObservation, HostObservation, LifecycleError
+    from .matrix import BuildEvidence, RowIdentity
 except ImportError:
     from input_admission import Candidate, DuckDbIdentity, admit_candidate
-    from lifecycle import ExtensionObservation, HostObservation
-    from matrix import RowIdentity
+    from lifecycle import ExtensionObservation, HostObservation, LifecycleError
+    from matrix import BuildEvidence, RowIdentity
 
 
 GIT_A = "1" * 40
 GIT_B = "2" * 40
-GIT_C = "3" * 40
+GIT_C = "08e34c447bae34eaee3723cac61f2878b6bdf787"
 GIT_D = "4" * 40
 GIT_E = "5" * 40
 SHA_A = "a" * 64
@@ -119,6 +119,79 @@ def extension(
     )
 
 
+def build_evidence(candidate: Candidate, target: RowIdentity | None = None) -> BuildEvidence:
+    return BuildEvidence(
+        candidate_sha256=candidate.sha256,
+        row=target or row(),
+        status="passed",
+        channel="community",
+        artifact_sha256=SHA_A,
+        custody_sha256=SHA_B,
+    )
+
+
+def supported_observations(target: RowIdentity | None = None) -> list[HostObservation]:
+    selected = target or row()
+    return [
+        HostObservation(
+            action="pre_install",
+            process_token="process-1",
+            ok=True,
+            row=selected,
+            allow_unsigned_extensions=False,
+            extension=None,
+            function_registered=False,
+        ),
+        HostObservation(
+            action="install",
+            process_token="process-2",
+            ok=True,
+            row=selected,
+            allow_unsigned_extensions=False,
+            extension=extension(loaded=False),
+            function_registered=False,
+        ),
+        HostObservation(
+            action="repeat_install",
+            process_token="process-3",
+            ok=True,
+            row=selected,
+            allow_unsigned_extensions=False,
+            extension=extension(loaded=False),
+            function_registered=False,
+        ),
+        HostObservation(
+            action="load_query",
+            process_token="process-4",
+            ok=True,
+            row=selected,
+            allow_unsigned_extensions=False,
+            extension=extension(loaded=True),
+            function_registered=True,
+            behavior=public_contract(),
+        ),
+    ]
+
+
+def incompatible_observation(
+    target: RowIdentity | None = None,
+    *,
+    process_token: str = "process-negative",
+) -> HostObservation:
+    selected = target or row()
+    return HostObservation(
+        action="incompatible",
+        process_token=process_token,
+        ok=False,
+        row=selected,
+        allow_unsigned_extensions=False,
+        extension=None,
+        function_registered=False,
+        diagnostic_category="version",
+        diagnostic="artifact targets v1.5.4; current host is v1.5.3",
+    )
+
+
 class FakeRunner:
     """Return scripted observations while recording one call per process action."""
 
@@ -132,3 +205,24 @@ class FakeRunner:
             return next(self._observations)
         except StopIteration as error:
             raise AssertionError("fake host received an unexpected action") from error
+
+
+class FakeInitializationProbe:
+    """Deterministic independent refusal observable for scenario tests."""
+
+    evidence_sha256 = SHA_D
+
+    def __init__(self, *, initialized: bool = False):
+        self.initialized = initialized
+        self.armed = False
+        self.checked = False
+
+    def arm(self) -> None:
+        self.armed = True
+
+    def assert_not_initialized(self) -> None:
+        if not self.armed:
+            raise LifecycleError("initialization probe was not armed")
+        self.checked = True
+        if self.initialized:
+            raise LifecycleError("incompatible native initializer was observed")
