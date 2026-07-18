@@ -26,8 +26,8 @@ API. Its public contract is DuckDB-native.
 - [Runtime contracts](docs/RUNTIME_CONTRACTS.md) defines the compiled IR,
   planning contracts, execution interfaces, and policy capabilities.
 - [Changelog](CHANGELOG.md) records user-visible additions and limitations.
-- [0.1.0 candidate notes](docs/releases/0.1.0-notes.md) describe the current
-  preview without implying that it has been released.
+- [0.1.0 release notes](docs/releases/0.1.0-notes.md) describe the first native
+  preview, its supported compatibility cell, and its explicit limitations.
 
 The broader system-design documents remain proposals. RFC 0001 is the accepted
 contract for the executable native `0.1.0` preview, while the connector
@@ -36,12 +36,11 @@ is intentionally published. The product-delivery, team-topology, and RFC
 documents are the active operating model for turning product outcomes into
 agent-led work.
 
-## Unreleased 0.1.0 native preview
+## 0.1.0 native preview
 
-The current source is an **unreleased 0.1.0 candidate**. It is a fixture-backed
-native preview, not a published package or a live HTTP connector. Its purpose is
-to prove that one API-shaped relation can load locally and return trustworthy,
-bounded DuckDB rows.
+Version `0.1.0` is a fixture-backed native preview, not a general package or a
+live HTTP connector. It proves that one API-shaped relation can load locally
+and return trustworthy, bounded DuckDB rows.
 
 ### Supported cell
 

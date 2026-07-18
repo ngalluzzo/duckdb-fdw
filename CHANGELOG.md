@@ -1,9 +1,8 @@
 # Changelog
 
-This file records user-visible changes to duckdb-fdw. The project has not yet
-published a release.
+This file records user-visible changes to duckdb-fdw.
 
-## Unreleased — 0.1.0 candidate
+## 0.1.0 — 2026-07-17
 
 ### Added
 
@@ -18,12 +17,12 @@ published a release.
 
 ### Limitations
 
-- This is an unreleased, fixture-backed candidate; no `v0.1.0` artifact has been
-  published.
+- This is a fixture-backed native preview for one exact compatibility cell,
+  not a general-purpose connector or portable binary distribution.
 - There is no live HTTP, authentication, pagination, GraphQL, arbitrary
   connector loading, binary installation, signing, or update support.
 - Compatibility is limited to the exact product cell documented in the
-  [0.1.0 candidate notes](docs/releases/0.1.0-notes.md).
+  [0.1.0 release notes](docs/releases/0.1.0-notes.md).
 - Developer artifacts and `make verify` output are not substitutes for the
   clean tagged release evidence required by the
   [0.1.0 evidence runbook](docs/releases/0.1.0.md).
