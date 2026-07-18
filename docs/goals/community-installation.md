@@ -105,6 +105,24 @@ captured with an actionable diagnostic and no registered function.
   upstream matrix supplies the exact compatibility evidence before any support
   row or ordinary-user instruction is published.
 
+### Publication-atomicity finding
+
+Community pull-request CI can prove the build and test matrix, but it cannot
+prove the final default-signature installation path. The pinned reusable
+[distribution workflow](https://github.com/duckdb/extension-ci-tools/blob/72e76e99cd7fee45a99739cd118ec2db64e034ec/.github/workflows/_extension_distribution.yml#L1-L9)
+uploads build artifacts without deploying them. The pinned Community
+[build workflow](https://github.com/duckdb/community-extensions/blob/3a9af37016c909a7fb01510d1b63eda1e177da8a/.github/workflows/build.yml#L144-L160)
+runs deployment only from upstream `main`, where the
+[deployment job](https://github.com/duckdb/community-extensions/blob/3a9af37016c909a7fb01510d1b63eda1e177da8a/.github/workflows/_extension_deploy.yml#L121-L147)
+receives the Community signing key.
+
+Delivery therefore exhausts candidate, dependency, build, query, provenance,
+and custody evidence before the upstream merge, then performs the exact stock
+Community install immediately after deployment. The candidate commit is never
+replaced. If that irreversible final proof fails, `0.2.0` remains a failed
+public candidate and the correction advances to a new SemVer; no project tag,
+source ref, or published identity moves.
+
 ### Delivery path
 
 1. Produce a Community-compatible `0.2.0` source candidate, exact version and
