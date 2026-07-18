@@ -319,7 +319,7 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 		options.Set(CURLOPT_AUTOREFERER, 0L);
 		options.Set(CURLOPT_PROXY, "");
 		options.Set(CURLOPT_PRE_PROXY, "");
-		options.Set(CURLOPT_NETRC, CURL_NETRC_IGNORED);
+		options.Set(CURLOPT_NETRC, static_cast<long>(CURL_NETRC_IGNORED));
 		options.Set(CURLOPT_HTTPAUTH, CURLAUTH_NONE);
 		options.Set(CURLOPT_PROXYAUTH, CURLAUTH_NONE);
 		options.Set(CURLOPT_UNRESTRICTED_AUTH, 0L);
