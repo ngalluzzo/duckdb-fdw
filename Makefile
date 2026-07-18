@@ -7,8 +7,21 @@ EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 # include path when a checkout directory contains spaces. Supported entry
 # points invoke this Makefile from its own directory, directly or with `-C`.
 EXTENSION_TEMPLATE_MAKEFILE := extension-ci-tools/makefiles/duckdb_extension.Makefile
+override DUCKDB_API_NATIVE_GOALS := help bootstrap build test demo paths verify
+override DUCKDB_API_REQUESTED_GOALS := $(strip $(MAKECMDGOALS))
+override DUCKDB_API_REQUESTED_NATIVE_GOALS := $(filter $(DUCKDB_API_NATIVE_GOALS),$(DUCKDB_API_REQUESTED_GOALS))
+override DUCKDB_API_REQUESTED_UPSTREAM_GOALS := $(filter-out $(DUCKDB_API_NATIVE_GOALS),$(DUCKDB_API_REQUESTED_GOALS))
 
-ifneq ($(wildcard $(EXTENSION_TEMPLATE_MAKEFILE)),)
+ifneq ($(DUCKDB_API_REQUESTED_NATIVE_GOALS),)
+ifneq ($(DUCKDB_API_REQUESTED_UPSTREAM_GOALS),)
+$(error native goal(s) $(DUCKDB_API_REQUESTED_NATIVE_GOALS) cannot be combined with Community/upstream goal(s) $(DUCKDB_API_REQUESTED_UPSTREAM_GOALS))
+endif
+endif
+
+ifneq ($(DUCKDB_API_REQUESTED_UPSTREAM_GOALS),)
+ifeq ($(wildcard $(EXTENSION_TEMPLATE_MAKEFILE)),)
+$(error Community/upstream goal(s) $(DUCKDB_API_REQUESTED_UPSTREAM_GOALS) require an initialized extension-ci-tools submodule)
+endif
 include $(EXTENSION_TEMPLATE_MAKEFILE)
 else
 

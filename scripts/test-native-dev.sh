@@ -6,6 +6,62 @@ readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/duckdb-api-native-dev.XXXXXX")"
 trap 'rm -rf "${TEMP_ROOT}"' EXIT
 
+fail() {
+    echo "$1" >&2
+    exit 1
+}
+
+assert_output() {
+    local label="$1"
+    local expected="$2"
+    shift 2
+    local observed
+    if ! observed="$("$@" 2>&1)"; then
+        echo "${label} failed:" >&2
+        echo "${observed}" >&2
+        exit 1
+    fi
+    if [[ "${observed}" != "${expected}" ]]; then
+        echo "${label} produced unexpected output:" >&2
+        echo "expected: ${expected}" >&2
+        echo "observed: ${observed}" >&2
+        exit 1
+    fi
+}
+
+create_native_probe() {
+    local root="$1"
+    mkdir -p "${root}/scripts"
+    cp "${REPOSITORY_ROOT}/Makefile" "${root}/Makefile"
+    cat >"${root}/scripts/native-dev.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'native:%s' "$1"
+if [[ "$#" -gt 1 ]]; then
+    printf ':%s' "$2"
+fi
+printf '\n'
+printf 'native:%s\n' "$1" >>"${ROUTING_LOG}"
+SH
+    chmod +x "${root}/scripts/native-dev.sh"
+}
+
+assert_native_routes() {
+    local root="$1"
+    local log="$2"
+    local target
+    assert_output "default native route" "native:help" \
+        env ROUTING_LOG="${log}" make -s -C "${root}"
+    for target in help bootstrap; do
+        assert_output "${target} native route" "native:${target}" \
+            env ROUTING_LOG="${log}" make -s -C "${root}" "${target}" PROFILE=release
+    done
+    for target in build test demo paths verify; do
+        assert_output "${target} native route" "native:${target}:release" \
+            env ROUTING_LOG="${log}" make -s -C "${root}" "${target}" PROFILE=release
+    done
+}
+
 help_output="$(make -s -C "${REPOSITORY_ROOT}" help)"
 for target in bootstrap build test demo paths verify; do
     if [[ "${help_output}" != *"make ${target}"* ]]; then
@@ -28,19 +84,59 @@ if ! grep -F "profile must be debug or release" "${TEMP_ROOT}/invalid.out" >/dev
     exit 1
 fi
 
-readonly TEMPLATE_PROBE_ROOT="${TEMP_ROOT}/template with spaces"
-mkdir -p "${TEMPLATE_PROBE_ROOT}/extension-ci-tools/makefiles"
-cp "${REPOSITORY_ROOT}/Makefile" "${TEMPLATE_PROBE_ROOT}/Makefile"
-cat >"${TEMPLATE_PROBE_ROOT}/extension-ci-tools/makefiles/duckdb_extension.Makefile" <<'MAKE'
-.PHONY: template-mode-probe
-template-mode-probe:
+readonly UNINITIALIZED_PROBE_ROOT="${TEMP_ROOT}/uninitialized layout with spaces"
+readonly UNINITIALIZED_LOG="${TEMP_ROOT}/uninitialized.log"
+create_native_probe "${UNINITIALIZED_PROBE_ROOT}"
+assert_native_routes "${UNINITIALIZED_PROBE_ROOT}" "${UNINITIALIZED_LOG}"
+rm -f "${UNINITIALIZED_LOG}"
+if env ROUTING_LOG="${UNINITIALIZED_LOG}" \
+    make -s -C "${UNINITIALIZED_PROBE_ROOT}" release \
+    >"${TEMP_ROOT}/missing-upstream.out" 2>&1; then
+    fail "uninitialized source layout accepted an upstream-only goal"
+fi
+if ! grep -F "Community/upstream goal(s) release require an initialized extension-ci-tools submodule" \
+    "${TEMP_ROOT}/missing-upstream.out" >/dev/null; then
+    echo "upstream-only goal failed without the expected initialization diagnostic" >&2
+    cat "${TEMP_ROOT}/missing-upstream.out" >&2
+    exit 1
+fi
+if [[ -e "${UNINITIALIZED_LOG}" ]]; then
+    fail "uninitialized upstream-only failure partly executed native mode"
+fi
+
+readonly INITIALIZED_PROBE_ROOT="${TEMP_ROOT}/initialized layout with spaces"
+readonly INITIALIZED_LOG="${TEMP_ROOT}/initialized.log"
+create_native_probe "${INITIALIZED_PROBE_ROOT}"
+mkdir -p "${INITIALIZED_PROBE_ROOT}/extension-ci-tools/makefiles"
+cat >"${INITIALIZED_PROBE_ROOT}/extension-ci-tools/makefiles/duckdb_extension.Makefile" <<'MAKE'
+.PHONY: release debug test_release template-mode-probe
+release debug test_release template-mode-probe:
 	@test "$(PROJ_DIR)" = "$(CURDIR)/"
 	@test "$(EXT_CONFIG)" = "$(CURDIR)/extension_config.cmake"
-	@echo template-mode-ok
+	@printf 'upstream:%s\n' "$@"
+	@printf 'upstream:%s\n' "$@" >>"$(ROUTING_LOG)"
 MAKE
-if [[ "$(make -s -C "${TEMPLATE_PROBE_ROOT}" template-mode-probe)" != "template-mode-ok" ]]; then
-    echo "root Makefile did not delegate from a space-containing template path" >&2
+assert_native_routes "${INITIALIZED_PROBE_ROOT}" "${INITIALIZED_LOG}"
+for target in release debug test_release template-mode-probe; do
+    assert_output "${target} upstream route" "upstream:${target}" \
+        env ROUTING_LOG="${INITIALIZED_LOG}" \
+        make -s -C "${INITIALIZED_PROBE_ROOT}" "${target}"
+done
+
+rm -f "${INITIALIZED_LOG}"
+if env ROUTING_LOG="${INITIALIZED_LOG}" \
+    make -s -C "${INITIALIZED_PROBE_ROOT}" help release \
+    >"${TEMP_ROOT}/mixed-goals.out" 2>&1; then
+    fail "Makefile accepted mixed native and Community/upstream goals"
+fi
+if ! grep -F "native goal(s) help cannot be combined with Community/upstream goal(s) release" \
+    "${TEMP_ROOT}/mixed-goals.out" >/dev/null; then
+    echo "mixed goals failed without the expected routing diagnostic" >&2
+    cat "${TEMP_ROOT}/mixed-goals.out" >&2
     exit 1
+fi
+if [[ -e "${INITIALIZED_LOG}" ]]; then
+    fail "mixed-goal rejection partly executed a native or upstream recipe"
 fi
 
 python3 -I - "${REPOSITORY_ROOT}" <<'PY'
