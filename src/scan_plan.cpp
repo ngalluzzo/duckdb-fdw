@@ -28,6 +28,8 @@ const char *CardinalityName(PlannedCardinality cardinality) {
 	switch (cardinality) {
 	case PlannedCardinality::ZERO_TO_MANY:
 		return "zero_to_many";
+	case PlannedCardinality::EXACTLY_ONE_ON_SUCCESS:
+		return "exactly_one_on_success";
 	}
 	throw std::logic_error("scan plan contains an unknown cardinality");
 }
@@ -50,18 +52,30 @@ const char *UrlSchemeName(PlannedUrlScheme scheme) {
 	throw std::logic_error("scan plan contains an unknown URL scheme");
 }
 
+const char *ResponseSourceName(PlannedResponseSource source) {
+	switch (source) {
+	case PlannedResponseSource::JSON_PATH_MANY:
+		return "json_path_many";
+	case PlannedResponseSource::ROOT_OBJECT:
+		return "root_object";
+	}
+	throw std::logic_error("scan plan contains an unknown response source");
+}
+
 const char *BaseDomainName(BaseDomain domain) {
 	switch (domain) {
-	case BaseDomain::SINGLE_RESPONSE_PAGE:
-		return "single_response_page";
+	case BaseDomain::JSON_PATH_RECORDS:
+		return "json_path_records";
+	case BaseDomain::SUCCESSFUL_ROOT_OBJECT:
+		return "successful_root_object";
 	}
 	throw std::logic_error("scan plan contains an unknown base domain");
 }
 
-const char *PredicateName(PlannedPredicate predicate) {
+const char *PredicateName(PlannedPredicate predicate, BaseDomain domain) {
 	switch (predicate) {
 	case PlannedPredicate::TRUE_FOR_BASE_DOMAIN:
-		return "TRUE@single_response_page";
+		return domain == BaseDomain::JSON_PATH_RECORDS ? "TRUE@json_path_records" : "TRUE@successful_root_object";
 	}
 	throw std::logic_error("scan plan contains an unknown predicate classification");
 }
@@ -86,8 +100,40 @@ const char *FeatureName(FeatureState state) {
 	switch (state) {
 	case FeatureState::DISABLED:
 		return "disabled";
+	case FeatureState::ENABLED:
+		return "enabled";
 	}
 	throw std::logic_error("scan plan contains an unknown feature state");
+}
+
+const char *RequirementName(PlannedCredentialRequirement requirement) {
+	switch (requirement) {
+	case PlannedCredentialRequirement::NONE:
+		return "none";
+	case PlannedCredentialRequirement::REQUIRED:
+		return "required";
+	}
+	throw std::logic_error("scan plan contains an unknown credential requirement");
+}
+
+const char *AuthenticatorName(PlannedAuthenticator authenticator) {
+	switch (authenticator) {
+	case PlannedAuthenticator::NONE:
+		return "none";
+	case PlannedAuthenticator::BEARER:
+		return "bearer";
+	}
+	throw std::logic_error("scan plan contains an unknown authenticator");
+}
+
+const char *PlacementName(PlannedCredentialPlacement placement) {
+	switch (placement) {
+	case PlannedCredentialPlacement::NONE:
+		return "none";
+	case PlannedCredentialPlacement::AUTHORIZATION_HEADER:
+		return "Authorization";
+	}
+	throw std::logic_error("scan plan contains an unknown credential placement");
 }
 
 const char *PermissionName(bool enabled) {
@@ -131,18 +177,48 @@ void AppendColumns(std::ostringstream &result, const std::vector<PlannedColumn> 
 	}
 }
 
+void AppendOrigin(std::ostringstream &result, const PlannedRestOrigin &origin) {
+	result << "[scheme:" << UrlSchemeName(origin.scheme) << ",host:" << origin.host << ",port:" << origin.port << ']';
+}
+
 } // namespace
 
 bool ResourceBudgets::IsWithinLiveRestBounds() const {
 	return request_attempts == HOST_MAX_REQUEST_ATTEMPTS && response_bytes > 0 &&
 	       response_bytes <= HOST_MAX_RESPONSE_BYTES && header_bytes > 0 && header_bytes <= HOST_MAX_HEADER_BYTES &&
 	       decompressed_bytes > 0 && decompressed_bytes <= HOST_MAX_DECOMPRESSED_BYTES && decoded_records > 0 &&
-	       decoded_records <= LIVE_RELATION_MAX_RECORDS && extracted_string_bytes > 0 &&
+	       decoded_records <= HOST_MAX_DECODED_RECORDS && extracted_string_bytes > 0 &&
 	       extracted_string_bytes <= HOST_MAX_EXTRACTED_STRING_BYTES && json_nesting > 0 &&
 	       json_nesting <= HOST_MAX_JSON_NESTING && decoded_memory_bytes > 0 &&
 	       decoded_memory_bytes <= HOST_MAX_DECODED_MEMORY_BYTES && batch_rows > 0 && batch_rows <= OUTPUT_BATCH_ROWS &&
 	       wall_milliseconds > 0 && wall_milliseconds <= MAX_EXECUTION_MILLISECONDS &&
 	       concurrency == HOST_MAX_CONCURRENCY;
+}
+
+PlannedAuthenticationObligation::PlannedAuthenticationObligation()
+    : requirement(PlannedCredentialRequirement::NONE), logical_credential(), authenticator(PlannedAuthenticator::NONE),
+      placement(PlannedCredentialPlacement::NONE), has_destination(false),
+      destination {PlannedUrlScheme::HTTPS, "", 0} {
+}
+
+PlannedCredentialRequirement PlannedAuthenticationObligation::Requirement() const {
+	return requirement;
+}
+
+const std::string &PlannedAuthenticationObligation::LogicalCredential() const {
+	return logical_credential;
+}
+
+PlannedAuthenticator PlannedAuthenticationObligation::Authenticator() const {
+	return authenticator;
+}
+
+PlannedCredentialPlacement PlannedAuthenticationObligation::Placement() const {
+	return placement;
+}
+
+const PlannedRestOrigin *PlannedAuthenticationObligation::Destination() const {
+	return has_destination ? &destination : nullptr;
 }
 
 ScanPlan::ScanPlan() {
@@ -236,6 +312,14 @@ FeatureState ScanPlan::Authentication() const {
 	return authentication;
 }
 
+const LogicalSecretReference &ScanPlan::SecretReference() const {
+	return secret_reference;
+}
+
+const PlannedAuthenticationObligation &ScanPlan::AuthenticationObligation() const {
+	return authentication_obligation;
+}
+
 const NetworkCapability &ScanPlan::Network() const {
 	return network;
 }
@@ -255,16 +339,17 @@ std::string ScanPlan::Snapshot() const {
 	       << ";source_snapshot=[" << source_snapshot << "];domain=" << BaseDomainName(domain)
 	       << ";operation=" << operation.operation_name << ':' << CardinalityName(operation.cardinality) << ':'
 	       << ProtocolName(operation.protocol) << ':' << MethodName(operation.method) << ':'
-	       << ReplaySafetyName(operation.replay_safety)
-	       << ";request=origin:[scheme:" << UrlSchemeName(operation.origin.scheme) << ",host:" << operation.origin.host
-	       << ",port:" << operation.origin.port << "],path:" << operation.path << ",query:[";
+	       << ReplaySafetyName(operation.replay_safety) << ";request=origin:";
+	AppendOrigin(result, operation.origin);
+	result << ",path:" << operation.path << ",query:[";
 	AppendQuery(result, operation.query_parameters);
 	result << "],headers:[";
 	AppendHeaders(result, operation.headers);
-	result << "];response_records=" << operation.records_extractor << ";projection=";
+	result << "];response=source:" << ResponseSourceName(operation.response_source)
+	       << ",records:" << operation.records_extractor << ";projection=";
 	AppendColumns(result, output_columns);
-	result << ";remote_predicate=" << PredicateName(remote_predicate)
-	       << ";residual_predicate=" << PredicateName(residual_predicate)
+	result << ";remote_predicate=" << PredicateName(remote_predicate, domain)
+	       << ";residual_predicate=" << PredicateName(residual_predicate, domain)
 	       << ";residual_owner=" << OwnerName(residual_owner) << ";owners=filter:" << OwnerName(ownership.filter)
 	       << ",ordering:" << OwnerName(ownership.ordering) << ",limit:" << OwnerName(ownership.limit)
 	       << ",offset:" << OwnerName(ownership.offset)
@@ -274,7 +359,19 @@ std::string ScanPlan::Snapshot() const {
 	       << ",runtime_limit:" << DelegationName(runtime_limit) << ",runtime_offset:" << DelegationName(runtime_offset)
 	       << ";features=pagination:" << FeatureName(pagination) << ",providers:" << FeatureName(providers)
 	       << ",retry:" << FeatureName(retry) << ",cache:" << FeatureName(cache)
-	       << ",authentication:" << FeatureName(authentication) << ";network=schemes:[";
+	       << ",authentication:" << FeatureName(authentication) << ";secret-reference=" << secret_reference.Snapshot()
+	       << ";auth-obligation=requirement:" << RequirementName(authentication_obligation.Requirement())
+	       << ",logical_credential:"
+	       << (authentication_obligation.LogicalCredential().empty() ? "none"
+	                                                                 : authentication_obligation.LogicalCredential())
+	       << ",authenticator:" << AuthenticatorName(authentication_obligation.Authenticator())
+	       << ",placement:" << PlacementName(authentication_obligation.Placement()) << ",destination:";
+	if (authentication_obligation.Destination() == nullptr) {
+		result << "none";
+	} else {
+		AppendOrigin(result, *authentication_obligation.Destination());
+	}
+	result << ";network=schemes:[";
 	AppendStrings(result, network.allowed_schemes);
 	result << "],hosts:[";
 	AppendStrings(result, network.allowed_hosts);

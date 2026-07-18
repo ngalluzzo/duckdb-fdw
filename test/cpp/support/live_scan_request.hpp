@@ -3,23 +3,23 @@
 #include "duckdb_api/connector.hpp"
 #include "duckdb_api/scan_request.hpp"
 
+#include <string>
+
 namespace duckdb_api_test {
 
-// Builds the conservative request supplied by the native DuckDB adapter. Test
-// families share this helper so planner and immutable-plan oracles exercise
-// the same Query-to-Semantics boundary without constructing ScanPlan fields.
-inline duckdb_api::ScanRequest BuildLiveScanRequest(const duckdb_api::CompiledConnector &connector) {
-	duckdb_api::ScanRequest result;
-	result.connector_name = connector.connector_name;
-	result.relation_name = connector.relation_name;
-	for (const auto &column : connector.columns) {
-		result.projected_columns.push_back(column.name);
-	}
-	result.predicate = "TRUE";
-	result.has_limit = false;
-	result.has_offset = false;
-	result.capabilities = {false, false, false, false, false, false, true, false};
-	return result;
+// Semantics-local request fixtures deliberately use Query's public builder.
+// They neither reproduce request construction nor know native relation names,
+// schemas, or Connector authentication-policy internals.
+inline duckdb_api::ScanRequest BuildAnonymousScanRequest(const duckdb_api::CompiledConnector &connector,
+                                                         const std::string &relation_name) {
+	return duckdb_api::BuildConservativeScanRequest(connector, relation_name, duckdb_api::LogicalSecretReference());
+}
+
+inline duckdb_api::ScanRequest BuildAuthenticatedScanRequest(const duckdb_api::CompiledConnector &connector,
+                                                             const std::string &relation_name,
+                                                             const std::string &secret_name) {
+	return duckdb_api::BuildConservativeScanRequest(connector, relation_name,
+	                                                duckdb_api::LogicalSecretReference::Named(secret_name));
 }
 
 } // namespace duckdb_api_test

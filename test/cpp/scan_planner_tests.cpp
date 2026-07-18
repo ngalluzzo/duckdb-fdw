@@ -1,7 +1,8 @@
-#include "duckdb_api/connector.hpp"
 #include "duckdb_api/scan_plan.hpp"
+#include "support/connector_catalog_test_fixtures.hpp"
 #include "support/live_scan_request.hpp"
 #include "support/require.hpp"
+#include "support/scan_plan_contract_test_support.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -10,271 +11,264 @@
 
 namespace {
 
-using duckdb_api_test::BuildLiveScanRequest;
+using duckdb_api_test::BuildAnonymousScanRequest;
+using duckdb_api_test::BuildAuthenticatedScanRequest;
 using duckdb_api_test::Require;
+using duckdb_api_test::scan_plan_contract::FindRelationByRequirement;
+using duckdb_api_test::scan_plan_contract::RequireThrows;
 
-void RequireConnectorRejected(duckdb_api::CompiledConnector connector, const std::string &field) {
-	bool rejected = false;
-	try {
-		duckdb_api::BuildConservativeScanPlan(connector, BuildLiveScanRequest(connector));
-	} catch (const std::logic_error &) {
-		rejected = true;
-	}
-	Require(rejected, "planner accepted invalid connector metadata " + field);
-}
-
-void RequireRequestRejected(duckdb_api::ScanRequest request, const std::string &field) {
-	bool rejected = false;
-	try {
-		const auto connector = duckdb_api::BuildNativeGithubConnector();
-		duckdb_api::BuildConservativeScanPlan(connector, request);
-	} catch (const std::logic_error &) {
-		rejected = true;
-	}
-	Require(rejected, "planner accepted non-conservative request " + field);
+void RequireRequestRejected(const duckdb_api::CompiledConnector &connector, const duckdb_api::ScanRequest &request,
+                            const std::string &counterexample) {
+	RequireThrows<std::logic_error>(
+	    [&connector, &request]() { (void)duckdb_api::BuildConservativeScanPlan(connector, request); },
+	    "planner accepted " + counterexample);
 }
 
 void RequireBudgetFieldBounded(const duckdb_api::ResourceBudgets &baseline,
-                               std::uint64_t duckdb_api::ResourceBudgets::*field, std::uint64_t semantic_cap,
+                               std::uint64_t duckdb_api::ResourceBudgets::*field, std::uint64_t host_cap,
                                const std::string &name) {
 	auto invalid = baseline;
 	invalid.*field = 0;
 	Require(!invalid.IsWithinLiveRestBounds(), "zero " + name + " budget was accepted");
 	invalid = baseline;
-	invalid.*field = semantic_cap + 1;
-	Require(!invalid.IsWithinLiveRestBounds(), name + " budget widened its semantic cap");
+	invalid.*field = host_cap + 1;
+	Require(!invalid.IsWithinLiveRestBounds(), name + " budget widened its host cap");
 }
 
-void TestSourceConstantsAreNotPushdown() {
+void TestExactSelectionHasNoFallback() {
+	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
+	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
+	const auto &authenticated =
+	    FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+	const auto anonymous_plan =
+	    duckdb_api::BuildConservativeScanPlan(connector, BuildAnonymousScanRequest(connector, anonymous.Name()));
+	const auto authenticated_plan = duckdb_api::BuildConservativeScanPlan(
+	    connector, BuildAuthenticatedScanRequest(connector, authenticated.Name(), "selected_secret"));
+	Require(anonymous_plan.RelationName() == anonymous.Name() &&
+	            anonymous_plan.OutputColumns()[0].name == anonymous.Columns()[0].name &&
+	            authenticated_plan.RelationName() == authenticated.Name() &&
+	            authenticated_plan.OutputColumns()[0].name == authenticated.Columns()[0].name,
+	        "exact lookup selected another relation's identity or schema");
+
+	auto missing = BuildAnonymousScanRequest(connector, anonymous.Name());
+	missing.relation_name = "missing_relation";
+	RequireRequestRejected(connector, missing, "an unknown relation with an available fallback operation");
+	auto case_varied = BuildAuthenticatedScanRequest(connector, authenticated.Name(), "selected_secret");
+	case_varied.relation_name[0] = case_varied.relation_name[0] == 'f' ? 'F' : 'f';
+	RequireRequestRejected(connector, case_varied, "a case-varied relation identifier");
+	auto wrong_connector = BuildAnonymousScanRequest(connector, anonymous.Name());
+	wrong_connector.connector_name = "other_connector";
+	RequireRequestRejected(connector, wrong_connector, "a connector/request identity mismatch");
+}
+
+void TestReferenceRequirementMatrix() {
 	const auto connector = duckdb_api::BuildNativeGithubConnector();
-	const auto plan = duckdb_api::BuildConservativeScanPlan(connector, BuildLiveScanRequest(connector));
-	Require(plan.Operation().query_parameters[0].name == "q" && plan.Operation().query_parameters[1].name == "per_page",
-	        "fixed source constants disappeared from the executable operation");
-	Require(plan.RemotePredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
-	            plan.RemoteLimit() == duckdb_api::RelationalDelegation::NONE &&
-	            plan.RuntimeLimit() == duckdb_api::RelationalDelegation::NONE &&
-	            plan.Ownership().filter == duckdb_api::RelationalOwner::DUCKDB &&
-	            plan.Ownership().limit == duckdb_api::RelationalOwner::DUCKDB,
-	        "fixed q or per_page was misclassified as relational pushdown");
+	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
+	const auto &authenticated =
+	    FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+
+	const auto anonymous_request = BuildAnonymousScanRequest(connector, anonymous.Name());
+	const auto authenticated_request = BuildAuthenticatedScanRequest(connector, authenticated.Name(), "matrix_secret");
+	const auto anonymous_plan = duckdb_api::BuildConservativeScanPlan(connector, anonymous_request);
+	const auto authenticated_plan = duckdb_api::BuildConservativeScanPlan(connector, authenticated_request);
+	Require(!anonymous_plan.SecretReference().IsPresent() && authenticated_plan.SecretReference().IsPresent(),
+	        "valid absent/present reference states did not plan");
+
+	auto surplus = anonymous_request;
+	surplus.secret_reference = duckdb_api::LogicalSecretReference::Named("surplus_secret");
+	RequireRequestRejected(connector, surplus, "an anonymous request with a surplus reference");
+	auto missing = authenticated_request;
+	missing.secret_reference = duckdb_api::LogicalSecretReference();
+	RequireRequestRejected(connector, missing, "an authenticated request without a reference");
+
+	RequireThrows<std::invalid_argument>(
+	    [&connector, &anonymous]() {
+		    (void)duckdb_api::BuildConservativeScanRequest(connector, anonymous.Name(),
+		                                                   duckdb_api::LogicalSecretReference::Named("surplus_secret"));
+	    },
+	    "Query request builder accepted a surplus reference");
+	RequireThrows<std::invalid_argument>(
+	    [&connector, &authenticated]() {
+		    (void)duckdb_api::BuildConservativeScanRequest(connector, authenticated.Name(),
+		                                                   duckdb_api::LogicalSecretReference());
+	    },
+	    "Query request builder accepted a missing required reference");
+	RequireThrows<std::invalid_argument>([]() { (void)duckdb_api::LogicalSecretReference::Named(""); },
+	                                     "logical reference admitted an empty present state");
 }
 
-void TestConnectorCeilingsNarrowSemanticAndHostBudgets() {
-	auto connector = duckdb_api::BuildNativeGithubConnector();
-	connector.network_policy.max_response_bytes = 2048;
-	connector.resource_ceilings.max_records = 2;
-	connector.resource_ceilings.max_extracted_string_bytes = 64;
-	const auto narrowed = duckdb_api::BuildConservativeScanPlan(connector, BuildLiveScanRequest(connector));
-	Require(narrowed.Budgets().response_bytes == 2048 && narrowed.Budgets().decoded_records == 2 &&
-	            narrowed.Budgets().extracted_string_bytes == 64,
-	        "connector ceilings did not narrow semantic and host budgets");
-	Require(narrowed.Budgets().IsWithinLiveRestBounds(),
-	        "valid connector-narrowed budgets were rejected as outside live relation bounds");
-
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.resource_ceilings.max_records = 1;
-	const auto minimum = duckdb_api::BuildConservativeScanPlan(connector, BuildLiveScanRequest(connector));
-	Require(minimum.Budgets().decoded_records == 1 && minimum.Budgets().IsWithinLiveRestBounds(),
-	        "minimum nonzero connector record ceiling was not preserved exactly");
-
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.network_policy.max_response_bytes = duckdb_api::HOST_MAX_RESPONSE_BYTES + 1;
-	connector.resource_ceilings.max_extracted_string_bytes = duckdb_api::HOST_MAX_EXTRACTED_STRING_BYTES + 1;
-	const auto host_capped = duckdb_api::BuildConservativeScanPlan(connector, BuildLiveScanRequest(connector));
-	Require(host_capped.Budgets().response_bytes == duckdb_api::HOST_MAX_RESPONSE_BYTES &&
-	            host_capped.Budgets().decoded_records == duckdb_api::LIVE_RELATION_MAX_RECORDS &&
-	            host_capped.Budgets().extracted_string_bytes == duckdb_api::HOST_MAX_EXTRACTED_STRING_BYTES,
-	        "connector metadata widened host budgets");
-
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.resource_ceilings.max_records = duckdb_api::LIVE_RELATION_MAX_RECORDS + 1;
-	RequireConnectorRejected(connector, "with a record ceiling wider than the fixed response-page domain");
-
-	RequireBudgetFieldBounded(narrowed.Budgets(), &duckdb_api::ResourceBudgets::response_bytes,
-	                          duckdb_api::HOST_MAX_RESPONSE_BYTES, "response byte");
-	RequireBudgetFieldBounded(narrowed.Budgets(), &duckdb_api::ResourceBudgets::header_bytes,
-	                          duckdb_api::HOST_MAX_HEADER_BYTES, "header byte");
-	RequireBudgetFieldBounded(narrowed.Budgets(), &duckdb_api::ResourceBudgets::decompressed_bytes,
-	                          duckdb_api::HOST_MAX_DECOMPRESSED_BYTES, "decompressed byte");
-	RequireBudgetFieldBounded(narrowed.Budgets(), &duckdb_api::ResourceBudgets::decoded_records,
-	                          duckdb_api::LIVE_RELATION_MAX_RECORDS, "decoded record");
-	RequireBudgetFieldBounded(narrowed.Budgets(), &duckdb_api::ResourceBudgets::extracted_string_bytes,
-	                          duckdb_api::HOST_MAX_EXTRACTED_STRING_BYTES, "extracted string byte");
-	RequireBudgetFieldBounded(narrowed.Budgets(), &duckdb_api::ResourceBudgets::json_nesting,
-	                          duckdb_api::HOST_MAX_JSON_NESTING, "JSON nesting");
-	RequireBudgetFieldBounded(narrowed.Budgets(), &duckdb_api::ResourceBudgets::decoded_memory_bytes,
-	                          duckdb_api::HOST_MAX_DECODED_MEMORY_BYTES, "decoded memory byte");
-	RequireBudgetFieldBounded(narrowed.Budgets(), &duckdb_api::ResourceBudgets::batch_rows,
-	                          duckdb_api::OUTPUT_BATCH_ROWS, "batch row");
-	RequireBudgetFieldBounded(narrowed.Budgets(), &duckdb_api::ResourceBudgets::wall_milliseconds,
-	                          duckdb_api::MAX_EXECUTION_MILLISECONDS, "wall time");
-
-	auto invalid = narrowed.Budgets();
-	invalid.request_attempts = 2;
-	Require(!invalid.IsWithinLiveRestBounds(), "effective budget enabled a second request attempt");
-	invalid = narrowed.Budgets();
-	invalid.request_attempts = 0;
-	Require(!invalid.IsWithinLiveRestBounds(), "effective budget disabled the required request attempt");
-	invalid = narrowed.Budgets();
-	invalid.concurrency = 2;
-	Require(!invalid.IsWithinLiveRestBounds(), "effective budget enabled a second concurrent transfer");
-	invalid = narrowed.Budgets();
-	invalid.concurrency = 0;
-	Require(!invalid.IsWithinLiveRestBounds(), "effective budget removed the required concurrency slot");
-}
-
-void TestPrivateControlledCapabilityUsesTheSamePlanner() {
-	auto connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.origin.scheme = duckdb_api::CompiledUrlScheme::HTTP;
-	connector.operation.request.origin.host = duckdb_api::CompiledRestHost("127.0.0.1");
-	connector.operation.request.origin.port = 8080;
-	connector.network_policy.allowed_schemes = {"http"};
-	connector.network_policy.allowed_hosts = {"127.0.0.1"};
-	connector.network_policy.loopback_addresses_enabled = true;
-	const auto plan = duckdb_api::BuildConservativeScanPlan(connector, BuildLiveScanRequest(connector));
-	Require(plan.Operation().origin.scheme == duckdb_api::PlannedUrlScheme::HTTP &&
-	            plan.Operation().origin.host == "127.0.0.1" && plan.Operation().origin.port == 8080 &&
-	            plan.Network().loopback_addresses_enabled,
-	        "private controlled capability did not traverse the production planner");
-	Require(plan.RemotePredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
-	            plan.RemoteLimit() == duckdb_api::RelationalDelegation::NONE &&
-	            plan.Ownership().filter == duckdb_api::RelationalOwner::DUCKDB &&
-	            plan.Ownership().limit == duckdb_api::RelationalOwner::DUCKDB,
-	        "private controlled capability changed relational meaning");
-}
-
-void TestConnectorCounterexamples() {
-	auto connector = duckdb_api::BuildNativeGithubConnector();
-	connector.columns.clear();
-	RequireConnectorRejected(connector, "with no schema");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.columns[0].nullable = true;
-	RequireConnectorRejected(connector, "with nullable required output");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.columns[0].logical_type = "DOUBLE";
-	RequireConnectorRejected(connector, "with unsupported output type");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.columns[0].extractor.clear();
-	RequireConnectorRejected(connector, "with missing extractor");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.columns[1].name = connector.columns[0].name;
-	RequireConnectorRejected(connector, "with duplicate column");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.fallback = false;
-	RequireConnectorRejected(connector, "without fallback operation");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.retry_enabled = true;
-	RequireConnectorRejected(connector, "with retry enabled");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.authentication_enabled = true;
-	RequireConnectorRejected(connector, "with authentication enabled");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.pagination_enabled = true;
-	RequireConnectorRejected(connector, "with pagination enabled");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.path = "search/users";
-	RequireConnectorRejected(connector, "with invalid path");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.path = "/search/users?per_page=3";
-	RequireConnectorRejected(connector, "with query structure in path");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.path = "/search/users#page";
-	RequireConnectorRejected(connector, "with fragment structure in path");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.query_parameters[0].name = "q?hidden";
-	RequireConnectorRejected(connector, "with URL structure in query name");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.query_parameters[0].encoded_value = "duckdb#fragment";
-	RequireConnectorRejected(connector, "with URL structure in encoded query value");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.query_parameters[1].name = connector.operation.request.query_parameters[0].name;
-	RequireConnectorRejected(connector, "with duplicate query name");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.headers[0].value.clear();
-	RequireConnectorRejected(connector, "with empty header value");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.origin.scheme = duckdb_api::CompiledUrlScheme::HTTP;
-	RequireConnectorRejected(connector, "with origin outside declared scheme");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.origin.host = duckdb_api::CompiledRestHost("example.com");
-	RequireConnectorRejected(connector, "with origin outside declared host");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.origin.port = 444;
-	RequireConnectorRejected(connector, "with non-canonical HTTPS port");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.origin.port = 0;
-	RequireConnectorRejected(connector, "with zero origin port");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.network_policy.allowed_schemes.push_back("http");
-	RequireConnectorRejected(connector, "with widened scheme capability");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.network_policy.allowed_hosts.push_back("example.com");
-	RequireConnectorRejected(connector, "with widened host capability");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.network_policy.redirects_enabled = true;
-	RequireConnectorRejected(connector, "with redirects enabled");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.network_policy.private_addresses_enabled = true;
-	RequireConnectorRejected(connector, "with private-address authority enabled");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.network_policy.link_local_addresses_enabled = true;
-	RequireConnectorRejected(connector, "with link-local authority enabled");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.network_policy.loopback_addresses_enabled = true;
-	RequireConnectorRejected(connector, "with loopback authority inconsistent with HTTPS origin");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.network_policy.max_response_bytes = 0;
-	RequireConnectorRejected(connector, "with zero response budget");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.resource_ceilings.max_records = 0;
-	RequireConnectorRejected(connector, "with zero record budget");
-	connector = duckdb_api::BuildNativeGithubConnector();
-	connector.resource_ceilings.max_extracted_string_bytes = 0;
-	RequireConnectorRejected(connector, "with zero extracted-string budget");
-}
-
-void TestRequestCounterexamples() {
+void TestSecretManagerCapabilityIsRequirementScoped() {
 	const auto connector = duckdb_api::BuildNativeGithubConnector();
-	auto request = BuildLiveScanRequest(connector);
-	request.connector_name = "other";
-	RequireRequestRejected(request, "with wrong connector");
-	request = BuildLiveScanRequest(connector);
-	request.relation_name = "other";
-	RequireRequestRejected(request, "with wrong relation");
-	request = BuildLiveScanRequest(connector);
-	request.explicit_inputs.push_back("unexpected");
-	RequireRequestRejected(request, "with explicit inputs");
-	request = BuildLiveScanRequest(connector);
+	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
+	const auto &authenticated =
+	    FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+
+	auto anonymous_without_capability = BuildAnonymousScanRequest(connector, anonymous.Name());
+	anonymous_without_capability.capabilities.secret_manager = false;
+	const auto without = duckdb_api::BuildConservativeScanPlan(connector, anonymous_without_capability);
+	auto anonymous_with_capability = anonymous_without_capability;
+	anonymous_with_capability.capabilities.secret_manager = true;
+	const auto with = duckdb_api::BuildConservativeScanPlan(connector, anonymous_with_capability);
+	Require(without.Snapshot() == with.Snapshot() && without.Authentication() == duckdb_api::FeatureState::DISABLED,
+	        "ambient Secret Manager availability changed anonymous relational meaning");
+
+	auto authenticated_without_capability =
+	    BuildAuthenticatedScanRequest(connector, authenticated.Name(), "capability_secret");
+	authenticated_without_capability.capabilities.secret_manager = false;
+	RequireRequestRejected(connector, authenticated_without_capability,
+	                       "a required reference without Secret Manager capability");
+}
+
+void TestUnavailableRelationalCounterexamples() {
+	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
+	const auto &relation = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
+	const auto valid = BuildAnonymousScanRequest(connector, relation.Name());
+
+	auto request = valid;
+	request.explicit_inputs.push_back("secret=selector");
+	RequireRequestRejected(connector, request, "a logical selector encoded as an explicit input");
+	request = valid;
 	request.projected_columns.pop_back();
-	RequireRequestRejected(request, "with incomplete projection closure");
-	request = BuildLiveScanRequest(connector);
-	request.predicate = "id > 1";
-	RequireRequestRejected(request, "with unavailable predicate");
-	request = BuildLiveScanRequest(connector);
-	request.orderings.push_back("id");
-	RequireRequestRejected(request, "with unavailable ordering");
-	request = BuildLiveScanRequest(connector);
+	RequireRequestRejected(connector, request, "an incomplete projection closure");
+	request = valid;
+	request.projected_columns[0] = relation.Columns().back().name;
+	RequireRequestRejected(connector, request, "a mismatched selected schema");
+	request = valid;
+	request.predicate = "public_id > 1";
+	RequireRequestRejected(connector, request, "a predicate unavailable from the adapter");
+	request = valid;
+	request.orderings.push_back("public_id");
+	RequireRequestRejected(connector, request, "ordering unavailable from the adapter");
+	request = valid;
 	request.has_limit = true;
-	RequireRequestRejected(request, "with unavailable limit");
-	request = BuildLiveScanRequest(connector);
+	RequireRequestRejected(connector, request, "a limit unavailable from the adapter");
+	request = valid;
 	request.has_offset = true;
-	RequireRequestRejected(request, "with unavailable offset");
-	request = BuildLiveScanRequest(connector);
+	RequireRequestRejected(connector, request, "an offset unavailable from the adapter");
+	request = valid;
 	request.capabilities.projection = true;
-	RequireRequestRejected(request, "with projection capability");
-	request = BuildLiveScanRequest(connector);
+	RequireRequestRejected(connector, request, "unexpected projection delegation");
+	request = valid;
+	request.capabilities.filter = true;
+	RequireRequestRejected(connector, request, "unexpected filter delegation");
+	request = valid;
+	request.capabilities.ordering = true;
+	RequireRequestRejected(connector, request, "unexpected ordering delegation");
+	request = valid;
+	request.capabilities.limit = true;
+	RequireRequestRejected(connector, request, "unexpected limit delegation");
+	request = valid;
+	request.capabilities.offset = true;
+	RequireRequestRejected(connector, request, "unexpected offset delegation");
+	request = valid;
+	request.capabilities.progress = true;
+	RequireRequestRejected(connector, request, "unexpected progress capability");
+	request = valid;
 	request.capabilities.cancellation = false;
-	RequireRequestRejected(request, "without verified cancellation");
+	RequireRequestRejected(connector, request, "unverified cancellation");
+}
+
+void TestResponseSourceCardinalityAndLimitAreIndependent() {
+	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
+	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
+	const auto &authenticated =
+	    FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+	const auto many =
+	    duckdb_api::BuildConservativeScanPlan(connector, BuildAnonymousScanRequest(connector, anonymous.Name()));
+	const auto one = duckdb_api::BuildConservativeScanPlan(
+	    connector, BuildAuthenticatedScanRequest(connector, authenticated.Name(), "cardinality_secret"));
+
+	Require(many.Operation().cardinality == duckdb_api::PlannedCardinality::ZERO_TO_MANY &&
+	            many.Operation().response_source == duckdb_api::PlannedResponseSource::JSON_PATH_MANY &&
+	            many.Domain() == duckdb_api::BaseDomain::JSON_PATH_RECORDS && many.Budgets().decoded_records == 4,
+	        "generic multi-record source retained the native three-row domain");
+	Require(one.Operation().cardinality == duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS &&
+	            one.Operation().response_source == duckdb_api::PlannedResponseSource::ROOT_OBJECT &&
+	            one.Domain() == duckdb_api::BaseDomain::SUCCESSFUL_ROOT_OBJECT && one.Budgets().decoded_records == 1,
+	        "single-success source lost cardinality, response source, domain, or separate record ceiling");
+	for (const auto *plan : {&many, &one}) {
+		Require(plan->RemoteLimit() == duckdb_api::RelationalDelegation::NONE &&
+		            plan->RuntimeLimit() == duckdb_api::RelationalDelegation::NONE &&
+		            plan->RemoteOffset() == duckdb_api::RelationalDelegation::NONE &&
+		            plan->RuntimeOffset() == duckdb_api::RelationalDelegation::NONE &&
+		            plan->Ownership().limit == duckdb_api::RelationalOwner::DUCKDB,
+		        "source cardinality or record budget granted early row-removal authority");
+	}
+}
+
+void TestFixedSourceInputsRemainNonRelational() {
+	const auto connector = duckdb_api::BuildNativeGithubConnector();
+	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
+	const auto plan =
+	    duckdb_api::BuildConservativeScanPlan(connector, BuildAnonymousScanRequest(connector, anonymous.Name()));
+	Require(plan.Operation().query_parameters.size() == anonymous.Operation().request.query_parameters.size() &&
+	            !plan.Operation().query_parameters.empty(),
+	        "fixed source query fields disappeared from the selected operation");
+	Require(plan.RemotePredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
+	            plan.ResidualPredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
+	            plan.RemoteLimit() == duckdb_api::RelationalDelegation::NONE &&
+	            plan.Ownership().filter == duckdb_api::RelationalOwner::DUCKDB &&
+	            plan.Ownership().limit == duckdb_api::RelationalOwner::DUCKDB,
+	        "fixed source query fields were reclassified as predicate or limit pushdown");
+}
+
+void TestResourceEnvelopeBounds() {
+	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
+	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
+	const auto plan =
+	    duckdb_api::BuildConservativeScanPlan(connector, BuildAnonymousScanRequest(connector, anonymous.Name()));
+	Require(plan.Budgets().response_bytes == connector.NetworkPolicy().max_response_bytes &&
+	            plan.Budgets().decoded_records == anonymous.ResourceCeilings().max_records &&
+	            plan.Budgets().extracted_string_bytes == anonymous.ResourceCeilings().max_extracted_string_bytes,
+	        "smaller provider ceilings did not narrow host budgets");
+
+	RequireBudgetFieldBounded(plan.Budgets(), &duckdb_api::ResourceBudgets::response_bytes,
+	                          duckdb_api::HOST_MAX_RESPONSE_BYTES, "response-byte");
+	RequireBudgetFieldBounded(plan.Budgets(), &duckdb_api::ResourceBudgets::header_bytes,
+	                          duckdb_api::HOST_MAX_HEADER_BYTES, "header-byte");
+	RequireBudgetFieldBounded(plan.Budgets(), &duckdb_api::ResourceBudgets::decompressed_bytes,
+	                          duckdb_api::HOST_MAX_DECOMPRESSED_BYTES, "decompressed-byte");
+	RequireBudgetFieldBounded(plan.Budgets(), &duckdb_api::ResourceBudgets::decoded_records,
+	                          duckdb_api::HOST_MAX_DECODED_RECORDS, "decoded-record");
+	RequireBudgetFieldBounded(plan.Budgets(), &duckdb_api::ResourceBudgets::extracted_string_bytes,
+	                          duckdb_api::HOST_MAX_EXTRACTED_STRING_BYTES, "extracted-string-byte");
+	RequireBudgetFieldBounded(plan.Budgets(), &duckdb_api::ResourceBudgets::json_nesting,
+	                          duckdb_api::HOST_MAX_JSON_NESTING, "JSON-nesting");
+	RequireBudgetFieldBounded(plan.Budgets(), &duckdb_api::ResourceBudgets::decoded_memory_bytes,
+	                          duckdb_api::HOST_MAX_DECODED_MEMORY_BYTES, "decoded-memory-byte");
+	RequireBudgetFieldBounded(plan.Budgets(), &duckdb_api::ResourceBudgets::batch_rows, duckdb_api::OUTPUT_BATCH_ROWS,
+	                          "batch-row");
+	RequireBudgetFieldBounded(plan.Budgets(), &duckdb_api::ResourceBudgets::wall_milliseconds,
+	                          duckdb_api::MAX_EXECUTION_MILLISECONDS, "wall-time");
+
+	auto invalid = plan.Budgets();
+	invalid.request_attempts = 0;
+	Require(!invalid.IsWithinLiveRestBounds(), "resource envelope removed the one required request attempt");
+	invalid = plan.Budgets();
+	invalid.request_attempts = 2;
+	Require(!invalid.IsWithinLiveRestBounds(), "resource envelope enabled a retry attempt");
+	invalid = plan.Budgets();
+	invalid.concurrency = 0;
+	Require(!invalid.IsWithinLiveRestBounds(), "resource envelope removed its one concurrency slot");
+	invalid = plan.Budgets();
+	invalid.concurrency = 2;
+	Require(!invalid.IsWithinLiveRestBounds(), "resource envelope enabled parallel transfers");
+	invalid = plan.Budgets();
+	invalid.decoded_records = duckdb_api::HOST_MAX_DECODED_RECORDS;
+	Require(invalid.IsWithinLiveRestBounds(), "generic host decoder ceiling retained a native relation-specific cap");
 }
 
 } // namespace
 
 int main() {
 	try {
-		TestSourceConstantsAreNotPushdown();
-		TestConnectorCeilingsNarrowSemanticAndHostBudgets();
-		TestPrivateControlledCapabilityUsesTheSamePlanner();
-		TestConnectorCounterexamples();
-		TestRequestCounterexamples();
+		TestExactSelectionHasNoFallback();
+		TestReferenceRequirementMatrix();
+		TestSecretManagerCapabilityIsRequirementScoped();
+		TestUnavailableRelationalCounterexamples();
+		TestResponseSourceCardinalityAndLimitAreIndependent();
+		TestFixedSourceInputsRemainNonRelational();
+		TestResourceEnvelopeBounds();
 		std::cout << "scan planner tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {
