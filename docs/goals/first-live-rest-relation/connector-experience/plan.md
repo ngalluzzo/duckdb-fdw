@@ -94,13 +94,35 @@ network dependency is permitted in the production interface.
 
 ## Interaction exit
 
-Connector Experience reaches its X-as-a-Service implementation exit when the
-committed header, constructor, and direct oracle expose the exact RFC 0005
-snapshot without YAML, runtime, planner, or DuckDB dependencies, and
-Relational Semantics can consume the interface without coordinated edits to
-these owned files. The contract-propagation cleanup additionally requires that
-the authoring specification identify this boundary and that current product
-verification no longer depends on the retired example artifacts. The broader
-goal exit remains open until final integration proves that all consumers use
-the snapshot without duplicated connector constants and that the installed
-artifact excludes test-only authority seams.
+Status: **Satisfied; X-as-a-Service**. The final integrated graph meets the
+Connector-owned provider and consumer exit conditions:
+
+- The committed `CompiledConnector` header, canonical constructor, explanation,
+  and direct oracle expose the exact RFC 0005 snapshot using only Connector-
+  owned types and the C++ standard library. Focused contract tests prove every
+  field, ordering, ceiling, native provenance value, and deterministic copy
+  without YAML, planner, runtime, DuckDB, filesystem, or network dependencies.
+- Relational Semantics consumes the public immutable snapshot to build the
+  golden `ScanPlan` and reject inconsistent or widened declarations without
+  importing Connector implementation or authoring knowledge. Query's product
+  composition obtains the snapshot from `BuildNativeGithubConnector`; request
+  construction and bind consume only its public identity and schema values,
+  with no duplicated request authority or coordinated edit to Connector-owned
+  files.
+- The installed artifact inventory proves that only the canonical GitHub
+  authority is present and rejects loopback metadata, controlled factories,
+  authority selectors, and retired `example.items` inputs. The separate private
+  controlled artifact supplies its own test-only metadata through Runtime's
+  documented factory and does not alter or enter the public Connector builder.
+- `docs/CONNECTOR_SPECIFICATIONS.md` identifies the native metadata boundary,
+  current source-identity verification consumes the canonical Connector source
+  while preserving frozen `0.1.0`/`0.2.0` records, and current product
+  verification no longer depends on `fixtures/example`.
+
+The final product graph is integrated at `f834eb0`; the broader goal and Query
+consumer exits are recorded as satisfied at `2d273f4`. Connector Experience
+retains ownership of native metadata, provenance, direct contract tests, and
+authoring-boundary documentation. Consumers receive the immutable snapshot as
+a low-friction service; they do not acquire Connector syntax, validation, or
+source-identity ownership, and this completion does not activate package
+authoring.
