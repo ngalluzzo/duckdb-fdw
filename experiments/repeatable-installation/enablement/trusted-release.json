@@ -1,0 +1,20 @@
+{
+  "artifact": {
+    "filename": "duckdb_api.duckdb_extension",
+    "sha256": "4f1a0678fd2a673b433af6248a34966cb8fd41d107d4c0b3b97ca71eb35179ea",
+    "size": 4859678
+  },
+  "manifest": {
+    "anchor_filename": "manifest.sha256",
+    "filename": "manifest.json",
+    "sha256": "764be0f79b373c53f61926e96dd5b56ca51d1c775cbdd949d85a30ac58b8a4f9",
+    "size": 2863
+  },
+  "schema": "duckdb_api/installability-trusted-release/v1",
+  "source": {
+    "commit": "f855dfb5f5de0be7cb8ffd6a58d54552aeaada8d",
+    "tag": "v0.1.0",
+    "tag_object": "6764f24aca21298cb5161171a917e29fadf3f55d",
+    "tree": "77819955090f36a596a502f6aec8c2ebd9e28873"
+  }
+}
