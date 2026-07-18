@@ -11,7 +11,7 @@ readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "${REPOSITORY_ROOT}/scripts/lib/release-common.sh"
 readonly BUILD_ROOT="$(release_resolve_path "$1")"
 readonly BUILD_PROFILE="${2:-debug}"
-readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.3.0/pins.json"
+readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.4.0/pins.json"
 current_pin() {
     python3 -I "${REPOSITORY_ROOT}/scripts/read-release-pin.py" "${PINS_FILE}" "$@"
 }
@@ -136,6 +136,7 @@ python3 -I "${REPOSITORY_ROOT}/scripts/write-observed-dependencies.py" \
 
 rsync -a --delete "${PROJECT_SOURCE}/src/" "${TEMPLATE_ROOT}/src/"
 rsync -a --delete "${PROJECT_SOURCE}/test/" "${TEMPLATE_ROOT}/test/"
+rsync -a --delete "${PROJECT_SOURCE}/cmake/" "${TEMPLATE_ROOT}/cmake/"
 rm -rf "${TEMPLATE_ROOT}/fixtures"
 cp "${PROJECT_SOURCE}/CMakeLists.txt" "${PROJECT_SOURCE}/Makefile" \
     "${PROJECT_SOURCE}/extension_config.cmake" "${TEMPLATE_ROOT}/"
@@ -174,6 +175,8 @@ fi
 python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
     configuration "${PINS_FILE}" "${VERIFIED_SDK_ROOT}" \
     "${NATIVE_TEST_ROOT}/duckdb_api_native_dependencies.json" >/dev/null
+python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-product-sources.py" \
+    "${PINS_FILE}" "${NATIVE_TEST_ROOT}/duckdb_api_product_sources.json" >/dev/null
 "${NATIVE_TEST_ROOT}/duckdb_api_native_dependency_identity" \
     >"${BUILD_ROOT}/observed-native-runtime.json"
 python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
@@ -185,13 +188,18 @@ python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
     linkage "${PINS_FILE}" transport "${CONTROLLED_ARTIFACT}" >/dev/null
 for target in \
     duckdb_api_connector_tests \
+    duckdb_api_connector_catalog_fixture_tests \
     duckdb_api_scan_request_tests \
     duckdb_api_scan_planner_tests \
     duckdb_api_scan_plan_contract_tests \
+    duckdb_api_scan_plan_fixture_tests \
     duckdb_api_execution_contract_tests \
+    duckdb_api_authorization_contract_tests \
     duckdb_api_network_policy_tests \
     duckdb_api_json_decoder_tests \
     duckdb_api_http_scan_executor_tests \
+    duckdb_api_http_scan_executor_policy_tests \
+    duckdb_api_duckdb_secret_tests \
     duckdb_api_adapter_tests; do
     python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
         linkage "${PINS_FILE}" curl-free "${NATIVE_TEST_ROOT}/${target}" >/dev/null
@@ -200,6 +208,7 @@ for target in \
     duckdb_api_curl_http_transport_tests \
     duckdb_api_curl_http_budget_tests \
     duckdb_api_curl_http_lifecycle_tests \
+    duckdb_api_curl_transfer_policy_tests \
     duckdb_api_curl_tls_security_tests; do
     python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
         linkage "${PINS_FILE}" transport "${NATIVE_TEST_ROOT}/${target}" >/dev/null
@@ -219,25 +228,31 @@ for target in "${ARTIFACT}" "${CONTROLLED_ARTIFACT}" \
 done
 python3 -I -B "${PROJECT_SOURCE}/scripts/test-native-dependencies.py"
 "${NATIVE_TEST_ROOT}/duckdb_api_connector_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_connector_catalog_fixture_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_contract_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_fixture_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_execution_contract_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_authorization_contract_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_network_policy_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_json_decoder_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_policy_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_transport_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_budget_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_lifecycle_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_curl_transfer_policy_tests"
 python3 -I -B "${PROJECT_SOURCE}/test/python/runtime_curl_tls_tests.py" \
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_tls_security_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_adapter_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_duckdb_secret_tests"
 (
     cd "${TEMPLATE_ROOT}"
     "./build/${BUILD_PROFILE}/test/unittest" --require duckdb_api 'test/*'
 )
 "${PROJECT_SOURCE}/scripts/verify-loadable-inventory.sh" \
-    "${ARTIFACT}" "${PROJECT_SOURCE}/release/0.3.0/pins.json" transport
+    "${ARTIFACT}" "${PROJECT_SOURCE}/release/0.4.0/pins.json" transport
 
 env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}" \
     PATH="${PYTHON_DIR}:/usr/bin:/bin:/usr/sbin:/sbin" \
@@ -253,6 +268,11 @@ env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}
     PATH="${PYTHON_ENV}/bin:${PYTHON_DIR}:/usr/bin:/bin:/usr/sbin:/sbin" \
     "${PYTHON_ENV}/bin/python3" -I -B \
     "${PROJECT_SOURCE}/test/python/live_rest_product_contract.py" "${CONTROLLED_ARTIFACT}"
+env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}" \
+    PATH="${PYTHON_ENV}/bin:${PYTHON_DIR}:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "${PYTHON_ENV}/bin/python3" -I -B \
+    "${PROJECT_SOURCE}/test/python/authenticated_relation_product_contract.py" \
+    "${CONTROLLED_ARTIFACT}"
 env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}" \
     PATH="${PYTHON_ENV}/bin:${PYTHON_DIR}:/usr/bin:/bin:/usr/sbin:/sbin" \
     python3 -I "${PROJECT_SOURCE}/test/python/source_demo_contract.py" \

@@ -25,12 +25,20 @@ FORBIDDEN_ARTIFACT_MARKERS = (
     b"BuildControlledHttpRuntime",
     b"BuildControlledProductComposition",
     b"BuildLoopbackCurlRuntime",
+    b"BuildDistinctSchemaConnectorCatalogFixture",
+    b"ScanPlanTestAccess",
+    b"ConnectorCatalogTestAccess",
     b"controlled_duckdb_api",
     b"duckdb_api_controlled",
     b"DUCKDB_API_CONTROLLED_PORT",
     b"DUCKDB_API_CONNECTOR_PATH",
     b"DUCKDB_API_FIXTURE_SCENARIO",
     b"DUCKDB_API_LIVE_PROOF_AUTHORITY",
+    b"fixture_secret",
+    b"runtime_generated_",
+    b"duckdb_api_auth_adapter_test",
+    b"duckdb_api_secret_test",
+    b"test-only-redacted",
 )
 
 

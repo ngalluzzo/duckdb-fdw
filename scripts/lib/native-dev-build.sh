@@ -26,6 +26,7 @@ tree_digest_projection() (
     trap 'rm -rf "${stage}"' EXIT
     rsync -a "${TEMPLATE_ROOT}/src/" "${stage}/src/"
     rsync -a "${TEMPLATE_ROOT}/test/" "${stage}/test/"
+    rsync -a "${TEMPLATE_ROOT}/cmake/" "${stage}/cmake/"
     cp "${TEMPLATE_ROOT}/CMakeLists.txt" "${TEMPLATE_ROOT}/Makefile" \
         "${TEMPLATE_ROOT}/extension_config.cmake" "${stage}/"
     tree_digest "${stage}"
@@ -37,7 +38,7 @@ sync_sources() {
     local stage
     local status
     status="$(git -C "${REPOSITORY_ROOT}" status --porcelain --untracked-files=all -- \
-        src test CMakeLists.txt Makefile extension_config.cmake | sed -n '/^??/p')"
+        src test cmake CMakeLists.txt Makefile extension_config.cmake | sed -n '/^??/p')"
     if [[ -n "${status}" ]]; then
         echo "native developer sync accepts tracked files only; add or remove:" >&2
         echo "${status}" >&2
@@ -46,7 +47,7 @@ sync_sources() {
     stage="$(mktemp -d "${DEV_ROOT}/sync.XXXXXX")"
     TEMP_ROOTS+=("${stage}")
     git -C "${REPOSITORY_ROOT}" ls-files -z -- \
-        src test CMakeLists.txt Makefile extension_config.cmake |
+        src test cmake CMakeLists.txt Makefile extension_config.cmake |
         rsync -a --from0 --files-from=- "${REPOSITORY_ROOT}/" "${stage}/"
     source_digest="$(tree_digest "${stage}")"
     if [[ -f "${SOURCE_STATE}" && "$(cat "${SOURCE_STATE}")" == "${source_digest}" ]]; then
@@ -59,6 +60,7 @@ sync_sources() {
     rm -f "${SOURCE_STATE}"
     rsync -a --delete "${stage}/src/" "${TEMPLATE_ROOT}/src/"
     rsync -a --delete "${stage}/test/" "${TEMPLATE_ROOT}/test/"
+    rsync -a --delete "${stage}/cmake/" "${TEMPLATE_ROOT}/cmake/"
     rm -rf "${TEMPLATE_ROOT}/fixtures"
     cp "${stage}/CMakeLists.txt" "${stage}/Makefile" "${stage}/extension_config.cmake" "${TEMPLATE_ROOT}/"
     "${CMAKE_BIN}" -E rm -f "${TEMPLATE_ROOT}/vcpkg.json"
@@ -130,6 +132,8 @@ run_build() {
     python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
         configuration "${PINS_FILE}" "${SDK_ROOT}" \
         "${NATIVE_TEST_ROOT}/duckdb_api_native_dependencies.json" >/dev/null
+    python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-product-sources.py" \
+        "${PINS_FILE}" "${NATIVE_TEST_ROOT}/duckdb_api_product_sources.json" >/dev/null
     "${NATIVE_TEST_ROOT}/duckdb_api_native_dependency_identity" \
         >"${DEV_ROOT}/observed-native-runtime.json"
     python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
@@ -141,13 +145,18 @@ run_build() {
         linkage "${PINS_FILE}" transport "${CONTROLLED_ARTIFACT}" >/dev/null
     for target in \
         duckdb_api_connector_tests \
+        duckdb_api_connector_catalog_fixture_tests \
         duckdb_api_scan_request_tests \
         duckdb_api_scan_planner_tests \
         duckdb_api_scan_plan_contract_tests \
+        duckdb_api_scan_plan_fixture_tests \
         duckdb_api_execution_contract_tests \
+        duckdb_api_authorization_contract_tests \
         duckdb_api_network_policy_tests \
         duckdb_api_json_decoder_tests \
         duckdb_api_http_scan_executor_tests \
+        duckdb_api_http_scan_executor_policy_tests \
+        duckdb_api_duckdb_secret_tests \
         duckdb_api_adapter_tests; do
         python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
             linkage "${PINS_FILE}" curl-free "${NATIVE_TEST_ROOT}/${target}" >/dev/null
@@ -156,6 +165,7 @@ run_build() {
         duckdb_api_curl_http_transport_tests \
         duckdb_api_curl_http_budget_tests \
         duckdb_api_curl_http_lifecycle_tests \
+        duckdb_api_curl_transfer_policy_tests \
         duckdb_api_curl_tls_security_tests; do
         python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
             linkage "${PINS_FILE}" transport "${NATIVE_TEST_ROOT}/${target}" >/dev/null
@@ -190,20 +200,26 @@ run_tests() {
     local contract="${REPOSITORY_ROOT}/test/python/source_demo_contract.py"
     python3 -I -B "${REPOSITORY_ROOT}/scripts/test-native-dependencies.py"
     "${NATIVE_TEST_ROOT}/duckdb_api_connector_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_connector_catalog_fixture_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_contract_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_fixture_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_execution_contract_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_authorization_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_network_policy_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_json_decoder_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_policy_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_transport_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_budget_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_lifecycle_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_curl_transfer_policy_tests"
     "${PINNED_PYTHON}" -I -B \
         "${REPOSITORY_ROOT}/test/python/runtime_curl_tls_tests.py" \
         "${NATIVE_TEST_ROOT}/duckdb_api_curl_tls_security_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_adapter_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_duckdb_secret_tests"
     (
         cd "${TEMPLATE_ROOT}"
         "./build/${PROFILE}/test/unittest" --require duckdb_api 'test/*'
@@ -212,6 +228,9 @@ run_tests() {
         "${ARTIFACT}" "${PINS_FILE}" transport
     "${PINNED_PYTHON}" -I -B \
         "${REPOSITORY_ROOT}/test/python/live_rest_product_contract.py" \
+        "${CONTROLLED_ARTIFACT}"
+    "${PINNED_PYTHON}" -I -B \
+        "${REPOSITORY_ROOT}/test/python/authenticated_relation_product_contract.py" \
         "${CONTROLLED_ARTIFACT}"
     if [[ ! -f "${contract}" ]]; then
         echo "required Query Experience demo contract is missing: ${contract}" >&2

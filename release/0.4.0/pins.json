@@ -1,0 +1,167 @@
+{
+  "dependencies": {
+    "duckdb": {
+      "commit": "08e34c447bae34eaee3723cac61f2878b6bdf787",
+      "git_describe": "v1.5.4-0-g08e34c447b",
+      "tree": "33c1f40f6421fd8f79912a6ce96722feca538c61",
+      "version": "1.5.4"
+    },
+    "extension_ci_tools": {
+      "commit": "b777c70d30942cca5bef62d6d4fa23a13362f398",
+      "tree": "d3295344af82907cad620374596c44479f35f410"
+    },
+    "extension_template": {
+      "commit": "cfaf3e236008e782d27f4341b0ee036002d0a449",
+      "tree": "e9d306f3e8b0eed85e3cfc132066769baab9f6d2"
+    }
+  },
+  "identities": {
+    "build_graph": {
+      "controlled_translation_units": [
+        "src/connector_catalog.cpp",
+        "src/connector.cpp",
+        "src/scan_request.cpp",
+        "src/scan_plan.cpp",
+        "src/scan_planner.cpp",
+        "src/authorization.cpp",
+        "src/execution_error.cpp",
+        "src/fixed_github_user_bearer_authenticator.cpp",
+        "src/json_decoder.cpp",
+        "src/http_scan_executor.cpp",
+        "src/network_policy.cpp",
+        "src/curl_transfer.cpp",
+        "src/curl_http_transport.cpp",
+        "src/http_runtime.cpp",
+        "src/duckdb_secret.cpp",
+        "src/duckdb_api_adapter.cpp",
+        "test/cpp/support/loopback_curl_runtime.cpp",
+        "test/cpp/support/controlled_product_composition.cpp",
+        "test/cpp/controlled_duckdb_api_extension.cpp"
+      ],
+      "public_translation_units": [
+        "src/connector_catalog.cpp",
+        "src/connector.cpp",
+        "src/scan_request.cpp",
+        "src/scan_plan.cpp",
+        "src/scan_planner.cpp",
+        "src/authorization.cpp",
+        "src/execution_error.cpp",
+        "src/fixed_github_user_bearer_authenticator.cpp",
+        "src/json_decoder.cpp",
+        "src/http_scan_executor.cpp",
+        "src/network_policy.cpp",
+        "src/curl_transfer.cpp",
+        "src/curl_http_transport.cpp",
+        "src/http_runtime.cpp",
+        "src/product_composition.cpp",
+        "src/duckdb_secret.cpp",
+        "src/duckdb_api_adapter.cpp",
+        "src/duckdb_api_extension.cpp"
+      ]
+    },
+    "controlled_product_sources": {
+      "algorithm": "sha256-length-prefixed-path-and-bytes-v1",
+      "paths": [
+        "test/cpp/controlled_duckdb_api_extension.cpp",
+        "test/cpp/support/controlled_product_composition.cpp",
+        "test/cpp/support/controlled_product_composition.hpp",
+        "test/cpp/support/loopback_curl_runtime.cpp",
+        "test/cpp/support/loopback_curl_runtime.hpp"
+      ],
+      "sha256": "620f25af26070565a70709d2d4c03b7374d1557a338f7bf0579a9177a727ad2e"
+    },
+    "native_product_sources": {
+      "algorithm": "sha256-length-prefixed-path-and-bytes-v1",
+      "paths": [
+        "src/authorization.cpp",
+        "src/connector.cpp",
+        "src/connector_catalog.cpp",
+        "src/curl_http_transport.cpp",
+        "src/curl_transfer.cpp",
+        "src/duckdb_api_adapter.cpp",
+        "src/duckdb_api_extension.cpp",
+        "src/duckdb_secret.cpp",
+        "src/execution_error.cpp",
+        "src/fixed_github_user_bearer_authenticator.cpp",
+        "src/http_runtime.cpp",
+        "src/http_scan_executor.cpp",
+        "src/include/duckdb_api/authorization.hpp",
+        "src/include/duckdb_api/connector.hpp",
+        "src/include/duckdb_api/connector_catalog.hpp",
+        "src/include/duckdb_api/duckdb_secret.hpp",
+        "src/include/duckdb_api/execution.hpp",
+        "src/include/duckdb_api/http_runtime.hpp",
+        "src/include/duckdb_api/internal/curl_http_transport.hpp",
+        "src/include/duckdb_api/internal/curl_transfer.hpp",
+        "src/include/duckdb_api/internal/fixed_github_user_bearer_authenticator.hpp",
+        "src/include/duckdb_api/internal/http_scan_executor.hpp",
+        "src/include/duckdb_api/internal/http_transport.hpp",
+        "src/include/duckdb_api/internal/json_decoder.hpp",
+        "src/include/duckdb_api/internal/network_policy.hpp",
+        "src/include/duckdb_api/product_composition.hpp",
+        "src/include/duckdb_api/scan_plan.hpp",
+        "src/include/duckdb_api/scan_request.hpp",
+        "src/include/duckdb_api_extension.hpp",
+        "src/json_decoder.cpp",
+        "src/network_policy.cpp",
+        "src/product_composition.cpp",
+        "src/scan_plan.cpp",
+        "src/scan_planner.cpp",
+        "src/scan_request.cpp"
+      ],
+      "sha256": "69a83ba8d3286bb9cb102ec3889bf4d9f78c3800fe69844b8054b6058d6af5ca"
+    },
+    "public_contract": {
+      "canonical_json_sha256": "958c028ac6b296d09ae079d3a2a55da257f6d4ee92f39ae9d7f663b57a112afa",
+      "path": "release/0.4.0/public_contract.json"
+    }
+  },
+  "product_cell": {
+    "architecture": "arm64",
+    "cmake": "4.1.2",
+    "compiler": "Apple clang version 17.0.0",
+    "cxx_standard": "c++11",
+    "duckdb_platform": "osx_arm64",
+    "host": "macOS 26.5.1",
+    "host_build": "25F80",
+    "ninja": "1.13.0"
+  },
+  "project": {
+    "extension": "duckdb_api",
+    "tag": "v0.4.0",
+    "version": "0.4.0"
+  },
+  "system_dependencies": {
+    "macos_sdk": {
+      "build_version": "24F74",
+      "curl_header_root": "usr/include/curl",
+      "curl_headers_sha256": "82b6f38212ed3c50e5c2485f97b9c8e21919fe86a6ce1272f2c6cba4bba102e7",
+      "curl_include_dir": "usr/include",
+      "curl_stub": "usr/lib/libcurl.4.tbd",
+      "curl_stub_sha256": "080b9e030bfed3b77776a91f967029b41f5adab7de1e870ba8bfeed5b52ac9da",
+      "version": "15.5"
+    },
+    "system_libcurl": {
+      "cmake_imported_target": "CURL::libcurl",
+      "compatibility_version": 7,
+      "configured_version": "8.7.1",
+      "current_version": 9,
+      "install_name": "/usr/lib/libcurl.4.dylib",
+      "runtime_features": 1366229917,
+      "runtime_ssl_version": "(SecureTransport) LibreSSL/3.3.6",
+      "runtime_version": "8.7.1",
+      "runtime_version_num": "0x080701",
+      "threadsafe_feature_mask": 1073741824
+    }
+  },
+  "tools": {
+    "cmake_macos_universal": {
+      "sha256": "3be85f5b999e327b1ac7d804cbc9acd767059e9f603c42ec2765f6ab68fbd367",
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-macos-universal.tar.gz"
+    },
+    "ninja_macos": {
+      "sha256": "229314c7ef65e9c11d19f84e5f4bb374105a4f21f64ed55e8f403df765ab52a7",
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.0/ninja-mac.zip"
+    }
+  }
+}

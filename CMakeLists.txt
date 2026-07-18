@@ -1,9 +1,11 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.19)
 
 set(TARGET_NAME duckdb_api)
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 
 project(${TARGET_NAME})
+
+include(cmake/DuckDBApiProductSources.cmake)
 
 if(NOT APPLE)
   message(FATAL_ERROR "duckdb_api 0.4.0 supports only the pinned macOS arm64 cell")
@@ -155,34 +157,6 @@ set(CONTROLLED_PRODUCT_SOURCES
     ${QUERY_DUCKDB_SECRET_SOURCES}
     src/duckdb_api_adapter.cpp
     ${QUERY_CONTROLLED_COMPOSITION_SOURCES})
-
-# The release identity verifier owns the expected path set; this configure-time
-# observation proves that the actual public and private product compositions
-# match their recorded translation-unit sets. Keep paths repository-relative so
-# a different worktree root does not alter product identity.
-function(duckdb_api_source_array_json output)
-  set(result "[")
-  set(separator "")
-  foreach(source IN LISTS ARGN)
-    if(NOT source MATCHES "^[A-Za-z0-9_./-]+$")
-      message(FATAL_ERROR "product source path cannot be represented safely: ${source}")
-    endif()
-    string(APPEND result "${separator}\"${source}\"")
-    set(separator ",")
-  endforeach()
-  string(APPEND result "]")
-  set(${output} "${result}" PARENT_SCOPE)
-endfunction()
-duckdb_api_source_array_json(
-  DUCKDB_API_PUBLIC_TRANSLATION_UNITS_JSON ${PRODUCTION_SOURCES})
-duckdb_api_source_array_json(
-  DUCKDB_API_CONTROLLED_TRANSLATION_UNITS_JSON ${CONTROLLED_PRODUCT_SOURCES})
-file(
-  WRITE "${CMAKE_CURRENT_BINARY_DIR}/duckdb_api_product_sources.json"
-  "{\n"
-  "  \"controlled_translation_units\": ${DUCKDB_API_CONTROLLED_TRANSLATION_UNITS_JSON},\n"
-  "  \"public_translation_units\": ${DUCKDB_API_PUBLIC_TRANSLATION_UNITS_JSON}\n"
-  "}\n")
 
 build_static_extension(${TARGET_NAME} ${PRODUCTION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${PRODUCTION_SOURCES})
@@ -444,3 +418,12 @@ install(
   EXPORT "${DUCKDB_EXPORT_SET}"
   LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")
+
+# Keep this as the literal final command. CMake executes deferred calls in
+# scheduling order, so the product-graph observer must follow every possible
+# deferred target mutation in this directory.
+duckdb_api_defer_product_source_record(
+  OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/duckdb_api_product_sources.json"
+  PUBLIC_STATIC "${TARGET_NAME}_extension"
+  PUBLIC_LOADABLE "${TARGET_NAME}_loadable_extension"
+  CONTROLLED "duckdb_api_controlled_loadable_extension")
