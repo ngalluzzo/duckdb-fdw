@@ -44,7 +44,13 @@ def expect_bind_error(connection: duckdb.DuckDBPyConnection, sql: str, suffix: s
         connection.execute(sql).fetchall()
     except duckdb.BinderException as error:
         diagnostic = str(error)
-        if not diagnostic.endswith(suffix):
+        expected = f"Binder Error: {suffix}"
+        first_line, separator, context = diagnostic.partition("\n\n")
+        if (
+            first_line != expected
+            or separator != "\n\n"
+            or not context.startswith("LINE 1:")
+        ):
             raise AssertionError(f"unexpected bind diagnostic: {diagnostic!r}") from error
         if "top-secret" in diagnostic:
             raise AssertionError(f"bind diagnostic leaked ambient context: {diagnostic!r}")
