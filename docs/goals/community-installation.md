@@ -141,16 +141,47 @@ source ref, or published identity moves.
 
 ### Delivered
 
-Pending.
+An immutable, locally verified `0.2.0` source candidate and exact Community
+descriptor proposal now exist. The repository also contains the dependency,
+candidate, descriptor, upstream-build, native-signature-transition,
+stock-DuckDB lifecycle, support-matrix-admission, and evidence-custody
+boundaries needed to finish the Community path without reconstructing release
+authority from chat or mutable branch state.
+
+This is an **unreleased delivery checkpoint**, not completion of the product
+outcome. DuckDB Community maintainers have not run, signed, deployed, or
+accepted the candidate; no `v0.2.0` tag, public support matrix, ordinary-user
+Community installation guidance, or `0.2.0` release exists.
 
 ### Evidence
 
-Pending.
+- The immutable candidate is source commit
+  `47dc6169ae820f70beb0c2722b8a8f5288cd1469`; the Community proposal is
+  [duckdb/community-extensions#2256](https://github.com/duckdb/community-extensions/pull/2256).
+- Candidate, dependency, descriptor, build-evidence, deployment-transition,
+  Query lifecycle, and matrix-admission oracles pass locally and in the
+  repository's pinned Linux container cell.
+- Independent Query and supply-chain review found no remaining local defect in
+  the pre-publication evidence boundaries.
+- The upstream workflows remain subject to DuckDB Community maintainer
+  authority, so none of the local evidence is represented as Community build,
+  signature, deployment, or stock-install proof.
 
 ### Material decisions and deviations
 
-Pending.
+- The product manager decided that real Community publication is not a
+  prerequisite for continuing development of later product outcomes. The
+  external publication gate is deferred rather than weakened or simulated.
+- RFC 0004 remains the accepted ordinary-user distribution direction. Later
+  product work may reuse the source-build developer path, but it cannot claim
+  Community installation, a passing Community platform row, or a released
+  `0.2.0` identity without completing this goal's remaining external evidence.
 
 ### Product options discovered
 
-Pending.
+- Resume the pinned Community proposal when upstream maintainer capacity is
+  available; its immutable source identity allows that work to proceed even
+  after `main` advances.
+- Revisit the ordinary-user distribution decision in a superseding RFC only if
+  product evidence—not schedule pressure—shows that Community is the wrong
+  long-term channel.
