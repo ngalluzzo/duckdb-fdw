@@ -1,0 +1,18 @@
+{
+  "candidate": {
+    "anchor_sha256": "6e0ba58de66c7b2f8b74e2bd0906115da2c3f2ce3b3b699221f8da7e77cdbca2",
+    "sha256": "49b550ff15c98b5896902dd25a6f57675cbbfeba27a489cfa14e6585330a9e5a"
+  },
+  "dependency_audit": {
+    "anchor_sha256": "03361afca206952ae78cd04db00a5a4c25a284c5e5cc3a3898725507bd8fe2a5",
+    "sha256": "082862affe14dc7160561b7610c0e60338a8f5df395c0e8dda29e3f91872d16b"
+  },
+  "descriptor_expectation_sha256": "84a42986c9e48c39a035db0fcae6a9e36bf8cd0f535ba916fe660adbe8c0dc79",
+  "pins_sha256": "590e2e8c55714d391ccaa78ef91e824ab579686c2f3bf0652698e90319c3e0c7",
+  "proposal_sha256": "f80a6f0d28ff474ea4274e4e3c8fec9895b503f586e54f24d2aa5b832b92d123",
+  "schema": "duckdb_api/community-descriptor-cycle/v1",
+  "source": {
+    "commit": "47dc6169ae820f70beb0c2722b8a8f5288cd1469",
+    "tree": "6356b5296276aff08f81a6ec3ef9da6d0a6b8f7a"
+  }
+}

@@ -32,7 +32,7 @@ credentials, absolute runner paths, or unrestricted environment data.
 | --- | --- | --- | --- |
 | Candidate admission | Exact source commit, `0.2.0` pins, extension metadata, root MIT license, latest-stable DuckDB identity, and exact Community toolchain layout | `candidate.json` and `candidate.sha256` | Binds source commit/tree, project version, DuckDB identity, descriptor inputs, license digest, the complete pinned gitlink set, and exact `.gitmodules` metadata without consulting `HEAD`, index, or worktree. It contains no supported-platform claim |
 | Dependency audit | Admitted source, actual Community build graph, lock/configuration inputs, and primary license texts | `dependency-audit.json`, notices inventory, and anchor | Requires every compiled, linked, bundled, or redistributed dependency to have identity, provenance, license evidence, and an explicit disposition; ambiguity is a hard failure |
-| Descriptor admission | Exact proposed upstream descriptor bytes, candidate record, repository identity, and approved maintainer metadata | `descriptor.json`, descriptor digest, source ref, and upstream PR/run identifiers | Requires MIT, `duckdb_api`, version `0.2.0`, and the exact immutable candidate commit. It never accepts a branch name or self-reported ref as authority |
+| Descriptor admission | Tracked exact `description.yml`, reviewed `descriptor-cycle.json`, anchored candidate and dependency records, pins, and approved maintainer metadata | `descriptor-admission.json` and `descriptor-admission.sha256` in a new caller-owned output root | Requires MIT, `duckdb_api`, version `0.2.0`, C++/cmake, and the exact immutable candidate commit. The reviewed cycle—not co-located custody anchors—authorizes the handoff. It admits only a local proposal and never accepts a branch name, exclusion field, support claim, or self-reported ref as authority |
 | Community build evidence | Explicit `duckdb/community-extensions` repository, workflow run, descriptor, job inventory, logs, and downloaded outputs | One `community-build.json` and anchor per row, a complete `community-builds.json` inventory, and explicit artifact paths | Records every job conclusion, DuckDB/toolchain/platform identity, artifact size/digest, and Community origin. A build pass is only a candidate row, not product support |
 | Query handoff | Verified candidate, descriptor, Community job inventory, and admitted artifact paths | `query-inputs.json` plus read-only artifacts and manifests | Gives Query only stable identities and explicit paths. Query does not import build, descriptor, workflow, dependency, or custody internals |
 | Release binding | Anchored provider records and a Query-owned result inventory supplied as opaque bytes | `release-evidence.json` and anchor | Binds provider and Query evidence without evaluating SQL, diagnostics, or supported-row meaning |
@@ -54,13 +54,19 @@ change.
 | --- | --- |
 | `docs/goals/community-installation/engineering-enablement/plan.md` | This facilitation, handoff, and exit contract |
 | `release/0.2.0/enablement/pins.json` | Approved latest-stable DuckDB, Community repository/toolchain, action, and evidence-schema identities for one candidate cycle |
-| `release/0.2.0/enablement/descriptor.json` | Expected immutable source ref, extension/version/license fields, and upstream descriptor identity |
+| `release/0.2.0/enablement/descriptor.json` | Non-authoritative candidate-bound expectation with source and maintainer authority still unset |
+| `release/0.2.0/enablement/description.yml` | Exact Community descriptor proposal for the published immutable candidate; no exclusions, docs, or support claims |
+| `release/0.2.0/enablement/descriptor-cycle.json` | Reviewed authority binding the published source and exact proposal/candidate/dependency custody identities |
 | `release/0.2.0/enablement/evidence-allowlist.json` | Exact files allowed through hosted custody and final release binding |
 | `release/0.2.0/enablement/schemas/` | Versioned provider-record schemas only; no Query result or public support schema |
 | `release/0.2.0/enablement/README.md` | Provider command contracts and failure categories for Query and the release gate |
 | `scripts/community/verify_candidate.py` | Exact candidate commit/tree, version, license, DuckDB gitlink, and toolchain layout admission |
 | `scripts/community/audit_dependencies.py` | Dependency enumeration and canonical license-evidence production |
-| `scripts/community/verify_descriptor.py` | Proposed upstream descriptor and immutable-ref verification |
+| `scripts/community/descriptor_expectation.py` | Candidate-bound non-authoritative descriptor expectation validation |
+| `scripts/community/candidate_record.py` | Complete provider candidate-record validation at downstream boundaries |
+| `scripts/community/descriptor_cycle.py` | Reviewed descriptor-handoff authority validation; self-anchors remain custody only |
+| `scripts/community/descriptor_proposal.py` | Dependency-free exact Community YAML grammar and proposal semantics |
+| `scripts/community/verify_descriptor.py` | Thin anchored composition boundary for local descriptor admission |
 | `scripts/community/collect_build_evidence.py` | Community run/job/output collection and provenance normalization |
 | `scripts/community/write_query_inputs.py` | Read-only provider-to-Query artifact/path handoff |
 | `scripts/community/bind_release_evidence.py` | Provider records plus opaque Query inventory binding |
@@ -90,8 +96,9 @@ Provider tests are split by failure authority:
   DuckDB pins, license drift, and mismatched Community toolchain refs;
 - dependency tests cover omitted transitive inputs, unknown or conflicting
   licenses, missing notices, duplicate identities, and generated output drift;
-- descriptor tests cover movable refs, wrong repository/version/license,
-  unapproved fields, and descriptor-to-candidate mismatch;
+- descriptor tests cover movable refs, wrong repository/version/license/build/
+  maintainer metadata, missing or extra fields, ambiguous YAML, candidate and
+  dependency custody drift, and descriptor-to-candidate mismatch;
 - build-evidence tests cover wrong repository/run/commit, missing or duplicate
   jobs, skipped/failed rows, platform-label collisions, changed artifacts,
   truncated logs, and extra outputs;

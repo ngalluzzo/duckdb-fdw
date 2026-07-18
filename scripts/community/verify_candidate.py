@@ -26,7 +26,8 @@ from record_format import (  # noqa: E402
     verify_anchored_object,
     write_anchored_json,
 )
-from verify_descriptor import validate_expectation  # noqa: E402
+from candidate_record import validate_candidate_record  # noqa: E402
+from descriptor_expectation import validate_expectation  # noqa: E402
 
 
 CANDIDATE_SCHEMA = "duckdb_api/community-candidate/v1"
@@ -322,7 +323,7 @@ def candidate_record(
     community = _mapping(pins["community_extensions"], "Community pins")
     template = _mapping(pins["extension_template"], "template pins")
     ci_tools = _mapping(pins["extension_ci_tools"], "ci-tools pins")
-    return {
+    record = {
         "community": {
             "commit": community["commit"],
             "extension_ci_tools": {
@@ -359,6 +360,8 @@ def candidate_record(
         "source": {"commit": commit, "tree": tree},
         "status": "admitted_candidate",
     }
+    validate_candidate_record(record, pins, pins_digest, descriptor_digest)
+    return record
 
 
 def parser() -> argparse.ArgumentParser:

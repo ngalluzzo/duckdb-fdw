@@ -13,7 +13,9 @@ HERE = pathlib.Path(__file__).resolve().parent
 MODULES = (
     "test_record_boundaries",
     "test_tracked_records",
-    "test_descriptor_admission",
+    "test_descriptor_proposal",
+    "test_descriptor_authority",
+    "test_descriptor_filesystem",
     "test_dependency_admission",
     "test_candidate_admission",
 )

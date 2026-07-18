@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
 import pathlib
-import subprocess
 import sys
 import unittest
 
@@ -18,10 +18,39 @@ sys.path.insert(0, str(COMMUNITY))
 from audit_dependencies import _validate_expectations  # noqa: E402
 from candidate_pins import validate_pins  # noqa: E402
 from record_format import load_canonical_object  # noqa: E402
-from verify_descriptor import validate_expectation  # noqa: E402
+from descriptor_expectation import validate_expectation  # noqa: E402
+from descriptor_cycle import APPROVED_CYCLE_SHA256, validate_descriptor_cycle  # noqa: E402
+from descriptor_proposal import validate_proposal  # noqa: E402
 
 
 class TrackedRecordTest(unittest.TestCase):
+    def test_tracked_descriptor_proposal_is_exact_for_published_candidate(self) -> None:
+        pins, _pins_digest = load_canonical_object(
+            (ENABLEMENT / "pins.json").resolve(), "tracked Community pins"
+        )
+        candidate = {
+            "source": {
+                "commit": "47dc6169ae820f70beb0c2722b8a8f5288cd1469",
+                "tree": "6356b5296276aff08f81a6ec3ef9da6d0a6b8f7a",
+            }
+        }
+        validate_proposal(
+            (ENABLEMENT / "description.yml").read_bytes(), candidate, pins
+        )
+        cycle, cycle_digest = load_canonical_object(
+            (ENABLEMENT / "descriptor-cycle.json").resolve(),
+            "tracked descriptor cycle",
+        )
+        self.assertEqual(cycle_digest, APPROVED_CYCLE_SHA256)
+        validate_descriptor_cycle(cycle, cycle_digest)
+        self.assertEqual(cycle["source"], candidate["source"])
+        for name, path in (
+            ("pins_sha256", ENABLEMENT / "pins.json"),
+            ("descriptor_expectation_sha256", ENABLEMENT / "descriptor.json"),
+            ("proposal_sha256", ENABLEMENT / "description.yml"),
+        ):
+            self.assertEqual(cycle[name], hashlib.sha256(path.read_bytes()).hexdigest())
+
     def test_tracked_records_are_canonical_and_mutually_admitted(self) -> None:
         pins, _pins_digest = load_canonical_object(
             (ENABLEMENT / "pins.json").resolve(), "tracked Community pins"
@@ -40,24 +69,6 @@ class TrackedRecordTest(unittest.TestCase):
         )
         _validate_expectations(dependencies)
         validate_expectation(descriptor, pins)
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-I",
-                "-B",
-                str(COMMUNITY / "verify_descriptor.py"),
-                "--pins",
-                str(ENABLEMENT / "pins.json"),
-                "--descriptor-expectation",
-                str(ENABLEMENT / "descriptor.json"),
-            ],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "descriptor.json\n")
 
 
 if __name__ == "__main__":
