@@ -99,20 +99,26 @@ Connector
     └── partitions
 ```
 
-### 1.4 Repository preview evidence boundary
+### 1.4 Native product metadata boundary
 
-The repository-owned `example.items` metadata used by `duckdb_api` 0.1.0 is an
-internal acceptance fixture, not an implementation of this authoring
-specification. It may mirror the `duckdb_api/draft` field meanings needed to
-construct one immutable `CompiledConnector`, but the preview does not parse or
+The native preview compiles the exact `github.duckdb_login_search_page`
+metadata directly into the extension with the explicit
+`native_product_metadata` origin. This repository-owned product snapshot is not
+an implementation of this draft authoring specification: it does not parse or
 validate arbitrary YAML, load connector directories, resolve caller-selected
 paths, expose author tooling, or establish package compatibility.
 
-The preview's `duckdb_api_scan(connector := 'example', relation := 'items')`
-dispatcher is likewise not a general mapping from connector packages to SQL
-names. Package loading, registration, reload, validation, and distribution
-remain specification capabilities that require their own accepted product
-contract and executable authoring evidence.
+The durable internal provider boundary is the immutable `CompiledConnector`
+value. Its consumers may rely on stable connector, relation, and operation
+identifiers; typed columns and extractors; structural request metadata; and
+explicit connector policy and resource ceilings for the lifetime of the
+snapshot. That C++ team API is neither a public native ABI nor a promise that
+the same metadata can be authored or distributed as a connector package.
+
+The preview's `duckdb_api_scan` dispatcher is likewise not a general mapping
+from connector packages to SQL names. Package loading, registration, reload,
+validation, and distribution remain specification capabilities that require
+their own accepted product contract and executable authoring evidence.
 
 ---
 
@@ -2932,8 +2938,9 @@ Custom code is not permission to bypass host security policy.
 ## 33. Distribution
 
 Package loading is intended to be local and explicit when this draft becomes
-an implemented authoring contract. The `0.1.0` native preview embeds its single
-repository-owned example and does not implement the loading behavior below.
+an implemented authoring contract. The native preview embeds one exact
+repository-owned `CompiledConnector` snapshot and does not implement the
+loading behavior below.
 
 ### 33.1 Local packages
 

@@ -20,12 +20,15 @@ constants.
 | `src/include/duckdb_api/connector.hpp` | Private native `CompiledConnector` team API: stable identifiers, schema and nullability, structural REST request fields, fixed headers, response extractor, replay and feature declarations, connector policy narrowing, resource ceilings, native provenance, immutability expectations, and compatibility boundary |
 | `src/connector.cpp` | Sole production construction of the canonical `native_product_metadata` snapshot and stable, complete explanation of every connector-owned field |
 | `test/cpp/connector_contract_tests.cpp` | Exact field, ordering, policy, provenance, schema, constructor determinism, and snapshot oracles independent of DuckDB, planning, runtime, transport, YAML, or a live service |
+| `docs/CONNECTOR_SPECIFICATIONS.md` | Clarify the boundary between the compiled-in native product snapshot and the still-draft connector-package authoring contract |
+| `fixtures/example/` | Retire the obsolete current-tree `example.items` metadata and response artifacts after the product path replaces that relation |
+| `scripts/verify-source-identities.py` and `test/python/source_identity_contract.py` | Verify the current native connector source while preserving immutable `0.1.0`/`0.2.0` release records without retaining their fixture bytes as current inputs |
 
-No other production, test, build, fixture, release, or shared-document file is
-owned by this workstream. In particular, the workstream does not edit CMake,
+No Query, Runtime, Semantics, or Enablement production or build file is owned by
+this workstream. In particular, the workstream does not edit CMake,
 `ScanRequest`, `ScanPlan`, executor/stream types, decoding, HTTP policy
 enforcement, composition, the DuckDB adapter, source-identity pins, or
-authoritative shared contracts.
+immutable historical release records.
 
 ## Exact provided contract
 
@@ -83,6 +86,8 @@ network dependency is permitted in the production interface.
 - Provenance assertions reject the former fixture-specific shape by requiring
   the native origin and a snapshot with no fixture or response-content
   identity.
+- Current source-identity verification succeeds with no `fixtures/example`
+  source tree and rejects drift in the frozen `0.1.0`/`0.2.0` identity records.
 - The existing focused `connector_contract_tests` target compiles and passes.
 - `git diff --check`, cached-diff whitespace validation after staging, and the
   repository agent-asset validator pass for the two workstream commits.
@@ -93,6 +98,9 @@ Connector Experience reaches its X-as-a-Service implementation exit when the
 committed header, constructor, and direct oracle expose the exact RFC 0005
 snapshot without YAML, runtime, planner, or DuckDB dependencies, and
 Relational Semantics can consume the interface without coordinated edits to
-these owned files. The broader goal exit remains open until final integration
-proves that all consumers use the snapshot without duplicated connector
-constants and that the installed artifact excludes test-only authority seams.
+these owned files. The contract-propagation cleanup additionally requires that
+the authoring specification identify this boundary and that current product
+verification no longer depends on the retired example artifacts. The broader
+goal exit remains open until final integration proves that all consumers use
+the snapshot without duplicated connector constants and that the installed
+artifact excludes test-only authority seams.
