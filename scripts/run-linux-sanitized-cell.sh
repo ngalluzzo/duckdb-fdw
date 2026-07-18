@@ -68,9 +68,9 @@ case "${DOCKER_ENDPOINT}" in
         ;;
 esac
 docker --host "${DOCKER_ENDPOINT}" info --format '{{json .}}' >"${DAEMON_RECORD}"
-readonly DAEMON_ID="$(docker --host "${DOCKER_ENDPOINT}" info --format '{{.ID}}')"
-readonly DAEMON_OS="$(docker --host "${DOCKER_ENDPOINT}" info --format '{{.OSType}}')"
-readonly DAEMON_ARCHITECTURE="$(docker --host "${DOCKER_ENDPOINT}" info --format '{{.Architecture}}')"
+IFS=$'\t' read -r DAEMON_ID DAEMON_OS DAEMON_ARCHITECTURE <<< \
+    "$(release_docker_daemon_identity "${DAEMON_RECORD}")"
+readonly DAEMON_ID DAEMON_OS DAEMON_ARCHITECTURE
 if [[ -z "${DAEMON_ID}" || "${DAEMON_OS}" != "linux" || "${DAEMON_ARCHITECTURE}" != "x86_64" ]]; then
     echo "authoritative sanitizer evidence requires a Linux x86_64 Docker daemon" >&2
     exit 1
@@ -106,10 +106,9 @@ docker --host "${DOCKER_ENDPOINT}" run --rm --platform "${PLATFORM}" \
     ' bash "${OUTPUT_NAME}" "${HOST_UID}" "${HOST_GID}"
 
 docker --host "${DOCKER_ENDPOINT}" info --format '{{json .}}' >"${POST_DAEMON_RECORD}"
-readonly POST_DAEMON_ID="$(docker --host "${DOCKER_ENDPOINT}" info --format '{{.ID}}')"
-readonly POST_DAEMON_OS="$(docker --host "${DOCKER_ENDPOINT}" info --format '{{.OSType}}')"
-readonly POST_DAEMON_ARCHITECTURE="$(docker --host "${DOCKER_ENDPOINT}" info \
-    --format '{{.Architecture}}')"
+IFS=$'\t' read -r POST_DAEMON_ID POST_DAEMON_OS POST_DAEMON_ARCHITECTURE <<< \
+    "$(release_docker_daemon_identity "${POST_DAEMON_RECORD}")"
+readonly POST_DAEMON_ID POST_DAEMON_OS POST_DAEMON_ARCHITECTURE
 if [[ "${POST_DAEMON_ID}" != "${DAEMON_ID}" || "${POST_DAEMON_OS}" != "${DAEMON_OS}" ||
       "${POST_DAEMON_ARCHITECTURE}" != "${DAEMON_ARCHITECTURE}" ]]; then
     echo "Docker daemon identity changed during sanitizer execution" >&2

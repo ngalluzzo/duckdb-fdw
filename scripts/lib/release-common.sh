@@ -19,6 +19,20 @@ release_pin() {
         "${repository}/release/0.1.0/pins.json" "$@"
 }
 
+release_docker_daemon_identity() {
+    python3 -I - "$1" <<'PY'
+import json
+import pathlib
+import sys
+
+record = json.loads(pathlib.Path(sys.argv[1]).resolve(strict=True).read_text())
+values = [record.get("ID"), record.get("OSType"), record.get("Architecture")]
+if not all(isinstance(value, str) and value and "\t" not in value for value in values):
+    raise AssertionError("Docker daemon identity record is incomplete")
+print("\t".join(values))
+PY
+}
+
 release_require_new_root() {
     local label="$1"
     local root="$2"
