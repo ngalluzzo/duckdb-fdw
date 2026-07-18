@@ -130,6 +130,7 @@ def main() -> int:
         or not executor.get("docker_endpoint", "").startswith("unix://")
         or executor.get("daemon_os") != "linux"
         or executor.get("daemon_architecture") != "x86_64"
+        or not executor.get("daemon_id")
         or executor.get("container_platform") != pins["sanitizer_cell"]["platform"]
     ):
         raise AssertionError(

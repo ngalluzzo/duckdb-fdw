@@ -40,6 +40,7 @@ readonly SNAPSHOT_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/duckdb-api-sanitizer-sour
 readonly SOURCE_SNAPSHOT="${SNAPSHOT_PARENT}/source"
 readonly INSPECT_RECORD="${SNAPSHOT_PARENT}/docker-image-inspect.json"
 readonly DAEMON_RECORD="${SNAPSHOT_PARENT}/docker-daemon-info.json"
+readonly POST_DAEMON_RECORD="${SNAPSHOT_PARENT}/docker-daemon-info-after.json"
 trap 'rm -rf "${SNAPSHOT_PARENT}"' EXIT
 release_materialize_snapshot "${CALLER_REPOSITORY}" "${SOURCE_COMMIT}" "${SOURCE_SNAPSHOT}"
 if [[ "$(git -C "${SOURCE_SNAPSHOT}" rev-parse 'HEAD^{tree}')" != "${SOURCE_TREE}" ]]; then
@@ -66,17 +67,19 @@ case "${DOCKER_ENDPOINT}" in
         exit 1
         ;;
 esac
-docker info --format '{{json .}}' >"${DAEMON_RECORD}"
-readonly DAEMON_OS="$(docker info --format '{{.OSType}}')"
-readonly DAEMON_ARCHITECTURE="$(docker info --format '{{.Architecture}}')"
-if [[ "${DAEMON_OS}" != "linux" || "${DAEMON_ARCHITECTURE}" != "x86_64" ]]; then
+docker --host "${DOCKER_ENDPOINT}" info --format '{{json .}}' >"${DAEMON_RECORD}"
+readonly DAEMON_ID="$(docker --host "${DOCKER_ENDPOINT}" info --format '{{.ID}}')"
+readonly DAEMON_OS="$(docker --host "${DOCKER_ENDPOINT}" info --format '{{.OSType}}')"
+readonly DAEMON_ARCHITECTURE="$(docker --host "${DOCKER_ENDPOINT}" info --format '{{.Architecture}}')"
+if [[ -z "${DAEMON_ID}" || "${DAEMON_OS}" != "linux" || "${DAEMON_ARCHITECTURE}" != "x86_64" ]]; then
     echo "authoritative sanitizer evidence requires a Linux x86_64 Docker daemon" >&2
     exit 1
 fi
 
-docker pull --platform "${PLATFORM}" "${IMAGE}" >/dev/null
-docker image inspect "${IMAGE}" >"${INSPECT_RECORD}"
-readonly REPO_DIGESTS="$(docker image inspect --format '{{json .RepoDigests}}' "${IMAGE}")"
+docker --host "${DOCKER_ENDPOINT}" pull --platform "${PLATFORM}" "${IMAGE}" >/dev/null
+docker --host "${DOCKER_ENDPOINT}" image inspect "${IMAGE}" >"${INSPECT_RECORD}"
+readonly REPO_DIGESTS="$(docker --host "${DOCKER_ENDPOINT}" image inspect \
+    --format '{{json .RepoDigests}}' "${IMAGE}")"
 if [[ "${REPO_DIGESTS}" != *"${IMAGE_DIGEST}"* ]]; then
     echo "Docker did not resolve the pinned sanitizer image digest" >&2
     exit 1
@@ -87,7 +90,7 @@ readonly OUTPUT_NAME="$(basename "${OUTPUT_ROOT}")"
 readonly HOST_UID="$(id -u)"
 readonly HOST_GID="$(id -g)"
 mkdir -p "${OUTPUT_PARENT}"
-docker run --rm --platform "${PLATFORM}" \
+docker --host "${DOCKER_ENDPOINT}" run --rm --platform "${PLATFORM}" \
     --mount "type=bind,src=${SOURCE_SNAPSHOT},dst=/repo,readonly" \
     --mount "type=bind,src=${OUTPUT_PARENT},dst=/evidence" \
     -w /repo \
@@ -102,6 +105,16 @@ docker run --rm --platform "${PLATFORM}" \
         chown -R "$2:$3" "/evidence/$1"
     ' bash "${OUTPUT_NAME}" "${HOST_UID}" "${HOST_GID}"
 
+docker --host "${DOCKER_ENDPOINT}" info --format '{{json .}}' >"${POST_DAEMON_RECORD}"
+readonly POST_DAEMON_ID="$(docker --host "${DOCKER_ENDPOINT}" info --format '{{.ID}}')"
+readonly POST_DAEMON_OS="$(docker --host "${DOCKER_ENDPOINT}" info --format '{{.OSType}}')"
+readonly POST_DAEMON_ARCHITECTURE="$(docker --host "${DOCKER_ENDPOINT}" info \
+    --format '{{.Architecture}}')"
+if [[ "${POST_DAEMON_ID}" != "${DAEMON_ID}" || "${POST_DAEMON_OS}" != "${DAEMON_OS}" ||
+      "${POST_DAEMON_ARCHITECTURE}" != "${DAEMON_ARCHITECTURE}" ]]; then
+    echo "Docker daemon identity changed during sanitizer execution" >&2
+    exit 1
+fi
 "${SOURCE_SNAPSHOT}/scripts/release-source-guard.sh" "${SNAPSHOT_PARENT}/final-source-guard"
 python3 -I "${SOURCE_SNAPSHOT}/scripts/verify-sanitizer-manifest.py" \
     "${SOURCE_SNAPSHOT}" "${OUTPUT_ROOT}/manifest.json" "${OUTPUT_ROOT}/manifest.sha256" \

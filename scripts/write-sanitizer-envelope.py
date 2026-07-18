@@ -53,6 +53,8 @@ def main() -> int:
         raise AssertionError("sanitizer envelope requires the local default Docker context")
     if daemon.get("OSType") != "linux" or daemon.get("Architecture") != "x86_64":
         raise AssertionError("sanitizer envelope requires a Linux x86_64 Docker daemon")
+    if not daemon.get("ID"):
+        raise AssertionError("sanitizer envelope requires an observed Docker daemon ID")
 
     manifest = evidence / "manifest.json"
     artifact = evidence / "duckdb_api.duckdb_extension"
@@ -74,6 +76,7 @@ def main() -> int:
             "docker_endpoint": endpoint,
             "daemon_os": daemon["OSType"],
             "daemon_architecture": daemon["Architecture"],
+            "daemon_id": daemon["ID"],
             "container_platform": pins["sanitizer_cell"]["platform"],
         },
         "image": {
