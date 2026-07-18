@@ -9,10 +9,11 @@ unbounded GitHub user or search-result universe. Its fixed `q` and `per_page`
 request values define that base domain; they are not DuckDB predicate or limit
 pushdown.
 
-This workstream starts after Connector Experience publishes the immutable
-native product metadata required by RFC 0005. Query Experience and Remote
-Runtime consume the resulting plan without duplicating or reclassifying its
-relational decisions.
+Status: **Satisfied on `main`**. Connector Experience's immutable native
+metadata, this planning service, the Query adapter, and Remote Runtime are
+integrated in the permanent product graph at `f834eb0`. Query and Runtime
+consume the resulting plan through its typed public interface without
+constructing plan fields or reclassifying its relational decisions.
 
 ## Owned files
 
@@ -142,26 +143,51 @@ consumer contract without an independent reason to change.
 | Diagnostics | Unchanged safe planning error class; no URL, credential, or response content is added. |
 | Tests and fixtures | Separate plan-contract and planner-policy suites cover the golden value, one/two-row narrowing, the four-row counterexample, and immutable relational ownership. |
 
-## Interaction exit
+## Interaction exits
 
-The Connector interaction exits when the accepted immutable native metadata
-drives the complete golden plan without Connector internals or YAML knowledge.
-The Query interaction exits when supported capability-profile and prepared-plan
-oracles pass without Query constructing or interpreting `ScanPlan`. The Remote
-Runtime interaction exits when direct runtime tests consume the typed
-executable facts while ignoring planner-only ownership and explanation fields.
+- **Connector Experience — Satisfied; X-as-a-Service.**
+  `BuildConservativeScanPlan` consumes the immutable public
+  `CompiledConnector` and protocol-neutral `ScanRequest`; it neither imports
+  Connector implementation details nor reads YAML. The independently runnable
+  `duckdb_api_scan_planner_tests` and
+  `duckdb_api_scan_plan_contract_tests` targets prove the complete golden plan,
+  deterministic construction, valid one-to-three-row narrowing, the widened
+  four-row counterexample, and conservative rejection of inconsistent source
+  declarations.
+- **Query Experience — Satisfied; X-as-a-Service.** In
+  `src/duckdb_api_adapter.cpp`, Query constructs only the conservative
+  `ScanRequest`, obtains the plan from `BuildConservativeScanPlan`, and retains
+  the immutable result in bind state. It consumes declared output types,
+  resource bounds, and safe identity for adapter work but does not construct or
+  inspect predicates, residual ownership, ordering or bound delegation, or the
+  classification reason. The controlled relational oracle proves that
+  `DESCRIBE` and `PREPARE` perform no request, prepared and ordinary scans agree,
+  and filter, ordering, limit/offset, and filter-before-limit variants each
+  preserve the exact single-request target while DuckDB produces the expected
+  results. The focused adapter target consumes the Semantics and Runtime public
+  interfaces without linking transport or decoder implementation.
+- **Remote Runtime — Satisfied; X-as-a-Service.** Runtime compiles against the
+  typed `ScanPlan` contract and validates only executable operation, schema,
+  feature, network, and resource facts before performing I/O. Its source
+  explicitly excludes source snapshot, predicates, relational ownership,
+  ordering and limit delegation, and classification reason from executable
+  validation. The independently runnable HTTP executor tests obtain plans
+  through the Semantics service and prove structural request identity, typed
+  batches, budget narrowing, no replay, cancellation, close, and one persistent
+  deadline without importing or mutating planner internals.
+- **Engineering Enablement — Satisfied; facilitation ended.** The integrated
+  CMake graph names `RELATIONAL_PLANNING_SOURCES` separately and gives plan
+  representation and planner policy their own focused targets. Cached
+  `make build`, `make test`, and `make demo` passed, and fresh
+  `make verify PROFILE=debug` rebuilt 618 targets and ran both Semantics suites,
+  Runtime consumers, the Query adapter, the private 20-request controlled
+  product oracle, and the installed product evidence. The verified delivery
+  head and integration commit `f834eb0` have exact Git tree
+  `f9f11018fa4671faa213ff9999adc9c7c72e9689`; Enablement retains the reusable
+  graph and gates without becoming a semantic approval queue.
 
-Until all three conditions are supported by final source and test dependencies,
-the Relational Semantics collaboration remains **Open**. Once satisfied, the
-typed `ScanPlan` becomes an X-as-a-Service boundary maintained by Relational
-Semantics.
-
-Semantics-owned exit evidence is complete for Connector: focused tests consume
-only `CompiledConnector`, reject inconsistent or widened declarations, and
-produce the golden plan without YAML or Connector implementation knowledge.
-Query and Runtime exits remain **Open** in this worktree until the lead agent
-integrates their final consumer sources and proves that Query constructs only
-`ScanRequest` while Runtime consumes only typed executable plan facts. The new
-source and oracle target also require Engineering Enablement's build-graph
-integration before the project-wide exit audit can mark the service boundary
-satisfied.
+All temporary interactions are closed. The immutable, explainable `ScanPlan`
+is now an X-as-a-Service boundary maintained by Relational Semantics. Its
+consumers remain responsible for Query adaptation and Runtime execution, while
+any change to relational classification or ownership returns to this team and
+the accepted contract-change process.
