@@ -11,17 +11,27 @@ readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "${REPOSITORY_ROOT}/scripts/lib/release-common.sh"
 readonly BUILD_ROOT="$(release_resolve_path "$1")"
 readonly BUILD_PROFILE="${2:-debug}"
-readonly TEMPLATE_COMMIT="$(release_pin "${REPOSITORY_ROOT}" dependencies extension_template commit)"
-readonly TEMPLATE_TREE="$(release_pin "${REPOSITORY_ROOT}" dependencies extension_template tree)"
-readonly DUCKDB_COMMIT="$(release_pin "${REPOSITORY_ROOT}" dependencies duckdb commit)"
-readonly DUCKDB_TREE="$(release_pin "${REPOSITORY_ROOT}" dependencies duckdb tree)"
-readonly DUCKDB_DESCRIBE="$(release_pin "${REPOSITORY_ROOT}" dependencies duckdb git_describe)"
-readonly CI_TOOLS_COMMIT="$(release_pin "${REPOSITORY_ROOT}" dependencies extension_ci_tools commit)"
-readonly CI_TOOLS_TREE="$(release_pin "${REPOSITORY_ROOT}" dependencies extension_ci_tools tree)"
-readonly CMAKE_URL="$(release_pin "${REPOSITORY_ROOT}" tools cmake_macos_universal url)"
-readonly CMAKE_SHA256="$(release_pin "${REPOSITORY_ROOT}" tools cmake_macos_universal sha256)"
-readonly NINJA_URL="$(release_pin "${REPOSITORY_ROOT}" tools ninja_macos url)"
-readonly NINJA_SHA256="$(release_pin "${REPOSITORY_ROOT}" tools ninja_macos sha256)"
+readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.3.0/pins.json"
+current_pin() {
+    python3 -I "${REPOSITORY_ROOT}/scripts/read-release-pin.py" "${PINS_FILE}" "$@"
+}
+readonly TEMPLATE_COMMIT="$(current_pin dependencies extension_template commit)"
+readonly TEMPLATE_TREE="$(current_pin dependencies extension_template tree)"
+readonly DUCKDB_COMMIT="$(current_pin dependencies duckdb commit)"
+readonly DUCKDB_TREE="$(current_pin dependencies duckdb tree)"
+readonly DUCKDB_DESCRIBE="$(current_pin dependencies duckdb git_describe)"
+readonly CI_TOOLS_COMMIT="$(current_pin dependencies extension_ci_tools commit)"
+readonly CI_TOOLS_TREE="$(current_pin dependencies extension_ci_tools tree)"
+readonly CMAKE_URL="$(current_pin tools cmake_macos_universal url)"
+readonly CMAKE_SHA256="$(current_pin tools cmake_macos_universal sha256)"
+readonly NINJA_URL="$(current_pin tools ninja_macos url)"
+readonly NINJA_SHA256="$(current_pin tools ninja_macos sha256)"
+readonly EXPECTED_HOST="$(current_pin product_cell host)"
+readonly EXPECTED_HOST_BUILD="$(current_pin product_cell host_build)"
+readonly EXPECTED_ARCHITECTURE="$(current_pin product_cell architecture)"
+readonly EXPECTED_COMPILER="$(current_pin product_cell compiler)"
+readonly EXPECTED_SDK_VERSION="$(current_pin system_dependencies macos_sdk version)"
+readonly EXPECTED_SDK_BUILD="$(current_pin system_dependencies macos_sdk build_version)"
 readonly TEMPLATE_ROOT="${BUILD_ROOT}/extension-template"
 readonly TOOL_ROOT="${BUILD_ROOT}/tools"
 readonly CMAKE_ARCHIVE="${TOOL_ROOT}/cmake.tar.gz"
@@ -40,28 +50,46 @@ if [[ "${BUILD_PROFILE}" != "debug" && "${BUILD_PROFILE}" != "release" ]]; then
     echo "build profile must be debug or release" >&2
     exit 2
 fi
-if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
-    echo "native product test records only the Darwin arm64 product cell" >&2
+if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "${EXPECTED_ARCHITECTURE}" ]]; then
+    echo "native product test records only the Darwin ${EXPECTED_ARCHITECTURE} product cell" >&2
     exit 1
 fi
-if [[ "$(sw_vers -productVersion)" != "26.5.1" ]]; then
-    echo "native product test requires macOS 26.5.1" >&2
+if [[ "macOS $(sw_vers -productVersion)" != "${EXPECTED_HOST}" ]]; then
+    echo "native product test requires ${EXPECTED_HOST}" >&2
+    exit 1
+fi
+if [[ "$(sw_vers -buildVersion)" != "${EXPECTED_HOST_BUILD}" ]]; then
+    echo "native product test requires host build ${EXPECTED_HOST_BUILD}" >&2
     exit 1
 fi
 if [[ "$(python3 -I -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" != "3.14" ]]; then
     echo "native product test requires Python 3.14 for its pinned DuckDB wheel" >&2
     exit 1
 fi
-for command in c++ curl git make nm python3 rsync shasum strings sw_vers tar unzip; do
+for command in c++ curl git make nm python3 rsync shasum strings sw_vers tar unzip xcrun; do
     if ! command -v "${command}" >/dev/null 2>&1; then
         echo "missing required command: ${command}" >&2
         exit 1
     fi
 done
-if [[ "$(c++ --version | head -n 1)" != Apple\ clang\ version\ 17.0.0* ]]; then
-    echo "native product test requires Apple clang 17.0.0" >&2
+if [[ "$(c++ --version | head -n 1)" != "${EXPECTED_COMPILER}"* ]]; then
+    echo "native product test requires ${EXPECTED_COMPILER}" >&2
     exit 1
 fi
+readonly SDK_ROOT="$(xcrun --sdk macosx --show-sdk-path)"
+readonly SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+readonly SDK_BUILD="$(xcrun --sdk macosx --show-sdk-build-version)"
+if [[ "${SDK_VERSION}" != "${EXPECTED_SDK_VERSION}" || "${SDK_BUILD}" != "${EXPECTED_SDK_BUILD}" ]]; then
+    echo "native product test requires SDK ${EXPECTED_SDK_VERSION} build ${EXPECTED_SDK_BUILD}" >&2
+    exit 1
+fi
+readonly VERIFIED_DEPENDENCIES="$(python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
+    inputs "${PINS_FILE}" "${SDK_ROOT}" "$(sw_vers -productVersion)" \
+    "$(sw_vers -buildVersion)" "$(uname -m)" "${SDK_VERSION}" "${SDK_BUILD}")"
+readonly VERIFIED_SDK_ROOT="$(python3 -I -c 'import json,sys; print(json.loads(sys.argv[1])["sdk_root"])' \
+    "${VERIFIED_DEPENDENCIES}")"
+readonly SDK_CURL_INCLUDE_DIR="${VERIFIED_SDK_ROOT}/$(current_pin system_dependencies macos_sdk curl_include_dir)"
+readonly SDK_CURL_LIBRARY="${VERIFIED_SDK_ROOT}/$(current_pin system_dependencies macos_sdk curl_stub)"
 
 mkdir -p "${TOOL_ROOT}" "${CMAKE_ROOT}" "${NINJA_ROOT}" "${TEMPLATE_ROOT}" "${PROJECT_SOURCE}"
 git -C "${REPOSITORY_ROOT}" archive --format=tar HEAD | tar -x -C "${PROJECT_SOURCE}"
@@ -102,7 +130,8 @@ if [[ "$(git -C "${TEMPLATE_ROOT}" rev-parse 'HEAD^{tree}')" != "${TEMPLATE_TREE
     exit 1
 fi
 python3 -I "${REPOSITORY_ROOT}/scripts/write-observed-dependencies.py" \
-    "${REPOSITORY_ROOT}" "${TEMPLATE_ROOT}" "${BUILD_ROOT}/observed-dependencies.json" >/dev/null
+    "${REPOSITORY_ROOT}" "${TEMPLATE_ROOT}" "${PINS_FILE}" \
+    "${BUILD_ROOT}/observed-dependencies.json" >/dev/null
 
 rsync -a --delete "${PROJECT_SOURCE}/src/" "${TEMPLATE_ROOT}/src/"
 rsync -a --delete "${PROJECT_SOURCE}/test/" "${TEMPLATE_ROOT}/test/"
@@ -127,10 +156,15 @@ env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}
     PATH="${CMAKE_ROOT}/CMake.app/Contents/bin:${NINJA_ROOT}:${PYTHON_DIR}:/usr/bin:/bin:/usr/sbin:/sbin" \
     GEN=ninja DISABLE_SANITIZER=1 DUCKDB_PLATFORM=osx_arm64 \
     OVERRIDE_GIT_DESCRIBE="${DUCKDB_DESCRIBE}" \
-    make -C "${TEMPLATE_ROOT}" "${EXTRA_FLAGS_NAME}=-DCMAKE_CXX_STANDARD=11 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" \
+    make -C "${TEMPLATE_ROOT}" \
+        "${EXTRA_FLAGS_NAME}=-DCMAKE_CXX_STANDARD=11 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DDUCKDB_API_VERIFIED_SDK_ROOT=${VERIFIED_SDK_ROOT} -DCURL_NO_CURL_CMAKE=ON -DCURL_INCLUDE_DIR=${SDK_CURL_INCLUDE_DIR} -DCURL_LIBRARY=${SDK_CURL_LIBRARY}" \
         "${BUILD_PROFILE}"
 
 readonly NATIVE_TEST_ROOT="${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/extension/duckdb_api"
+python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
+    configuration "${PINS_FILE}" "${VERIFIED_SDK_ROOT}" \
+    "${NATIVE_TEST_ROOT}/duckdb_api_native_dependencies.json" >/dev/null
+python3 -I -B "${PROJECT_SOURCE}/scripts/test-native-dependencies.py"
 "${NATIVE_TEST_ROOT}/duckdb_api_connector_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_fixture_decoder_tests"

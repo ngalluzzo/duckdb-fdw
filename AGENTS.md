@@ -202,15 +202,18 @@ must additionally pass:
 
 ```sh
 scripts/verify-source-identities.py
+python3 -I -B scripts/test-native-dependencies.py
 scripts/run-native-product-tests.sh /absolute/new/build-root debug
 ```
 
 The first command is the fast content and version identity gate. The second
-performs a fresh pinned DuckDB build, private C++ contract tests, SQLLogicTests,
-loadable-artifact inventory, and the same clean-host direct-load contract used
-by `make demo` on the supported product cell. Use a new build root on every
-run. `make verify` is the convenience wrapper that allocates that new root; it
-does not reuse developer state.
+uses deterministic fake SDK records to prove that native dependency drift
+fails closed. The third derives the SDK through `xcrun`, verifies the current
+platform libcurl inputs, and performs a fresh pinned DuckDB build, private C++
+contract tests, SQLLogicTests, loadable-artifact inventory, and the same
+clean-host direct-load contract used by `make demo` on the supported product
+cell. Use a new build root on every run. `make verify` is the convenience
+wrapper that allocates that new root; it does not reuse developer state.
 
 The authoritative `0.2.0` source-identity, Community Query, and Community
 Enablement gates are:

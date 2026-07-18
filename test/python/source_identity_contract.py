@@ -26,6 +26,9 @@ SOURCE_PATHS = (
     "release/0.1.0/public_contract.json",
     "release/0.2.0/pins.json",
     "release/0.2.0/public_contract.json",
+    "release/0.3.0/pins.json",
+    "release/0.3.0/public_contract.json",
+    "src/connector.cpp",
     "src/include/duckdb_api/embedded_example.hpp",
 )
 
@@ -51,23 +54,25 @@ class SourceIdentityContractTests(unittest.TestCase):
 
     def test_selects_current_version_and_preserves_historical_contract(self) -> None:
         result = VERIFIER.verify(self.root)
-        self.assertEqual(result["version"], "0.2.0")
+        self.assertEqual(result["version"], "0.3.0")
         self.assertEqual(result["duckdb_version"], "1.5.4")
         self.assertEqual(
             result["public_contract_sha256"],
-            "bbba900cb94f6289c9282750ed6d15a5356f6c0de9aa00fa5ae3a0ed8e452160",
+            "f5d9a5c14ef603fef34bf7154ad2272e86742fec0af994aacfbfec4afe84c8e9",
         )
 
     def test_rejects_current_and_historical_contract_pin_drift(self) -> None:
-        current_pins = self.json("release/0.2.0/pins.json")
-        current_pins["identities"]["public_contract_sha256"] = "0" * 64
-        self.write_json("release/0.2.0/pins.json", current_pins)
+        current_pins = self.json("release/0.3.0/pins.json")
+        current_pins["identities"]["public_contract"][
+            "canonical_json_sha256"
+        ] = "0" * 64
+        self.write_json("release/0.3.0/pins.json", current_pins)
         with self.assertRaisesRegex(AssertionError, "current public contract digest"):
             VERIFIER.verify(self.root)
 
         shutil.copyfile(
-            REPOSITORY / "release/0.2.0/pins.json",
-            self.root / "release/0.2.0/pins.json",
+            REPOSITORY / "release/0.3.0/pins.json",
+            self.root / "release/0.3.0/pins.json",
         )
         historical_pins = self.json("release/0.1.0/pins.json")
         historical_pins["identities"]["public_contract_sha256"] = "0" * 64
@@ -75,17 +80,20 @@ class SourceIdentityContractTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "historical 0.1"):
             VERIFIER.verify(self.root)
 
-    def test_rejects_public_behavior_drift_even_when_repinned(self) -> None:
-        contract_path = self.root / "release/0.2.0/public_contract.json"
-        contract = self.json("release/0.2.0/public_contract.json")
-        contract["rows"][0][1] = "drifted"
-        self.write_json("release/0.2.0/public_contract.json", contract)
-        pins = self.json("release/0.2.0/pins.json")
-        pins["identities"]["public_contract_sha256"] = VERIFIER.canonical_digest(
-            json.loads(contract_path.read_text())
+    def test_rejects_current_public_contract_and_connector_drift(self) -> None:
+        contract = self.json("release/0.3.0/public_contract.json")
+        contract["relation"]["cardinality"]["maximum"] = 4
+        self.write_json("release/0.3.0/public_contract.json", contract)
+        with self.assertRaisesRegex(AssertionError, "public contract digest"):
+            VERIFIER.verify(self.root)
+
+        shutil.copyfile(
+            REPOSITORY / "release/0.3.0/public_contract.json",
+            self.root / "release/0.3.0/public_contract.json",
         )
-        self.write_json("release/0.2.0/pins.json", pins)
-        with self.assertRaisesRegex(AssertionError, "beyond extension version"):
+        with (self.root / "src/connector.cpp").open("a", encoding="utf-8") as connector:
+            connector.write("// drift\n")
+        with self.assertRaisesRegex(AssertionError, "connector source digest"):
             VERIFIER.verify(self.root)
 
     def test_rejects_jointly_repinned_historical_and_current_behavior(self) -> None:
@@ -104,20 +112,20 @@ class SourceIdentityContractTests(unittest.TestCase):
             VERIFIER.verify(self.root)
 
     def test_rejects_project_and_duckdb_identity_drift(self) -> None:
-        pins = self.json("release/0.2.0/pins.json")
-        pins["project"]["tag"] = "v0.2.1"
-        self.write_json("release/0.2.0/pins.json", pins)
+        pins = self.json("release/0.3.0/pins.json")
+        pins["project"]["tag"] = "v0.3.1"
+        self.write_json("release/0.3.0/pins.json", pins)
         with self.assertRaisesRegex(AssertionError, "current project identity"):
             VERIFIER.verify(self.root)
 
         shutil.copyfile(
-            REPOSITORY / "release/0.2.0/pins.json",
-            self.root / "release/0.2.0/pins.json",
+            REPOSITORY / "release/0.3.0/pins.json",
+            self.root / "release/0.3.0/pins.json",
         )
-        pins = self.json("release/0.2.0/pins.json")
+        pins = self.json("release/0.3.0/pins.json")
         pins["dependencies"]["duckdb"]["commit"] = "0" * 40
         pins["dependencies"]["duckdb"]["git_describe"] = "v1.5.4-0-g0000000000"
-        self.write_json("release/0.2.0/pins.json", pins)
+        self.write_json("release/0.3.0/pins.json", pins)
         with self.assertRaisesRegex(AssertionError, "different DuckDB identity"):
             VERIFIER.verify(self.root)
 
@@ -140,8 +148,8 @@ class SourceIdentityContractTests(unittest.TestCase):
                 "  SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}\n"
                 ")\n"
             ),
-            "unquoted version": accepted.replace('"0.2.0"', "0.2.0"),
-            "nonrelease version": accepted.replace('"0.2.0"', '"../../0.1.0"'),
+            "unquoted version": accepted.replace('"0.3.0"', "0.3.0"),
+            "nonrelease version": accepted.replace('"0.3.0"', '"../../0.1.0"'),
         }
         for label, content in invalid.items():
             with self.subTest(label=label):

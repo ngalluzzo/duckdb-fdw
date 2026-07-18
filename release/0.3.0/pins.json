@@ -45,6 +45,7 @@
       "build_version": "24F74",
       "curl_header_root": "usr/include/curl",
       "curl_headers_sha256": "82b6f38212ed3c50e5c2485f97b9c8e21919fe86a6ce1272f2c6cba4bba102e7",
+      "curl_include_dir": "usr/include",
       "curl_stub": "usr/lib/libcurl.4.tbd",
       "curl_stub_sha256": "080b9e030bfed3b77776a91f967029b41f5adab7de1e870ba8bfeed5b52ac9da",
       "version": "15.5"

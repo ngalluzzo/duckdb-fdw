@@ -125,6 +125,7 @@ def validate_pins(pins: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any],
         "build_version",
         "curl_header_root",
         "curl_headers_sha256",
+        "curl_include_dir",
         "curl_stub",
         "curl_stub_sha256",
     ):
@@ -246,7 +247,7 @@ def verify_configuration(
 ) -> dict[str, Any]:
     _, sdk, curl = validate_pins(pins)
     root = sdk_root.resolve(strict=True)
-    expected_include = confined_path(root, sdk["curl_header_root"], "curl_header_root")
+    expected_include = confined_path(root, sdk["curl_include_dir"], "curl_include_dir")
     expected_library = confined_path(root, sdk["curl_stub"], "curl_stub")
     expected = {
         "curl_include_dir": str(expected_include),

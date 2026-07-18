@@ -99,7 +99,8 @@ run_build() {
         GEN=ninja DISABLE_SANITIZER=1 DUCKDB_PLATFORM="${DUCKDB_PLATFORM}" \
         OVERRIDE_GIT_DESCRIBE="${DUCKDB_GIT_DESCRIBE}" \
         make -C "${TEMPLATE_ROOT}" \
-            "${extra_flags_name}=-DCMAKE_CXX_STANDARD=11 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" "${profile}"
+            "${extra_flags_name}=-DCMAKE_CXX_STANDARD=11 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DDUCKDB_API_VERIFIED_SDK_ROOT=${SDK_ROOT} -DCURL_NO_CURL_CMAKE=ON -DCURL_INCLUDE_DIR=${SDK_CURL_INCLUDE_DIR} -DCURL_LIBRARY=${SDK_CURL_LIBRARY}" \
+            "${profile}"
     if [[ ! -x "${STATIC_TEST_CLI}" ]]; then
         echo "native build did not produce expected static test CLI: ${STATIC_TEST_CLI}" >&2
         exit 1
@@ -108,6 +109,9 @@ run_build() {
         echo "native build did not produce expected loadable artifact: ${ARTIFACT}" >&2
         exit 1
     fi
+    python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
+        configuration "${PINS_FILE}" "${SDK_ROOT}" \
+        "${NATIVE_TEST_ROOT}/duckdb_api_native_dependencies.json" >/dev/null
 }
 
 print_paths() {
@@ -123,6 +127,7 @@ print_paths() {
 
 run_tests() {
     local contract="${REPOSITORY_ROOT}/test/python/source_demo_contract.py"
+    python3 -I -B "${REPOSITORY_ROOT}/scripts/test-native-dependencies.py"
     "${NATIVE_TEST_ROOT}/duckdb_api_connector_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_fixture_decoder_tests"

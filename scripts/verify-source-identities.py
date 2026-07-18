@@ -102,7 +102,7 @@ def validate_duckdb(pins: dict, public_contract: dict) -> dict:
     return duckdb
 
 
-def validate_identities(pins: dict) -> dict:
+def validate_legacy_identities(pins: dict) -> dict:
     identities = pins.get("identities")
     expected_keys = {
         "compiled_connector_sha256",
@@ -116,6 +116,39 @@ def validate_identities(pins: dict) -> dict:
         for value in identities.values()
     ):
         raise AssertionError("current source identity pin is not a lowercase SHA-256")
+    return identities
+
+
+def validate_current_identities(pins: dict) -> dict:
+    identities = pins.get("identities")
+    if not isinstance(identities, dict) or set(identities) != {
+        "native_connector_source",
+        "public_contract",
+    }:
+        raise AssertionError("current 0.3 source identity pins are incomplete")
+    expected = {
+        "native_connector_source": ("path", "sha256"),
+        "public_contract": ("canonical_json_sha256", "path"),
+    }
+    for name, keys in expected.items():
+        record = identities.get(name)
+        if not isinstance(record, dict) or set(record) != set(keys):
+            raise AssertionError(f"current 0.3 {name} identity is malformed")
+        path = record.get("path")
+        if (
+            not isinstance(path, str)
+            or pathlib.PurePosixPath(path).is_absolute()
+            or ".." in pathlib.PurePosixPath(path).parts
+        ):
+            raise AssertionError(f"current 0.3 {name} path is not repository-relative")
+        digest_key = next(key for key in keys if key != "path")
+        value = record.get(digest_key)
+        if not isinstance(value, str) or SHA256.fullmatch(value) is None:
+            raise AssertionError(f"current 0.3 {name} digest is not a lowercase SHA-256")
+    if identities["native_connector_source"]["path"] != "src/connector.cpp":
+        raise AssertionError("current 0.3 connector identity names the wrong source")
+    if identities["public_contract"]["path"] != "release/0.3.0/public_contract.json":
+        raise AssertionError("current 0.3 public contract identity names the wrong source")
     return identities
 
 
@@ -156,13 +189,37 @@ def verify(root: pathlib.Path = ROOT) -> dict[str, str]:
     version = current_extension_version(root)
     pins, public_contract = release_record(root, version)
     validate_project(pins, version)
-    identities = validate_identities(pins)
     duckdb = validate_duckdb(pins, public_contract)
     if public_contract.get("extension") != ["duckdb_api", version]:
         raise AssertionError("current public contract names a different extension identity")
 
     historical_contract = validate_historical_contract(root)
     validate_preserved_behavior(version, public_contract, historical_contract)
+
+    if version == "0.3.0":
+        identities = validate_current_identities(pins)
+        connector = identities["native_connector_source"]
+        connector_path = root / connector["path"]
+        actual_connector = digest(connector_path)
+        if actual_connector != connector["sha256"]:
+            raise AssertionError(
+                "native connector source digest does not match the current release pin"
+            )
+        public_identity = identities["public_contract"]
+        actual_public_contract = canonical_digest(public_contract)
+        if actual_public_contract != public_identity["canonical_json_sha256"]:
+            raise AssertionError(
+                "current public contract digest does not match the release pin"
+            )
+        return {
+            "duckdb_commit": duckdb["commit"],
+            "duckdb_version": duckdb["version"],
+            "native_connector_source_sha256": actual_connector,
+            "public_contract_sha256": actual_public_contract,
+            "version": version,
+        }
+
+    identities = validate_legacy_identities(pins)
 
     expected = identities
     actual_fixture = digest(root / "fixtures/example/items.json")

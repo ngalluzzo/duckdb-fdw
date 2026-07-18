@@ -5,6 +5,72 @@ set(EXTENSION_NAME ${TARGET_NAME}_extension)
 
 project(${TARGET_NAME})
 
+if(NOT APPLE)
+  message(FATAL_ERROR "duckdb_api 0.3.0 supports only the pinned macOS arm64 cell")
+endif()
+
+find_program(DUCKDB_API_XCRUN xcrun REQUIRED)
+execute_process(
+  COMMAND "${DUCKDB_API_XCRUN}" --sdk macosx --show-sdk-path
+  RESULT_VARIABLE DUCKDB_API_XCRUN_RESULT
+  OUTPUT_VARIABLE DUCKDB_API_XCRUN_SDK_ROOT
+  ERROR_VARIABLE DUCKDB_API_XCRUN_ERROR
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT DUCKDB_API_XCRUN_RESULT EQUAL 0 OR DUCKDB_API_XCRUN_SDK_ROOT STREQUAL "")
+  message(FATAL_ERROR "xcrun could not derive the macOS SDK: ${DUCKDB_API_XCRUN_ERROR}")
+endif()
+get_filename_component(DUCKDB_API_SDK_ROOT "${DUCKDB_API_XCRUN_SDK_ROOT}" REALPATH)
+if(DEFINED DUCKDB_API_VERIFIED_SDK_ROOT)
+  get_filename_component(
+    DUCKDB_API_CALLER_SDK_ROOT "${DUCKDB_API_VERIFIED_SDK_ROOT}" REALPATH)
+  if(NOT DUCKDB_API_CALLER_SDK_ROOT STREQUAL DUCKDB_API_SDK_ROOT)
+    message(FATAL_ERROR
+            "verified SDK does not match xcrun: ${DUCKDB_API_CALLER_SDK_ROOT} != ${DUCKDB_API_SDK_ROOT}")
+  endif()
+endif()
+
+# The 0.3.0 cell consumes only the verified SDK headers and text stub. Disabling
+# curl's config-package mode prevents an ambient Homebrew or package-manager
+# installation from replacing those inputs before FindCURL creates its target.
+set(CURL_NO_CURL_CMAKE ON CACHE BOOL "Disable ambient curl config packages" FORCE)
+set(CURL_INCLUDE_DIR "${DUCKDB_API_SDK_ROOT}/usr/include" CACHE PATH
+    "Verified macOS SDK curl include directory" FORCE)
+set(CURL_LIBRARY "${DUCKDB_API_SDK_ROOT}/usr/lib/libcurl.4.tbd" CACHE FILEPATH
+    "Verified macOS SDK curl text stub" FORCE)
+find_package(CURL 8.7.1 EXACT REQUIRED)
+if(DEFINED CURL_VERSION)
+  set(DUCKDB_API_CURL_VERSION "${CURL_VERSION}")
+else()
+  set(DUCKDB_API_CURL_VERSION "${CURL_VERSION_STRING}")
+endif()
+if(NOT DUCKDB_API_CURL_VERSION STREQUAL "8.7.1")
+  message(FATAL_ERROR "configured libcurl version drifted: ${DUCKDB_API_CURL_VERSION}")
+endif()
+get_target_property(
+  DUCKDB_API_CURL_LOCATION CURL::libcurl IMPORTED_LOCATION)
+if(NOT DUCKDB_API_CURL_LOCATION STREQUAL CURL_LIBRARY)
+  message(FATAL_ERROR
+          "CURL::libcurl resolved outside the verified SDK stub: ${DUCKDB_API_CURL_LOCATION}")
+endif()
+get_target_property(
+  DUCKDB_API_CURL_INCLUDE_DIRS CURL::libcurl INTERFACE_INCLUDE_DIRECTORIES)
+list(LENGTH DUCKDB_API_CURL_INCLUDE_DIRS DUCKDB_API_CURL_INCLUDE_COUNT)
+if(NOT DUCKDB_API_CURL_INCLUDE_COUNT EQUAL 1 OR
+   NOT DUCKDB_API_CURL_INCLUDE_DIRS STREQUAL CURL_INCLUDE_DIR)
+  message(FATAL_ERROR
+          "CURL::libcurl includes resolved outside the verified SDK: ${DUCKDB_API_CURL_INCLUDE_DIRS}")
+endif()
+file(
+  WRITE "${CMAKE_CURRENT_BINARY_DIR}/duckdb_api_native_dependencies.json"
+  "{\n"
+  "  \"curl_include_dir\": \"${DUCKDB_API_CURL_INCLUDE_DIRS}\",\n"
+  "  \"curl_library\": \"${DUCKDB_API_CURL_LOCATION}\",\n"
+  "  \"curl_no_curl_cmake\": true,\n"
+  "  \"curl_target\": \"CURL::libcurl\",\n"
+  "  \"curl_version\": \"${DUCKDB_API_CURL_VERSION}\",\n"
+  "  \"sdk_root\": \"${DUCKDB_API_SDK_ROOT}\"\n"
+  "}\n")
+
 find_package(Threads REQUIRED)
 
 include_directories(src/include)

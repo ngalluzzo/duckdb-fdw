@@ -1,7 +1,7 @@
 # Environment and dependency bootstrap for the native developer cell.
 # This file is sourced by scripts/native-dev.sh.
 
-readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.1.0/pins.json"
+readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.3.0/pins.json"
 readonly REQUIREMENTS_FILE="${REPOSITORY_ROOT}/test/python/requirements-macos-py314.txt"
 readonly DEFAULT_DEV_ROOT="${REPOSITORY_ROOT}/.build/dev"
 readonly TEMPLATE_URL="https://github.com/duckdb/extension-template.git"
@@ -34,11 +34,14 @@ readonly CMAKE_SHA256="$(pin_value tools.cmake_macos_universal.sha256)"
 readonly NINJA_URL="$(pin_value tools.ninja_macos.url)"
 readonly NINJA_SHA256="$(pin_value tools.ninja_macos.sha256)"
 readonly EXPECTED_HOST="$(pin_value product_cell.host)"
+readonly EXPECTED_HOST_BUILD="$(pin_value product_cell.host_build)"
 readonly EXPECTED_ARCHITECTURE="$(pin_value product_cell.architecture)"
 readonly EXPECTED_COMPILER="$(pin_value product_cell.compiler)"
 readonly EXPECTED_CMAKE="$(pin_value product_cell.cmake)"
 readonly EXPECTED_NINJA="$(pin_value product_cell.ninja)"
 readonly DUCKDB_PLATFORM="$(pin_value product_cell.duckdb_platform)"
+readonly EXPECTED_SDK_VERSION="$(pin_value system_dependencies.macos_sdk.version)"
+readonly EXPECTED_SDK_BUILD="$(pin_value system_dependencies.macos_sdk.build_version)"
 
 readonly DEV_ROOT="$(python3 -I -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' \
     "${DUCKDB_API_DEV_ROOT:-${DEFAULT_DEV_ROOT}}")"
@@ -56,6 +59,11 @@ readonly PYTHON_ENV="${DEV_ROOT}/python-${DUCKDB_VERSION}"
 readonly PINNED_PYTHON="${PYTHON_ENV}/bin/python3"
 readonly PYTHON_REQUIREMENTS_STATE="${PYTHON_ENV}/.requirements.sha256"
 readonly SOURCE_STATE="${DEV_ROOT}/source-state.sha256"
+readonly OBSERVED_DEPENDENCIES="${DEV_ROOT}/observed-dependencies.json"
+
+SDK_ROOT=""
+SDK_CURL_INCLUDE_DIR=""
+SDK_CURL_LIBRARY=""
 
 LOCK_HELD=0
 TEMP_ROOTS=()
@@ -130,7 +138,10 @@ verify_host() {
     local actual_compiler
     local actual_host
     local actual_python
-    for command in c++ curl git make nm python3 rsync shasum strings sw_vers tar unzip; do
+    local actual_host_build
+    local actual_sdk_build
+    local actual_sdk_version
+    for command in c++ curl git make nm python3 rsync shasum strings sw_vers tar unzip xcrun; do
         require_command "${command}"
     done
     if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "${EXPECTED_ARCHITECTURE}" ]]; then
@@ -140,6 +151,11 @@ verify_host() {
     actual_host="macOS $(sw_vers -productVersion)"
     if [[ "${actual_host}" != "${EXPECTED_HOST}" ]]; then
         echo "native developer cell requires ${EXPECTED_HOST}; found ${actual_host}" >&2
+        exit 1
+    fi
+    actual_host_build="$(sw_vers -buildVersion)"
+    if [[ "${actual_host_build}" != "${EXPECTED_HOST_BUILD}" ]]; then
+        echo "native developer cell requires host build ${EXPECTED_HOST_BUILD}; found ${actual_host_build}" >&2
         exit 1
     fi
     actual_python="$(python3 -I -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
@@ -152,6 +168,16 @@ verify_host() {
         echo "native developer cell requires ${EXPECTED_COMPILER}; found ${actual_compiler}" >&2
         exit 1
     fi
+    SDK_ROOT="$(xcrun --sdk macosx --show-sdk-path)"
+    actual_sdk_version="$(xcrun --sdk macosx --show-sdk-version)"
+    actual_sdk_build="$(xcrun --sdk macosx --show-sdk-build-version)"
+    local verified
+    verified="$(python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
+        inputs "${PINS_FILE}" "${SDK_ROOT}" "${actual_host#macOS }" "${actual_host_build}" \
+        "$(uname -m)" "${actual_sdk_version}" "${actual_sdk_build}")"
+    SDK_ROOT="$(python3 -I -c 'import json,sys; print(json.loads(sys.argv[1])["sdk_root"])' "${verified}")"
+    SDK_CURL_INCLUDE_DIR="${SDK_ROOT}/$(pin_value system_dependencies.macos_sdk.curl_include_dir)"
+    SDK_CURL_LIBRARY="${SDK_ROOT}/$(pin_value system_dependencies.macos_sdk.curl_stub)"
 }
 
 download_verified() {
@@ -272,6 +298,9 @@ bootstrap_template() {
     fi
     assert_clean_checkout "${TEMPLATE_ROOT}/duckdb" "DuckDB"
     assert_clean_checkout "${TEMPLATE_ROOT}/extension-ci-tools" "extension CI tools"
+    python3 -I "${REPOSITORY_ROOT}/scripts/write-observed-dependencies.py" \
+        "${REPOSITORY_ROOT}" "${TEMPLATE_ROOT}" "${PINS_FILE}" \
+        "${OBSERVED_DEPENDENCIES}" >/dev/null
 }
 
 bootstrap_python() {

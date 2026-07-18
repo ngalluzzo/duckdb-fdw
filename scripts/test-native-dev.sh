@@ -145,7 +145,7 @@ import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1])
-pins = json.loads((root / "release/0.1.0/pins.json").read_text())
+pins = json.loads((root / "release/0.3.0/pins.json").read_text())
 scripts = "\n".join(
     path.read_text()
     for path in (
@@ -166,16 +166,24 @@ identities = [
 identities.extend(tool[field] for tool in pins["tools"].values() for field in ("url", "sha256"))
 duplicated = [value for value in identities if value in scripts]
 if duplicated:
-    raise SystemExit(f"native developer script duplicated release identities: {duplicated!r}")
+    raise SystemExit(f"native developer script duplicated current identities: {duplicated!r}")
 for path in (
     "dependencies.duckdb.commit",
     "dependencies.extension_ci_tools.commit",
     "dependencies.extension_template.commit",
     "tools.cmake_macos_universal.sha256",
     "tools.ninja_macos.sha256",
+    "system_dependencies.macos_sdk.version",
+    "system_dependencies.macos_sdk.build_version",
 ):
     if path not in scripts:
         raise SystemExit(f"native developer script does not read required pin: {path}")
+if "release/0.3.0/pins.json" not in scripts:
+    raise SystemExit("native developer workflow does not select current 0.3 pins")
+if "release/0.1.0/pins.json" in scripts:
+    raise SystemExit("native developer workflow reads historical 0.1 pins")
+if "verify-native-dependencies.py" not in scripts:
+    raise SystemExit("native developer workflow omits dependency verification")
 PY
 
 bash -n "${REPOSITORY_ROOT}/scripts/native-dev.sh"

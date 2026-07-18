@@ -187,7 +187,7 @@ class NativeDependencyTests(unittest.TestCase):
     def test_configuration_requires_exact_sdk_paths_and_find_mode(self) -> None:
         observed = verify_inputs(self.pins, self.sdk)
         record = {
-            "curl_include_dir": observed["curl_header_root"],
+            "curl_include_dir": str(self.sdk.resolve() / "usr/include"),
             "curl_library": observed["curl_library"],
             "curl_no_curl_cmake": True,
             "curl_target": "CURL::libcurl",

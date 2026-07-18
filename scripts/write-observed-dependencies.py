@@ -15,14 +15,27 @@ def git(repository: pathlib.Path, revision: str) -> str:
 
 
 def main() -> int:
-    if len(sys.argv) != 4:
+    if len(sys.argv) not in (4, 5):
         raise SystemExit(
-            "usage: write-observed-dependencies.py REPOSITORY TEMPLATE_ROOT OUTPUT"
+            "usage: write-observed-dependencies.py REPOSITORY TEMPLATE_ROOT "
+            "[PINS_JSON] OUTPUT"
         )
     repository = pathlib.Path(sys.argv[1]).resolve(strict=True)
     template = pathlib.Path(sys.argv[2]).resolve(strict=True)
-    output = pathlib.Path(sys.argv[3]).resolve()
-    pins = json.loads((repository / "release/0.1.0/pins.json").read_text())
+    if len(sys.argv) == 4:
+        # The original three-argument interface is part of the 0.1 release and
+        # sanitizer evidence contract. Current native workflows must name their
+        # pins explicitly instead of changing this historical default.
+        pins_path = repository / "release/0.1.0/pins.json"
+        output = pathlib.Path(sys.argv[3]).resolve()
+    else:
+        pins_path = pathlib.Path(sys.argv[3]).resolve(strict=True)
+        try:
+            pins_path.relative_to(repository)
+        except ValueError as error:
+            raise AssertionError("dependency pins must be inside the repository") from error
+        output = pathlib.Path(sys.argv[4]).resolve()
+    pins = json.loads(pins_path.read_text())
     observed = json.loads(json.dumps(pins["dependencies"]))
     roots = {
         "extension_template": template,
