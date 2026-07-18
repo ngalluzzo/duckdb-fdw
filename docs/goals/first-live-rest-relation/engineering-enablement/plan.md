@@ -9,16 +9,12 @@ the product outcome. Remote Runtime owns libcurl lifecycle and network behavior;
 Enablement owns only the reusable build and evidence service that proves the
 declared dependency reached the intended targets and no others.
 
-This workstream begins with this plan only. Root CMake composition and gate
-implementation wait for the final committed Connector, Relational Semantics,
-Remote Runtime, and Query source inventories. Enablement will not guess target
-membership from the experiment or introduce compatibility shims around an
-unfinished provider interface.
-
-The branch is `goal/0.3-live-rest/enablement` in the isolated
-`.worktrees/first-live-rest/enablement` worktree. Provider commits are consumed
-unchanged in the order selected by the lead agent; this workstream does not
-rewrite their history or edit their owned source.
+Status: **Satisfied on `main`**. Commit `f834eb0` integrates the final Connector,
+Relational Semantics, Remote Runtime, and Query inventories into the permanent
+graph after Query's direct-load diagnostic correction in `ba389a9`. The
+Enablement integration changed only the root build and evidence service; it did
+not edit provider-owned source or introduce compatibility shims around those
+interfaces.
 
 ## Owned build and evidence files
 
@@ -42,11 +38,10 @@ rewrite their history or edit their owned source.
 | `docs/goals/first-live-rest-relation/engineering-enablement/plan.md` | Record this bounded facilitation, ownership, evidence, and exit contract |
 
 The exact source lists inside `CMakeLists.txt`, the controlled artifact target,
-and the source-identity input paths are integration facts, not decisions for
-this planning commit. They are filled from the final provider and Query
-commits. No file under `src/`, provider-owned `test/cpp` or `test/python`
-support, examples, `release/0.3.0/public_contract.json`, or shared architecture,
-connector, and runtime contracts is owned here.
+and the source-identity input paths are integration facts supplied by the final
+provider and Query commits. No file under `src/`, provider-owned `test/cpp` or
+`test/python` support, examples, `release/0.3.0/public_contract.json`, or shared
+architecture, connector, and runtime contracts is owned here.
 
 ## Receiving teams and dependency direction
 
@@ -104,7 +99,7 @@ other ambient curl selection. The OS trust store and platform TLS
 implementation remain declared cell inputs; no claim is made that their bytes
 are redistributed or independently frozen.
 
-The current native build scripts may gain a current-product pin reader, but the
+The current native build scripts select the current-product pins, while the
 historical `release_pin` service and all `0.1.0` release and sanitizer commands
 remain bound to `release/0.1.0/pins.json`. The native developer and fresh
 product paths do not add vcpkg, FetchContent, vendored curl/TLS sources, or a
@@ -112,20 +107,21 @@ second dependency manager.
 
 ## Build composition and artifact custody
 
-Once final inventories are available, `CMakeLists.txt` will:
+The integrated `CMakeLists.txt`:
 
-1. keep Connector, planning, Remote Runtime, Query composition/adapter, test
+1. keeps Connector, planning, Remote Runtime, Query composition/adapter, test
    support, and private controlled entry points in distinct source groups;
-2. link `CURL::libcurl` only to targets that contain the production curl
+2. links `CURL::libcurl` only to targets that contain the production curl
    transport, the Runtime-owned curl tests, the private controlled artifact
    when it exercises that transport, and the native dependency identity probe;
-3. prove Connector/planner/adapter-fake-only targets remain curl-free;
-4. build one installed `duckdb_api` artifact from only the production entry
+3. verifies that Connector, planner, execution-with-fake-transport, and
+   adapter-with-fake-runtime targets remain curl-free;
+4. builds one installed `duckdb_api` artifact from only the production entry
    point and product composition;
-5. build the controlled entry point as a separately named, non-installable
+5. builds the controlled entry point as a separately named, non-installable
    test artifact with an unambiguous path that cannot replace the public
    artifact; and
-6. install and report only the permanent `duckdb_api` extension.
+6. installs and reports only the permanent `duckdb_api` extension.
 
 The CMake configure result records the imported target's include directory,
 library/stub path, and version. The post-build verifier compares those values
@@ -136,7 +132,8 @@ no libcurl linkage.
 
 ## Drift canaries and acceptance evidence
 
-Deterministic gate tests must prove failure for:
+The deterministic dependency, linkage, source-identity, and inventory gates
+cover failure for:
 
 - a changed host build, SDK version, curl header set or bytes, stub bytes or
   link target, configured curl version, SDK-relative path, artifact install
@@ -167,11 +164,11 @@ direct-load contract. Source, fixture, build, dependency, or release-evidence
 changes require both the fast source/dependency identity checks and that fresh
 gate under `AGENTS.md`.
 
-Implementation completion additionally requires the documentation/agent
-asset validator, working- and cached-diff whitespace checks, focused
-dependency-gate tests, the ordinary developer commands, a fresh product root,
-and an audit of the final CMake target/link dependency graph. Exact public
-GitHub rows and order are never gate inputs.
+Completion evidence includes the documentation/agent asset validator, working-
+and cached-diff whitespace checks, focused dependency-gate tests, the ordinary
+developer commands, a fresh product root, and an audit of the final CMake
+target/link dependency graph. Exact public GitHub rows and order are not gate
+inputs.
 
 ## No-publication boundary
 
@@ -189,24 +186,43 @@ this facilitation cannot silently authorize them.
 
 ## Facilitation exit
 
-The interaction remains **Open** until final implementation evidence shows:
+The interaction is **Satisfied**. The permanent graph and evidence demonstrate
+the recorded self-sufficiency conditions:
 
-- Remote Runtime can add or maintain a transport-bearing target and diagnose
-  dependency/lifecycle gate failures without Enablement editing runtime code;
-- Query Experience can build, test, inventory, and demonstrate the permanent
-  and private artifacts through the stable Make commands without learning
-  SDK, curl, transport, or dependency-verifier internals;
-- Connector and Relational focused targets remain independently buildable and
-  curl-free, with their source identities consumed rather than recreated by
-  the gate;
-- every dependency and artifact drift canary fails before unsupported bytes or
-  authority can be accepted, while the selected cell passes both reusable and
-  fresh paths; and
-- the final source, include, target-link, install, test, and evidence
-  dependencies match this responsibility map and no ordinary delivery step
-  requires Enablement approval.
+- Remote Runtime's transport, budget, lifecycle, and TLS targets compile from
+  its owned sources and support, link through the declared transport class, and
+  carry the private curl observer only in the focused target authorized to use
+  it. The public artifact, private controlled product, and static CLI all pass
+  the negative observer check.
+- Query Experience's public and controlled entry points run through the stable
+  `make test` command, and its live public example runs through `make demo`.
+  The controlled artifact is emitted only at
+  `build/debug/private/duckdb_api_controlled.duckdb_extension`; both reusable
+  and fresh paths reject it if it enters DuckDB's install repository.
+- Connector, scan request, scan planner, scan-plan contract, execution
+  contract, network policy, JSON decoder, HTTP executor, and adapter targets
+  remain independently executable. The build service verifies the non-curl
+  target set as `curl-free` and consumes the committed Connector and public
+  contract identities rather than reconstructing them.
+- The reusable `make build`, `make test`, and `make demo` commands passed on the
+  integrated tree. The cached suite included 11 dependency-verifier tests, all
+  focused C++ and TLS oracles, 25 SQLLogicTest assertions, the public artifact
+  inventory, the controlled product's 20-request oracle, and the live public
+  compatibility example.
+- Fresh `make verify PROFILE=debug` passed with
+  `developer_cache_reused=false` in a new root. It rebuilt 618 targets, repeated
+  dependency identity and linkage classification, canary isolation, focused
+  tests, TLS probes, SQLLogicTests, public direct-load inventory, the controlled
+  oracle, and the live example. It produced public artifact SHA-256
+  `55371437224cee67a71f3b548643de35ce149c9f94626c25fc071a44c61f9182`
+  and controlled artifact SHA-256
+  `8813dff1d2a815a27bacf74c6c08012262f6126e57176e998318c88bcdb2663e`.
+- The verified delivery head and `main` at `f834eb0` share exact Git tree
+  `f9f11018fa4671faa213ff9999adc9c7c72e9689`, so the fresh evidence covers the
+  integrated source, include, target-link, install, test, and evidence graph.
+  Independent re-review reported no remaining graph findings.
 
-When those conditions are demonstrated, ownership of the domain oracles and
-normal gate operation returns to the receiving teams. Enablement retains the
-small reusable build and identity service but does not become the release
-decision owner, runtime quality owner, or permanent approval queue.
+Ownership of domain oracles and normal gate operation has returned to the
+receiving teams. Enablement retains the small reusable build and identity
+service but is not the release decision owner, runtime quality owner, or a
+permanent approval queue.
