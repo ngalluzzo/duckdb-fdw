@@ -21,20 +21,25 @@ def git(repository: pathlib.Path, revision: str) -> str:
 
 
 def main() -> int:
-    if len(sys.argv) != 5:
+    if len(sys.argv) != 8:
         raise SystemExit(
             "usage: write-sanitizer-envelope.py REPOSITORY EVIDENCE_ROOT "
-            "DOCKER_INSPECT_JSON OUTPUT"
+            "DOCKER_INSPECT_JSON DOCKER_INFO_JSON DOCKER_CONTEXT "
+            "DOCKER_ENDPOINT OUTPUT"
         )
     repository = pathlib.Path(sys.argv[1]).resolve(strict=True)
     evidence = pathlib.Path(sys.argv[2]).resolve(strict=True)
     inspect_path = pathlib.Path(sys.argv[3]).resolve(strict=True)
-    output = pathlib.Path(sys.argv[4]).resolve()
+    daemon_path = pathlib.Path(sys.argv[4]).resolve(strict=True)
+    context = sys.argv[5]
+    endpoint = sys.argv[6]
+    output = pathlib.Path(sys.argv[7]).resolve()
     pins = json.loads((repository / "release/0.1.0/pins.json").read_text())
     image = json.loads(inspect_path.read_text())
     if not isinstance(image, list) or len(image) != 1:
         raise AssertionError("Docker inspect did not return exactly one image")
     record = image[0]
+    daemon = json.loads(daemon_path.read_text())
     required_image = pins["sanitizer_cell"]["base_image"]
     required_digest = required_image.split("@", 1)[1]
     repo_digests = record.get("RepoDigests", [])
@@ -44,6 +49,10 @@ def main() -> int:
         raise AssertionError("inspected Docker image platform drifted")
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         raise AssertionError("sanitizer envelope requires a native Linux x86_64 host")
+    if context != "default" or not endpoint.startswith("unix://"):
+        raise AssertionError("sanitizer envelope requires the local default Docker context")
+    if daemon.get("OSType") != "linux" or daemon.get("Architecture") != "x86_64":
+        raise AssertionError("sanitizer envelope requires a Linux x86_64 Docker daemon")
 
     manifest = evidence / "manifest.json"
     artifact = evidence / "duckdb_api.duckdb_extension"
@@ -59,8 +68,12 @@ def main() -> int:
             "tag": tag,
         },
         "executor": {
-            "host_os": platform.system(),
-            "host_architecture": platform.machine(),
+            "client_host_os": platform.system(),
+            "client_host_architecture": platform.machine(),
+            "docker_context": context,
+            "docker_endpoint": endpoint,
+            "daemon_os": daemon["OSType"],
+            "daemon_architecture": daemon["Architecture"],
             "container_platform": pins["sanitizer_cell"]["platform"],
         },
         "image": {

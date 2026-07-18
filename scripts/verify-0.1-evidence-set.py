@@ -123,12 +123,18 @@ def main() -> int:
     if envelope.get("cell") != pins["sanitizer_cell"]["name"]:
         raise AssertionError("sanitizer launcher cell drifted")
     executor = envelope["executor"]
-    if executor != {
-        "host_os": "Linux",
-        "host_architecture": "x86_64",
-        "container_platform": pins["sanitizer_cell"]["platform"],
-    }:
-        raise AssertionError("sanitizer launcher did not record native Linux x86_64")
+    if (
+        executor.get("client_host_os") != "Linux"
+        or executor.get("client_host_architecture") != "x86_64"
+        or executor.get("docker_context") != "default"
+        or not executor.get("docker_endpoint", "").startswith("unix://")
+        or executor.get("daemon_os") != "linux"
+        or executor.get("daemon_architecture") != "x86_64"
+        or executor.get("container_platform") != pins["sanitizer_cell"]["platform"]
+    ):
+        raise AssertionError(
+            "sanitizer launcher did not record a local native Linux x86_64 daemon"
+        )
     image = envelope["image"]
     required_image = pins["sanitizer_cell"]["base_image"]
     required_digest = required_image.split("@", 1)[1]

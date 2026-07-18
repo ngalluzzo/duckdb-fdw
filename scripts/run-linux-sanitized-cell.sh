@@ -39,6 +39,7 @@ readonly SOURCE_TREE="$(git -C "${CALLER_REPOSITORY}" rev-parse 'HEAD^{tree}')"
 readonly SNAPSHOT_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/duckdb-api-sanitizer-source.XXXXXX")"
 readonly SOURCE_SNAPSHOT="${SNAPSHOT_PARENT}/source"
 readonly INSPECT_RECORD="${SNAPSHOT_PARENT}/docker-image-inspect.json"
+readonly DAEMON_RECORD="${SNAPSHOT_PARENT}/docker-daemon-info.json"
 trap 'rm -rf "${SNAPSHOT_PARENT}"' EXIT
 release_materialize_snapshot "${CALLER_REPOSITORY}" "${SOURCE_COMMIT}" "${SOURCE_SNAPSHOT}"
 if [[ "$(git -C "${SOURCE_SNAPSHOT}" rev-parse 'HEAD^{tree}')" != "${SOURCE_TREE}" ]]; then
@@ -46,6 +47,32 @@ if [[ "$(git -C "${SOURCE_SNAPSHOT}" rev-parse 'HEAD^{tree}')" != "${SOURCE_TREE
     exit 1
 fi
 "${SOURCE_SNAPSHOT}/scripts/release-source-guard.sh" "${SNAPSHOT_PARENT}/unused-build"
+
+if [[ -n "${DOCKER_HOST:-}" || -n "${DOCKER_CONTEXT:-}" ]]; then
+    echo "authoritative sanitizer evidence rejects Docker endpoint overrides" >&2
+    exit 1
+fi
+readonly DOCKER_CONTEXT_NAME="$(docker context show)"
+if [[ "${DOCKER_CONTEXT_NAME}" != "default" ]]; then
+    echo "authoritative sanitizer evidence requires the default Docker context" >&2
+    exit 1
+fi
+readonly DOCKER_ENDPOINT="$(docker context inspect --format \
+    '{{(index .Endpoints "docker").Host}}' "${DOCKER_CONTEXT_NAME}")"
+case "${DOCKER_ENDPOINT}" in
+    unix://*) ;;
+    *)
+        echo "authoritative sanitizer evidence requires a local Unix-socket Docker daemon" >&2
+        exit 1
+        ;;
+esac
+docker info --format '{{json .}}' >"${DAEMON_RECORD}"
+readonly DAEMON_OS="$(docker info --format '{{.OSType}}')"
+readonly DAEMON_ARCHITECTURE="$(docker info --format '{{.Architecture}}')"
+if [[ "${DAEMON_OS}" != "linux" || "${DAEMON_ARCHITECTURE}" != "x86_64" ]]; then
+    echo "authoritative sanitizer evidence requires a Linux x86_64 Docker daemon" >&2
+    exit 1
+fi
 
 docker pull --platform "${PLATFORM}" "${IMAGE}" >/dev/null
 docker image inspect "${IMAGE}" >"${INSPECT_RECORD}"
@@ -81,7 +108,8 @@ python3 -I "${SOURCE_SNAPSHOT}/scripts/verify-sanitizer-manifest.py" \
     "${OUTPUT_ROOT}/duckdb_api.duckdb_extension" "${OUTPUT_ROOT}/compile_commands.json" \
     "${OUTPUT_ROOT}/sanitizer-flags.txt"
 python3 -I "${SOURCE_SNAPSHOT}/scripts/write-sanitizer-envelope.py" \
-    "${SOURCE_SNAPSHOT}" "${OUTPUT_ROOT}" "${INSPECT_RECORD}" "${OUTPUT_ROOT}/envelope.json"
+    "${SOURCE_SNAPSHOT}" "${OUTPUT_ROOT}" "${INSPECT_RECORD}" "${DAEMON_RECORD}" \
+    "${DOCKER_CONTEXT_NAME}" "${DOCKER_ENDPOINT}" "${OUTPUT_ROOT}/envelope.json"
 sha256sum "${OUTPUT_ROOT}/envelope.json" >"${OUTPUT_ROOT}/envelope.sha256"
 chmod 0444 "${OUTPUT_ROOT}/envelope.json" "${OUTPUT_ROOT}/envelope.sha256"
 
