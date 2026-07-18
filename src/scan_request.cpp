@@ -31,13 +31,17 @@ std::string ScanRequest::Snapshot() const {
 	return result.str();
 }
 
-ScanRequest BuildConservativeScanRequest() {
+ScanRequest BuildConservativeScanRequest(const CompiledConnector &connector) {
 	ScanRequest result;
-	result.connector_name = "example";
-	result.relation_name = "items";
+	result.connector_name = connector.connector_name;
+	result.relation_name = connector.relation_name;
 	result.explicit_inputs.clear();
-	result.projected_columns = {"id", "name", "active"};
+	result.projected_columns.reserve(connector.columns.size());
+	for (const auto &column : connector.columns) {
+		result.projected_columns.push_back(column.name);
+	}
 	result.predicate = "TRUE";
+	result.orderings.clear();
 	result.has_limit = false;
 	result.has_offset = false;
 	result.capabilities = {false, false, false, false, false, false, true, false};

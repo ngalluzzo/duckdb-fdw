@@ -42,6 +42,7 @@ edited by this workstream.
 
 | Artifact | Query Experience responsibility |
 | --- | --- |
+| `test/cpp/scan_request_tests.cpp` | Provider-independent request identity, full-projection closure, conservative capability, determinism, and connector-derived-value oracles |
 | `test/cpp/duckdb_adapter_tests.cpp` | Provider-fake adapter oracles for offline bind, bind-data copy, schema, typed batches, cancellation/error translation, early close, connection destruction, repeated and concurrent scans, and DuckDB-owned relational operators |
 | `test/cpp/support/query_runtime_scenarios.hpp` and `.cpp` | DuckDB-free fake `ScanExecutor`/`BatchStream` implementations and lifecycle probes used only by adapter tests; no HTTP behavior or provider policy is recreated |
 | `test/cpp/support/controlled_product_composition.hpp` and `.cpp` | Private non-installable composition of the accepted controlled compiled snapshot, the public planner, and a Runtime-owned controlled executor service; Query does not construct a `ScanPlan` or import transport internals |

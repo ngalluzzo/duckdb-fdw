@@ -1,5 +1,7 @@
 #pragma once
 
+#include "duckdb_api/connector.hpp"
+
 #include <string>
 #include <vector>
 
@@ -38,6 +40,12 @@ struct ScanRequest {
 	std::string Snapshot() const;
 };
 
-ScanRequest BuildConservativeScanRequest();
+// Builds the accepted native adapter request from immutable connector
+// metadata. The current DuckDB profile exposes no relational scan metadata, so
+// the request carries the complete declared projection and conservative
+// unavailable values. This function performs no validation, I/O, environment
+// access, or SQL reconstruction; Relational Semantics validates the request
+// against the connector when constructing ScanPlan.
+ScanRequest BuildConservativeScanRequest(const CompiledConnector &connector);
 
 } // namespace duckdb_api
