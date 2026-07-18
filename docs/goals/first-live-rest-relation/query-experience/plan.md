@@ -47,19 +47,22 @@ edited by this workstream.
 | `test/cpp/support/query_runtime_scenarios.hpp` and `.cpp` | DuckDB-free fake `ScanExecutor`/`BatchStream` implementations and lifecycle probes used only by adapter tests; no HTTP behavior or provider policy is recreated |
 | `test/cpp/support/controlled_product_composition.hpp` and `.cpp` | Private non-installable composition of the accepted controlled compiled snapshot, the public planner, and a Runtime-owned controlled executor service; Query does not construct a `ScanPlan` or import transport internals |
 | `test/cpp/controlled_duckdb_api_extension.cpp` | Test-only DuckDB extension entry point that calls the same production registration/adapter code with the controlled composition |
-| `test/python/live_rest_product_contract.py` | Direct-load controlled-service oracle for exact request, rows, offline bind/prepare, immutable prepared authority, local relational ownership, failures, cancellation, recovery, and teardown |
+| `test/python/live_rest_product_contract.py` and `test/python/live_rest_product/` | Direct-load controlled-service runner with separate socket support, relational, and lifecycle responsibilities for exact request and rows, offline bind/prepare, immutable prepared authority, local relational ownership, failures, cancellation, recovery, and teardown |
 | `test/python/artifact_contract.py` and `test/python/source_demo_contract.py` | Installed `0.3.0` public inventory, absence of authority/test seams, direct-load identity, safe bind failures, and public GitHub compatibility demonstration |
 | `test/sql/duckdb_api.test` | Accepted dispatcher signature, version, static schema/bind behavior, and migration from the removed fixture identifiers without making public-service data a deterministic SQLLogicTest oracle |
 | `examples/first-live-rest-relation.sql` and `examples/first_live_rest_relation.py` | Source-built public GitHub query narrative with no exact public row identity or order claim |
 | `release/0.3.0/public_contract.json` | Machine-readable extension/function/identifier/schema/diagnostic inventory and explicit removal of `example.items` |
 
-The controlled server and its low-level transport observations remain Remote
-Runtime-owned test support. Query consumes a documented test-only factory that
-returns the public `ScanExecutor` service plus bounded observations; it does
-not include runtime-internal transport headers. The lead-owned build graph may
-compile the controlled entry point as a separate non-installable artifact, but
-the installed `duckdb_api` artifact is always built from the production entry
-point and composition.
+Query owns the black-box Python HTTP service and DuckDB-visible assertions for
+its user acceptance narrative. Remote Runtime separately owns the typed
+loopback composition internals, socket-policy observations, and low-level
+transport fixtures; the responsibility-specific harnesses share no production
+authority or implementation types. Query consumes Runtime's documented
+test-only factory as a public `ScanExecutor` service and does not include
+runtime-internal transport headers. The lead-owned build graph may compile the
+controlled entry point as a separate non-installable artifact, but the
+installed `duckdb_api` artifact is always built from the production entry point
+and composition.
 
 ## Provider dependencies and dependency direction
 

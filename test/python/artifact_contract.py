@@ -23,7 +23,11 @@ EXPECTED_SCHEMA = [
 FORBIDDEN_ARTIFACT_MARKERS = (
     b"127.0.0.1",
     b"BuildControlledHttpRuntime",
+    b"BuildControlledProductComposition",
+    b"BuildLoopbackCurlRuntime",
     b"controlled_duckdb_api",
+    b"duckdb_api_controlled",
+    b"DUCKDB_API_CONTROLLED_PORT",
     b"DUCKDB_API_CONNECTOR_PATH",
     b"DUCKDB_API_FIXTURE_SCENARIO",
     b"DUCKDB_API_LIVE_PROOF_AUTHORITY",
