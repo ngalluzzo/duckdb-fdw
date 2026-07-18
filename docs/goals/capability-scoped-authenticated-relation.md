@@ -144,6 +144,11 @@ becoming an empty result or anonymous fallback.
   enforcement, cancellation, cleanup, and redacted structured errors. Exit
   when DuckDB-free security/lifecycle tests pass and Query contains no auth
   decoration or Runtime internals.
+- Engineering Enablement — **Facilitation:** integrate the provider handoffs
+  into responsibility-specific build targets, the `0.4.0` source and release
+  identities, installed/private artifact inventories, and cached/fresh gates.
+  Exit when every provider can run and diagnose its own focused target and the
+  shared product gate without an Enablement approval queue.
 - RFC: RFC 0006 is Accepted with product approval and all required affected-
   team reviews recorded. Its contract propagation and acceptance evidence are
   completion requirements for this active goal.
