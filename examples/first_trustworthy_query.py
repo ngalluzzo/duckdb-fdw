@@ -10,7 +10,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.1.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.2.0", True, False, "NOT_INSTALLED")
 EXPECTED_SCHEMA = [("id", "BIGINT"), ("name", "VARCHAR"), ("active", "BOOLEAN")]
 EXPECTED_ROWS = [(1, "alpha", True), (2, "beta", False), (3, "gamma", True)]
 
@@ -45,7 +45,7 @@ def render_plain(summary: dict[str, object]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run the duckdb_api 0.1.0 first-query example."
+        description="Run the duckdb_api 0.2.0 source-build query example."
     )
     parser.add_argument("artifact", help="path to duckdb_api.duckdb_extension")
     parser.add_argument(

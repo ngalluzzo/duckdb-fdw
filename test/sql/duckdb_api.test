@@ -1,5 +1,5 @@
 # name: test/sql/duckdb_api.test
-# description: accepted duckdb_api 0.1.0 public SQL contract
+# description: accepted duckdb_api SQL contract preserved by 0.2.0
 # group: [duckdb_api]
 
 statement error
@@ -8,6 +8,13 @@ SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'items');
 Catalog Error: Table Function with name duckdb_api_scan does not exist!
 
 require duckdb_api
+
+query T
+SELECT extension_version
+FROM duckdb_extensions()
+WHERE extension_name = 'duckdb_api';
+----
+0.2.0
 
 query ITI
 SELECT id, name, active

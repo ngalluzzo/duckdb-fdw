@@ -1,0 +1,20 @@
+{
+  "project": {
+    "extension": "duckdb_api",
+    "tag": "v0.2.0",
+    "version": "0.2.0"
+  },
+  "dependencies": {
+    "duckdb": {
+      "commit": "08e34c447bae34eaee3723cac61f2878b6bdf787",
+      "git_describe": "v1.5.4-0-g08e34c447b",
+      "tree": "33c1f40f6421fd8f79912a6ce96722feca538c61",
+      "version": "1.5.4"
+    }
+  },
+  "identities": {
+    "compiled_connector_sha256": "a3f59ec862769f2e32b234500e9d95e002fb82d64fb0e4881560fb0980ce6072",
+    "fixture_sha256": "1b789738607ae9a74d24b07cacc09e98531c0de5ae9a822e78cabe9c8fc0eb39",
+    "public_contract_sha256": "bbba900cb94f6289c9282750ed6d15a5356f6c0de9aa00fa5ae3a0ed8e452160"
+  }
+}

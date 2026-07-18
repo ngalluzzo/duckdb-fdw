@@ -18,7 +18,7 @@ EXPECTED_SUMMARY = {
         "installed": False,
         "loaded": True,
         "name": "duckdb_api",
-        "version": "0.1.0",
+        "version": "0.2.0",
     },
     "rows": [[1, "alpha", True], [2, "beta", False], [3, "gamma", True]],
     "schema": [["id", "BIGINT"], ["name", "VARCHAR"], ["active", "BOOLEAN"]],

@@ -14,7 +14,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.1.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.2.0", True, False, "NOT_INSTALLED")
 EXPECTED_ROWS = [(1, "alpha", True), (2, "beta", False), (3, "gamma", True)]
 EXPECTED_SCHEMA = [("id", "BIGINT"), ("name", "VARCHAR"), ("active", "BOOLEAN")]
 
@@ -154,7 +154,7 @@ def main() -> int:
 
         behavior = {
             "duckdb": list(EXPECTED_DUCKDB[:2]),
-            "extension": ["duckdb_api", "0.1.0"],
+            "extension": ["duckdb_api", "0.2.0"],
             "function": {
                 "name": "duckdb_api_scan",
                 "named_parameters": {"connector": "VARCHAR", "relation": "VARCHAR"},

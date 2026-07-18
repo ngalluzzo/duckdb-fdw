@@ -1,0 +1,50 @@
+{
+  "added_settings": [],
+  "added_types": [],
+  "duckdb": [
+    "v1.5.4",
+    "08e34c447b"
+  ],
+  "extension": [
+    "duckdb_api",
+    "0.2.0"
+  ],
+  "function": {
+    "name": "duckdb_api_scan",
+    "named_parameters": {
+      "connector": "VARCHAR",
+      "relation": "VARCHAR"
+    }
+  },
+  "rows": [
+    [
+      1,
+      "alpha",
+      true
+    ],
+    [
+      2,
+      "beta",
+      false
+    ],
+    [
+      3,
+      "gamma",
+      true
+    ]
+  ],
+  "schema": [
+    [
+      "id",
+      "BIGINT"
+    ],
+    [
+      "name",
+      "VARCHAR"
+    ],
+    [
+      "active",
+      "BOOLEAN"
+    ]
+  ]
+}

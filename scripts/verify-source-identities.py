@@ -11,6 +11,11 @@ import sys
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+HISTORICAL_VERSION = "0.1.0"
+PRESERVED_BEHAVIOR_BASES = {"0.2.0": HISTORICAL_VERSION}
+GIT_ID = re.compile(r"[0-9a-f]{40}")
+SHA256 = re.compile(r"[0-9a-f]{64}")
+VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 
 
 def digest(path: pathlib.Path) -> str:
@@ -36,46 +41,148 @@ def embedded_fixture(header: str) -> bytes:
     return "".join(ast.literal_eval(literal) for literal in literals).encode()
 
 
-def main() -> int:
-    pins = json.loads((ROOT / "release/0.1.0/pins.json").read_text())
-    expected = pins["identities"]
-    actual_fixture = digest(ROOT / "fixtures/example/items.json")
-    actual_connector = digest(ROOT / "fixtures/example/compiled_connector.snapshot")
-    public_contract = json.loads(
-        (ROOT / "release/0.1.0/public_contract.json").read_text()
-    )
-    if actual_fixture != expected["fixture_sha256"]:
-        raise AssertionError("example fixture digest does not match the release pin")
-    if actual_connector != expected["compiled_connector_sha256"]:
-        raise AssertionError("compiled connector snapshot digest does not match the release pin")
-    if canonical_digest(public_contract) != expected["public_contract_sha256"]:
-        raise AssertionError("public contract digest does not match the release pin")
+def release_record(root: pathlib.Path, version: str) -> tuple[dict, dict]:
+    release_root = root / "release" / version
+    pins = json.loads((release_root / "pins.json").read_text())
+    public_contract = json.loads((release_root / "public_contract.json").read_text())
+    return pins, public_contract
 
-    embedded = (ROOT / "src/include/duckdb_api/embedded_example.hpp").read_text()
-    if embedded_fixture(embedded) != (ROOT / "fixtures/example/items.json").read_bytes():
+
+def current_extension_version(root: pathlib.Path) -> str:
+    extension_config = (root / "extension_config.cmake").read_text()
+    versions = re.findall(r'EXTENSION_VERSION\s+"([^"]+)"', extension_config)
+    if len(versions) != 1:
+        raise AssertionError(f"extension version sources drifted: {versions!r}")
+    version = versions[0]
+    if VERSION.fullmatch(version) is None:
+        raise AssertionError(f"current extension version is invalid: {version!r}")
+    return version
+
+
+def validate_project(pins: dict, version: str) -> None:
+    expected = {
+        "extension": "duckdb_api",
+        "tag": f"v{version}",
+        "version": version,
+    }
+    if pins.get("project") != expected:
+        raise AssertionError("current project identity does not match its release pins")
+
+
+def validate_duckdb(pins: dict, public_contract: dict) -> dict:
+    try:
+        duckdb = pins["dependencies"]["duckdb"]
+        commit = duckdb["commit"]
+        tree = duckdb["tree"]
+        version = duckdb["version"]
+        git_describe = duckdb["git_describe"]
+    except (KeyError, TypeError) as error:
+        raise AssertionError("current DuckDB identity is incomplete") from error
+    if (
+        set(duckdb) != {"commit", "git_describe", "tree", "version"}
+        or not isinstance(commit, str)
+        or GIT_ID.fullmatch(commit) is None
+        or not isinstance(tree, str)
+        or GIT_ID.fullmatch(tree) is None
+        or not isinstance(version, str)
+        or git_describe != f"v{version}-0-g{commit[:10]}"
+    ):
+        raise AssertionError("current DuckDB identity is malformed")
+    if public_contract.get("duckdb") != [f"v{version}", commit[:10]]:
+        raise AssertionError("current public contract names a different DuckDB identity")
+    return duckdb
+
+
+def validate_identities(pins: dict) -> dict:
+    identities = pins.get("identities")
+    expected_keys = {
+        "compiled_connector_sha256",
+        "fixture_sha256",
+        "public_contract_sha256",
+    }
+    if not isinstance(identities, dict) or set(identities) != expected_keys:
+        raise AssertionError("current source identity pins are incomplete")
+    if any(
+        not isinstance(value, str) or SHA256.fullmatch(value) is None
+        for value in identities.values()
+    ):
+        raise AssertionError("current source identity pin is not a lowercase SHA-256")
+    return identities
+
+
+def validate_historical_contract(root: pathlib.Path) -> dict:
+    historical_pins, historical_contract = release_record(root, HISTORICAL_VERSION)
+    try:
+        expected_digest = historical_pins["identities"]["public_contract_sha256"]
+    except (KeyError, TypeError) as error:
+        raise AssertionError("historical 0.1 public contract pin is missing") from error
+    if canonical_digest(historical_contract) != expected_digest:
+        raise AssertionError("historical 0.1 public contract digest does not match its pin")
+    if historical_contract.get("extension") != ["duckdb_api", HISTORICAL_VERSION]:
+        raise AssertionError("historical 0.1 public contract identity drifted")
+    return historical_contract
+
+
+def validate_preserved_behavior(
+    version: str, current_contract: dict, historical_contract: dict
+) -> None:
+    base_version = PRESERVED_BEHAVIOR_BASES.get(version)
+    if base_version is None:
+        return
+    expected = json.loads(json.dumps(historical_contract))
+    expected["extension"] = ["duckdb_api", version]
+    if current_contract != expected:
+        raise AssertionError(
+            f"{version} public behavior differs from {base_version} beyond extension version"
+        )
+
+
+def verify(root: pathlib.Path = ROOT) -> dict[str, str]:
+    version = current_extension_version(root)
+    pins, public_contract = release_record(root, version)
+    validate_project(pins, version)
+    identities = validate_identities(pins)
+    duckdb = validate_duckdb(pins, public_contract)
+    if public_contract.get("extension") != ["duckdb_api", version]:
+        raise AssertionError("current public contract names a different extension identity")
+
+    historical_contract = validate_historical_contract(root)
+    validate_preserved_behavior(version, public_contract, historical_contract)
+
+    expected = identities
+    actual_fixture = digest(root / "fixtures/example/items.json")
+    actual_connector = digest(root / "fixtures/example/compiled_connector.snapshot")
+    if actual_fixture != expected["fixture_sha256"]:
+        raise AssertionError("example fixture digest does not match the current release pin")
+    if actual_connector != expected["compiled_connector_sha256"]:
+        raise AssertionError(
+            "compiled connector snapshot digest does not match the current release pin"
+        )
+    if canonical_digest(public_contract) != expected["public_contract_sha256"]:
+        raise AssertionError("current public contract digest does not match the release pin")
+
+    embedded = (root / "src/include/duckdb_api/embedded_example.hpp").read_text()
+    if embedded_fixture(embedded) != (root / "fixtures/example/items.json").read_bytes():
         raise AssertionError("embedded fixture bytes drifted from the tracked fixture")
     for value in (actual_fixture, actual_connector):
         if value not in embedded:
             raise AssertionError(f"embedded identity is missing {value}")
 
-    extension_config = (ROOT / "extension_config.cmake").read_text()
-    versions = re.findall(r'EXTENSION_VERSION\s+"([^"]+)"', extension_config)
-    if versions != [pins["project"]["version"]]:
-        raise AssertionError(f"extension version sources drifted: {versions!r}")
-
-    snapshot = (ROOT / "fixtures/example/compiled_connector.snapshot").read_text()
+    snapshot = (root / "fixtures/example/compiled_connector.snapshot").read_text()
     if f"fixture={actual_fixture}\n" not in snapshot:
         raise AssertionError("compiled connector snapshot does not reference the fixture digest")
-    print(
-        json.dumps(
-            {
-                "compiled_connector_sha256": actual_connector,
-                "fixture_sha256": actual_fixture,
-                "version": pins["project"]["version"],
-            },
-            sort_keys=True,
-        )
-    )
+    return {
+        "compiled_connector_sha256": actual_connector,
+        "duckdb_commit": duckdb["commit"],
+        "duckdb_version": duckdb["version"],
+        "fixture_sha256": actual_fixture,
+        "public_contract_sha256": expected["public_contract_sha256"],
+        "version": version,
+    }
+
+
+def main() -> int:
+    print(json.dumps(verify(), sort_keys=True))
     return 0
 
 
