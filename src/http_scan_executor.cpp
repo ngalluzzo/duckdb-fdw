@@ -8,12 +8,16 @@
 #include <cstddef>
 #include <memory>
 #include <new>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace duckdb_api {
 namespace internal {
 namespace {
+
+static_assert(std::is_nothrow_move_assignable<TypedBatch>::value,
+              "batch ownership transfer must not fail after rows are committed");
 
 bool HasExpectedColumns(const std::vector<PlannedColumn> &columns) {
 	return columns.size() == 3 && columns[0].name == "id" && columns[0].logical_type == "BIGINT" &&
@@ -176,10 +180,10 @@ public:
 			return false;
 		}
 		TypedBatch produced;
-		produced.column_kinds = {ValueKind::BIGINT, ValueKind::VARCHAR, ValueKind::BOOLEAN};
 		const auto remaining = decoded.size() - offset;
 		const auto count = std::min(remaining, static_cast<std::size_t>(plan.Budgets().batch_rows));
 		try {
+			produced.column_kinds = {ValueKind::BIGINT, ValueKind::VARCHAR, ValueKind::BOOLEAN};
 			produced.rows.reserve(count);
 			for (std::size_t index = 0; index < count; index++) {
 				CheckCancellation(combined);
@@ -263,8 +267,17 @@ std::shared_ptr<const ScanExecutor> BuildHttpScanExecutor(std::unique_ptr<HttpTr
 	if (!transport) {
 		throw ExecutionError(ErrorStage::INTERNAL, "", "HTTP executor requires a transport");
 	}
-	std::shared_ptr<const HttpTransport> shared(std::move(transport));
-	return std::shared_ptr<const ScanExecutor>(new HttpScanExecutor(std::move(shared)));
+	try {
+		std::shared_ptr<const HttpTransport> shared(std::move(transport));
+		return std::shared_ptr<const ScanExecutor>(new HttpScanExecutor(std::move(shared)));
+	} catch (const ExecutionError &) {
+		throw;
+	} catch (const std::bad_alloc &) {
+		throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+		                     "HTTP executor could not be allocated within its memory budget");
+	} catch (...) {
+		throw ExecutionError(ErrorStage::INTERNAL, "", "HTTP executor initialization failed");
+	}
 }
 
 } // namespace internal

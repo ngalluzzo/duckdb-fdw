@@ -205,7 +205,7 @@ long RemainingMilliseconds(std::chrono::steady_clock::time_point deadline) {
 	const auto remaining = deadline - now;
 	auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(remaining).count();
 	if (milliseconds == 0) {
-		milliseconds = 1;
+		throw ExecutionError(ErrorStage::RESOURCE, "wall_milliseconds", "execution exceeded its wall-time budget");
 	}
 	if (milliseconds > std::numeric_limits<long>::max()) {
 		throw ExecutionError(ErrorStage::RESOURCE, "wall_milliseconds", "wall-time budget is not executable");
