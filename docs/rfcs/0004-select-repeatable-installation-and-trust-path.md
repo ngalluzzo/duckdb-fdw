@@ -25,9 +25,10 @@ supersedes: "none"
 Target DuckDB Community Extensions as the ordinary-user distribution and
 trust path for `duckdb_api`. Retain source build and a checksum-verified,
 explicitly unsigned local artifact only as development and controlled-preview
-paths. Do not publish or claim the ordinary-user path until the product manager
-selects an open-source license and approves the compatibility, update, and
-support boundaries recorded by this RFC.
+paths. The product manager selected the MIT License and aligned with Community
+Extensions as the target direction. Do not publish or claim the ordinary-user
+path until the remaining compatibility, update, and support boundaries are
+approved and the external path is proved.
 
 ## Sponsorship and context
 
@@ -57,8 +58,9 @@ use the normal signed-extension experience. Publishing the same unsigned bytes
 at a URL or custom repository would improve acquisition while preserving the
 same trust reduction. DuckDB's documented third-party route to a default-
 trusted artifact is its Community Extensions program, which builds, signs, and
-distributes public open-source extensions. This repository currently has no
-project license, so it is not ready to enter that program.
+distributes public open-source extensions. This repository is now licensed
+under MIT, clearing the project-license prerequisite but not the remaining
+product decisions, dependency audit, or external submission evidence.
 
 Observed facts:
 
@@ -72,10 +74,10 @@ Observed facts:
   artifacts are signed by DuckDB's community build and distribution pipeline.
   Community code is not security-vetted merely because its binary is signed.
 - Community submission requires public open-source source and a declared
-  license. The project has no root license file and no approved license choice.
+  license. The product manager selected MIT, recorded in the root `LICENSE`.
 
-Unknowns reserved for the product decision are the license, compatibility
-support window, update/backport policy, and support boundary.
+Unknowns reserved for the product decision are the compatibility support
+window, update/backport policy, and support boundary.
 
 ## Decision drivers and invariants
 
@@ -87,8 +89,9 @@ support window, update/backport policy, and support boundary.
   refusal with reproducible artifact provenance.
 - **Must not introduce:** A claim that a co-located checksum authenticates an
   untrusted publisher; a normal-user instruction that weakens signature policy
-  process-wide; an unapproved license; a mutable release artifact; or an
-  implicit compatibility, update, backport, or support promise.
+  process-wide; license metadata inconsistent with the root MIT License; a
+  mutable release artifact; or an implicit compatibility, update, backport, or
+  support promise.
 
 ## Proposed decision
 
@@ -214,7 +217,7 @@ forbidden.
 | Corrupted download is stopped before DuckDB | Manifest anchor, size, and SHA-256 mismatch | Body-corrupted copy; host invocation sentinel | Passed: the verifier rejected SHA-256 `363a9183…` with zero Query-host invocations; proves bundle integrity, not publisher authenticity |
 | Release artifact is byte-reproducible | Two independent clean workspaces produce the trusted extension bytes | Independently anchored reproduction evidence and `verify_reproduced_artifacts.py` | Passed: both 4,859,678-byte artifacts equal trusted SHA-256 `4f1a0678…`; one recorded source and product cell only |
 | CI preserves the intended evidence bundle | Downloaded workflow artifact contains manifest and artifact, not only a log | Visible allowlisted custody stage, pinned upload/download actions, inner-evidence verifier, and retention guard | The hidden-`.build` omission is repaired and locally guarded; a new GitHub-hosted workflow round trip remains pending after integration |
-| Community path is accepted by stock DuckDB | DuckDB-managed build, signing, publication, clean community install | Community Extensions submission and matrix | Not run; blocked on license choice and external maintainer coordination |
+| Community path is accepted by stock DuckDB | DuckDB-managed build, signing, publication, clean community install | Community Extensions submission and matrix | Not run; MIT is selected, but the approved compatibility boundary and external maintainer coordination remain prerequisites |
 
 Primary policy references are DuckDB's [extension security
 guidance](https://duckdb.org/docs/current/operations_manual/securing_duckdb/securing_extensions),
@@ -313,7 +316,6 @@ define behavior after acceptance.
 
 ## Unresolved questions
 
-- Which project license does the product manager select?
 - Which DuckDB versions, platforms, and architectures will the first supported
   installation promise include?
 - What are the support window, update cadence, backport policy, rollback story,
@@ -328,14 +330,19 @@ decisions before this RFC can enter final decision.
 
 | Required reviewer | Team | Result | Evidence or objection | Disposition by decision owner |
 | --- | --- | --- | --- | --- |
-| Query Experience perspective | Query Experience | Objected | The controlled unsigned lifecycle oracle passes, but the proposed stock-DuckDB Community path is unrun and its license, compatibility, update, rollback, and support boundaries are undecided | Keep Draft. Obtain the reserved product decisions, prove the DuckDB-managed build/sign/install path across the approved boundary, and repeat Query review before acceptance |
+| Query Experience perspective | Query Experience | Objected | The controlled unsigned lifecycle oracle passes, but the proposed stock-DuckDB Community path is unrun and its compatibility, update, rollback, and support boundaries are undecided | Keep Draft. Obtain the remaining reserved product decisions, prove the DuckDB-managed build/sign/install path across the approved boundary, and repeat Query review before acceptance |
 | Engineering Enablement perspective | Engineering Enablement | Approved with conditions | Local trial, two-workspace reproduction, custody, identity, and product gates pass. Hosted transfer and Community build are unrun; PM-reserved policy remains unresolved; facilitation exit is still open | Keep Draft, retain the external proofs as delivery evidence, and avoid indefinite Enablement ownership. Exit only after hosted custody proof and demonstrated Query self-sufficiency |
 
 ## Decision and rationale
 
 - **Technical decision owner:** Lead agent.
-- **Product approval:** Pending product manager decision on license,
-  distribution and trust model, compatibility, updates, and support.
+- **Product license:** MIT, selected by the product manager on 2026-07-17 and
+  recorded in the root `LICENSE`.
+- **Distribution and trust direction:** The product manager aligned with DuckDB
+  Community Extensions as the ordinary-user target. Publication remains
+  unauthorized until the RFC gates pass.
+- **Product approval still pending:** Compatibility, updates, rollback,
+  historical-version behavior, backports, and support.
 - **Rationale:** The bounded trial proves repeatable verified installation and
   deterministic refusal for the exact `0.1.0` cell, while stock DuckDB still
   rejects the self-built artifact under default signature policy. Community
@@ -354,4 +361,4 @@ decisions before this RFC can enter final decision.
 | Outcome or objective | Accountable team | Supporting teams and interaction modes | Activation condition |
 | --- | --- | --- | --- |
 | Deliver the accepted `0.2.0` installation path | Query Experience | Engineering Enablement — Facilitation until Query owns the oracle | RFC 0004 Accepted with product approval and external prerequisites satisfied |
-| Submit and prove the Community Extension path | Query Experience | Engineering Enablement — Facilitation for descriptor, matrix, provenance, and custody | Approved license, accepted RFC, and product manager authorization for external submission |
+| Submit and prove the Community Extension path | Query Experience | Engineering Enablement — Facilitation for descriptor, matrix, provenance, and custody | MIT license recorded, accepted RFC, and product manager authorization for external submission |

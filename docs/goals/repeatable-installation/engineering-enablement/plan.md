@@ -14,7 +14,8 @@ decision authority. The product manager retains licensing, ordinary-user
 trust, compatibility, support, update, and public-distribution decisions.
 
 The bounded trial may repair evidence retention and produce decision evidence.
-It may not publish an artifact, select a license, accept RFC 0004, expand the
+It may not publish an artifact, change the PM-selected MIT license, accept RFC
+0004, expand the
 supported cell, or describe process-wide unsigned loading as a production
 posture.
 
@@ -310,7 +311,7 @@ RFC 0004 remains mandatory, Query-sponsored, and product-manager-gated before
 any of the following crosses the trial boundary:
 
 - choosing or publishing an ordinary-user download or repository channel;
-- selecting a project license or submitting to DuckDB Community Extensions;
+- changing the MIT project license or submitting to DuckDB Community Extensions;
 - accepting a signing authority, custom trust root, or routine unsigned
   posture;
 - promising compatibility beyond the existing DuckDB 1.5.4 `osx_arm64` cell;

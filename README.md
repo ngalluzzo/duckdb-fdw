@@ -122,3 +122,7 @@ internal evidence, not a stable authoring contract.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for repository and commit conventions.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

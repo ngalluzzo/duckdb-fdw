@@ -40,10 +40,9 @@ overstating compatibility, provenance, or production readiness.
 - The product manager receives a decision-ready comparison of source-built,
   downloadable unsigned, and DuckDB Community Extension distribution paths.
 
-### Reserved product decisions
+### Product decisions
 
-- Select the project license before any Community Extension submission or
-  public binary-distribution commitment.
+- Selected on 2026-07-17: MIT, recorded in the root `LICENSE`.
 - Approve the ordinary-user distribution and trust model, the compatibility
   promise, and the support and update boundaries before full `0.2.0` delivery.
 
@@ -156,7 +155,8 @@ license, accept the RFC, or expand the supported cell.
 - The successful downloadable path deliberately weakens signature policy for
   one isolated trial host; it is not ordinary production guidance.
 - Community build, signing, and installation remain unproved until the product
-  manager selects a license and authorizes external submission.
+  manager authorizes external submission. The project-license prerequisite is
+  now resolved as MIT.
 - Full `0.2.0` delivery remains gated on RFC 0004 acceptance and explicit
   product decisions for compatibility, update, rollback, history, backports,
   and support.

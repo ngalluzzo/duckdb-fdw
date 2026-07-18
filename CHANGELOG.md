@@ -2,6 +2,12 @@
 
 This file records user-visible changes to duckdb-fdw.
 
+## Unreleased
+
+### Added
+
+- The project is now distributed under the MIT License.
+
 ## 0.1.0 — 2026-07-17
 
 ### Added
