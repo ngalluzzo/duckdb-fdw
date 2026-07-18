@@ -3,6 +3,7 @@
 #include "duckdb_api/execution.hpp"
 #include "duckdb_api/scan_plan.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -11,7 +12,7 @@
 
 namespace duckdb_api_test {
 
-enum class ControlledHttpMode { RESPONSE, TRANSPORT_FAILURE, BLOCK_UNTIL_CANCEL };
+enum class ControlledHttpMode { RESPONSE, TRANSPORT_FAILURE, BLOCK_UNTIL_CANCEL, BEARER_RESPONSE_BARRIER };
 
 struct ControlledRequestObservation {
 	uint64_t request_count;
@@ -36,9 +37,14 @@ public:
 	std::shared_ptr<const duckdb_api::ScanExecutor> Executor() const;
 
 	void Respond(uint32_t status, std::string body);
+	void RespondWithBearerBarrier(std::string first_header, std::string first_body, std::string second_header,
+	                              std::string second_body);
 	void FailWithUnknownTransportDiagnostic(std::string diagnostic);
 	void BlockUntilCancelled();
+	bool WaitForRequestCount(uint64_t count, std::chrono::milliseconds timeout);
+	void ReleaseBearerBarrier();
 	ControlledRequestObservation Observation() const;
+	std::vector<ControlledRequestObservation> Observations() const;
 
 private:
 	friend std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntime(uint64_t max_wall_milliseconds,

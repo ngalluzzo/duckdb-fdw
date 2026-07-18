@@ -52,7 +52,11 @@ void RequireMemory(uint64_t current, uint64_t addition, uint64_t limit, uint64_t
 }
 
 void ValidatePlan(const JsonDecodePlan &plan) {
-	if (plan.records_field.empty() || plan.columns.empty() || plan.max_records == 0 || plan.max_string_bytes == 0 ||
+	const bool source_valid =
+	    (plan.response_source == JsonResponseSource::JSON_PATH_MANY && !plan.records_field.empty()) ||
+	    (plan.response_source == JsonResponseSource::ROOT_OBJECT && plan.records_field.empty() &&
+	     plan.max_records == 1);
+	if (!source_valid || plan.columns.empty() || plan.max_records == 0 || plan.max_string_bytes == 0 ||
 	    plan.max_json_nesting == 0 || plan.max_decoded_memory_bytes == 0 ||
 	    plan.max_records > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max())) {
 		throw ExecutionError(ErrorStage::INTERNAL, "", "JSON decoder received an invalid schema or budget");
@@ -84,13 +88,28 @@ public:
 		ValidateDocument();
 		SkipWhitespace();
 		if (Peek() != '{') {
-			throw ExecutionError(ErrorStage::SCHEMA, plan.records_field,
+			throw ExecutionError(ErrorStage::SCHEMA,
+			                     plan.response_source == JsonResponseSource::JSON_PATH_MANY ? plan.records_field : "",
 			                     "response root does not match the declared schema");
 		}
+		if (plan.response_source == JsonResponseSource::ROOT_OBJECT) {
+			return ParseRootObject();
+		}
+		return ParseRecordArrayResponse();
+	}
 
-		Expect('{');
-		SkipWhitespace();
-		bool found_records = false;
+private:
+	struct ParsedSlot {
+		ParsedSlot() : bigint_value(0), boolean_value(false), seen(false) {
+		}
+
+		int64_t bigint_value;
+		std::string varchar_value;
+		bool boolean_value;
+		bool seen;
+	};
+
+	std::vector<TypedRow> AllocateResult() {
 		std::vector<TypedRow> result;
 		try {
 			result.reserve(static_cast<std::size_t>(plan.max_records));
@@ -106,6 +125,25 @@ public:
 			                     "decoded rows exceeded their memory budget");
 		}
 		decoded_memory = row_storage;
+		return result;
+	}
+
+	std::vector<TypedRow> ParseRootObject() {
+		auto result = AllocateResult();
+		result.push_back(ParseRecord());
+		SkipWhitespace();
+		if (position != input.size()) {
+			MalformedJson();
+		}
+		return result;
+	}
+
+	std::vector<TypedRow> ParseRecordArrayResponse() {
+
+		Expect('{');
+		SkipWhitespace();
+		bool found_records = false;
+		auto result = AllocateResult();
 
 		while (Peek() != '}') {
 			RequireObjectKey();
@@ -140,17 +178,6 @@ public:
 		}
 		return result;
 	}
-
-private:
-	struct ParsedSlot {
-		ParsedSlot() : bigint_value(0), boolean_value(false), seen(false) {
-		}
-
-		int64_t bigint_value;
-		std::string varchar_value;
-		bool boolean_value;
-		bool seen;
-	};
 
 	void ValidateDocument() {
 		SkipWhitespace();

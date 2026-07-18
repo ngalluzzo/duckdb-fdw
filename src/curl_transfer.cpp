@@ -296,6 +296,11 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 		TransferState state(control, limits, profile);
 		CurlHeaderList headers;
 		CurlHeaderList resolve_entries;
+		// The per-call slist necessarily materializes the already authorized
+		// header before DNS resolution. OpenPolicySocket still rejects every
+		// resolved address before connect(), so a denied destination receives no
+		// credential-bearing byte. Both lists and the easy handle are local to
+		// this call and are destroyed on every exit.
 		BuildHeaders(request, headers);
 		CurlEasyHandle easy(curl_easy_init());
 		if (!easy.Get()) {
@@ -350,6 +355,10 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 		options.Set(CURLOPT_HTTP_CONTENT_DECODING, 1L);
 		options.Set(CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(limits.max_response_bytes));
 		options.Set(CURLOPT_PATH_AS_IS, 1L);
+		// A fresh, unshared handle plus disabled reuse, cookies, netrc, proxy, and
+		// built-in authentication prevents credential state from crossing scans.
+		// The exact option-inventory oracle proves no cookie/share/user-password
+		// facility is enabled on this otherwise default-empty easy handle.
 		options.Set(CURLOPT_FRESH_CONNECT, 1L);
 		options.Set(CURLOPT_FORBID_REUSE, 1L);
 		options.Set(CURLOPT_DNS_CACHE_TIMEOUT, 0L);

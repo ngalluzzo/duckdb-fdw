@@ -68,8 +68,16 @@ duckdb_api::internal::HttpRequest BuildRequest(const PrivateCurlProbeOptions &op
 	request.port = options.request_port;
 	request.target = "/search/users?q=duckdb+in%3Alogin&per_page=3";
 	request.headers = {{"Accept", "application/vnd.github+json"},
-	                   {"User-Agent", "duckdb-api/0.3.0"},
+	                   {"User-Agent", "duckdb-api/0.4.0"},
 	                   {"X-GitHub-Api-Version", "2022-11-28"}};
+	return request;
+}
+
+duckdb_api::internal::HttpRequest BuildAuthorizedRequest(const PrivateCurlProbeOptions &options,
+                                                         std::string bearer_token) {
+	auto request = BuildRequest(options);
+	request.target = "/user";
+	request.headers.push_back({"Authorization", "Bearer " + std::move(bearer_token)});
 	return request;
 }
 
@@ -80,14 +88,13 @@ void ObserveOption(CURLoption option, const char *normalized_value, void *contex
 
 } // namespace
 
-PrivateCurlProbeResult PerformPrivateCurlProbe(const PrivateCurlProbeOptions &options,
-                                               duckdb_api::ExecutionControl &control) {
+PrivateCurlProbeResult PerformProbe(const PrivateCurlProbeOptions &options, duckdb_api::internal::HttpRequest request,
+                                    duckdb_api::ExecutionControl &control) {
 	(void)duckdb_api::internal::AcquireCurlProcessLifetime();
 	SocketAuthority authority(options.request_port, options.socket_policy);
 	PublishChecks publish_checks(authority, options.completed_socket_policy_checks);
 	std::vector<PrivateCurlProbeResult::OptionObservation> option_observations;
 	option_observations.reserve(48);
-	const auto request = BuildRequest(options);
 	const duckdb_api::internal::HttpLimits limits {
 	    duckdb_api::HOST_MAX_HEADER_BYTES, duckdb_api::HOST_MAX_RESPONSE_BYTES, duckdb_api::HOST_MAX_DECOMPRESSED_BYTES,
 	    std::chrono::steady_clock::now() + std::chrono::milliseconds(options.wall_milliseconds)};
@@ -102,6 +109,17 @@ PrivateCurlProbeResult PerformPrivateCurlProbe(const PrivateCurlProbeOptions &op
 	    &option_observations};
 	auto response = duckdb_api::internal::PerformCurlTransfer(profile, request, limits, control);
 	return {std::move(response), authority.checks.load(std::memory_order_relaxed), std::move(option_observations)};
+}
+
+PrivateCurlProbeResult PerformPrivateCurlProbe(const PrivateCurlProbeOptions &options,
+                                               duckdb_api::ExecutionControl &control) {
+	return PerformProbe(options, BuildRequest(options), control);
+}
+
+PrivateCurlProbeResult PerformPrivateAuthorizedCurlProbe(const PrivateCurlProbeOptions &options,
+                                                         std::string bearer_token,
+                                                         duckdb_api::ExecutionControl &control) {
+	return PerformProbe(options, BuildAuthorizedRequest(options, std::move(bearer_token)), control);
 }
 
 } // namespace duckdb_api_test

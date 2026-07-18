@@ -1,86 +1,33 @@
-#include "duckdb_api/connector.hpp"
-#include "duckdb_api/internal/http_scan_executor.hpp"
-#include "duckdb_api/scan_plan.hpp"
-#include "duckdb_api/scan_request.hpp"
+#include "duckdb_api/authorization.hpp"
 #include "support/controlled_http_transport.hpp"
+#include "support/http_scan_executor_test_support.hpp"
 #include "support/require.hpp"
 
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
-#include <functional>
 #include <iostream>
-#include <memory>
-#include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace {
 
+using duckdb_api_test::BuildAnonymousHttpPlan;
+using duckdb_api_test::BuildAuthenticatedHttpPlan;
+using duckdb_api_test::GeneratedHttpBearerToken;
+using duckdb_api_test::ManualHttpExecutionControl;
+using duckdb_api_test::OneAuthenticatedHttpRow;
 using duckdb_api_test::Require;
-
-class ManualControl final : public duckdb_api::ExecutionControl {
-public:
-	ManualControl() : cancelled(false) {
-	}
-
-	bool IsCancellationRequested() const noexcept override {
-		return cancelled.load(std::memory_order_acquire);
-	}
-
-	void Cancel() noexcept {
-		cancelled.store(true, std::memory_order_release);
-	}
-
-private:
-	std::atomic<bool> cancelled;
-};
-
-duckdb_api::ScanRequest Request() {
-	duckdb_api::ScanRequest request;
-	request.connector_name = "github";
-	request.relation_name = "duckdb_login_search_page";
-	request.projected_columns = {"id", "login", "site_admin"};
-	request.predicate = "TRUE";
-	request.has_limit = false;
-	request.has_offset = false;
-	request.capabilities = {false, false, false, false, false, false, true, false};
-	return request;
-}
-
-duckdb_api::ScanPlan Plan() {
-	return duckdb_api::BuildConservativeScanPlan(duckdb_api::BuildNativeGithubConnector(), Request());
-}
-
-std::string ThreeRows() {
-	return "{\"items\":[{\"id\":11,\"login\":\"duckdb\",\"site_admin\":false},"
-	       "{\"id\":22,\"login\":\"duckdb-fdw\",\"site_admin\":true},"
-	       "{\"id\":33,\"login\":\"three\",\"site_admin\":false}]}";
-}
-
-void RequireError(const std::function<void()> &action, duckdb_api::ErrorStage stage,
-                  const std::string &forbidden = "") {
-	bool rejected = false;
-	try {
-		action();
-	} catch (const duckdb_api::ExecutionError &error) {
-		rejected = true;
-		Require(error.Stage() == stage, "executor error stage drifted");
-		Require(!error.SafeMessage().empty() && error.SafeMessage().size() <= 128,
-		        "executor diagnostic was empty or unbounded");
-		if (!forbidden.empty()) {
-			Require(error.SafeMessage().find(forbidden) == std::string::npos,
-			        "executor exposed transport or response data");
-		}
-	}
-	Require(rejected, "expected a structured executor error");
-}
+using duckdb_api_test::RequireHttpExecutionError;
+using duckdb_api_test::ThreeHttpRows;
 
 void TestOneRequestAndSchemaAlignedBatches() {
 	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
-	runtime->Respond(200, ThreeRows());
-	ManualControl control;
-	auto stream = runtime->Executor()->Open(Plan(), control);
+	runtime->Respond(200, ThreeHttpRows());
+	ManualHttpExecutionControl control;
+	auto stream = runtime->Executor()->Open(BuildAnonymousHttpPlan(), control);
 	Require(runtime->Observation().request_count == 0, "Open performed network work");
 
 	duckdb_api::TypedBatch batch;
@@ -106,7 +53,7 @@ void TestOneRequestAndSchemaAlignedBatches() {
 	Require(observation.headers.size() == 3 &&
 	            observation.headers[0] ==
 	                std::make_pair(std::string("Accept"), std::string("application/vnd.github+json")) &&
-	            observation.headers[1] == std::make_pair(std::string("User-Agent"), std::string("duckdb-api/0.3.0")) &&
+	            observation.headers[1] == std::make_pair(std::string("User-Agent"), std::string("duckdb-api/0.4.0")) &&
 	            observation.headers[2] ==
 	                std::make_pair(std::string("X-GitHub-Api-Version"), std::string("2022-11-28")),
 	        "fixed request headers drifted");
@@ -116,48 +63,249 @@ void TestOneRequestAndSchemaAlignedBatches() {
 	        "transport did not receive the applied hard budgets");
 }
 
-void TestFailureStagesRedactionAndNoReplay() {
-	ManualControl control;
+void TestExactBearerRequestAndRootObject() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->Respond(200, OneAuthenticatedHttpRow());
+	ManualHttpExecutionControl control;
+	auto token = GeneratedHttpBearerToken(1);
+	const auto expected_value = "Bearer " + token;
+	const auto plan = BuildAuthenticatedHttpPlan();
+	Require(plan.Snapshot().find(token) == std::string::npos, "credential bytes entered the immutable plan snapshot");
+	auto stream = runtime->Executor()->OpenWithAuthorization(
+	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+	Require(runtime->Observation().request_count == 0, "authorized Open performed network work");
 	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 1 && batch.IsSchemaAligned(),
+	        "authenticated root object did not produce one aligned row");
+	Require(!stream->Next(control, batch), "authenticated root object was emitted more than once");
+	const auto observation = runtime->Observation();
+	Require(observation.method == "GET" && observation.scheme == "https" && observation.host == "api.github.com" &&
+	            observation.port == 443 && observation.target == "/user",
+	        "authenticated structural request identity drifted");
+	Require(observation.headers.size() == 4 && observation.headers[3].first == "Authorization" &&
+	            observation.headers[3].second == expected_value,
+	        "fixed authenticator did not append exactly one canonical bearer header");
+}
 
+void TestAuthenticatedStatusFailures() {
+	ManualHttpExecutionControl control;
+	duckdb_api::TypedBatch batch;
+	for (uint32_t status = 401; status <= 403; status += 2) {
+		const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+		auto token = GeneratedHttpBearerToken(status);
+		const auto credential_canary = token;
+		const auto response_canary = token + "_response_body";
+		runtime->Respond(status, response_canary);
+		auto stream = runtime->Executor()->OpenWithAuthorization(
+		    BuildAuthenticatedHttpPlan(), duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+		RequireHttpExecutionError([&]() { stream->Next(control, batch); },
+		                          status == 401 ? duckdb_api::ErrorStage::AUTHENTICATION
+		                                        : duckdb_api::ErrorStage::AUTHORIZATION,
+		                          credential_canary);
+		Require(runtime->Observation().request_count == 1, "authenticated status failure replayed transport");
+	}
+}
+
+void TestSimultaneousAuthorizationSnapshots() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	ManualHttpExecutionControl first_control;
+	ManualHttpExecutionControl second_control;
+	auto first_token = GeneratedHttpBearerToken(31);
+	auto second_token = GeneratedHttpBearerToken(32);
+	const auto first_header = "Bearer " + first_token;
+	const auto second_header = "Bearer " + second_token;
+	runtime->RespondWithBearerBarrier(first_header, OneAuthenticatedHttpRow("first-isolated"), second_header,
+	                                  OneAuthenticatedHttpRow("second-isolated"));
+	auto first = runtime->Executor()->OpenWithAuthorization(
+	    BuildAuthenticatedHttpPlan(), duckdb_api::ScanAuthorization::GithubUserBearer(std::move(first_token)),
+	    first_control);
+	auto second = runtime->Executor()->OpenWithAuthorization(
+	    BuildAuthenticatedHttpPlan(), duckdb_api::ScanAuthorization::GithubUserBearer(std::move(second_token)),
+	    second_control);
+	duckdb_api::TypedBatch first_batch;
+	duckdb_api::TypedBatch second_batch;
+	std::atomic<bool> first_succeeded(false);
+	std::atomic<bool> second_succeeded(false);
+	std::thread first_worker([&]() {
+		try {
+			first_succeeded.store(first->Next(first_control, first_batch), std::memory_order_release);
+		} catch (...) {
+		}
+	});
+	std::thread second_worker([&]() {
+		try {
+			second_succeeded.store(second->Next(second_control, second_batch), std::memory_order_release);
+		} catch (...) {
+		}
+	});
+	const auto overlapped = runtime->WaitForRequestCount(2, std::chrono::seconds(2));
+	runtime->ReleaseBearerBarrier();
+	first_worker.join();
+	second_worker.join();
+	Require(overlapped, "isolated scans did not overlap at the transport barrier");
+	Require(first_succeeded.load(std::memory_order_acquire) && second_succeeded.load(std::memory_order_acquire),
+	        "one isolated scan failed");
+	Require(first_batch.rows[0].values[1].varchar_value == "first-isolated" &&
+	            second_batch.rows[0].values[1].varchar_value == "second-isolated",
+	        "authorization identity crossed its originating stream");
+	const auto observations = runtime->Observations();
+	Require(observations.size() == 2, "isolated scans did not perform two independent requests");
+	uint64_t first_matches = 0;
+	uint64_t second_matches = 0;
+	for (std::size_t index = 0; index < observations.size(); index++) {
+		Require(observations[index].headers.size() == 4, "isolated scan header count drifted");
+		first_matches += observations[index].headers[3].second == first_header ? 1 : 0;
+		second_matches += observations[index].headers[3].second == second_header ? 1 : 0;
+	}
+	Require(first_matches == 1 && second_matches == 1, "authorization snapshots crossed concurrent scans");
+
+	ManualHttpExecutionControl cancelled_control;
+	ManualHttpExecutionControl surviving_control;
+	auto cancelled_token = GeneratedHttpBearerToken(33);
+	auto surviving_token = GeneratedHttpBearerToken(34);
+	const auto cancelled_header = "Bearer " + cancelled_token;
+	const auto surviving_header = "Bearer " + surviving_token;
+	runtime->RespondWithBearerBarrier(cancelled_header, OneAuthenticatedHttpRow("cancelled-isolated"), surviving_header,
+	                                  OneAuthenticatedHttpRow("surviving-isolated"));
+	auto cancelled_stream = runtime->Executor()->OpenWithAuthorization(
+	    BuildAuthenticatedHttpPlan(), duckdb_api::ScanAuthorization::GithubUserBearer(std::move(cancelled_token)),
+	    cancelled_control);
+	auto surviving_stream = runtime->Executor()->OpenWithAuthorization(
+	    BuildAuthenticatedHttpPlan(), duckdb_api::ScanAuthorization::GithubUserBearer(std::move(surviving_token)),
+	    surviving_control);
+	duckdb_api::TypedBatch cancelled_batch;
+	duckdb_api::TypedBatch surviving_batch;
+	std::atomic<bool> cancellation_observed(false);
+	std::atomic<bool> survivor_succeeded(false);
+	std::thread cancelled_worker([&]() {
+		try {
+			(void)cancelled_stream->Next(cancelled_control, cancelled_batch);
+		} catch (const duckdb_api::ExecutionCancelled &) {
+			cancellation_observed.store(true, std::memory_order_release);
+		} catch (...) {
+		}
+	});
+	std::thread surviving_worker([&]() {
+		try {
+			survivor_succeeded.store(surviving_stream->Next(surviving_control, surviving_batch),
+			                         std::memory_order_release);
+		} catch (...) {
+		}
+	});
+	const auto teardown_overlapped = runtime->WaitForRequestCount(4, std::chrono::seconds(2));
+	cancelled_stream->Cancel();
+	cancelled_stream->Close();
+	if (!teardown_overlapped) {
+		surviving_stream->Cancel();
+	}
+	runtime->ReleaseBearerBarrier();
+	cancelled_worker.join();
+	surviving_worker.join();
+	Require(teardown_overlapped, "close/cancel scans did not overlap at the transport barrier");
+	Require(cancellation_observed.load(std::memory_order_acquire),
+	        "closing one overlapping authorized stream did not cancel it");
+	Require(survivor_succeeded.load(std::memory_order_acquire) &&
+	            surviving_batch.rows[0].values[1].varchar_value == "surviving-isolated",
+	        "closing one authorized stream disturbed the other stream's identity");
+}
+
+void TestAuthenticatedLifecycleAndRecovery() {
+	ManualHttpExecutionControl control;
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->Respond(200, OneAuthenticatedHttpRow());
+	auto unopened_token = GeneratedHttpBearerToken(51);
+	auto unopened = runtime->Executor()->OpenWithAuthorization(
+	    BuildAuthenticatedHttpPlan(), duckdb_api::ScanAuthorization::GithubUserBearer(std::move(unopened_token)),
+	    control);
+	unopened->Close();
+	unopened->Close();
+	Require(runtime->Observation().request_count == 0, "closing an unpulled authorized stream performed a request");
+
+	runtime->BlockUntilCancelled();
+	auto blocked_token = GeneratedHttpBearerToken(52);
+	auto blocked = runtime->Executor()->OpenWithAuthorization(
+	    BuildAuthenticatedHttpPlan(), duckdb_api::ScanAuthorization::GithubUserBearer(std::move(blocked_token)),
+	    control);
+	duckdb_api::TypedBatch blocked_batch;
+	std::atomic<bool> cancellation_observed(false);
+	std::thread worker([&]() {
+		try {
+			(void)blocked->Next(control, blocked_batch);
+		} catch (const duckdb_api::ExecutionCancelled &) {
+			cancellation_observed.store(true, std::memory_order_release);
+		}
+	});
+	for (std::size_t index = 0; index < 500 && runtime->Observation().request_count == 0; index++) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	blocked->Close();
+	blocked->Cancel();
+	worker.join();
+	Require(cancellation_observed.load(std::memory_order_acquire),
+	        "concurrent authorized close did not cancel the active transfer");
+
+	runtime->FailWithUnknownTransportDiagnostic("dependency diagnostic must remain redacted");
+	auto failed_token = GeneratedHttpBearerToken(53);
+	const auto failed_canary = failed_token;
+	auto failed = runtime->Executor()->OpenWithAuthorization(
+	    BuildAuthenticatedHttpPlan(), duckdb_api::ScanAuthorization::GithubUserBearer(std::move(failed_token)),
+	    control);
+	duckdb_api::TypedBatch failed_batch;
+	RequireHttpExecutionError([&]() { failed->Next(control, failed_batch); }, duckdb_api::ErrorStage::TRANSPORT,
+	                          failed_canary);
+	failed->Close();
+
+	runtime->Respond(200, OneAuthenticatedHttpRow("recovered"));
+	auto recovered_token = GeneratedHttpBearerToken(54);
+	auto recovered = runtime->Executor()->OpenWithAuthorization(
+	    BuildAuthenticatedHttpPlan(), duckdb_api::ScanAuthorization::GithubUserBearer(std::move(recovered_token)),
+	    control);
+	duckdb_api::TypedBatch recovered_batch;
+	Require(recovered->Next(control, recovered_batch) && recovered_batch.rows[0].values[1].varchar_value == "recovered",
+	        "shared executor did not recover after authorized cancellation and transport failure");
+}
+
+void TestFailureStagesRedactionAndNoReplay() {
+	ManualHttpExecutionControl control;
+	duckdb_api::TypedBatch batch;
 	const auto status_runtime = duckdb_api_test::BuildControlledHttpRuntime();
 	status_runtime->Respond(503, "SECRET_STATUS_BODY https://secret.invalid/path");
-	auto status_stream = status_runtime->Executor()->Open(Plan(), control);
-	RequireError([&]() { status_stream->Next(control, batch); }, duckdb_api::ErrorStage::HTTP_STATUS,
-	             "SECRET_STATUS_BODY");
+	auto status_stream = status_runtime->Executor()->Open(BuildAnonymousHttpPlan(), control);
+	RequireHttpExecutionError([&]() { status_stream->Next(control, batch); }, duckdb_api::ErrorStage::HTTP_STATUS,
+	                          "SECRET_STATUS_BODY");
 	Require(!status_stream->Next(control, batch), "HTTP status failure was replayed");
 	Require(status_runtime->Observation().request_count == 1, "status failure performed more than one request");
 
 	const auto unknown_runtime = duckdb_api_test::BuildControlledHttpRuntime();
 	unknown_runtime->FailWithUnknownTransportDiagnostic("SECRET_TRANSPORT api.github.com internal curl detail");
-	auto unknown_stream = unknown_runtime->Executor()->Open(Plan(), control);
-	RequireError([&]() { unknown_stream->Next(control, batch); }, duckdb_api::ErrorStage::TRANSPORT,
-	             "SECRET_TRANSPORT");
+	auto unknown_stream = unknown_runtime->Executor()->Open(BuildAnonymousHttpPlan(), control);
+	RequireHttpExecutionError([&]() { unknown_stream->Next(control, batch); }, duckdb_api::ErrorStage::TRANSPORT,
+	                          "SECRET_TRANSPORT");
 	Require(!unknown_stream->Next(control, batch), "unknown transport failure was replayed");
 
 	const auto oversized_runtime = duckdb_api_test::BuildControlledHttpRuntime();
 	oversized_runtime->Respond(200, std::string(duckdb_api::HOST_MAX_RESPONSE_BYTES + 1, 'x'));
-	auto oversized_stream = oversized_runtime->Executor()->Open(Plan(), control);
-	RequireError([&]() { oversized_stream->Next(control, batch); }, duckdb_api::ErrorStage::RESOURCE);
+	auto oversized_stream = oversized_runtime->Executor()->Open(BuildAnonymousHttpPlan(), control);
+	RequireHttpExecutionError([&]() { oversized_stream->Next(control, batch); }, duckdb_api::ErrorStage::RESOURCE);
 }
 
 void TestCancellationAndIdempotentClose() {
 	const auto unopened_runtime = duckdb_api_test::BuildControlledHttpRuntime();
-	ManualControl cancelled;
+	ManualHttpExecutionControl cancelled;
 	cancelled.Cancel();
 	bool open_cancelled = false;
 	try {
-		unopened_runtime->Executor()->Open(Plan(), cancelled);
+		unopened_runtime->Executor()->Open(BuildAnonymousHttpPlan(), cancelled);
 	} catch (const duckdb_api::ExecutionCancelled &) {
 		open_cancelled = true;
 	}
 	Require(open_cancelled && unopened_runtime->Observation().request_count == 0,
 	        "pre-open cancellation acquired request authority");
 
-	ManualControl control;
+	ManualHttpExecutionControl control;
 	const auto closed_runtime = duckdb_api_test::BuildControlledHttpRuntime();
-	closed_runtime->Respond(200, ThreeRows());
-	auto closed_stream = closed_runtime->Executor()->Open(Plan(), control);
+	closed_runtime->Respond(200, ThreeHttpRows());
+	auto closed_stream = closed_runtime->Executor()->Open(BuildAnonymousHttpPlan(), control);
 	closed_stream->Close();
 	closed_stream->Close();
 	duckdb_api::TypedBatch batch;
@@ -166,7 +314,7 @@ void TestCancellationAndIdempotentClose() {
 
 	const auto blocked_runtime = duckdb_api_test::BuildControlledHttpRuntime();
 	blocked_runtime->BlockUntilCancelled();
-	auto blocked_stream = blocked_runtime->Executor()->Open(Plan(), control);
+	auto blocked_stream = blocked_runtime->Executor()->Open(BuildAnonymousHttpPlan(), control);
 	std::atomic<bool> observed_cancel(false);
 	std::atomic<bool> returned(false);
 	std::thread worker([&]() {
@@ -191,41 +339,16 @@ void TestCancellationAndIdempotentClose() {
 void TestDeadlinePersistsAcrossBatchPulls() {
 	const uint64_t controlled_wall_milliseconds = 30;
 	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime(controlled_wall_milliseconds);
-	runtime->Respond(200, ThreeRows());
-	ManualControl control;
-	auto stream = runtime->Executor()->Open(Plan(), control);
+	runtime->Respond(200, ThreeHttpRows());
+	ManualHttpExecutionControl control;
+	auto stream = runtime->Executor()->Open(BuildAnonymousHttpPlan(), control);
 	duckdb_api::TypedBatch batch;
 	Require(stream->Next(control, batch) && batch.rows.size() == 2,
 	        "deadline regression did not produce the first batch");
 	std::this_thread::sleep_for(std::chrono::milliseconds(controlled_wall_milliseconds + 20));
-	RequireError([&]() { stream->Next(control, batch); }, duckdb_api::ErrorStage::RESOURCE);
+	RequireHttpExecutionError([&]() { stream->Next(control, batch); }, duckdb_api::ErrorStage::RESOURCE);
 	Require(!stream->Next(control, batch), "expired stream resumed after delayed second pull");
 	Require(runtime->Observation().request_count == 1, "delayed second pull replayed the request");
-}
-
-void TestExecutionProfileNeverWidensRecordAuthority() {
-	const uint64_t narrower_record_authority = 2;
-	const auto runtime =
-	    duckdb_api_test::BuildControlledHttpRuntime(duckdb_api::MAX_EXECUTION_MILLISECONDS, narrower_record_authority);
-	runtime->Respond(200, ThreeRows());
-	ManualControl control;
-	Require(Plan().Budgets().decoded_records == 3,
-	        "record-authority counterexample did not retain the valid product plan");
-	RequireError([&]() { (void)runtime->Executor()->Open(Plan(), control); }, duckdb_api::ErrorStage::POLICY);
-	Require(runtime->Observation().request_count == 0, "plan wider than executor authority reached transport");
-
-	RequireError(
-	    [&]() { (void)duckdb_api_test::BuildControlledHttpRuntime(duckdb_api::MAX_EXECUTION_MILLISECONDS, 0); },
-	    duckdb_api::ErrorStage::INTERNAL);
-	RequireError(
-	    [&]() { (void)duckdb_api_test::BuildControlledHttpRuntime(duckdb_api::MAX_EXECUTION_MILLISECONDS, 4); },
-	    duckdb_api::ErrorStage::INTERNAL);
-}
-
-void TestNullTransportRejected() {
-	RequireError(
-	    [&]() { duckdb_api::internal::BuildHttpScanExecutor(std::unique_ptr<duckdb_api::internal::HttpTransport>()); },
-	    duckdb_api::ErrorStage::INTERNAL);
 }
 
 } // namespace
@@ -233,11 +356,13 @@ void TestNullTransportRejected() {
 int main() {
 	try {
 		TestOneRequestAndSchemaAlignedBatches();
+		TestExactBearerRequestAndRootObject();
+		TestAuthenticatedStatusFailures();
+		TestSimultaneousAuthorizationSnapshots();
+		TestAuthenticatedLifecycleAndRecovery();
 		TestFailureStagesRedactionAndNoReplay();
 		TestCancellationAndIdempotentClose();
 		TestDeadlinePersistsAcrossBatchPulls();
-		TestExecutionProfileNeverWidensRecordAuthority();
-		TestNullTransportRejected();
 		std::cout << "HTTP scan executor tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

@@ -1,4 +1,5 @@
 #include "duckdb_api/http_runtime.hpp"
+#include "duckdb_api/authorization.hpp"
 #include "duckdb_api/internal/curl_http_transport.hpp"
 #include "support/controlled_socket_service.hpp"
 #include "support/loopback_curl_runtime.hpp"
@@ -11,6 +12,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -67,10 +69,14 @@ void TestPlanDeadlineBoundsBlockedCurlTransfer() {
 }
 
 void TestConcurrentCloseAndRecovery() {
-	ControlledSocketService blocked(ControlledSocketMode::BLOCK);
+	ControlledSocketService blocked(ControlledSocketMode::BLOCK_THEN_AUTHENTICATED_SUCCESS);
 	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(blocked.Port());
 	ManualControl control;
-	auto stream = runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(runtime->Connector()), control);
+	auto token = duckdb_api_test::RuntimeCurlBearerToken(70);
+	const auto expected_header = "Authorization: Bearer " + token + "\r\n";
+	auto stream = runtime->Executor()->OpenWithAuthorization(
+	    duckdb_api_test::BuildAuthenticatedRuntimePlan(runtime->Connector()),
+	    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
 	duckdb_api::TypedBatch batch;
 	std::atomic<bool> cancelled(false);
 	std::thread worker([&]() {
@@ -81,6 +87,8 @@ void TestConcurrentCloseAndRecovery() {
 		}
 	});
 	Require(blocked.WaitForRequest(std::chrono::seconds(2)), "curl request did not reach the blocking service");
+	Require(blocked.Request().find(expected_header) != std::string::npos,
+	        "blocking authenticated transfer did not carry its isolated bearer header");
 	const auto started = std::chrono::steady_clock::now();
 	stream->Close();
 	stream->Close();
@@ -92,13 +100,15 @@ void TestConcurrentCloseAndRecovery() {
 	Require(runtime->Observation().request_count == 1, "cancelled curl request was replayed");
 	Require(!stream->Next(control, batch), "closed curl stream resumed after concurrent teardown");
 
-	ControlledSocketService recovered(ControlledSocketMode::SUCCESS);
-	const auto recovered_runtime = duckdb_api_test::BuildLoopbackCurlRuntime(recovered.Port());
 	ManualControl recovered_control;
-	auto recovered_stream = recovered_runtime->Executor()->Open(
-	    duckdb_api_test::BuildRuntimePlan(recovered_runtime->Connector()), recovered_control);
-	Require(recovered_stream->Next(recovered_control, batch) && batch.IsSchemaAligned(),
-	        "curl runtime did not recover after a cancelled transfer");
+	auto recovered_token = duckdb_api_test::RuntimeCurlBearerToken(71);
+	auto recovered_stream = runtime->Executor()->OpenWithAuthorization(
+	    duckdb_api_test::BuildAuthenticatedRuntimePlan(runtime->Connector()),
+	    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(recovered_token)), recovered_control);
+	Require(recovered_stream->Next(recovered_control, batch) && batch.IsSchemaAligned() && batch.rows.size() == 1,
+	        "same curl runtime did not recover after a cancelled transfer");
+	Require(blocked.ConnectionCount() == 2 && runtime->Observation().request_count == 2,
+	        "shared curl executor did not perform one cancelled and one recovered request");
 }
 
 } // namespace

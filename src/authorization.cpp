@@ -1,5 +1,6 @@
 #include "duckdb_api/authorization.hpp"
 #include "duckdb_api/execution.hpp"
+#include "duckdb_api/internal/fixed_github_user_bearer_authenticator.hpp"
 
 #include <new>
 #include <utility>
@@ -76,6 +77,17 @@ ScanAuthorization ScanAuthorization::GithubUserBearer(std::string &&token) {
 		throw ExecutionError(ErrorStage::RESOURCE, "authorization",
 		                     "authorization capability could not be allocated within its memory budget");
 	}
+}
+
+std::string internal::FixedGithubUserBearerAuthenticator::Consume(ScanAuthorization &authorization) {
+	if (!authorization.valid || authorization.kind != ScanAuthorization::Kind::GITHUB_USER_BEARER ||
+	    !authorization.state) {
+		throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization", "bearer authorization capability is invalid");
+	}
+	authorization.valid = false;
+	auto token = std::move(authorization.state->token);
+	authorization.state.reset();
+	return token;
 }
 
 } // namespace duckdb_api

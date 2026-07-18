@@ -1,8 +1,6 @@
-#include "duckdb_api/connector.hpp"
 #include "duckdb_api/execution.hpp"
-#include "duckdb_api/scan_plan.hpp"
-#include "duckdb_api/scan_request.hpp"
 #include "support/require.hpp"
+#include "support/scan_plan_test_fixtures.hpp"
 
 #include <cstdlib>
 #include <functional>
@@ -60,8 +58,7 @@ public:
 };
 
 duckdb_api::ScanPlan AnonymousPlan() {
-	const auto connector = duckdb_api::BuildNativeGithubConnector();
-	return duckdb_api::BuildConservativeScanPlan(connector, duckdb_api::BuildConservativeScanRequest(connector));
+	return duckdb_api_test::BuildValidAnonymousPlanFixture();
 }
 
 std::string TokenCanary() {

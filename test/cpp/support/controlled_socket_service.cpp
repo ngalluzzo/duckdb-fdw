@@ -39,8 +39,9 @@ std::string Binary(const unsigned char *bytes, std::size_t size) {
 
 } // namespace
 
-ControlledSocketService::ControlledSocketService(ControlledSocketMode mode_p)
-    : mode(mode_p), listener(-1), client(-1), port(0), request_ready(false), stop(false), connection_count(0) {
+ControlledSocketService::ControlledSocketService(ControlledSocketMode mode_p, uint16_t redirect_port_p)
+    : mode(mode_p), redirect_port(redirect_port_p), listener(-1), client(-1), port(0), request_ready(false),
+      stop(false), connection_count(0) {
 	listener = socket(AF_INET, SOCK_STREAM, 0);
 	if (listener < 0) {
 		throw std::runtime_error("controlled service socket failed");
@@ -123,42 +124,60 @@ bool ControlledSocketService::SendAll(int socket_fd, const std::string &bytes) n
 	return true;
 }
 
-std::string ControlledSocketService::Response() const {
+std::string ControlledSocketService::Response(ControlledSocketMode response_mode) const {
 	const std::string success_body = "{\"items\":[{\"id\":11,\"login\":\"duckdb\",\"site_admin\":false},"
 	                                 "{\"id\":22,\"login\":\"duckdb-fdw\",\"site_admin\":true},"
 	                                 "{\"id\":33,\"login\":\"three\",\"site_admin\":false}]}";
-	if (mode == ControlledSocketMode::SUCCESS || mode == ControlledSocketMode::SET_COOKIE) {
-		const std::string cookie_header = mode == ControlledSocketMode::SET_COOKIE
+	const std::string authenticated_body = "{\"id\":44,\"login\":\"authenticated\",\"site_admin\":false}";
+	if (response_mode == ControlledSocketMode::AUTHENTICATED_SUCCESS ||
+	    response_mode == ControlledSocketMode::AUTHENTICATED_SET_COOKIE) {
+		const std::string cookie_header = response_mode == ControlledSocketMode::AUTHENTICATED_SET_COOKIE
+		                                      ? "Set-Cookie: runtime_cookie=AUTH_COOKIE_CANARY; Path=/\r\n"
+		                                      : "";
+		return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+		       std::to_string(authenticated_body.size()) + "\r\n" + cookie_header + "Connection: close\r\n\r\n" +
+		       authenticated_body;
+	}
+	if (response_mode == ControlledSocketMode::SUCCESS || response_mode == ControlledSocketMode::SET_COOKIE) {
+		const std::string cookie_header = response_mode == ControlledSocketMode::SET_COOKIE
 		                                      ? "Set-Cookie: runtime_cookie=CONTROLLED_COOKIE_SECRET; Path=/\r\n"
 		                                      : "";
 		return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
 		       std::to_string(success_body.size()) + "\r\n" + cookie_header + "Connection: close\r\n\r\n" +
 		       success_body;
 	}
-	if (mode == ControlledSocketMode::STATUS) {
+	if (response_mode == ControlledSocketMode::STATUS) {
 		const std::string body = "SECRET_STATUS_BODY http://127.0.0.1/private";
 		return "HTTP/1.1 503 Service Unavailable\r\nContent-Length: " + std::to_string(body.size()) +
 		       "\r\nConnection: close\r\n\r\n" + body;
 	}
-	if (mode == ControlledSocketMode::REDIRECT) {
-		return "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:" + std::to_string(port) +
+	if (response_mode == ControlledSocketMode::AUTHENTICATION_STATUS ||
+	    response_mode == ControlledSocketMode::AUTHORIZATION_STATUS) {
+		const auto authentication = response_mode == ControlledSocketMode::AUTHENTICATION_STATUS;
+		const std::string body = authentication ? "AUTHENTICATION_RESPONSE_CANARY" : "AUTHORIZATION_RESPONSE_CANARY";
+		return std::string("HTTP/1.1 ") + (authentication ? "401 Unauthorized" : "403 Forbidden") +
+		       "\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
+	}
+	if (response_mode == ControlledSocketMode::REDIRECT) {
+		const auto destination_port = redirect_port == 0 ? port : redirect_port;
+		return "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:" + std::to_string(destination_port) +
 		       "/forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 	}
-	if (mode == ControlledSocketMode::MALFORMED) {
+	if (response_mode == ControlledSocketMode::MALFORMED) {
 		const std::string body = "{SECRET_MALFORMED";
 		return "HTTP/1.1 200 OK\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" +
 		       body;
 	}
-	if (mode == ControlledSocketMode::OVERSIZED_HEADER) {
+	if (response_mode == ControlledSocketMode::OVERSIZED_HEADER) {
 		return "HTTP/1.1 200 OK\r\nX-Controlled: " + std::string(17000, 'h') +
 		       "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 	}
-	if (mode == ControlledSocketMode::OVERSIZED_RESPONSE) {
+	if (response_mode == ControlledSocketMode::OVERSIZED_RESPONSE) {
 		return "HTTP/1.1 200 OK\r\nContent-Length: 65537\r\nConnection: close\r\n\r\n" + std::string(65537, 'b');
 	}
-	if (mode == ControlledSocketMode::GZIP_EXACT_DECOMPRESSED_LIMIT ||
-	    mode == ControlledSocketMode::GZIP_OVER_DECOMPRESSED_LIMIT) {
-		const auto body = mode == ControlledSocketMode::GZIP_EXACT_DECOMPRESSED_LIMIT
+	if (response_mode == ControlledSocketMode::GZIP_EXACT_DECOMPRESSED_LIMIT ||
+	    response_mode == ControlledSocketMode::GZIP_OVER_DECOMPRESSED_LIMIT) {
+		const auto body = response_mode == ControlledSocketMode::GZIP_EXACT_DECOMPRESSED_LIMIT
 		                      ? Binary(GZIP_EXACT, sizeof(GZIP_EXACT))
 		                      : Binary(GZIP_OVER, sizeof(GZIP_OVER));
 		return "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Type: application/json\r\nContent-Length: " +
@@ -168,42 +187,51 @@ std::string ControlledSocketService::Response() const {
 }
 
 void ControlledSocketService::Serve() noexcept {
-	sockaddr_in peer;
-	socklen_t peer_length = sizeof(peer);
-	const auto accepted = accept(listener, reinterpret_cast<sockaddr *>(&peer), &peer_length);
-	if (accepted < 0) {
-		return;
-	}
-	client.store(accepted, std::memory_order_release);
-	connection_count.fetch_add(1, std::memory_order_relaxed);
-	std::string received;
-	char buffer[2048];
-	while (received.find("\r\n\r\n") == std::string::npos && received.size() < 65536) {
-		const auto count = recv(accepted, buffer, sizeof(buffer), 0);
-		if (count <= 0) {
-			break;
+	const uint64_t expected_connections = mode == ControlledSocketMode::BLOCK_THEN_AUTHENTICATED_SUCCESS ? 2 : 1;
+	for (uint64_t connection_index = 0; connection_index < expected_connections; connection_index++) {
+		sockaddr_in peer;
+		socklen_t peer_length = sizeof(peer);
+		const auto accepted = accept(listener, reinterpret_cast<sockaddr *>(&peer), &peer_length);
+		if (accepted < 0) {
+			return;
 		}
-		try {
-			received.append(buffer, static_cast<std::size_t>(count));
-		} catch (...) {
-			break;
+		client.store(accepted, std::memory_order_release);
+		connection_count.fetch_add(1, std::memory_order_relaxed);
+		std::string received;
+		char buffer[2048];
+		while (received.find("\r\n\r\n") == std::string::npos && received.size() < 65536) {
+			const auto count = recv(accepted, buffer, sizeof(buffer), 0);
+			if (count <= 0) {
+				break;
+			}
+			try {
+				received.append(buffer, static_cast<std::size_t>(count));
+			} catch (...) {
+				break;
+			}
 		}
+		{
+			std::lock_guard<std::mutex> guard(mutex);
+			request = received;
+			request_ready = true;
+		}
+		condition.notify_all();
+		if (mode == ControlledSocketMode::BLOCK) {
+			std::unique_lock<std::mutex> guard(mutex);
+			condition.wait(guard, [&]() { return stop; });
+		} else if (mode == ControlledSocketMode::BLOCK_THEN_AUTHENTICATED_SUCCESS && connection_index == 0) {
+			while (recv(accepted, buffer, sizeof(buffer), 0) > 0) {
+			}
+		} else if (mode != ControlledSocketMode::DISCONNECT) {
+			const auto response_mode = mode == ControlledSocketMode::BLOCK_THEN_AUTHENTICATED_SUCCESS
+			                               ? ControlledSocketMode::AUTHENTICATED_SUCCESS
+			                               : mode;
+			(void)SendAll(accepted, Response(response_mode));
+		}
+		(void)shutdown(accepted, SHUT_RDWR);
+		close(accepted);
+		client.store(-1, std::memory_order_release);
 	}
-	{
-		std::lock_guard<std::mutex> guard(mutex);
-		request = received;
-		request_ready = true;
-	}
-	condition.notify_all();
-	if (mode == ControlledSocketMode::BLOCK) {
-		std::unique_lock<std::mutex> guard(mutex);
-		condition.wait(guard, [&]() { return stop; });
-	} else if (mode != ControlledSocketMode::DISCONNECT) {
-		(void)SendAll(accepted, Response());
-	}
-	(void)shutdown(accepted, SHUT_RDWR);
-	close(accepted);
-	client.store(-1, std::memory_order_release);
 }
 
 } // namespace duckdb_api_test

@@ -33,6 +33,7 @@ private:
 
 duckdb_api::internal::JsonDecodePlan Plan() {
 	duckdb_api::internal::JsonDecodePlan plan;
+	plan.response_source = duckdb_api::internal::JsonResponseSource::JSON_PATH_MANY;
 	plan.records_field = "items";
 	plan.columns = {{"id", "id", duckdb_api::ValueKind::BIGINT},
 	                {"login", "login", duckdb_api::ValueKind::VARCHAR},
@@ -45,8 +46,20 @@ duckdb_api::internal::JsonDecodePlan Plan() {
 	return plan;
 }
 
+duckdb_api::internal::JsonDecodePlan RootPlan() {
+	auto plan = Plan();
+	plan.response_source = duckdb_api::internal::JsonResponseSource::ROOT_OBJECT;
+	plan.records_field.clear();
+	plan.max_records = 1;
+	return plan;
+}
+
 std::vector<duckdb_api::TypedRow> Decode(const std::string &body, ManualControl &control) {
 	return duckdb_api::internal::DecodeJsonRows(body, Plan(), control);
+}
+
+std::vector<duckdb_api::TypedRow> DecodeRoot(const std::string &body, ManualControl &control) {
+	return duckdb_api::internal::DecodeJsonRows(body, RootPlan(), control);
 }
 
 void RequireError(const std::function<void()> &action, duckdb_api::ErrorStage stage, const std::string &field,
@@ -85,6 +98,54 @@ void TestTypedRowsAndCompleteValidation() {
 	Require(rows[1].values[0].bigint_value == -22 && rows[1].values[1].varchar_value == "duckdb-fdw" &&
 	            rows[1].values[2].boolean_value,
 	        "Unicode escape or typed value was decoded incorrectly");
+}
+
+void TestStrictSuccessfulRootObject() {
+	ManualControl control;
+	const auto rows = DecodeRoot(
+	    "{\"ignored\":{\"nested\":[true,null]},\"site_admin\":false,\"login\":\"duck\\u0064b\",\"id\":11}", control);
+	Require(rows.size() == 1 && rows[0].values.size() == 3 && rows[0].values[0].bigint_value == 11 &&
+	            rows[0].values[1].varchar_value == "duckdb" && !rows[0].values[2].boolean_value,
+	        "successful root object did not produce exactly one aligned row");
+
+	struct Case {
+		std::string body;
+		std::string field;
+	};
+	const std::vector<Case> cases = {
+	    {"[]", ""},
+	    {"null", ""},
+	    {"{}", "id"},
+	    {"{\"id\":1,\"login\":\"duckdb\",\"site_admin\":null}", "site_admin"},
+	    {"{\"id\":1,\"login\":\"duckdb\",\"login\":\"duplicate\",\"site_admin\":false}", "login"},
+	    {"{\"id\":1.0,\"login\":\"duckdb\",\"site_admin\":false}", "id"}};
+	for (std::size_t index = 0; index < cases.size(); index++) {
+		RequireError([&]() { DecodeRoot(cases[index].body, control); }, duckdb_api::ErrorStage::SCHEMA,
+		             cases[index].field);
+	}
+	RequireError([&]() { DecodeRoot("{\"id\":1", control); }, duckdb_api::ErrorStage::DECODE, "");
+
+	auto bounded = RootPlan();
+	bounded.max_string_bytes = 3;
+	RequireError(
+	    [&]() {
+		    duckdb_api::internal::DecodeJsonRows("{\"id\":1,\"login\":\"four\",\"site_admin\":false}", bounded,
+		                                         control);
+	    },
+	    duckdb_api::ErrorStage::RESOURCE, "login");
+	bounded = RootPlan();
+	bounded.max_json_nesting = 2;
+	RequireError(
+	    [&]() {
+		    duckdb_api::internal::DecodeJsonRows("{\"id\":1,\"login\":\"ok\",\"site_admin\":false,\"ignored\":[[0]]}",
+		                                         bounded, control);
+	    },
+	    duckdb_api::ErrorStage::RESOURCE, "json_nesting");
+
+	auto invalid = RootPlan();
+	invalid.max_records = 2;
+	RequireError([&]() { duckdb_api::internal::DecodeJsonRows("{}", invalid, control); },
+	             duckdb_api::ErrorStage::INTERNAL, "");
 }
 
 void TestMalformedAndInvalidUtf8() {
@@ -182,6 +243,7 @@ void TestCancellationAndDeadline() {
 int main() {
 	try {
 		TestTypedRowsAndCompleteValidation();
+		TestStrictSuccessfulRootObject();
 		TestMalformedAndInvalidUtf8();
 		TestRequiredShapeAndStrictTypes();
 		TestExactResourceBoundaries();

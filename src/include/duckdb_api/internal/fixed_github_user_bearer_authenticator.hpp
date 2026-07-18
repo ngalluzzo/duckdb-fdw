@@ -1,0 +1,25 @@
+#pragma once
+
+#include "duckdb_api/authorization.hpp"
+#include "duckdb_api/internal/http_transport.hpp"
+#include "duckdb_api/scan_plan.hpp"
+
+#include <string>
+
+namespace duckdb_api {
+namespace internal {
+
+// The sole consumer of ScanAuthorization credential bytes. The fixed
+// authenticator revalidates the already approved plan and structural request
+// before consuming the capability and constructing one canonical bearer
+// header. It returns no generic placement or destination facility.
+class FixedGithubUserBearerAuthenticator {
+public:
+	static HttpRequest Authorize(const ScanPlan &plan, HttpRequest request, ScanAuthorization authorization);
+
+private:
+	static std::string Consume(ScanAuthorization &authorization);
+};
+
+} // namespace internal
+} // namespace duckdb_api

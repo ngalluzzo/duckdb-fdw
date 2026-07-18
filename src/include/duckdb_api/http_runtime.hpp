@@ -23,7 +23,7 @@ struct HttpRuntimeService {
 // initialization. The returned executor has no authority override. A process-
 // resident owner deliberately performs no accepted-state cleanup and leaves
 // reclamation to the OS. Only rejected unpublished initialization is balanced;
-// dynamic extension unload/reload is unsupported by the 0.3.0 profile.
+// dynamic extension unload/reload is unsupported by the 0.4.0 profile.
 HttpRuntimeService InitializeHttpRuntime();
 
 } // namespace duckdb_api

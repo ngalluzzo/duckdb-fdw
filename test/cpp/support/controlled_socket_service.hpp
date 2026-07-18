@@ -12,8 +12,12 @@ namespace duckdb_api_test {
 
 enum class ControlledSocketMode {
 	SUCCESS,
+	AUTHENTICATED_SUCCESS,
+	AUTHENTICATED_SET_COOKIE,
 	SET_COOKIE,
 	STATUS,
+	AUTHENTICATION_STATUS,
+	AUTHORIZATION_STATUS,
 	REDIRECT,
 	MALFORMED,
 	OVERSIZED_HEADER,
@@ -21,14 +25,15 @@ enum class ControlledSocketMode {
 	GZIP_EXACT_DECOMPRESSED_LIMIT,
 	GZIP_OVER_DECOMPRESSED_LIMIT,
 	DISCONNECT,
-	BLOCK
+	BLOCK,
+	BLOCK_THEN_AUTHENTICATED_SUCCESS
 };
 
-// One-connection private HTTP/1.1 service. The service owns no product
+// Bounded private HTTP/1.1 service. The service owns no product
 // authority and is linked only into focused Runtime tests.
 class ControlledSocketService {
 public:
-	explicit ControlledSocketService(ControlledSocketMode mode);
+	explicit ControlledSocketService(ControlledSocketMode mode, uint16_t redirect_port = 0);
 	~ControlledSocketService() noexcept;
 
 	uint16_t Port() const noexcept;
@@ -42,10 +47,11 @@ private:
 	ControlledSocketService &operator=(const ControlledSocketService &) = delete;
 
 	static bool SendAll(int socket_fd, const std::string &bytes) noexcept;
-	std::string Response() const;
+	std::string Response(ControlledSocketMode response_mode) const;
 	void Serve() noexcept;
 
 	const ControlledSocketMode mode;
+	const uint16_t redirect_port;
 	int listener;
 	std::atomic<int> client;
 	uint16_t port;

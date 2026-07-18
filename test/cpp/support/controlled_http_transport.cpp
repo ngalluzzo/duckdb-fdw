@@ -4,6 +4,7 @@
 #include "duckdb_api/internal/http_transport.hpp"
 
 #include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -12,7 +13,7 @@
 namespace duckdb_api_test {
 
 struct ControlledHttpRuntime::State {
-	State() : mode(ControlledHttpMode::RESPONSE), status(200) {
+	State() : mode(ControlledHttpMode::RESPONSE), status(200), bearer_barrier_released(true) {
 		observation.request_count = 0;
 		observation.port = 0;
 		observation.max_header_bytes = 0;
@@ -21,11 +22,15 @@ struct ControlledHttpRuntime::State {
 	}
 
 	mutable std::mutex mutex;
+	std::condition_variable condition;
 	ControlledHttpMode mode;
 	uint32_t status;
 	std::string body;
 	std::string diagnostic;
 	ControlledRequestObservation observation;
+	std::vector<ControlledRequestObservation> observations;
+	std::vector<std::pair<std::string, std::string>> bearer_responses;
+	bool bearer_barrier_released;
 };
 
 namespace {
@@ -42,6 +47,7 @@ public:
 		uint32_t status;
 		std::string body;
 		std::string diagnostic;
+		bool wait_for_bearer_barrier = false;
 		{
 			std::lock_guard<std::mutex> guard(state->mutex);
 			state->observation.request_count++;
@@ -58,10 +64,43 @@ public:
 			state->observation.max_header_bytes = limits.max_header_bytes;
 			state->observation.max_response_bytes = limits.max_response_bytes;
 			state->observation.max_decompressed_bytes = limits.max_decompressed_bytes;
+			state->observations.push_back(state->observation);
 			mode = state->mode;
 			status = state->status;
-			body = state->body;
+			if (mode == ControlledHttpMode::BEARER_RESPONSE_BARRIER) {
+				wait_for_bearer_barrier = true;
+				for (std::size_t response_index = 0; response_index < state->bearer_responses.size();
+				     response_index++) {
+					for (std::size_t header_index = 0; header_index < request.headers.size(); header_index++) {
+						if (request.headers[header_index].name == "Authorization" &&
+						    request.headers[header_index].value == state->bearer_responses[response_index].first) {
+							body = state->bearer_responses[response_index].second;
+						}
+					}
+				}
+			} else {
+				body = state->body;
+			}
 			diagnostic = state->diagnostic;
+		}
+		state->condition.notify_all();
+
+		if (wait_for_bearer_barrier) {
+			if (body.empty()) {
+				throw std::runtime_error("controlled bearer response was not configured");
+			}
+			std::unique_lock<std::mutex> guard(state->mutex);
+			while (!state->bearer_barrier_released && !control.IsCancellationRequested() &&
+			       std::chrono::steady_clock::now() < limits.deadline) {
+				state->condition.wait_for(guard, std::chrono::milliseconds(1));
+			}
+			if (control.IsCancellationRequested()) {
+				throw duckdb_api::ExecutionCancelled();
+			}
+			if (!state->bearer_barrier_released) {
+				throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "wall_milliseconds",
+				                                 "execution exceeded its wall-time budget");
+			}
 		}
 
 		if (mode == ControlledHttpMode::TRANSPORT_FAILURE) {
@@ -109,6 +148,22 @@ void ControlledHttpRuntime::Respond(uint32_t status_p, std::string body_p) {
 	state->status = status_p;
 	state->body = std::move(body_p);
 	state->diagnostic.clear();
+	state->bearer_responses.clear();
+	state->bearer_barrier_released = true;
+	state->condition.notify_all();
+}
+
+void ControlledHttpRuntime::RespondWithBearerBarrier(std::string first_header, std::string first_body,
+                                                     std::string second_header, std::string second_body) {
+	std::lock_guard<std::mutex> guard(state->mutex);
+	state->mode = ControlledHttpMode::BEARER_RESPONSE_BARRIER;
+	state->status = 200;
+	state->body.clear();
+	state->diagnostic.clear();
+	state->bearer_responses.clear();
+	state->bearer_responses.push_back(std::make_pair(std::move(first_header), std::move(first_body)));
+	state->bearer_responses.push_back(std::make_pair(std::move(second_header), std::move(second_body)));
+	state->bearer_barrier_released = false;
 }
 
 void ControlledHttpRuntime::FailWithUnknownTransportDiagnostic(std::string diagnostic_p) {
@@ -116,6 +171,9 @@ void ControlledHttpRuntime::FailWithUnknownTransportDiagnostic(std::string diagn
 	state->mode = ControlledHttpMode::TRANSPORT_FAILURE;
 	state->body.clear();
 	state->diagnostic = std::move(diagnostic_p);
+	state->bearer_responses.clear();
+	state->bearer_barrier_released = true;
+	state->condition.notify_all();
 }
 
 void ControlledHttpRuntime::BlockUntilCancelled() {
@@ -123,11 +181,32 @@ void ControlledHttpRuntime::BlockUntilCancelled() {
 	state->mode = ControlledHttpMode::BLOCK_UNTIL_CANCEL;
 	state->body.clear();
 	state->diagnostic.clear();
+	state->bearer_responses.clear();
+	state->bearer_barrier_released = true;
+	state->condition.notify_all();
+}
+
+bool ControlledHttpRuntime::WaitForRequestCount(uint64_t count, std::chrono::milliseconds timeout) {
+	std::unique_lock<std::mutex> guard(state->mutex);
+	return state->condition.wait_for(guard, timeout, [&]() { return state->observations.size() >= count; });
+}
+
+void ControlledHttpRuntime::ReleaseBearerBarrier() {
+	{
+		std::lock_guard<std::mutex> guard(state->mutex);
+		state->bearer_barrier_released = true;
+	}
+	state->condition.notify_all();
 }
 
 ControlledRequestObservation ControlledHttpRuntime::Observation() const {
 	std::lock_guard<std::mutex> guard(state->mutex);
 	return state->observation;
+}
+
+std::vector<ControlledRequestObservation> ControlledHttpRuntime::Observations() const {
+	std::lock_guard<std::mutex> guard(state->mutex);
+	return state->observations;
 }
 
 std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntime(uint64_t max_wall_milliseconds,

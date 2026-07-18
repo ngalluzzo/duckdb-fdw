@@ -15,8 +15,10 @@ class CurlProcessLifetime;
 // are never cleaned by service, extension, or atexit teardown.
 const CurlProcessLifetime *AcquireCurlProcessLifetime();
 
-// Constructs the production fixed-authority transport. The process-lifetime
-// token proves initialization completed before any easy handle can be built.
+// Constructs the production fixed-authority transport. It admits only the two
+// compiled-in GitHub request profiles and never derives a URL or credential
+// placement from caller text. The process-lifetime token proves initialization
+// completed before any easy handle can be built.
 std::unique_ptr<HttpTransport> BuildCurlHttpTransport(const CurlProcessLifetime *lifetime);
 
 } // namespace internal

@@ -26,12 +26,25 @@ struct LoopbackCurlRuntime::State {
 
 namespace {
 
-bool HasExpectedRequest(const duckdb_api::internal::HttpRequest &request, uint16_t port) {
-	return request.method == "GET" && request.scheme == "http" && request.host == "127.0.0.1" && request.port == port &&
-	       request.target == "/search/users?q=duckdb+in%3Alogin&per_page=3" && request.headers.size() == 3 &&
-	       request.headers[0].name == "Accept" && request.headers[0].value == "application/vnd.github+json" &&
-	       request.headers[1].name == "User-Agent" && request.headers[1].value == "duckdb-api/0.3.0" &&
-	       request.headers[2].name == "X-GitHub-Api-Version" && request.headers[2].value == "2022-11-28";
+bool HasFixedHeaders(const std::vector<duckdb_api::internal::HttpHeader> &headers) {
+	return headers.size() >= 3 && headers[0].name == "Accept" && headers[0].value == "application/vnd.github+json" &&
+	       headers[1].name == "User-Agent" && headers[1].value == "duckdb-api/0.4.0" &&
+	       headers[2].name == "X-GitHub-Api-Version" && headers[2].value == "2022-11-28";
+}
+
+bool IsBearerHeader(const duckdb_api::internal::HttpHeader &header) {
+	return header.name == "Authorization" && header.value.size() > 7 && header.value.compare(0, 7, "Bearer ") == 0;
+}
+
+bool HasExpectedRequest(const duckdb_api::internal::HttpRequest &request) {
+	if (request.method != "GET" || request.scheme != "https" || request.host != "api.github.com" ||
+	    request.port != 443 || !HasFixedHeaders(request.headers)) {
+		return false;
+	}
+	if (request.target == "/search/users?q=duckdb+in%3Alogin&per_page=3") {
+		return request.headers.size() == 3;
+	}
+	return request.target == "/user" && request.headers.size() == 4 && IsBearerHeader(request.headers[3]);
 }
 
 bool IsOwnedLoopbackSocket(const sockaddr *address, socklen_t address_length, const void *context) noexcept {
@@ -47,18 +60,21 @@ bool IsOwnedLoopbackSocket(const sockaddr *address, socklen_t address_length, co
 class LoopbackCurlTransport final : public duckdb_api::internal::HttpTransport {
 public:
 	explicit LoopbackCurlTransport(std::shared_ptr<LoopbackCurlRuntime::State> state_p)
-	    : state(std::move(state_p)),
-	      url("http://127.0.0.1:" + std::to_string(state->port) + "/search/users?q=duckdb+in%3Alogin&per_page=3") {
+	    : state(std::move(state_p)), authority("http://127.0.0.1:" + std::to_string(state->port)) {
 	}
 
 	duckdb_api::internal::HttpResponse Get(const duckdb_api::internal::HttpRequest &request,
 	                                       const duckdb_api::internal::HttpLimits &limits,
 	                                       duckdb_api::ExecutionControl &control) const override {
-		if (!HasExpectedRequest(request, state->port)) {
+		if (!HasExpectedRequest(request)) {
 			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::POLICY, "",
 			                                 "HTTP request is outside the controlled test profile");
 		}
 		state->request_count.fetch_add(1, std::memory_order_relaxed);
+		// This separately linked private seam routes an already validated public
+		// request to the owned loopback socket. Installed objects contain neither
+		// this numeric authority nor a caller-selected routing facility.
+		const auto url = authority + request.target;
 		const duckdb_api::internal::CurlTransferProfile profile {url.c_str(),
 		                                                         "http",
 		                                                         IsOwnedLoopbackSocket,
@@ -76,7 +92,7 @@ public:
 
 private:
 	const std::shared_ptr<LoopbackCurlRuntime::State> state;
-	const std::string url;
+	const std::string authority;
 };
 
 } // namespace
@@ -107,19 +123,14 @@ std::shared_ptr<LoopbackCurlRuntime> BuildLoopbackCurlRuntime(uint16_t port) {
 	}
 	auto state = std::make_shared<LoopbackCurlRuntime::State>(port);
 	auto connector = duckdb_api::BuildNativeGithubConnector();
-	connector.operation.request.origin = {duckdb_api::CompiledUrlScheme::HTTP,
-	                                      duckdb_api::CompiledRestHost("127.0.0.1"), port};
-	connector.network_policy.allowed_schemes = {"http"};
-	connector.network_policy.allowed_hosts = {"127.0.0.1"};
-	connector.network_policy.loopback_addresses_enabled = true;
 	(void)duckdb_api::internal::AcquireCurlProcessLifetime();
 	std::unique_ptr<duckdb_api::internal::HttpTransport> transport(new LoopbackCurlTransport(state));
-	const duckdb_api::internal::HttpExecutionProfile profile {duckdb_api::PlannedUrlScheme::HTTP,
-	                                                          "127.0.0.1",
-	                                                          port,
+	const duckdb_api::internal::HttpExecutionProfile profile {duckdb_api::PlannedUrlScheme::HTTPS,
+	                                                          "api.github.com",
+	                                                          443,
 	                                                          false,
 	                                                          false,
-	                                                          true,
+	                                                          false,
 	                                                          duckdb_api::MAX_EXECUTION_MILLISECONDS,
 	                                                          3};
 	auto executor = duckdb_api::internal::BuildHttpScanExecutorForProfile(std::move(transport), profile);

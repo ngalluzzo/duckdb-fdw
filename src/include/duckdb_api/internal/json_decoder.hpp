@@ -16,7 +16,12 @@ struct JsonColumnPlan {
 	ValueKind kind;
 };
 
+// Selected explicitly from the already validated operation. The decoder does
+// not derive response shape or relational cardinality from an extractor.
+enum class JsonResponseSource { JSON_PATH_MANY, ROOT_OBJECT };
+
 struct JsonDecodePlan {
+	JsonResponseSource response_source;
 	std::string records_field;
 	std::vector<JsonColumnPlan> columns;
 	uint64_t max_records;
@@ -29,7 +34,8 @@ struct JsonDecodePlan {
 // Strictly decodes one already bounded JSON document. The decoder validates the
 // complete document, requires each declared non-null field exactly once,
 // retains JSON numeric spelling through BIGINT conversion, and checkpoints
-// cancellation/deadline and every decode budget. It has no request authority.
+// cancellation/deadline and every decode budget. ROOT_OBJECT produces exactly
+// one record from the successful response object. It has no request authority.
 std::vector<TypedRow> DecodeJsonRows(const std::string &body, const JsonDecodePlan &plan, ExecutionControl &control);
 
 } // namespace internal

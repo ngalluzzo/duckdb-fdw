@@ -40,4 +40,10 @@ struct PrivateCurlProbeResult {
 PrivateCurlProbeResult PerformPrivateCurlProbe(const PrivateCurlProbeOptions &options,
                                                duckdb_api::ExecutionControl &control);
 
+// Private fixed `/user` variant used only to prove that post-DNS denial occurs
+// after local bearer construction but before a connection or transmitted byte.
+PrivateCurlProbeResult PerformPrivateAuthorizedCurlProbe(const PrivateCurlProbeOptions &options,
+                                                         std::string bearer_token,
+                                                         duckdb_api::ExecutionControl &control);
+
 } // namespace duckdb_api_test
