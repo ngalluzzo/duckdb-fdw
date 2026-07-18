@@ -3,10 +3,32 @@
 #include <locale>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace duckdb_api {
 
 namespace {
+
+bool IsAsciiLowerOrDigit(char value) {
+	return (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9');
+}
+
+bool IsCanonicalHost(const std::string &host) {
+	if (host.empty() || !IsAsciiLowerOrDigit(host.front()) || !IsAsciiLowerOrDigit(host.back())) {
+		return false;
+	}
+	for (std::size_t index = 0; index < host.size(); index++) {
+		const auto value = host[index];
+		if (!IsAsciiLowerOrDigit(value) && value != '-' && value != '.') {
+			return false;
+		}
+		if (value == '.' && (index == 0 || index + 1 == host.size() || host[index - 1] == '.' ||
+		                     host[index - 1] == '-' || host[index + 1] == '-')) {
+			return false;
+		}
+	}
+	return true;
+}
 
 const char *OriginName(CompiledConnectorOrigin origin) {
 	switch (origin) {
@@ -46,6 +68,16 @@ const char *ReplaySafetyName(CompiledReplaySafety replay_safety) {
 		return "replay_safe";
 	}
 	throw std::logic_error("compiled connector contains an unknown replay-safety declaration");
+}
+
+const char *UrlSchemeName(CompiledUrlScheme scheme) {
+	switch (scheme) {
+	case CompiledUrlScheme::HTTP:
+		return "http";
+	case CompiledUrlScheme::HTTPS:
+		return "https";
+	}
+	throw std::logic_error("compiled connector contains an unknown URL scheme");
 }
 
 const char *EnabledState(bool enabled) {
@@ -95,6 +127,16 @@ void AppendStrings(std::ostringstream &result, const std::vector<std::string> &v
 
 } // namespace
 
+CompiledRestHost::CompiledRestHost(std::string value_p) : value(std::move(value_p)) {
+	if (!IsCanonicalHost(value)) {
+		throw std::invalid_argument("compiled REST host is not one exact canonical host component");
+	}
+}
+
+const std::string &CompiledRestHost::Value() const {
+	return value;
+}
+
 std::string CompiledConnector::Snapshot() const {
 	std::ostringstream result;
 	result.imbue(std::locale::classic());
@@ -104,7 +146,9 @@ std::string CompiledConnector::Snapshot() const {
 	result << ";operation=" << operation.name << ':' << (operation.fallback ? "fallback" : "selected") << ':'
 	       << CardinalityName(operation.cardinality) << ':' << ProtocolName(operation.protocol) << ':'
 	       << MethodName(operation.method) << ':' << ReplaySafetyName(operation.replay_safety)
-	       << ";request=base:" << operation.request.base_url << ",path:" << operation.request.path << ",query:[";
+	       << ";request=origin:[scheme:" << UrlSchemeName(operation.request.origin.scheme)
+	       << ",host:" << operation.request.origin.host.Value() << ",port:" << operation.request.origin.port
+	       << "],path:" << operation.request.path << ",query:[";
 	AppendQuery(result, operation.request.query_parameters);
 	result << "],headers:[";
 	AppendHeaders(result, operation.request.headers);
@@ -126,43 +170,31 @@ std::string CompiledConnector::Snapshot() const {
 }
 
 CompiledConnector BuildNativeGithubConnector() {
-	CompiledConnector result;
-	result.origin = CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA;
-	result.connector_name = "github";
-	result.version = "0.3.0";
-	result.relation_name = "duckdb_login_search_page";
-	result.columns = {{"id", "BIGINT", false, "$.id"},
-	                  {"login", "VARCHAR", false, "$.login"},
-	                  {"site_admin", "BOOLEAN", false, "$.site_admin"}};
-
-	result.operation.name = "github_search_duckdb_login_page";
-	result.operation.fallback = true;
-	result.operation.cardinality = CompiledOperationCardinality::ZERO_TO_MANY;
-	result.operation.protocol = CompiledProtocol::REST;
-	result.operation.method = CompiledHttpMethod::GET;
-	result.operation.replay_safety = CompiledReplaySafety::SAFE;
-	result.operation.retry_enabled = false;
-	result.operation.authentication_enabled = false;
-	result.operation.pagination_enabled = false;
-	result.operation.request.base_url = "https://api.github.com";
-	result.operation.request.path = "/search/users";
-	result.operation.request.query_parameters = {{"q", "duckdb+in%3Alogin"}, {"per_page", "3"}};
-	result.operation.request.headers = {{"Accept", "application/vnd.github+json"},
-	                                    {"User-Agent", "duckdb-api/0.3.0"},
-	                                    {"X-GitHub-Api-Version", "2022-11-28"}};
-	result.operation.records_extractor = "$.items[*]";
-
-	result.network_policy.allowed_schemes = {"https"};
-	result.network_policy.allowed_hosts = {"api.github.com"};
-	result.network_policy.redirects_enabled = false;
-	result.network_policy.private_addresses_enabled = false;
-	result.network_policy.link_local_addresses_enabled = false;
-	result.network_policy.loopback_addresses_enabled = false;
-	result.network_policy.max_response_bytes = 65536;
-
-	result.resource_ceilings.max_records = 3;
-	result.resource_ceilings.max_extracted_string_bytes = 256;
-	return result;
+	return {CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA,
+	        "github",
+	        "0.3.0",
+	        "duckdb_login_search_page",
+	        {{"id", "BIGINT", false, "$.id"},
+	         {"login", "VARCHAR", false, "$.login"},
+	         {"site_admin", "BOOLEAN", false, "$.site_admin"}},
+	        {"github_search_duckdb_login_page",
+	         true,
+	         CompiledOperationCardinality::ZERO_TO_MANY,
+	         CompiledProtocol::REST,
+	         CompiledHttpMethod::GET,
+	         CompiledReplaySafety::SAFE,
+	         false,
+	         false,
+	         false,
+	         {{CompiledUrlScheme::HTTPS, CompiledRestHost("api.github.com"), 443},
+	          "/search/users",
+	          {{"q", "duckdb+in%3Alogin"}, {"per_page", "3"}},
+	          {{"Accept", "application/vnd.github+json"},
+	           {"User-Agent", "duckdb-api/0.3.0"},
+	           {"X-GitHub-Api-Version", "2022-11-28"}}},
+	         "$.items[*]"},
+	        {{"https"}, {"api.github.com"}, false, false, false, false, 65536},
+	        {3, 256}};
 }
 
 } // namespace duckdb_api

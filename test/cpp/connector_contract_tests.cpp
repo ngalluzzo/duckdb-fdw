@@ -6,11 +6,71 @@
 #include <locale>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace {
 
 using duckdb_api_test::Require;
+
+template <typename T>
+class HasBaseUrlMember {
+	template <typename U>
+	static char Test(decltype(&U::base_url));
+	template <typename U>
+	static long Test(...);
+
+public:
+	static const bool VALUE = sizeof(Test<T>(0)) == sizeof(char);
+};
+
+template <typename T>
+class HasPathMember {
+	template <typename U>
+	static char Test(decltype(&U::path));
+	template <typename U>
+	static long Test(...);
+
+public:
+	static const bool VALUE = sizeof(Test<T>(0)) == sizeof(char);
+};
+
+template <typename T>
+class HasQueryMember {
+	template <typename U>
+	static char Test(decltype(&U::query));
+	template <typename U>
+	static long Test(...);
+
+public:
+	static const bool VALUE = sizeof(Test<T>(0)) == sizeof(char);
+};
+
+template <typename T>
+class HasFragmentMember {
+	template <typename U>
+	static char Test(decltype(&U::fragment));
+	template <typename U>
+	static long Test(...);
+
+public:
+	static const bool VALUE = sizeof(Test<T>(0)) == sizeof(char);
+};
+
+static_assert(!HasBaseUrlMember<duckdb_api::CompiledRestRequest>::VALUE,
+              "CompiledRestRequest must not restore a parseable base URL");
+static_assert(!HasPathMember<duckdb_api::CompiledRestOrigin>::VALUE,
+              "CompiledRestOrigin must not carry a path component");
+static_assert(!HasQueryMember<duckdb_api::CompiledRestOrigin>::VALUE,
+              "CompiledRestOrigin must not carry a query component");
+static_assert(!HasFragmentMember<duckdb_api::CompiledRestOrigin>::VALUE,
+              "CompiledRestOrigin must not carry a fragment component");
+static_assert(std::is_same<decltype(duckdb_api::CompiledRestOrigin::scheme), duckdb_api::CompiledUrlScheme>::value,
+              "CompiledRestOrigin scheme must remain typed");
+static_assert(std::is_same<decltype(duckdb_api::CompiledRestOrigin::host), duckdb_api::CompiledRestHost>::value,
+              "CompiledRestOrigin host must remain a validated exact host component");
+static_assert(std::is_same<decltype(duckdb_api::CompiledRestOrigin::port), std::uint16_t>::value,
+              "CompiledRestOrigin port must remain an explicit uint16_t");
 
 class GroupedDigits final : public std::numpunct<char> {
 protected:
@@ -42,6 +102,15 @@ void RequireHeader(const duckdb_api::CompiledHttpHeader &header, const std::stri
 	Require(header.value == value, "CompiledConnector header value drifted: " + name);
 }
 
+void RequireInvalidHost(const std::string &value) {
+	try {
+		duckdb_api::CompiledRestHost host(value);
+		(void)host;
+		throw std::runtime_error("CompiledRestHost accepted URL structure: " + value);
+	} catch (const std::invalid_argument &) {
+	}
+}
+
 void TestNativeGithubMetadata() {
 	const auto connector = duckdb_api::BuildNativeGithubConnector();
 	Require(connector.origin == duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA,
@@ -67,9 +136,12 @@ void TestNativeGithubMetadata() {
 	Require(!operation.retry_enabled && !operation.authentication_enabled && !operation.pagination_enabled,
 	        "CompiledConnector enabled an excluded operation capability");
 
-	Require(operation.request.base_url == "https://api.github.com", "CompiledConnector base URL drifted");
-	Require(operation.request.base_url.find('?') == std::string::npos,
-	        "CompiledConnector base URL contains prejoined query metadata");
+	Require(operation.request.origin.scheme == duckdb_api::CompiledUrlScheme::HTTPS,
+	        "CompiledConnector origin scheme drifted");
+	Require(operation.request.origin.host.Value() == "api.github.com", "CompiledConnector origin host drifted");
+	Require(operation.request.origin.host.Value().find_first_of("/:?#@") == std::string::npos,
+	        "CompiledConnector origin host contains URL structure");
+	Require(operation.request.origin.port == 443, "CompiledConnector origin port drifted");
 	Require(operation.request.path == "/search/users", "CompiledConnector request path drifted");
 	Require(operation.request.query_parameters.size() == 2, "CompiledConnector fixed query width drifted");
 	RequireQueryParameter(operation.request.query_parameters[0], "q", "duckdb+in%3Alogin");
@@ -100,7 +172,8 @@ void TestCanonicalSnapshot() {
 	    "origin=native_product_metadata;connector=github;version=0.3.0;relation=duckdb_login_search_page;"
 	    "schema=id:BIGINT!:$.id,login:VARCHAR!:$.login,site_admin:BOOLEAN!:$.site_admin;"
 	    "operation=github_search_duckdb_login_page:fallback:zero_to_many:REST:GET:replay_safe;"
-	    "request=base:https://api.github.com,path:/search/users,query:[q=duckdb+in%3Alogin,per_page=3],"
+	    "request=origin:[scheme:https,host:api.github.com,port:443],path:/search/users,"
+	    "query:[q=duckdb+in%3Alogin,per_page=3],"
 	    "headers:[Accept=application/vnd.github+json,User-Agent=duckdb-api/0.3.0,"
 	    "X-GitHub-Api-Version=2022-11-28];response_records=$.items[*];"
 	    "features=retry:disabled,authentication:disabled,pagination:disabled;"
@@ -126,12 +199,35 @@ void TestCanonicalSnapshot() {
 	        "CompiledConnector retained response-content identity");
 }
 
+void TestOriginCounterexamplesRemainStructural() {
+	const auto canonical = duckdb_api::BuildNativeGithubConnector();
+	auto wrong_port = canonical;
+	wrong_port.operation.request.origin.port = 444;
+	Require(wrong_port.Snapshot() != canonical.Snapshot(), "CompiledConnector snapshot hid a non-canonical port");
+	Require(wrong_port.Snapshot().find("origin:[scheme:https,host:api.github.com,port:444]") != std::string::npos,
+	        "CompiledConnector snapshot failed to expose a non-canonical port structurally");
+
+	auto wrong_scheme = canonical;
+	wrong_scheme.operation.request.origin.scheme = duckdb_api::CompiledUrlScheme::HTTP;
+	Require(wrong_scheme.Snapshot() != canonical.Snapshot(), "CompiledConnector snapshot hid a non-canonical scheme");
+	Require(wrong_scheme.Snapshot().find("origin:[scheme:http,host:api.github.com,port:443]") != std::string::npos,
+	        "CompiledConnector snapshot failed to expose a non-canonical scheme structurally");
+
+	RequireInvalidHost("api.github.com:444");
+	RequireInvalidHost("api.github.com/root");
+	RequireInvalidHost("api.github.com?pre=1");
+	RequireInvalidHost("api.github.com#fragment");
+	RequireInvalidHost("user@api.github.com");
+	RequireInvalidHost("https://api.github.com:444/root?pre=1#fragment");
+}
+
 } // namespace
 
 int main() {
 	try {
 		TestNativeGithubMetadata();
 		TestCanonicalSnapshot();
+		TestOriginCounterexamplesRemainStructural();
 		std::cout << "connector contract tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

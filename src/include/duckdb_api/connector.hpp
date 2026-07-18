@@ -19,6 +19,11 @@ enum class CompiledHttpMethod { GET };
 
 enum class CompiledReplaySafety { SAFE };
 
+// A closed transport scheme carried as data rather than recovered by parsing a
+// URL. HTTP exists for private controlled-service compositions; the installed
+// native connector below selects HTTPS exclusively.
+enum class CompiledUrlScheme { HTTP, HTTPS };
+
 // One required output column in the bounded GitHub response page. The
 // extractor is evaluated relative to one object selected by records_extractor.
 // A non-nullable column fails schema conversion when extraction is missing or
@@ -45,11 +50,35 @@ struct CompiledHttpHeader {
 	std::string value;
 };
 
-// Structural REST request metadata. base_url, path, and query_parameters stay
-// separate so the planner can construct an inspectable request without a
-// caller-selected or prejoined URL. No field carries credentials.
+// An exact lower-case DNS name or IPv4 literal. Construction rejects URL
+// syntax, user information, embedded ports, empty labels, and non-canonical
+// labels, so consumers cannot receive a path, query, or fragment disguised as
+// a host component.
+class CompiledRestHost {
+public:
+	explicit CompiledRestHost(std::string value);
+
+	const std::string &Value() const;
+
+private:
+	std::string value;
+};
+
+// The authority portion of a REST request. There is deliberately no
+// user-information, path, query, or fragment field; consumers compare these
+// fields directly and never parse an origin string.
+struct CompiledRestOrigin {
+	CompiledUrlScheme scheme;
+	CompiledRestHost host;
+	std::uint16_t port;
+};
+
+// Structural REST request metadata. The typed origin, operation path, and
+// ordered query parameters stay separate so the planner can construct an
+// inspectable request without a caller-selected or prejoined URL. No field
+// carries credentials.
 struct CompiledRestRequest {
-	std::string base_url;
+	CompiledRestOrigin origin;
 	std::string path;
 	std::vector<CompiledQueryParameter> query_parameters;
 	std::vector<CompiledHttpHeader> headers;
