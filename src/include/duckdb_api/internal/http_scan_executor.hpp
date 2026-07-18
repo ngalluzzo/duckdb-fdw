@@ -26,10 +26,12 @@ struct HttpExecutionProfile {
 	bool private_addresses_enabled;
 	bool link_local_addresses_enabled;
 	bool loopback_addresses_enabled;
+	uint64_t max_wall_milliseconds;
+	uint64_t max_decoded_records;
 };
 
-std::shared_ptr<const ScanExecutor> BuildHttpScanExecutorForProfile(
-    std::unique_ptr<HttpTransport> transport, const HttpExecutionProfile &profile);
+std::shared_ptr<const ScanExecutor> BuildHttpScanExecutorForProfile(std::unique_ptr<HttpTransport> transport,
+                                                                    const HttpExecutionProfile &profile);
 
 } // namespace internal
 } // namespace duckdb_api

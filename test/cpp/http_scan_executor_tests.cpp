@@ -59,7 +59,7 @@ std::string ThreeRows() {
 }
 
 void RequireError(const std::function<void()> &action, duckdb_api::ErrorStage stage,
-	              const std::string &forbidden = "") {
+                  const std::string &forbidden = "") {
 	bool rejected = false;
 	try {
 		action();
@@ -86,31 +86,27 @@ void TestOneRequestAndSchemaAlignedBatches() {
 	duckdb_api::TypedBatch batch;
 	Require(stream->Next(control, batch), "first batch was missing");
 	Require(batch.IsSchemaAligned() && batch.rows.size() == 2, "first batch was not aligned or bounded");
-	Require(batch.column_kinds == std::vector<duckdb_api::ValueKind>({duckdb_api::ValueKind::BIGINT,
-	                                                                duckdb_api::ValueKind::VARCHAR,
-	                                                                duckdb_api::ValueKind::BOOLEAN}),
+	Require(batch.column_kinds ==
+	            std::vector<duckdb_api::ValueKind>(
+	                {duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR, duckdb_api::ValueKind::BOOLEAN}),
 	        "batch schema drifted");
-	Require(batch.rows[0].values[0].bigint_value == 11 &&
-	            batch.rows[0].values[1].varchar_value == "duckdb" &&
+	Require(batch.rows[0].values[0].bigint_value == 11 && batch.rows[0].values[1].varchar_value == "duckdb" &&
 	            !batch.rows[0].values[2].boolean_value,
 	        "first typed row drifted");
-	Require(stream->Next(control, batch) && batch.rows.size() == 1 &&
-	            batch.rows[0].values[0].bigint_value == 33,
+	Require(stream->Next(control, batch) && batch.rows.size() == 1 && batch.rows[0].values[0].bigint_value == 33,
 	        "second bounded batch drifted");
 	Require(!stream->Next(control, batch) && batch.rows.empty() && batch.column_kinds.empty(),
 	        "stream did not exhaust cleanly");
 
 	const auto observation = runtime->Observation();
 	Require(observation.request_count == 1, "batch pulls did not perform exactly one request");
-	Require(observation.method == "GET" && observation.scheme == "https" &&
-	            observation.host == "api.github.com" && observation.port == 443 &&
-	            observation.target == "/search/users?q=duckdb+in%3Alogin&per_page=3",
+	Require(observation.method == "GET" && observation.scheme == "https" && observation.host == "api.github.com" &&
+	            observation.port == 443 && observation.target == "/search/users?q=duckdb+in%3Alogin&per_page=3",
 	        "structural request identity drifted");
 	Require(observation.headers.size() == 3 &&
-	            observation.headers[0] == std::make_pair(std::string("Accept"),
-	                                                     std::string("application/vnd.github+json")) &&
-	            observation.headers[1] ==
-	                std::make_pair(std::string("User-Agent"), std::string("duckdb-api/0.3.0")) &&
+	            observation.headers[0] ==
+	                std::make_pair(std::string("Accept"), std::string("application/vnd.github+json")) &&
+	            observation.headers[1] == std::make_pair(std::string("User-Agent"), std::string("duckdb-api/0.3.0")) &&
 	            observation.headers[2] ==
 	                std::make_pair(std::string("X-GitHub-Api-Version"), std::string("2022-11-28")),
 	        "fixed request headers drifted");
@@ -192,12 +188,43 @@ void TestCancellationAndIdempotentClose() {
 	Require(blocked_runtime->Observation().request_count == 1, "cancelled request was replayed");
 }
 
+void TestDeadlinePersistsAcrossBatchPulls() {
+	const uint64_t controlled_wall_milliseconds = 30;
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime(controlled_wall_milliseconds);
+	runtime->Respond(200, ThreeRows());
+	ManualControl control;
+	auto stream = runtime->Executor()->Open(Plan(), control);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 2,
+	        "deadline regression did not produce the first batch");
+	std::this_thread::sleep_for(std::chrono::milliseconds(controlled_wall_milliseconds + 20));
+	RequireError([&]() { stream->Next(control, batch); }, duckdb_api::ErrorStage::RESOURCE);
+	Require(!stream->Next(control, batch), "expired stream resumed after delayed second pull");
+	Require(runtime->Observation().request_count == 1, "delayed second pull replayed the request");
+}
+
+void TestExecutionProfileNeverWidensRecordAuthority() {
+	const uint64_t narrower_record_authority = 2;
+	const auto runtime =
+	    duckdb_api_test::BuildControlledHttpRuntime(duckdb_api::MAX_EXECUTION_MILLISECONDS, narrower_record_authority);
+	runtime->Respond(200, ThreeRows());
+	ManualControl control;
+	Require(Plan().Budgets().decoded_records == 3,
+	        "record-authority counterexample did not retain the valid product plan");
+	RequireError([&]() { (void)runtime->Executor()->Open(Plan(), control); }, duckdb_api::ErrorStage::POLICY);
+	Require(runtime->Observation().request_count == 0, "plan wider than executor authority reached transport");
+
+	RequireError(
+	    [&]() { (void)duckdb_api_test::BuildControlledHttpRuntime(duckdb_api::MAX_EXECUTION_MILLISECONDS, 0); },
+	    duckdb_api::ErrorStage::INTERNAL);
+	RequireError(
+	    [&]() { (void)duckdb_api_test::BuildControlledHttpRuntime(duckdb_api::MAX_EXECUTION_MILLISECONDS, 4); },
+	    duckdb_api::ErrorStage::INTERNAL);
+}
+
 void TestNullTransportRejected() {
 	RequireError(
-	    [&]() {
-		    duckdb_api::internal::BuildHttpScanExecutor(
-		        std::unique_ptr<duckdb_api::internal::HttpTransport>());
-	    },
+	    [&]() { duckdb_api::internal::BuildHttpScanExecutor(std::unique_ptr<duckdb_api::internal::HttpTransport>()); },
 	    duckdb_api::ErrorStage::INTERNAL);
 }
 
@@ -208,6 +235,8 @@ int main() {
 		TestOneRequestAndSchemaAlignedBatches();
 		TestFailureStagesRedactionAndNoReplay();
 		TestCancellationAndIdempotentClose();
+		TestDeadlinePersistsAcrossBatchPulls();
+		TestExecutionProfileNeverWidensRecordAuthority();
 		TestNullTransportRejected();
 		std::cout << "HTTP scan executor tests passed" << std::endl;
 		return EXIT_SUCCESS;

@@ -10,6 +10,12 @@ namespace duckdb_api {
 namespace internal {
 namespace {
 
+// This module deliberately keeps syntax validation, cursor movement, selected
+// field extraction, lossless conversion, cancellation, and retained-memory
+// accounting in one parser. Those responsibilities share one traversal and
+// one budget owner; splitting them would either rescan input or risk accepting
+// malformed JSON outside the selected record path.
+
 [[noreturn]] void MalformedJson() {
 	throw ExecutionError(ErrorStage::DECODE, "", "HTTP response is not valid JSON");
 }
@@ -41,8 +47,7 @@ bool CheckedMultiply(uint64_t left, uint64_t right, uint64_t &result) noexcept {
 
 void RequireMemory(uint64_t current, uint64_t addition, uint64_t limit, uint64_t &updated) {
 	if (!CheckedAdd(current, addition, updated) || updated > limit) {
-		throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
-		                     "decoded rows exceeded their memory budget");
+		throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes", "decoded rows exceeded their memory budget");
 	}
 }
 
@@ -427,7 +432,8 @@ private:
 	void SkipValue(uint64_t depth = 0) {
 		SkipWhitespace();
 		if (depth > plan.max_json_nesting) {
-			throw ExecutionError(ErrorStage::RESOURCE, "json_nesting", "HTTP response exceeded its JSON nesting budget");
+			throw ExecutionError(ErrorStage::RESOURCE, "json_nesting",
+			                     "HTTP response exceeded its JSON nesting budget");
 		}
 		if (Peek() == '"') {
 			ParseString();
@@ -585,8 +591,8 @@ private:
 			                     "decoded rows could not be allocated within their memory budget");
 		}
 		uint64_t value_storage = 0;
-		if (!CheckedMultiply(static_cast<uint64_t>(row.values.capacity()),
-		                     static_cast<uint64_t>(sizeof(TypedValue)), value_storage)) {
+		if (!CheckedMultiply(static_cast<uint64_t>(row.values.capacity()), static_cast<uint64_t>(sizeof(TypedValue)),
+		                     value_storage)) {
 			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                     "decoded rows exceeded their memory budget");
 		}
@@ -644,8 +650,7 @@ private:
 
 } // namespace
 
-std::vector<TypedRow> DecodeJsonRows(const std::string &body, const JsonDecodePlan &plan,
-                                     ExecutionControl &control) {
+std::vector<TypedRow> DecodeJsonRows(const std::string &body, const JsonDecodePlan &plan, ExecutionControl &control) {
 	ValidatePlan(plan);
 	Checkpoint(control, plan.deadline);
 	try {

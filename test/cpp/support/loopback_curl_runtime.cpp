@@ -27,13 +27,11 @@ struct LoopbackCurlRuntime::State {
 namespace {
 
 bool HasExpectedRequest(const duckdb_api::internal::HttpRequest &request, uint16_t port) {
-	return request.method == "GET" && request.scheme == "http" && request.host == "127.0.0.1" &&
-	       request.port == port && request.target == "/search/users?q=duckdb+in%3Alogin&per_page=3" &&
-	       request.headers.size() == 3 && request.headers[0].name == "Accept" &&
-	       request.headers[0].value == "application/vnd.github+json" &&
+	return request.method == "GET" && request.scheme == "http" && request.host == "127.0.0.1" && request.port == port &&
+	       request.target == "/search/users?q=duckdb+in%3Alogin&per_page=3" && request.headers.size() == 3 &&
+	       request.headers[0].name == "Accept" && request.headers[0].value == "application/vnd.github+json" &&
 	       request.headers[1].name == "User-Agent" && request.headers[1].value == "duckdb-api/0.3.0" &&
-	       request.headers[2].name == "X-GitHub-Api-Version" &&
-	       request.headers[2].value == "2022-11-28";
+	       request.headers[2].name == "X-GitHub-Api-Version" && request.headers[2].value == "2022-11-28";
 }
 
 bool IsOwnedLoopbackSocket(const sockaddr *address, socklen_t address_length, const void *context) noexcept {
@@ -50,20 +48,27 @@ class LoopbackCurlTransport final : public duckdb_api::internal::HttpTransport {
 public:
 	explicit LoopbackCurlTransport(std::shared_ptr<LoopbackCurlRuntime::State> state_p)
 	    : state(std::move(state_p)),
-	      url("http://127.0.0.1:" + std::to_string(state->port) +
-	          "/search/users?q=duckdb+in%3Alogin&per_page=3") {
+	      url("http://127.0.0.1:" + std::to_string(state->port) + "/search/users?q=duckdb+in%3Alogin&per_page=3") {
 	}
 
 	duckdb_api::internal::HttpResponse Get(const duckdb_api::internal::HttpRequest &request,
-	                                      const duckdb_api::internal::HttpLimits &limits,
-	                                      duckdb_api::ExecutionControl &control) const override {
+	                                       const duckdb_api::internal::HttpLimits &limits,
+	                                       duckdb_api::ExecutionControl &control) const override {
 		if (!HasExpectedRequest(request, state->port)) {
 			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::POLICY, "",
 			                                 "HTTP request is outside the controlled test profile");
 		}
 		state->request_count.fetch_add(1, std::memory_order_relaxed);
-		const duckdb_api::internal::CurlTransferProfile profile {url.c_str(), "http", IsOwnedLoopbackSocket,
-		                                                         state.get()};
+		const duckdb_api::internal::CurlTransferProfile profile {url.c_str(),
+		                                                         "http",
+		                                                         IsOwnedLoopbackSocket,
+		                                                         state.get()
+#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
+		                                                             ,
+		                                                         nullptr,
+		                                                         nullptr
+#endif
+		};
 		return duckdb_api::internal::PerformCurlTransfer(profile, request, limits, control);
 	}
 
@@ -75,8 +80,8 @@ private:
 } // namespace
 
 LoopbackCurlRuntime::LoopbackCurlRuntime(std::shared_ptr<State> state_p,
-	                                     std::shared_ptr<const duckdb_api::ScanExecutor> executor_p,
-	                                     duckdb_api::CompiledConnector connector_p)
+                                         std::shared_ptr<const duckdb_api::ScanExecutor> executor_p,
+                                         duckdb_api::CompiledConnector connector_p)
     : state(std::move(state_p)), executor(std::move(executor_p)), connector(std::move(connector_p)) {
 }
 
@@ -106,10 +111,15 @@ std::shared_ptr<LoopbackCurlRuntime> BuildLoopbackCurlRuntime(uint16_t port) {
 	connector.network_policy.allowed_hosts = {"127.0.0.1"};
 	connector.network_policy.loopback_addresses_enabled = true;
 	(void)duckdb_api::internal::AcquireCurlProcessLifetime();
-	std::unique_ptr<duckdb_api::internal::HttpTransport> transport(
-	    new LoopbackCurlTransport(state));
-	const duckdb_api::internal::HttpExecutionProfile profile {duckdb_api::PlannedUrlScheme::HTTP, "127.0.0.1",
-	                                                          port, false, false, true};
+	std::unique_ptr<duckdb_api::internal::HttpTransport> transport(new LoopbackCurlTransport(state));
+	const duckdb_api::internal::HttpExecutionProfile profile {duckdb_api::PlannedUrlScheme::HTTP,
+	                                                          "127.0.0.1",
+	                                                          port,
+	                                                          false,
+	                                                          false,
+	                                                          true,
+	                                                          duckdb_api::MAX_EXECUTION_MILLISECONDS,
+	                                                          3};
 	auto executor = duckdb_api::internal::BuildHttpScanExecutorForProfile(std::move(transport), profile);
 	return std::shared_ptr<LoopbackCurlRuntime>(
 	    new LoopbackCurlRuntime(std::move(state), std::move(executor), std::move(connector)));

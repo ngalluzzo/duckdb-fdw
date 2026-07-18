@@ -32,13 +32,12 @@ namespace {
 
 class ControlledTransport final : public duckdb_api::internal::HttpTransport {
 public:
-	explicit ControlledTransport(std::shared_ptr<ControlledHttpRuntime::State> state_p)
-	    : state(std::move(state_p)) {
+	explicit ControlledTransport(std::shared_ptr<ControlledHttpRuntime::State> state_p) : state(std::move(state_p)) {
 	}
 
 	duckdb_api::internal::HttpResponse Get(const duckdb_api::internal::HttpRequest &request,
-	                                      const duckdb_api::internal::HttpLimits &limits,
-	                                      duckdb_api::ExecutionControl &control) const override {
+	                                       const duckdb_api::internal::HttpLimits &limits,
+	                                       duckdb_api::ExecutionControl &control) const override {
 		ControlledHttpMode mode;
 		uint32_t status;
 		std::string body;
@@ -76,15 +75,15 @@ public:
 				throw duckdb_api::ExecutionCancelled();
 			}
 			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "wall_milliseconds",
-				                                 "execution exceeded its wall-time budget");
+			                                 "execution exceeded its wall-time budget");
 		}
 		if (static_cast<uint64_t>(body.size()) > limits.max_response_bytes) {
 			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "response_bytes",
-				                                 "HTTP response exceeded its byte budget");
+			                                 "HTTP response exceeded its byte budget");
 		}
 		if (static_cast<uint64_t>(body.size()) > limits.max_decompressed_bytes) {
 			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "decompressed_bytes",
-				                                 "HTTP response exceeded its decompressed-byte budget");
+			                                 "HTTP response exceeded its decompressed-byte budget");
 		}
 		return {status, 64, static_cast<uint64_t>(body.size()), std::move(body)};
 	}
@@ -131,10 +130,19 @@ ControlledRequestObservation ControlledHttpRuntime::Observation() const {
 	return state->observation;
 }
 
-std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntime() {
+std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntime(uint64_t max_wall_milliseconds,
+                                                                  uint64_t max_decoded_records) {
 	auto state = std::make_shared<ControlledHttpRuntime::State>();
 	std::unique_ptr<duckdb_api::internal::HttpTransport> transport(new ControlledTransport(state));
-	auto executor = duckdb_api::internal::BuildHttpScanExecutor(std::move(transport));
+	const duckdb_api::internal::HttpExecutionProfile profile {duckdb_api::PlannedUrlScheme::HTTPS,
+	                                                          "api.github.com",
+	                                                          443,
+	                                                          false,
+	                                                          false,
+	                                                          false,
+	                                                          max_wall_milliseconds,
+	                                                          max_decoded_records};
+	auto executor = duckdb_api::internal::BuildHttpScanExecutorForProfile(std::move(transport), profile);
 	return std::shared_ptr<ControlledHttpRuntime>(new ControlledHttpRuntime(std::move(state), std::move(executor)));
 }
 

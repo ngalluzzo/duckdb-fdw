@@ -21,12 +21,14 @@ namespace {
 static_assert(std::is_nothrow_move_assignable<TypedBatch>::value,
               "batch ownership transfer must not fail after rows are committed");
 
+static const uint64_t NATIVE_PRODUCT_MAX_DECODED_RECORDS = 3;
+
 bool HasExpectedColumns(const std::vector<PlannedColumn> &columns) {
 	return columns.size() == 3 && columns[0].name == "id" && columns[0].logical_type == "BIGINT" &&
 	       !columns[0].nullable && columns[0].extractor == "$.id" && columns[1].name == "login" &&
 	       columns[1].logical_type == "VARCHAR" && !columns[1].nullable && columns[1].extractor == "$.login" &&
-	       columns[2].name == "site_admin" && columns[2].logical_type == "BOOLEAN" &&
-	       !columns[2].nullable && columns[2].extractor == "$.site_admin";
+	       columns[2].name == "site_admin" && columns[2].logical_type == "BOOLEAN" && !columns[2].nullable &&
+	       columns[2].extractor == "$.site_admin";
 }
 
 const char *SchemeName(PlannedUrlScheme scheme) {
@@ -40,19 +42,18 @@ const char *SchemeName(PlannedUrlScheme scheme) {
 }
 
 bool HasExpectedOperation(const PlannedRestOperation &operation, const HttpExecutionProfile &profile) {
-	return operation.operation_name == "github_search_duckdb_login_page" && operation.protocol == PlannedProtocol::REST &&
-	       operation.method == PlannedHttpMethod::GET && operation.cardinality == PlannedCardinality::ZERO_TO_MANY &&
+	return operation.operation_name == "github_search_duckdb_login_page" &&
+	       operation.protocol == PlannedProtocol::REST && operation.method == PlannedHttpMethod::GET &&
+	       operation.cardinality == PlannedCardinality::ZERO_TO_MANY &&
 	       operation.replay_safety == PlannedReplaySafety::SAFE && operation.origin.scheme == profile.scheme &&
 	       operation.origin.host == profile.host && operation.origin.port == profile.port &&
 	       operation.path == "/search/users" && operation.query_parameters.size() == 2 &&
 	       operation.query_parameters[0].name == "q" &&
 	       operation.query_parameters[0].encoded_value == "duckdb+in%3Alogin" &&
-	       operation.query_parameters[1].name == "per_page" &&
-	       operation.query_parameters[1].encoded_value == "3" && operation.headers.size() == 3 &&
-	       operation.headers[0].name == "Accept" &&
-	       operation.headers[0].value == "application/vnd.github+json" &&
-	       operation.headers[1].name == "User-Agent" && operation.headers[1].value == "duckdb-api/0.3.0" &&
-	       operation.headers[2].name == "X-GitHub-Api-Version" &&
+	       operation.query_parameters[1].name == "per_page" && operation.query_parameters[1].encoded_value == "3" &&
+	       operation.headers.size() == 3 && operation.headers[0].name == "Accept" &&
+	       operation.headers[0].value == "application/vnd.github+json" && operation.headers[1].name == "User-Agent" &&
+	       operation.headers[1].value == "duckdb-api/0.3.0" && operation.headers[2].name == "X-GitHub-Api-Version" &&
 	       operation.headers[2].value == "2022-11-28" && operation.records_extractor == "$.items[*]";
 }
 
@@ -74,7 +75,8 @@ void ValidateExecutablePlan(const ScanPlan &plan, const HttpExecutionProfile &pr
 	    !HasExpectedColumns(plan.OutputColumns()) || plan.Pagination() != FeatureState::DISABLED ||
 	    plan.Providers() != FeatureState::DISABLED || plan.Retry() != FeatureState::DISABLED ||
 	    plan.Cache() != FeatureState::DISABLED || plan.Authentication() != FeatureState::DISABLED ||
-	    !HasExpectedNetwork(plan.Network(), profile) || !plan.Budgets().IsWithinLiveRestBounds()) {
+	    !HasExpectedNetwork(plan.Network(), profile) || !plan.Budgets().IsWithinLiveRestBounds() ||
+	    plan.Budgets().decoded_records > profile.max_decoded_records) {
 		throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
 	}
 }
@@ -115,6 +117,13 @@ void CheckCancellation(ExecutionControl &control) {
 	}
 }
 
+void CheckExecutionState(ExecutionControl &control, std::chrono::steady_clock::time_point deadline) {
+	CheckCancellation(control);
+	if (std::chrono::steady_clock::now() >= deadline) {
+		throw ExecutionError(ErrorStage::RESOURCE, "wall_milliseconds", "execution exceeded its wall-time budget");
+	}
+}
+
 class CombinedExecutionControl final : public ExecutionControl {
 public:
 	CombinedExecutionControl(ExecutionControl &outer_p, const std::atomic<bool> &cancelled_p)
@@ -135,9 +144,10 @@ private:
 // an uncommitted or partially sent request on a later pull.
 class HttpBatchStream final : public BatchStream {
 public:
-	HttpBatchStream(const ScanPlan &plan_p, std::shared_ptr<const HttpTransport> transport_p)
-	    : plan(plan_p), transport(std::move(transport_p)), cancelled(false), closed(false), attempted(false),
-	      failed(false), offset(0) {
+	HttpBatchStream(const ScanPlan &plan_p, std::shared_ptr<const HttpTransport> transport_p,
+	                uint64_t max_wall_milliseconds_p)
+	    : plan(plan_p), transport(std::move(transport_p)), max_wall_milliseconds(max_wall_milliseconds_p),
+	      cancelled(false), closed(false), attempted(false), failed(false), deadline_initialized(false), offset(0) {
 	}
 
 	~HttpBatchStream() noexcept override {
@@ -156,22 +166,31 @@ public:
 			return false;
 		}
 		CombinedExecutionControl combined(control, cancelled);
-		if (combined.IsCancellationRequested()) {
+		if (!deadline_initialized) {
+			deadline = std::chrono::steady_clock::now() +
+			           std::chrono::milliseconds(std::min(plan.Budgets().wall_milliseconds, max_wall_milliseconds));
+			deadline_initialized = true;
+		}
+		try {
+			CheckExecutionState(combined, deadline);
+		} catch (const ExecutionCancelled &) {
 			cancelled.store(true, std::memory_order_release);
 			failed = true;
-			throw ExecutionCancelled();
+			throw;
+		} catch (const ExecutionError &) {
+			failed = true;
+			throw;
 		}
 
 		if (!attempted) {
 			attempted = true;
-			const auto deadline = std::chrono::steady_clock::now() +
-			                      std::chrono::milliseconds(plan.Budgets().wall_milliseconds);
 			const HttpLimits limits {plan.Budgets().header_bytes, plan.Budgets().response_bytes,
 			                         plan.Budgets().decompressed_bytes, deadline};
 			try {
 				auto response = transport->Get(BuildRequest(plan.Operation()), limits, combined);
-				CheckCancellation(combined);
-				if (response.header_bytes > limits.max_header_bytes || response.response_bytes > limits.max_response_bytes ||
+				CheckExecutionState(combined, deadline);
+				if (response.header_bytes > limits.max_header_bytes ||
+				    response.response_bytes > limits.max_response_bytes ||
 				    static_cast<uint64_t>(response.body.size()) > limits.max_decompressed_bytes) {
 					throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP response exceeded an execution budget");
 				}
@@ -179,7 +198,7 @@ public:
 					throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status");
 				}
 				decoded = DecodeJsonRows(response.body, BuildDecodePlan(plan, deadline), combined);
-				CheckCancellation(combined);
+				CheckExecutionState(combined, deadline);
 			} catch (const ExecutionCancelled &) {
 				failed = true;
 				throw;
@@ -196,21 +215,24 @@ public:
 			}
 		}
 
-		if (offset >= decoded.size()) {
-			return false;
-		}
 		TypedBatch produced;
-		const auto remaining = decoded.size() - offset;
-		const auto count = std::min(remaining, static_cast<std::size_t>(plan.Budgets().batch_rows));
 		try {
+			CheckExecutionState(combined, deadline);
+			if (offset >= decoded.size()) {
+				return false;
+			}
+			const auto remaining = decoded.size() - offset;
+			const auto count = std::min(remaining, static_cast<std::size_t>(plan.Budgets().batch_rows));
 			produced.column_kinds = {ValueKind::BIGINT, ValueKind::VARCHAR, ValueKind::BOOLEAN};
 			produced.rows.reserve(count);
 			for (std::size_t index = 0; index < count; index++) {
-				CheckCancellation(combined);
+				CheckExecutionState(combined, deadline);
 				// Reserve completes before ownership moves, so batch delivery does
 				// not duplicate decoded strings or exceed the decoded-memory ceiling.
 				produced.rows.push_back(std::move(decoded[offset + index]));
 			}
+			CheckExecutionState(combined, deadline);
+			offset += count;
 		} catch (const ExecutionCancelled &) {
 			failed = true;
 			throw;
@@ -220,13 +242,12 @@ public:
 		} catch (...) {
 			failed = true;
 			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
-				                     "output batch could not be allocated within its memory budget");
+			                     "output batch could not be allocated within its memory budget");
 		}
 		if (!produced.IsSchemaAligned()) {
 			failed = true;
 			throw ExecutionError(ErrorStage::INTERNAL, "", "runtime produced a misaligned typed batch");
 		}
-		offset += count;
 		batch = std::move(produced);
 		return true;
 	}
@@ -258,11 +279,14 @@ public:
 private:
 	const ScanPlan plan;
 	const std::shared_ptr<const HttpTransport> transport;
+	const uint64_t max_wall_milliseconds;
 	mutable std::mutex state_mutex;
 	std::atomic<bool> cancelled;
 	bool closed;
 	bool attempted;
 	bool failed;
+	bool deadline_initialized;
+	std::chrono::steady_clock::time_point deadline;
 	std::vector<TypedRow> decoded;
 	std::size_t offset;
 };
@@ -278,7 +302,7 @@ public:
 		ValidateExecutablePlan(plan, profile);
 		CheckCancellation(control);
 		try {
-			return std::unique_ptr<BatchStream>(new HttpBatchStream(plan, transport));
+			return std::unique_ptr<BatchStream>(new HttpBatchStream(plan, transport, profile.max_wall_milliseconds));
 		} catch (const ExecutionError &) {
 			throw;
 		} catch (const std::bad_alloc &) {
@@ -297,7 +321,9 @@ private:
 } // namespace
 
 std::shared_ptr<const ScanExecutor> BuildHttpScanExecutor(std::unique_ptr<HttpTransport> transport) {
-	const HttpExecutionProfile public_profile {PlannedUrlScheme::HTTPS, "api.github.com", 443, false, false, false};
+	const HttpExecutionProfile public_profile {
+	    PlannedUrlScheme::HTTPS,           "api.github.com", 443, false, false, false, MAX_EXECUTION_MILLISECONDS,
+	    NATIVE_PRODUCT_MAX_DECODED_RECORDS};
 	return BuildHttpScanExecutorForProfile(std::move(transport), public_profile);
 }
 
@@ -308,6 +334,10 @@ std::shared_ptr<const ScanExecutor> BuildHttpScanExecutorForProfile(std::unique_
 	}
 	if (profile.host.empty() || profile.host.find_first_of("/:@?#\r\n") != std::string::npos || profile.port == 0) {
 		throw ExecutionError(ErrorStage::POLICY, "", "HTTP executor profile is invalid");
+	}
+	if (profile.max_wall_milliseconds == 0 || profile.max_wall_milliseconds > MAX_EXECUTION_MILLISECONDS ||
+	    profile.max_decoded_records == 0 || profile.max_decoded_records > NATIVE_PRODUCT_MAX_DECODED_RECORDS) {
+		throw ExecutionError(ErrorStage::INTERNAL, "", "HTTP executor profile is invalid");
 	}
 	try {
 		std::shared_ptr<const HttpTransport> shared(std::move(transport));

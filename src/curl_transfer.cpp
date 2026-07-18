@@ -240,6 +240,7 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 	try {
 		TransferState state(control, limits, profile);
 		CurlHeaderList headers;
+		CurlHeaderList resolve_entries;
 		BuildHeaders(request, headers);
 		CurlEasyHandle easy(curl_easy_init());
 		if (!easy.Get()) {
@@ -264,6 +265,17 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_UNRESTRICTED_AUTH, 0L));
 		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, 1L));
 		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_SSL_VERIFYHOST, 2L));
+#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
+		if (profile.trusted_ca_file) {
+			RequireCurlOption(curl_easy_setopt(handle, CURLOPT_CAINFO, profile.trusted_ca_file));
+		}
+		if (profile.resolve_entry) {
+			if (!resolve_entries.Append(profile.resolve_entry)) {
+				throw ExecutionError(ErrorStage::RESOURCE, "", "test resolution entry exceeded available memory");
+			}
+			RequireCurlOption(curl_easy_setopt(handle, CURLOPT_RESOLVE, resolve_entries.Get()));
+		}
+#endif
 		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, timeout_milliseconds));
 		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT_MS, timeout_milliseconds));
 		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L));
@@ -276,8 +288,8 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_HEADERDATA, &state));
 		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_ACCEPT_ENCODING, ""));
 		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_HTTP_CONTENT_DECODING, 1L));
-		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_MAXFILESIZE_LARGE,
-		                                    static_cast<curl_off_t>(limits.max_response_bytes)));
+		RequireCurlOption(
+		    curl_easy_setopt(handle, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(limits.max_response_bytes)));
 		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_PATH_AS_IS, 1L));
 		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_FRESH_CONNECT, 1L));
 		RequireCurlOption(curl_easy_setopt(handle, CURLOPT_FORBID_REUSE, 1L));
@@ -294,8 +306,7 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 			throw ExecutionError(ErrorStage::POLICY, "", "resolved address is outside network policy");
 		}
 		if (state.timed_out || transfer_result == CURLE_OPERATION_TIMEDOUT) {
-			throw ExecutionError(ErrorStage::RESOURCE, "wall_milliseconds",
-			                     "execution exceeded its wall-time budget");
+			throw ExecutionError(ErrorStage::RESOURCE, "wall_milliseconds", "execution exceeded its wall-time budget");
 		}
 		if (state.header_oversized) {
 			throw ExecutionError(ErrorStage::RESOURCE, "header_bytes", "HTTP response exceeded its header budget");

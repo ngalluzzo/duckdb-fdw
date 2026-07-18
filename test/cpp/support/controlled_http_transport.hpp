@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb_api/execution.hpp"
+#include "duckdb_api/scan_plan.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -19,7 +20,7 @@ struct ControlledRequestObservation {
 	std::string host;
 	uint16_t port;
 	std::string target;
-	std::vector<std::pair<std::string, std::string> > headers;
+	std::vector<std::pair<std::string, std::string>> headers;
 	uint64_t max_header_bytes;
 	uint64_t max_response_bytes;
 	uint64_t max_decompressed_bytes;
@@ -40,14 +41,16 @@ public:
 	ControlledRequestObservation Observation() const;
 
 private:
-	friend std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntime();
-	ControlledHttpRuntime(std::shared_ptr<State> state,
-	                      std::shared_ptr<const duckdb_api::ScanExecutor> executor);
+	friend std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntime(uint64_t max_wall_milliseconds,
+	                                                                         uint64_t max_decoded_records);
+	ControlledHttpRuntime(std::shared_ptr<State> state, std::shared_ptr<const duckdb_api::ScanExecutor> executor);
 
 	std::shared_ptr<State> state;
 	std::shared_ptr<const duckdb_api::ScanExecutor> executor;
 };
 
-std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntime();
+std::shared_ptr<ControlledHttpRuntime>
+BuildControlledHttpRuntime(uint64_t max_wall_milliseconds = duckdb_api::MAX_EXECUTION_MILLISECONDS,
+                           uint64_t max_decoded_records = 3);
 
 } // namespace duckdb_api_test

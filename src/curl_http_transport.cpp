@@ -20,8 +20,8 @@ bool HasExpectedRequest(const HttpRequest &request) {
 	       request.port == 443 && request.target == "/search/users?q=duckdb+in%3Alogin&per_page=3" &&
 	       request.headers.size() == 3 && request.headers[0].name == "Accept" &&
 	       request.headers[0].value == "application/vnd.github+json" && request.headers[1].name == "User-Agent" &&
-	       request.headers[1].value == "duckdb-api/0.3.0" &&
-	       request.headers[2].name == "X-GitHub-Api-Version" && request.headers[2].value == "2022-11-28";
+	       request.headers[1].value == "duckdb-api/0.3.0" && request.headers[2].name == "X-GitHub-Api-Version" &&
+	       request.headers[2].value == "2022-11-28";
 }
 
 bool IsPublicHttpsSocket(const sockaddr *address, socklen_t address_length, const void *) noexcept {
@@ -45,7 +45,16 @@ public:
 		if (!HasExpectedRequest(request)) {
 			throw ExecutionError(ErrorStage::POLICY, "", "HTTP request is outside the installed execution profile");
 		}
-		const CurlTransferProfile profile {PUBLIC_URL, "https", IsPublicHttpsSocket, nullptr};
+		const CurlTransferProfile profile {PUBLIC_URL,
+		                                   "https",
+		                                   IsPublicHttpsSocket,
+		                                   nullptr
+#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
+		                                   ,
+		                                   nullptr,
+		                                   nullptr
+#endif
+		};
 		return PerformCurlTransfer(profile, request, limits, control);
 	}
 };

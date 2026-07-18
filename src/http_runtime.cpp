@@ -5,7 +5,6 @@
 
 #include <curl/curl.h>
 
-#include <cstdlib>
 #include <memory>
 #include <new>
 #include <string>
@@ -20,8 +19,9 @@ namespace duckdb_api {
 namespace internal {
 
 // Initialization publishes one intentionally process-resident marker. Service
-// and DSO teardown can discard raw markers without running cleanup; the
-// system-libcurl callback registered below owns normal process-exit cleanup.
+// and DSO teardown discard raw markers without running cleanup. DuckDB exposes
+// no shutdown ordering that can prove all curl work has ended, so accepted
+// global state is left to OS process reclamation.
 class CurlProcessLifetime {
 public:
 	CurlProcessLifetime() {
@@ -42,15 +42,9 @@ public:
 			identity.libcurl_version = version->version;
 			identity.ssl_backend = version->ssl_version;
 			identity.thread_safe = true;
-			// Register the system-libcurl function itself, not an extension
-			// callback. C atexit owns it for normal process termination, while
-			// the intentionally leaked owner below cannot run cleanup at DSO
-			// unload. Registration is last, so accepted construction cannot fail
-			// after process cleanup has been scheduled.
-			if (std::atexit(curl_global_cleanup) != 0) {
-				throw ExecutionError(ErrorStage::INTERNAL, "", "HTTP runtime cleanup registration failed");
-			}
 		} catch (...) {
+			// Initialization has not been published, so rejection owns and can
+			// safely balance the failed attempt immediately.
 			curl_global_cleanup();
 			throw;
 		}
@@ -68,7 +62,7 @@ private:
 };
 
 static_assert(!std::is_destructible<CurlProcessLifetime>::value,
-              "accepted curl lifetime must not run cleanup during service or DSO teardown");
+              "accepted curl lifetime must remain initialized until OS process reclamation");
 
 const CurlProcessLifetime *AcquireCurlProcessLifetime() {
 	// Function-local initialization is thread-safe in C++11. The pointer has a
@@ -85,8 +79,7 @@ HttpRuntimeService InitializeHttpRuntime() {
 		const auto *lifetime = internal::AcquireCurlProcessLifetime();
 		HttpRuntimeService result;
 		result.identity = lifetime->Identity();
-		result.executor =
-		    internal::BuildHttpScanExecutor(internal::BuildCurlHttpTransport(lifetime));
+		result.executor = internal::BuildHttpScanExecutor(internal::BuildCurlHttpTransport(lifetime));
 		if (!result.executor) {
 			throw ExecutionError(ErrorStage::INTERNAL, "", "HTTP runtime initialization failed");
 		}

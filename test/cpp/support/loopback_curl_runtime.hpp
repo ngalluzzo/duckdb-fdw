@@ -27,8 +27,7 @@ public:
 
 private:
 	friend std::shared_ptr<LoopbackCurlRuntime> BuildLoopbackCurlRuntime(uint16_t port);
-	LoopbackCurlRuntime(std::shared_ptr<State> state,
-	                    std::shared_ptr<const duckdb_api::ScanExecutor> executor,
+	LoopbackCurlRuntime(std::shared_ptr<State> state, std::shared_ptr<const duckdb_api::ScanExecutor> executor,
 	                    duckdb_api::CompiledConnector connector);
 
 	std::shared_ptr<State> state;
