@@ -2,9 +2,8 @@
 
 Engineering Enablement owns candidate construction and source/toolchain
 verification. Query Experience checks the narrow, content-identified handoff
-before it can influence lifecycle or compatibility evidence. Build and custody
-records intentionally have no JSON adapter here until their provider schemas
-exist.
+before it can influence lifecycle or compatibility evidence. Deployment
+records use their own narrow admission module once provider bytes exist.
 """
 
 from __future__ import annotations
@@ -62,7 +61,9 @@ class Candidate:
     pins_sha256: str
 
 
-def _read_regular(path: pathlib.Path, label: str, limit: int) -> bytes:
+def read_regular_bytes(path: pathlib.Path, label: str, limit: int) -> bytes:
+    """Read one bounded, stable regular-file snapshot without following links."""
+
     try:
         before = path.lstat()
     except OSError as error:
@@ -182,10 +183,10 @@ def admit_candidate(candidate_path: pathlib.Path, anchor_path: pathlib.Path) -> 
         raise AdmissionError("candidate input must be named candidate.json")
     if anchor_path.name != "candidate.sha256":
         raise AdmissionError("candidate anchor must be named candidate.sha256")
-    candidate_bytes = _read_regular(
+    candidate_bytes = read_regular_bytes(
         candidate_path, "candidate.json", MAX_CANDIDATE_BYTES
     )
-    anchor_bytes = _read_regular(anchor_path, "candidate.sha256", 256)
+    anchor_bytes = read_regular_bytes(anchor_path, "candidate.sha256", 256)
     try:
         anchor_text = anchor_bytes.decode("ascii")
     except UnicodeDecodeError as error:

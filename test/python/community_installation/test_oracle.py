@@ -19,7 +19,7 @@ try:
         SHA_C,
         SHA_D,
         admitted_candidate,
-        build_evidence,
+        deployment_evidence,
         incompatible_observation,
         public_contract,
         row,
@@ -38,7 +38,7 @@ except ImportError:
         SHA_C,
         SHA_D,
         admitted_candidate,
-        build_evidence,
+        deployment_evidence,
         incompatible_observation,
         public_contract,
         row,
@@ -87,7 +87,7 @@ class OracleCompositionTests(unittest.TestCase):
             incompatible = FakeRunner([incompatible_observation()])
             result = evaluate_row(
                 candidate=candidate,
-                build=build_evidence(candidate),
+                deployment=deployment_evidence(candidate),
                 supported_runner=supported,
                 incompatible_runner=incompatible,
                 incompatible_row=row(),
@@ -122,7 +122,7 @@ class OracleCompositionTests(unittest.TestCase):
             )
             result = evaluate_row(
                 candidate=candidate,
-                build=build_evidence(candidate),
+                deployment=deployment_evidence(candidate),
                 supported_runner=FakeRunner(observations),
                 incompatible_runner=FakeRunner([incompatible_observation()]),
                 incompatible_row=row(),
@@ -152,7 +152,7 @@ class OracleCompositionTests(unittest.TestCase):
             probe = FakeInitializationProbe(initialized=True)
             result = evaluate_row(
                 candidate=candidate,
-                build=build_evidence(candidate),
+                deployment=deployment_evidence(candidate),
                 supported_runner=FakeRunner(supported_observations()),
                 incompatible_runner=FakeRunner([incompatible_observation()]),
                 incompatible_row=row(),
@@ -173,16 +173,20 @@ class OracleCompositionTests(unittest.TestCase):
             self.assertEqual(result["status"], "failed")
             self.assertTrue(probe.checked)
 
-    def test_invalid_provider_build_never_starts_query_processes(self) -> None:
+    def test_invalid_deployment_never_starts_query_processes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             candidate = admitted_candidate(root)
-            build = replace(build_evidence(candidate), status="failed", artifact_sha256=None)
+            deployment = replace(
+                deployment_evidence(candidate),
+                status="failed",
+                deployed_artifact_sha256=None,
+            )
             supported = FakeRunner(supported_observations())
             with self.assertRaisesRegex(OracleError, "passing admitted"):
                 evaluate_row(
                     candidate=candidate,
-                    build=build,
+                    deployment=deployment,
                     supported_runner=supported,
                     incompatible_runner=FakeRunner([incompatible_observation()]),
                     incompatible_row=row(),

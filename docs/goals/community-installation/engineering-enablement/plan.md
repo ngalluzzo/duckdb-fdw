@@ -34,7 +34,8 @@ credentials, absolute runner paths, or unrestricted environment data.
 | Dependency audit | Admitted source, actual Community build graph, lock/configuration inputs, and primary license texts | `dependency-audit.json`, notices inventory, and anchor | Requires every compiled, linked, bundled, or redistributed dependency to have identity, provenance, license evidence, and an explicit disposition; ambiguity is a hard failure |
 | Descriptor admission | Tracked exact `description.yml`, reviewed `descriptor-cycle.json`, anchored candidate and dependency records, pins, and approved maintainer metadata | `descriptor-admission.json` and `descriptor-admission.sha256` in a new caller-owned output root | Requires MIT, `duckdb_api`, version `0.2.0`, C++/cmake, and the exact immutable candidate commit. The reviewed cycle—not co-located custody anchors—authorizes the handoff. It admits only a local proposal and never accepts a branch name, exclusion field, support claim, or self-reported ref as authority |
 | Community build evidence | Explicit `duckdb/community-extensions` repository, workflow run, descriptor, reviewed expected/excluded matrix, complete job inventory, logs, and downloaded outputs | One `community-build.json` and anchor per job, a complete `community-builds.json` workflow inventory with excluded/unclaimed combinations, and explicit artifact paths | Separately binds the descriptor source, Community PR head/base, run execution head, every job conclusion, DuckDB/toolchain/platform identity, artifact/log size and digest, and Community origin. A build pass is only a candidate row, not product support |
-| Query handoff | Verified candidate, descriptor, Community job inventory, and admitted artifact paths | `query-inputs.json` plus read-only artifacts and manifests | Gives Query only stable identities and explicit paths. Query does not import build, descriptor, workflow, dependency, or custody internals |
+| Community signing and deployment evidence | Exact successful main-branch build/deploy run, its unsigned Actions archive, and freshly downloaded served native gzip bytes | One anchored deployment record per native row binding the archive, unsigned extension, shared pre-signature payload, served gzip, signed extension, endpoint, and deploy-run custody | DuckDB's native deploy path replaces the final 256-byte placeholder signature, so a PR build digest is never presented as the installed digest. The byte transition establishes derivation, while only stock DuckDB with default policy establishes signature acceptance. Wasm's distinct filename/Brotli path remains visible but unclaimed |
+| Query handoff | Verified candidate, descriptor, Community job inventory, admitted deployment records, and signed artifact paths | `query-inputs.json` plus read-only artifacts and manifests | Gives Query only stable deployment identities and explicit paths. Query does not import build, descriptor, workflow, dependency, signing, or custody internals |
 | Release binding | Anchored provider records and a Query-owned result inventory supplied as opaque bytes | `release-evidence.json` and anchor | Binds provider and Query evidence without evaluating SQL, diagnostics, or supported-row meaning |
 | Hosted custody | Exact release-evidence allowlist, staged root, and freshly downloaded root | `custody.json`, anchor, and staged/downloaded equality result | Verifies names, modes, sizes, digests, inner anchors, and byte equality across upload/download; the hosted artifact is a transfer mechanism, not a historical-availability promise |
 
@@ -72,6 +73,8 @@ change.
 | `scripts/community/build_evidence_exports.py` | Minimal canonical PR, workflow-run, reviewed expected/excluded matrix, complete-job, and artifact export validation |
 | `scripts/community/build_evidence_downloads.py` | Exact artifact/log directory inventory, safe regular-file reads, and byte verification |
 | `scripts/community/collect_build_evidence.py` | Thin composition boundary that writes per-job and complete Community build records without interpreting support |
+| `scripts/community/community_signature_payload.py` | Native-only, preflight-bounded single-file Actions ZIP, single-member served gzip, exact transport digests, and 256-byte Community signature-transition verification |
+| `scripts/community/collect_deployment_evidence.py` | Future thin composition boundary for reviewed post-merge deploy-run authority, endpoint bytes, and per-row signed deployment records |
 | `scripts/community/write_query_inputs.py` | Read-only provider-to-Query artifact/path handoff |
 | `scripts/community/bind_release_evidence.py` | Provider records plus opaque Query inventory binding |
 | `scripts/community/stage_release_evidence.py` | Exact visible allowlist staging for hosted transfer |
@@ -83,6 +86,7 @@ change.
 | `scripts/community/tests/test_build_evidence_authority.py` | Repository, PR, workflow, run, attempt, head/base, export-digest, and self-approval rejection |
 | `scripts/community/tests/test_build_evidence_inventory.py` | Complete job inventory, nonpassing-row preservation, raw label retention, duplicate and collision rejection |
 | `scripts/community/tests/test_build_evidence_downloads.py` | Artifact/log byte, exact inventory, symlink, canonical-input, and output-root boundaries |
+| `scripts/community/tests/test_community_signature_payload.py` | Pre-parse archive-directory bounds, archive/gzip custody identities, path/link rejection, payload equality, placeholder replacement, and signed/unsigned digest separation |
 | `scripts/community/tests/` | Remaining focused candidate, descriptor, dependency, record-boundary, custody, and tamper oracles with deterministic fake upstream records |
 | `scripts/test-community-enablement.sh` | Stable focused entry point and structural workflow guard |
 | `.github/workflows/community-evidence-custody.yml` | Minimum-permission hosted provider gates, exact staging, pinned upload/download, and post-download verification |
@@ -168,7 +172,20 @@ candidate rows for Query. Enablement reports portability failures with their
 source/build evidence but never converts them into public diagnostics or
 support exclusions.
 
-### Hosted custody and release evidence
+### Community deployment, hosted custody, and release evidence
+
+Treat the pull-request Actions archive, its unsigned native extension, the
+Community-served gzip, and its signed extension as four different byte
+identities. The pinned DuckDB native deployment path removes the extension's
+final 256-byte placeholder signature, appends the Community signature, and
+gzip-compresses the result. Deployment evidence must prove identical extension
+bytes before that signature block, retain all four complete-byte digests plus
+the shared payload digest, and bind the exact main-branch build/deploy run and
+served endpoint. Query admits the anchored deployment record and exercises the
+signed digest. Stock DuckDB's default-policy install and load—not a nonzero
+signature block—prove cryptographic acceptance. `wasm_mvp` uses a `.wasm`
+artifact and Brotli deployment path; retain that row as unclaimed rather than
+passing it through the native contract.
 
 Stage only the tracked allowlist into a new visible runner-temp root. Use
 commit-pinned upload/download actions, `contents: read`, no ambient write
@@ -209,18 +226,24 @@ source ref; no procedure may move a project tag or replace a released identity.
 5. **Build-evidence gate:** the complete Community job inventory and every
    candidate artifact are anchored. Missing, skipped, failed, or ambiguous rows
    remain visible and are never inferred as passing.
-6. **Query gate:** Query consumes `query-inputs.json` and owns the stock-host
-   lifecycle result for every candidate row. Only Query may turn build plus
-   lifecycle evidence into the exact public support matrix.
-7. **Custody gate:** the provider records, opaque Query inventory, artifacts,
+6. **Deployment gate:** a reviewed successful main-branch build/deploy run
+   binds each native Actions archive and unsigned extension to the freshly
+   downloaded served gzip and signed extension by exact equality before the
+   final 256-byte signature block. Every transport and inner-file digest
+   remains distinct in the record; no local parser claims that a nonzero
+   signature is cryptographically valid. Wasm remains explicitly unclaimed.
+7. **Query gate:** Query consumes `query-inputs.json` and owns the stock-host
+   lifecycle result for every candidate row. Only Query may turn signed
+   deployment plus lifecycle evidence into the exact public support matrix.
+8. **Custody gate:** the provider records, opaque Query inventory, artifacts,
    logs, and anchors survive a real hosted upload/download round trip with exact
    byte equality.
-8. **Release gate:** descriptor source, final immutable source/tag, extension
+9. **Release gate:** descriptor source, final immutable source/tag, extension
    version, dependency audit, upstream artifacts, Query matrix, custody, and
    release evidence all agree. The source tag must resolve to the candidate
    commit and must never be moved. Independent supply-chain and test-oracle
    review precede publication and guidance.
-9. **Transfer gate:** the final dependency direction and the measurable exit
+10. **Transfer gate:** the final dependency direction and the measurable exit
    evidence below are audited before Facilitation closes.
 
 ## Hazards and required containment

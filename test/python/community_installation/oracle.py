@@ -1,11 +1,10 @@
 """Compose one admitted Community row into a stock-host Query result.
 
 This module consumes existing Query-normalized ``Candidate`` and
-``BuildEvidence`` values; it does not parse provider JSON or import build,
-workflow, signing, or custody internals.  Provider build/custody schemas are
-not yet available, so this slice intentionally exposes no live command-line
-success path.  A provider adapter can call ``run_stock_row`` only after it has
-constructed the existing admitted types and supplied new caller-owned roots.
+``DeploymentEvidence`` values; it does not parse provider JSON or import
+build, workflow, signing, or custody internals. A provider adapter can call
+``run_stock_row`` admits the exact anchored provider record before it can start
+stock DuckDB and otherwise consumes only new caller-owned roots.
 """
 
 from __future__ import annotations
@@ -19,31 +18,33 @@ from collections.abc import Sequence
 from typing import Any
 
 try:
+    from .deployment_admission import admit_deployment
     from .evidence import (
         build_failed_evidence,
         build_passed_evidence,
-        query_evidence,
         write_evidence,
     )
+    from .evidence_admission import query_evidence
     from .host_action import HostActionError, StockHostRunner
     from .file_admission import FileAdmissionError, regular_file
     from .launcher import Launcher
     from .lifecycle import HostRunner, LifecycleError
-    from .matrix import BuildEvidence, MatrixError, RowIdentity, claimable_rows
+    from .matrix import DeploymentEvidence, MatrixError, RowIdentity, claimable_rows
     from .input_admission import Candidate
     from .scenarios import InitializationProbe, run_scenarios
 except ImportError:
+    from deployment_admission import admit_deployment
     from evidence import (
         build_failed_evidence,
         build_passed_evidence,
-        query_evidence,
         write_evidence,
     )
+    from evidence_admission import query_evidence
     from host_action import HostActionError, StockHostRunner
     from file_admission import FileAdmissionError, regular_file
     from launcher import Launcher
     from lifecycle import HostRunner, LifecycleError
-    from matrix import BuildEvidence, MatrixError, RowIdentity, claimable_rows
+    from matrix import DeploymentEvidence, MatrixError, RowIdentity, claimable_rows
     from input_admission import Candidate
     from scenarios import InitializationProbe, run_scenarios
 
@@ -62,7 +63,8 @@ class StockOracleInputs:
     """Caller-owned authorities for one supported row and one refusal row."""
 
     candidate: Candidate
-    build: BuildEvidence
+    deployment_record_path: pathlib.Path
+    deployment_anchor_path: pathlib.Path
     supported_launcher: Launcher
     incompatible_launcher: Launcher
     supported_state_root: pathlib.Path
@@ -115,27 +117,39 @@ def load_public_contract(
     return value, digest
 
 
-def _validate_build(candidate: Candidate, build: BuildEvidence) -> None:
+def _validate_deployment(
+    candidate: Candidate, deployment: DeploymentEvidence
+) -> None:
     if (
-        build.candidate_sha256 != candidate.sha256
-        or build.row.duckdb != candidate.duckdb
-        or build.channel != "community"
-        or build.status != "passed"
+        deployment.candidate_sha256 != candidate.sha256
+        or deployment.row.duckdb != candidate.duckdb
+        or deployment.channel != "community"
+        or deployment.status != "passed"
     ):
-        raise OracleError("stock Query run requires one passing admitted Community row")
-    if (
-        build.artifact_sha256 is None
-        or SHA256.fullmatch(build.artifact_sha256) is None
-        or build.custody_sha256 is None
-        or SHA256.fullmatch(build.custody_sha256) is None
-    ):
-        raise OracleError("stock Query run requires content-identified artifact custody")
+        raise OracleError(
+            "stock Query run requires one passing admitted Community deployment"
+        )
+    identities = (
+        deployment.build_archive_sha256,
+        deployment.unsigned_artifact_sha256,
+        deployment.shared_payload_sha256,
+        deployment.served_gzip_sha256,
+        deployment.deployed_artifact_sha256,
+        deployment.deployment_record_sha256,
+        deployment.deployment_anchor_sha256,
+    )
+    if any(value is None or SHA256.fullmatch(value) is None for value in identities):
+        raise OracleError(
+            "stock Query run requires content-identified deployment custody"
+        )
+    if deployment.unsigned_artifact_sha256 == deployment.deployed_artifact_sha256:
+        raise OracleError("stock Query run received unsigned artifact substitution")
 
 
 def evaluate_row(
     *,
     candidate: Candidate,
-    build: BuildEvidence,
+    deployment: DeploymentEvidence,
     supported_runner: HostRunner,
     incompatible_runner: HostRunner,
     incompatible_row: RowIdentity,
@@ -155,7 +169,7 @@ def evaluate_row(
 ) -> dict[str, object]:
     """Evaluate deterministic runners and write a passing or failed row result."""
 
-    _validate_build(candidate, build)
+    _validate_deployment(candidate, deployment)
     if incompatible_artifact_size < 0 or SHA256.fullmatch(incompatible_artifact_sha256) is None:
         raise OracleError("representative incompatible artifact is not content-identified")
     if any(
@@ -169,14 +183,14 @@ def evaluate_row(
         )
     ):
         raise OracleError("stock host authority is not content-identified")
-    assert build.artifact_sha256 is not None
+    assert deployment.deployed_artifact_sha256 is not None
     try:
         scenarios = run_scenarios(
             supported_runner=supported_runner,
             incompatible_runner=incompatible_runner,
-            supported_row=build.row,
+            supported_row=deployment.row,
             incompatible_row=incompatible_row,
-            artifact_sha256=build.artifact_sha256,
+            artifact_sha256=deployment.deployed_artifact_sha256,
             public_contract=public_contract,
             required_incompatible_facts=required_incompatible_facts,
             initialization_probe=initialization_probe,
@@ -184,7 +198,7 @@ def evaluate_row(
         )
         result = build_passed_evidence(
             candidate=candidate,
-            build=build,
+            deployment=deployment,
             scenarios=scenarios,
             incompatible_artifact_size=incompatible_artifact_size,
             incompatible_artifact_sha256=incompatible_artifact_sha256,
@@ -195,16 +209,16 @@ def evaluate_row(
             public_contract_sha256=public_contract_sha256,
             replacements=replacements,
         )
-        normalized = query_evidence(result)
+        normalized = query_evidence(result, candidate)
         claimed = claimable_rows(
-            candidate, [build], [normalized], public_contract_sha256
+            candidate, [deployment], [normalized], public_contract_sha256
         )
-        if claimed != (build.row,):
+        if claimed != (deployment.row,):
             raise OracleError("passing Query result did not claim exactly its own row")
     except (HostActionError, LifecycleError, MatrixError) as error:
         result = build_failed_evidence(
             candidate=candidate,
-            build=build,
+            deployment=deployment,
             public_contract_sha256=public_contract_sha256,
             category="stock_host_lifecycle",
             diagnostic=str(error),
@@ -224,13 +238,21 @@ def evaluate_row(
 def run_stock_row(inputs: StockOracleInputs) -> dict[str, object]:
     """Run the real stock-host seam after provider inputs have been admitted."""
 
-    _validate_build(inputs.candidate, inputs.build)
+    try:
+        deployment = admit_deployment(
+            inputs.deployment_record_path,
+            inputs.deployment_anchor_path,
+            inputs.candidate,
+        )
+    except ValueError as error:
+        raise OracleError(str(error)) from error
+    _validate_deployment(inputs.candidate, deployment)
     public_contract, contract_sha256 = load_public_contract(
         inputs.public_contract_path, inputs.candidate
     )
     supported = StockHostRunner(
         launcher=inputs.supported_launcher,
-        row=inputs.build.row,
+        row=deployment.row,
         state_root=inputs.supported_state_root,
         environment_root=inputs.supported_environment_root,
         diagnostic_roots=inputs.diagnostic_roots,
@@ -257,7 +279,7 @@ def run_stock_row(inputs: StockOracleInputs) -> dict[str, object]:
     try:
         return evaluate_row(
             candidate=inputs.candidate,
-            build=inputs.build,
+            deployment=deployment,
             supported_runner=supported,
             incompatible_runner=incompatible,
             incompatible_row=inputs.incompatible_row,

@@ -1,8 +1,8 @@
 """Pure support-row eligibility law for Community installation evidence.
 
 The dataclasses below are Query-internal normalized observations, not provider
-JSON contracts. A later adapter may construct them only after Enablement
-publishes and verifies the corresponding build/custody schema.
+JSON contracts. A later adapter may construct them only after Enablement binds
+one Community build payload to the signed artifact served after deployment.
 """
 
 from __future__ import annotations
@@ -32,13 +32,20 @@ class RowIdentity:
 
 
 @dataclass(frozen=True)
-class BuildEvidence:
+class DeploymentEvidence:
+    """One Community-built, signed, deployed artifact candidate for Query."""
+
     candidate_sha256: str
     row: RowIdentity
     status: str
     channel: str
-    artifact_sha256: str | None
-    custody_sha256: str | None
+    build_archive_sha256: str | None
+    unsigned_artifact_sha256: str | None
+    shared_payload_sha256: str | None
+    served_gzip_sha256: str | None
+    deployed_artifact_sha256: str | None
+    deployment_record_sha256: str | None
+    deployment_anchor_sha256: str | None
 
 
 @dataclass(frozen=True)
@@ -48,6 +55,8 @@ class QueryEvidence:
     status: str
     channel: str
     artifact_sha256: str
+    deployment_record_sha256: str
+    deployment_anchor_sha256: str
     default_signature_enforced: bool
     extension_version: str
     public_contract_sha256: str
@@ -59,39 +68,75 @@ def _digest(value: str | None, label: str) -> str:
     return value
 
 
+def is_community_platform(value: str) -> bool:
+    """Return whether a value has the canonical underscore-separated row shape."""
+
+    return PLATFORM.fullmatch(value) is not None
+
+
 def _row(candidate: Candidate, row: RowIdentity, label: str) -> None:
     if row.duckdb != candidate.duckdb:
         raise MatrixError(f"{label} does not target the candidate DuckDB identity")
-    if PLATFORM.fullmatch(row.platform) is None:
+    if not is_community_platform(row.platform):
         raise MatrixError(f"{label} has an invalid Community platform identity")
 
 
 def claimable_rows(
     candidate: Candidate,
-    builds: Iterable[BuildEvidence],
+    deployments: Iterable[DeploymentEvidence],
     query_results: Iterable[QueryEvidence],
     public_contract_sha256: str,
 ) -> tuple[RowIdentity, ...]:
-    """Return exactly the complete passing build/custody/query intersection."""
+    """Return exactly the complete deployed-artifact/Query intersection."""
 
     expected_contract = _digest(public_contract_sha256, "public contract")
-    build_by_row: dict[RowIdentity, BuildEvidence] = {}
-    for build in builds:
-        _row(candidate, build.row, "build row")
-        if build.row in build_by_row:
-            raise MatrixError("Community build evidence contains a duplicate row")
-        if build.candidate_sha256 != candidate.sha256:
-            raise MatrixError("build row names a different source candidate")
-        if build.channel != "community":
-            raise MatrixError("build row is not from the Community channel")
-        if build.status not in {"passed", "failed", "excluded"}:
-            raise MatrixError("build row has an unknown status")
-        if build.status == "passed":
-            _digest(build.artifact_sha256, "build artifact")
-            _digest(build.custody_sha256, "build custody")
-        elif build.artifact_sha256 is not None or build.custody_sha256 is not None:
-            raise MatrixError("a non-passing build row claims artifact custody")
-        build_by_row[build.row] = build
+    deployment_by_row: dict[RowIdentity, DeploymentEvidence] = {}
+    for deployment in deployments:
+        _row(candidate, deployment.row, "deployment row")
+        if deployment.row in deployment_by_row:
+            raise MatrixError("Community deployment evidence contains a duplicate row")
+        if deployment.candidate_sha256 != candidate.sha256:
+            raise MatrixError("deployment row names a different source candidate")
+        if deployment.channel != "community":
+            raise MatrixError("deployment row is not from the Community channel")
+        if deployment.status not in {"passed", "failed", "excluded"}:
+            raise MatrixError("deployment row has an unknown status")
+        if deployment.status == "passed":
+            if deployment.row.platform.startswith("wasm"):
+                raise MatrixError("native support admission cannot claim a Wasm row")
+            for value, label in (
+                (deployment.build_archive_sha256, "Community build archive"),
+                (deployment.unsigned_artifact_sha256, "unsigned Community artifact"),
+                (deployment.shared_payload_sha256, "Community signing payload"),
+                (deployment.served_gzip_sha256, "served Community gzip"),
+                (deployment.deployed_artifact_sha256, "deployed Community artifact"),
+                (deployment.deployment_record_sha256, "Community deployment record"),
+                (deployment.deployment_anchor_sha256, "Community deployment anchor"),
+            ):
+                _digest(value, label)
+            if (
+                deployment.unsigned_artifact_sha256
+                == deployment.deployed_artifact_sha256
+            ):
+                raise MatrixError(
+                    "unsigned and deployed Community artifacts have the same identity"
+                )
+        elif any(
+            value is not None
+            for value in (
+                deployment.build_archive_sha256,
+                deployment.unsigned_artifact_sha256,
+                deployment.shared_payload_sha256,
+                deployment.served_gzip_sha256,
+                deployment.deployed_artifact_sha256,
+                deployment.deployment_record_sha256,
+                deployment.deployment_anchor_sha256,
+            )
+        ):
+            raise MatrixError(
+                "a non-passing deployment row claims artifact custody"
+            )
+        deployment_by_row[deployment.row] = deployment
 
     query_by_row: dict[RowIdentity, QueryEvidence] = {}
     for result in query_results:
@@ -111,22 +156,33 @@ def claimable_rows(
         if result.public_contract_sha256 != expected_contract:
             raise MatrixError("Query row used a different public contract")
         _digest(result.artifact_sha256, "Query artifact")
-        build = build_by_row.get(result.row)
-        if build is None:
-            raise MatrixError("Query row has no Community build evidence")
-        if build.status != "passed":
-            raise MatrixError("Query row exists for a non-passing Community build")
-        if result.artifact_sha256 != build.artifact_sha256:
+        _digest(result.deployment_record_sha256, "Query deployment record")
+        _digest(result.deployment_anchor_sha256, "Query deployment anchor")
+        deployment = deployment_by_row.get(result.row)
+        if deployment is None:
+            raise MatrixError("Query row has no Community deployment evidence")
+        if deployment.status != "passed":
+            raise MatrixError(
+                "Query row exists for a non-passing Community deployment"
+            )
+        if result.artifact_sha256 != deployment.deployed_artifact_sha256:
             raise MatrixError("Query row exercised different artifact bytes")
+        if (
+            result.deployment_record_sha256
+            != deployment.deployment_record_sha256
+            or result.deployment_anchor_sha256
+            != deployment.deployment_anchor_sha256
+        ):
+            raise MatrixError("Query row used different deployment custody")
         query_by_row[result.row] = result
 
     claimed: list[RowIdentity] = []
-    for row, build in build_by_row.items():
-        if build.status != "passed":
+    for row, deployment in deployment_by_row.items():
+        if deployment.status != "passed":
             continue
         result = query_by_row.get(row)
         if result is None:
-            raise MatrixError("passing Community build lacks Query evidence")
+            raise MatrixError("passing Community deployment lacks Query evidence")
         if result.status == "passed":
             claimed.append(row)
     return tuple(sorted(claimed))

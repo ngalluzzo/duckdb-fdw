@@ -19,6 +19,7 @@ MODULES = (
     "test_build_evidence_authority",
     "test_build_evidence_inventory",
     "test_build_evidence_downloads",
+    "test_community_signature_payload",
     "test_dependency_admission",
     "test_candidate_admission",
 )

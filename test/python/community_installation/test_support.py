@@ -10,11 +10,11 @@ from typing import Iterable
 try:
     from .input_admission import Candidate, DuckDbIdentity, admit_candidate
     from .lifecycle import ExtensionObservation, HostObservation, LifecycleError
-    from .matrix import BuildEvidence, RowIdentity
+    from .matrix import DeploymentEvidence, RowIdentity
 except ImportError:
     from input_admission import Candidate, DuckDbIdentity, admit_candidate
     from lifecycle import ExtensionObservation, HostObservation, LifecycleError
-    from matrix import BuildEvidence, RowIdentity
+    from matrix import DeploymentEvidence, RowIdentity
 
 
 GIT_A = "1" * 40
@@ -119,15 +119,75 @@ def extension(
     )
 
 
-def build_evidence(candidate: Candidate, target: RowIdentity | None = None) -> BuildEvidence:
-    return BuildEvidence(
+def deployment_evidence(
+    candidate: Candidate, target: RowIdentity | None = None
+) -> DeploymentEvidence:
+    return DeploymentEvidence(
         candidate_sha256=candidate.sha256,
         row=target or row(),
         status="passed",
         channel="community",
-        artifact_sha256=SHA_A,
-        custody_sha256=SHA_B,
+        build_archive_sha256=SHA_C,
+        unsigned_artifact_sha256=SHA_B,
+        shared_payload_sha256=SHA_D,
+        served_gzip_sha256=SHA_C,
+        deployed_artifact_sha256=SHA_A,
+        deployment_record_sha256=SHA_C,
+        deployment_anchor_sha256=SHA_D,
     )
+
+
+def deployment_document(candidate: Candidate) -> dict[str, object]:
+    """Return one exact synthetic native deployment-provider handoff."""
+
+    return {
+        "schema": "duckdb_api/community-deployment/v1",
+        "status": "deployed_candidate",
+        "candidate_sha256": candidate.sha256,
+        "channel": "community",
+        "row": {
+            "duckdb": {
+                "version": candidate.duckdb.version,
+                "commit": candidate.duckdb.commit,
+            },
+            "platform": "osx_arm64",
+        },
+        "build": {
+            "archive_sha256": SHA_C,
+            "unsigned_artifact_sha256": SHA_B,
+            "shared_payload_sha256": SHA_D,
+        },
+        "community": {
+            "repository": candidate.community_repository,
+            "workflow": ".github/workflows/build.yml",
+            "run_id": 12345,
+            "run_attempt": 1,
+            "head_commit": GIT_D,
+            "endpoint": (
+                "http://community-extensions.duckdb.org/v1.5.4/osx_arm64/"
+                "duckdb_api.duckdb_extension.gz"
+            ),
+        },
+        "deployment": {
+            "served_gzip_sha256": SHA_C,
+            "signed_artifact_sha256": SHA_A,
+            "artifact_size": 4096,
+        },
+    }
+
+
+def write_deployment(
+    root: pathlib.Path,
+    candidate: Candidate,
+    document: dict[str, object] | None = None,
+) -> tuple[pathlib.Path, pathlib.Path]:
+    record = root / "deployment.json"
+    anchor = root / "deployment.sha256"
+    payload = canonical_bytes(document or deployment_document(candidate))
+    record.write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    anchor.write_text(f"{digest}  deployment.json\n", encoding="ascii")
+    return record, anchor
 
 
 def supported_observations(target: RowIdentity | None = None) -> list[HostObservation]:

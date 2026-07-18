@@ -10,17 +10,17 @@ unclaimed, and ordinary guidance never enables unsigned extensions.
 
 This plan is the team's implementation decomposition, not another source of
 product policy. Engineering Enablement facilitates Community build,
-provenance, dependency, custody, and release-evidence practice. Query consumes
-those results through bounded files and process commands; it does not inspect
-or reproduce their implementation.
+provenance, dependency, signing, deployment, custody, and release-evidence
+practice. Query consumes those results through bounded files and process
+commands; it does not inspect or reproduce their implementation.
 
 ## User acceptance narrative
 
 For every candidate support row, the same Query-owned oracle must:
 
 1. Admit one exact `0.2.0` candidate, latest-stable DuckDB identity, Community
-   platform identity, and Enablement-provided build/custody record into a new
-   empty host state.
+   platform identity, and Enablement-provided signed-deployment/custody record
+   into a new empty host state.
 2. Start stock DuckDB with default extension security, assert that unsigned
    loading was not enabled, and run `INSTALL duckdb_api FROM community`.
    Installation must identify the Community source and version `0.2.0` without
@@ -51,6 +51,7 @@ machine-local paths.
 | Project extension identity visible through DuckDB | `extension_config.cmake` and Query identity assertions | The immutable project/extension version changes; the internal example connector version does not change with `0.2.0` |
 | DuckDB registration and lifecycle portability | `src/duckdb_api_extension.cpp`, `src/include/duckdb_api_extension.hpp`, and `test/cpp/duckdb_adapter_tests.cpp` | A passing Community row requires an evidence-backed adapter compatibility, callback, state, diagnostic, or exception-boundary correction; no speculative platform shim is allowed |
 | Accepted public behavior | `release/0.2.0/public_contract.json`, `test/sql/duckdb_api.test`, and existing artifact/source-demo contract tests | Extension identity advances to `0.2.0` while the function, parameters, schema, rows, DuckDB-owned relational behavior, and diagnostics remain unchanged |
+| Anchored deployment handoff | `test/python/community_installation/deployment_admission.py` | The exact native deployment v1 record, anchor, Community run/endpoint, transport/inner digests, or candidate/row binding changes |
 | Community lifecycle composition | `test/python/community_installation/oracle.py` | The documented command, input admission, scenario ordering, and final success/failure outcome change |
 | Stock host inventory, private launcher, and argv | `test/python/community_installation/launcher.py` | The explicit executable, virtual-environment configuration, DuckDB native module/package metadata inventory, private staging, or default signature-policy arguments change |
 | Descriptor-stable host file admission | `test/python/community_installation/file_admission.py` | Bounded no-follow input reads, exact artifact size/digest admission, or O_EXCL staging changes |
@@ -61,15 +62,17 @@ machine-local paths.
 | One child-only DuckDB action | `test/python/community_installation/duckdb_action.py` | Stock DuckDB connection settings, Community install/load SQL, catalog observations, or exact query behavior changes |
 | One stock-host process action | `test/python/community_installation/host_action.py` | Composition of an admitted launcher, state capability, bounded child action, and one framed observation changes |
 | Install/repeat/restart/load/failure assertions | `test/python/community_installation/scenarios.py` | The user-visible lifecycle or required success and refusal observations change |
-| Exact support-row admission | `test/python/community_installation/matrix.py` | The accepted candidate/build/query identity join or the rule that only complete passing rows are claimable changes |
-| Canonical Query evidence | `test/python/community_installation/evidence.py` | The versioned, bounded, path-normalized result schema changes |
+| Exact support-row admission | `test/python/community_installation/matrix.py` | The accepted candidate/signed-deployment/query identity join or the rule that only complete passing rows are claimable changes |
+| Canonical Query evidence production | `test/python/community_installation/evidence.py` | The bounded, path-normalized v2 result construction or exclusive write boundary changes |
+| Query evidence admission | `test/python/community_installation/evidence_admission.py` | The exact status-aware v2 shape, lifecycle completeness, digest admission, or matrix normalization changes |
 | Responsibility-matched unit oracles | `test_state_capability.py`, `test_host_action.py`, the boundary `test_duckdb_action.py`, the install/refusal/query action suites, and other `test_*.py`, with explicit test-support modules limited to shared deterministic fixtures | The corresponding Query module's contract changes; provider build and custody behavior is never mocked as Query logic |
 | Published compatibility statement | `release/0.2.0/support-matrix.json` | The final exact DuckDB commit and Community platform rows change after complete evidence, never from a build result alone |
 | Ordinary-user narrative | `README.md`, `CHANGELOG.md`, `docs/releases/0.2.0-notes.md`, and `examples/community-installation.sql` | Installation, version, support, update, history, or diagnostic guidance changes |
 
 `oracle.py` is a thin composition root. `matrix.py` decides whether already
-admitted provider and Query results name the same claimable row; it never
-builds an extension or validates a toolchain. `host_action.py` composes the
+admitted signed-deployment and Query results name the same claimable row; it
+cannot receive an unsigned build digest as the deployed artifact identity and
+never builds an extension or validates a toolchain. `host_action.py` composes the
 separate launcher, file-admission, state-capability, environment,
 process-lifecycle, protocol, and child-action responsibilities for one bounded
 action and contains no support-policy decision. `state_capability.py` alone
@@ -81,7 +84,8 @@ fixture. `scenarios.py` owns state transitions and requires an
 independent, content-identified initialization probe before a refusal can
 pass; empty DuckDB catalogs alone do not prove that native initialization was
 absent. `evidence.py` receives completed observations and cannot authorize
-execution. Production code never imports these test modules.
+execution; `evidence_admission.py` independently re-admits the exact v2 result
+before matrix use. Production code never imports these test modules.
 
 No Query work may reinterpret connector metadata, relational plans, remote
 runtime behavior, or the `0.1.0` release record. If Community evidence exposes
@@ -95,8 +99,10 @@ Query accepts only explicit, content-identified inputs:
 - immutable `candidate.json` containing the source tag, commit, tree, project
   version, latest-stable DuckDB identity, toolchain identity, and dependency
   audit identity;
-- one `community-build.json` per Community CI row plus the downloaded signed
-  artifact path and exact row identity;
+- one exact anchored Community deployment v1 record per native row, binding the
+  Actions archive, unsigned extension, shared pre-signature payload, served
+  gzip, signed extension, exact build/deploy identities, endpoint, and
+  downloaded signed artifact path;
 - a canonical hosted-custody inventory and anchor that bind the supplied
   records and artifacts; and
 - an explicit stock DuckDB executable or launcher plus its full content digest
@@ -107,10 +113,11 @@ Query accepts only explicit, content-identified inputs:
   privately stages the executable, `pyvenv.cfg`, DuckDB native module, Python
   package, and package metadata before a passing observation can be composed.
 
-Query validates required shape, identity agreement, uniqueness, containment,
-and the accepted `0.2.0` public contract. Enablement owns source admission,
+Query validates the complete deployment record/anchor, required shape,
+identity agreement, uniqueness, containment, exact Query v2 result, and the
+accepted `0.2.0` public contract. Enablement owns source admission,
 toolchain setup, dependency discovery, descriptor generation, Community CI
-orchestration, artifact download, signature/custody provenance, hosted
+orchestration, artifact download, signing/deployment/custody provenance, hosted
 transfer, and their provider-side tests. Query must not import
 `scripts/community/`, read CI workflow structure, infer paths under build
 roots, or inspect `release/0.2.0/enablement/` internals. Enablement may bind the
@@ -134,7 +141,8 @@ lifecycle assertions, diagnostics, or support-row eligibility.
   observes the required DuckDB and row identity, and a rejected input leaves
   neither an installed artifact nor a registered function.
 - **Matrix law:** property-style cases reject duplicate rows, mixed candidate
-  or DuckDB identities, failed or missing Community builds, missing custody,
+  or DuckDB identities, failed or missing Community deployments, unsigned
+  build digests presented as deployed artifact identities, missing custody,
   failed Query results, non-Community modes, and untested rows. The emitted
   matrix equals exactly the set of fully passing joined rows.
 - **Live Community confirmation:** after upstream publication, the lifecycle
@@ -143,9 +151,9 @@ lifecycle assertions, diagnostics, or support-row eligibility.
   remain the primary correctness oracle.
 - **Representative failure:** a signed artifact presented to an incompatible
   host or platform fails before extension initialization with safe actionable
-  facts and an empty function inventory. A missing/failed Community build is
-  recorded as an unclaimed row, never converted into a passing diagnostic by
-  the Query harness.
+  facts and an empty function inventory. A missing/failed Community build or
+  deployment is recorded as an unclaimed row, never converted into a passing
+  diagnostic by the Query harness.
 
 ## Parallel workstreams and sequencing gates
 
@@ -215,7 +223,7 @@ following are observable in the final source and evidence:
   the documented candidate, row, custody, host-command, and output interfaces;
 - Query independently maintains the lifecycle oracle, matrix law, exact
   support matrix, and user guidance, while Enablement can change its internal
-  build/custody implementation without a Query edit;
+  build/signing/deployment/custody implementation without a Query edit;
 - every claimed row passes the complete stock-host oracle and the hosted
   custody round trip binds the same opaque Query result without interpreting
   it;

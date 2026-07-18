@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 import pathlib
 import tempfile
@@ -14,10 +15,11 @@ try:
         build_failed_evidence,
         build_passed_evidence,
         canonical_bytes,
-        query_evidence,
         write_evidence,
     )
+    from .evidence_admission import query_evidence
     from .scenarios import run_scenarios
+    from .matrix import claimable_rows
     from .test_support import (
         FakeInitializationProbe,
         FakeRunner,
@@ -25,7 +27,7 @@ try:
         SHA_C,
         SHA_D,
         admitted_candidate,
-        build_evidence,
+        deployment_evidence,
         extension,
         incompatible_observation,
         public_contract,
@@ -39,10 +41,11 @@ except ImportError:
         build_failed_evidence,
         build_passed_evidence,
         canonical_bytes,
-        query_evidence,
         write_evidence,
     )
+    from evidence_admission import query_evidence
     from scenarios import run_scenarios
+    from matrix import claimable_rows
     from test_support import (
         FakeInitializationProbe,
         FakeRunner,
@@ -50,13 +53,19 @@ except ImportError:
         SHA_C,
         SHA_D,
         admitted_candidate,
-        build_evidence,
+        deployment_evidence,
         extension,
         incompatible_observation,
         public_contract,
         row,
         supported_observations,
     )
+
+
+def contract_sha256() -> str:
+    return hashlib.sha256(
+        json.dumps(public_contract(), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 class EvidenceTests(unittest.TestCase):
@@ -66,7 +75,7 @@ class EvidenceTests(unittest.TestCase):
             candidate_root = root / "candidate"
             candidate_root.mkdir()
             candidate = admitted_candidate(candidate_root)
-            build = build_evidence(candidate)
+            deployment = deployment_evidence(candidate)
             install_path = root / "state/extensions/duckdb_api.duckdb_extension"
             observations = supported_observations()
             for index, loaded in ((1, False), (2, False), (3, True)):
@@ -88,7 +97,7 @@ class EvidenceTests(unittest.TestCase):
             )
             result = build_passed_evidence(
                 candidate=candidate,
-                build=build,
+                deployment=deployment,
                 scenarios=scenarios,
                 incompatible_artifact_size=6,
                 incompatible_artifact_sha256=SHA_A,
@@ -96,14 +105,45 @@ class EvidenceTests(unittest.TestCase):
                 incompatible_launcher_sha256=SHA_D,
                 supported_host_inventory_sha256=SHA_D,
                 incompatible_host_inventory_sha256=SHA_C,
-                public_contract_sha256=SHA_C,
+                public_contract_sha256=contract_sha256(),
                 replacements=((root, "<trial-root>"),),
             )
             self.assertEqual(result["schema"], QUERY_EVIDENCE_SCHEMA)
+            self.assertEqual(
+                set(result),
+                {
+                    "artifact_sha256",
+                    "candidate",
+                    "channel",
+                    "community",
+                    "default_signature_enforced",
+                    "extension_version",
+                    "incompatible",
+                    "incompatible_artifact_sha256",
+                    "incompatible_artifact_size",
+                    "initialization_probe_sha256",
+                    "launcher_sha256",
+                    "stock_host_inventory_sha256",
+                    "public_contract_sha256",
+                    "row",
+                    "schema",
+                    "status",
+                    "supported",
+                },
+            )
+            self.assertEqual(
+                set(result["community"]),
+                {
+                    "deployment_anchor_sha256",
+                    "deployment_record_sha256",
+                    "repository",
+                    "source_commit",
+                },
+            )
             self.assertTrue(result["default_signature_enforced"])
             self.assertNotIn(str(root.resolve()), json.dumps(result))
             self.assertIn("<trial-root>", json.dumps(result))
-            normalized = query_evidence(result)
+            normalized = query_evidence(result, candidate)
             self.assertEqual(normalized.row, row())
             self.assertEqual(normalized.artifact_sha256, SHA_A)
             self.assertEqual(
@@ -114,6 +154,21 @@ class EvidenceTests(unittest.TestCase):
                 result["stock_host_inventory_sha256"],
                 {"supported": SHA_D, "incompatible": SHA_C},
             )
+            with self.assertRaisesRegex(EvidenceError, "fields differ"):
+                query_evidence(
+                    {"schema": QUERY_EVIDENCE_SCHEMA, "status": "passed"},
+                    candidate,
+                )
+            for section, field in (
+                ("candidate", "source_commit"),
+                ("candidate", "source_tree"),
+                ("community", "source_commit"),
+            ):
+                malformed = json.loads(json.dumps(result))
+                malformed[section][field] = "f" * 40
+                with self.subTest(section=section, field=field):
+                    with self.assertRaisesRegex(EvidenceError, "different"):
+                        query_evidence(malformed, candidate)
 
     def test_writer_is_canonical_and_refuses_existing_target(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -154,7 +209,7 @@ class EvidenceTests(unittest.TestCase):
             candidate = admitted_candidate(candidate_root)
             result = build_failed_evidence(
                 candidate=candidate,
-                build=build_evidence(candidate),
+                deployment=deployment_evidence(candidate),
                 public_contract_sha256=SHA_C,
                 category="stock_host_lifecycle",
                 diagnostic=f"failed in {root}/secret",
@@ -169,8 +224,43 @@ class EvidenceTests(unittest.TestCase):
             )
             self.assertEqual(result["status"], "failed")
             self.assertNotIn(str(root), json.dumps(result))
-            with self.assertRaisesRegex(EvidenceError, "only passed"):
-                query_evidence(result)
+            self.assertEqual(
+                set(result),
+                {
+                    "artifact_sha256",
+                    "candidate",
+                    "channel",
+                    "community",
+                    "default_signature_enforced",
+                    "extension_version",
+                    "failure",
+                    "incompatible_artifact_sha256",
+                    "incompatible_artifact_size",
+                    "initialization_probe_sha256",
+                    "launcher_sha256",
+                    "stock_host_inventory_sha256",
+                    "public_contract_sha256",
+                    "row",
+                    "schema",
+                    "status",
+                },
+            )
+            normalized = query_evidence(result, candidate)
+            self.assertEqual(normalized.status, "failed")
+            self.assertEqual(
+                claimable_rows(
+                    candidate,
+                    [deployment_evidence(candidate)],
+                    [normalized],
+                    SHA_C,
+                ),
+                (),
+            )
+
+            malformed = json.loads(json.dumps(result))
+            malformed["community"]["deployment_record_sha256"] = "not-a-digest"
+            with self.assertRaisesRegex(EvidenceError, "SHA-256"):
+                query_evidence(malformed, candidate)
 
 
 if __name__ == "__main__":

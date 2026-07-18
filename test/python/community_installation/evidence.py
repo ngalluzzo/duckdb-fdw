@@ -19,16 +19,16 @@ from typing import Any
 try:
     from .input_admission import Candidate
     from .lifecycle import ExtensionObservation, HostObservation
-    from .matrix import BuildEvidence, QueryEvidence, RowIdentity
+    from .matrix import DeploymentEvidence, RowIdentity
     from .scenarios import ScenarioResult
 except ImportError:
     from input_admission import Candidate
     from lifecycle import ExtensionObservation, HostObservation
-    from matrix import BuildEvidence, QueryEvidence, RowIdentity
+    from matrix import DeploymentEvidence, RowIdentity
     from scenarios import ScenarioResult
 
 
-QUERY_EVIDENCE_SCHEMA = "duckdb_api/community-query-evidence/v1"
+QUERY_EVIDENCE_SCHEMA = "duckdb_api/community-query-evidence/v2"
 MAX_EVIDENCE_BYTES = 256 * 1024
 SHA256 = re.compile(r"[0-9a-f]{64}")
 
@@ -113,7 +113,7 @@ def normalize_paths(
 def build_passed_evidence(
     *,
     candidate: Candidate,
-    build: BuildEvidence,
+    deployment: DeploymentEvidence,
     scenarios: ScenarioResult,
     incompatible_artifact_size: int,
     incompatible_artifact_sha256: str,
@@ -124,11 +124,15 @@ def build_passed_evidence(
     public_contract_sha256: str,
     replacements: Sequence[tuple[pathlib.Path, str]],
 ) -> dict[str, object]:
-    """Bind one passing stock-host lifecycle to its candidate and build row."""
+    """Bind one passing stock-host lifecycle to its deployed Community row."""
 
     if (
-        build.artifact_sha256 is None
-        or build.custody_sha256 is None
+        deployment.deployed_artifact_sha256 is None
+        or deployment.deployment_record_sha256 is None
+        or deployment.deployment_anchor_sha256 is None
+        or SHA256.fullmatch(deployment.deployed_artifact_sha256) is None
+        or SHA256.fullmatch(deployment.deployment_record_sha256) is None
+        or SHA256.fullmatch(deployment.deployment_anchor_sha256) is None
         or incompatible_artifact_size < 0
     ):
         raise EvidenceError("passing Query evidence requires artifact custody")
@@ -144,7 +148,7 @@ def build_passed_evidence(
     ):
         raise EvidenceError("passing Query host authority is malformed")
     result: dict[str, object] = {
-        "artifact_sha256": build.artifact_sha256,
+        "artifact_sha256": deployment.deployed_artifact_sha256,
         "candidate": {
             "sha256": candidate.sha256,
             "source_commit": candidate.source_commit,
@@ -153,7 +157,8 @@ def build_passed_evidence(
         },
         "channel": "community",
         "community": {
-            "build_custody_sha256": build.custody_sha256,
+            "deployment_anchor_sha256": deployment.deployment_anchor_sha256,
+            "deployment_record_sha256": deployment.deployment_record_sha256,
             "repository": candidate.community_repository,
             "source_commit": candidate.community_commit,
         },
@@ -172,7 +177,7 @@ def build_passed_evidence(
             "supported": supported_host_inventory_sha256,
         },
         "public_contract_sha256": public_contract_sha256,
-        "row": _row(build.row),
+        "row": _row(deployment.row),
         "schema": QUERY_EVIDENCE_SCHEMA,
         "status": "passed",
         "supported": [
@@ -192,7 +197,7 @@ def build_passed_evidence(
 def build_failed_evidence(
     *,
     candidate: Candidate,
-    build: BuildEvidence,
+    deployment: DeploymentEvidence,
     public_contract_sha256: str,
     category: str,
     diagnostic: str,
@@ -219,8 +224,17 @@ def build_failed_evidence(
         )
     ):
         raise EvidenceError("failed Query host authority is malformed")
+    if (
+        deployment.deployed_artifact_sha256 is None
+        or SHA256.fullmatch(deployment.deployed_artifact_sha256) is None
+        or deployment.deployment_record_sha256 is None
+        or SHA256.fullmatch(deployment.deployment_record_sha256) is None
+        or deployment.deployment_anchor_sha256 is None
+        or SHA256.fullmatch(deployment.deployment_anchor_sha256) is None
+    ):
+        raise EvidenceError("failed Query deployment authority is malformed")
     result = {
-        "artifact_sha256": build.artifact_sha256,
+        "artifact_sha256": deployment.deployed_artifact_sha256,
         "candidate": {
             "sha256": candidate.sha256,
             "source_commit": candidate.source_commit,
@@ -228,6 +242,14 @@ def build_failed_evidence(
             "source_tree": candidate.source_tree,
         },
         "channel": "community",
+        "community": {
+            "deployment_anchor_sha256": deployment.deployment_anchor_sha256,
+            "deployment_record_sha256": deployment.deployment_record_sha256,
+            "repository": candidate.community_repository,
+            "source_commit": candidate.community_commit,
+        },
+        "default_signature_enforced": True,
+        "extension_version": "0.2.0",
         "failure": {"category": category, "diagnostic": diagnostic[:4096]},
         "incompatible_artifact_sha256": incompatible_artifact_sha256,
         "incompatible_artifact_size": incompatible_artifact_size,
@@ -241,7 +263,7 @@ def build_failed_evidence(
             "supported": supported_host_inventory_sha256,
         },
         "public_contract_sha256": public_contract_sha256,
-        "row": _row(build.row),
+        "row": _row(deployment.row),
         "schema": QUERY_EVIDENCE_SCHEMA,
         "status": "failed",
     }
@@ -290,34 +312,3 @@ def write_evidence(path: pathlib.Path, value: dict[str, object]) -> None:
     finally:
         if descriptor is not None:
             os.close(descriptor)
-
-
-def query_evidence(value: dict[str, object]) -> QueryEvidence:
-    """Adapt only a passing Query-owned result to the existing matrix law."""
-
-    if value.get("schema") != QUERY_EVIDENCE_SCHEMA or value.get("status") != "passed":
-        raise EvidenceError("only passed Query v1 evidence can enter the matrix")
-    candidate = value.get("candidate")
-    row = value.get("row")
-    if not isinstance(candidate, dict) or not isinstance(row, dict):
-        raise EvidenceError("passed Query evidence identity is malformed")
-    duckdb = row.get("duckdb")
-    if not isinstance(duckdb, dict):
-        raise EvidenceError("passed Query evidence DuckDB identity is malformed")
-    try:
-        from .input_admission import DuckDbIdentity
-    except ImportError:
-        from input_admission import DuckDbIdentity
-    return QueryEvidence(
-        candidate_sha256=str(candidate["sha256"]),
-        row=RowIdentity(
-            DuckDbIdentity(str(duckdb["version"]), str(duckdb["commit"])),
-            str(row["platform"]),
-        ),
-        status="passed",
-        channel=str(value["channel"]),
-        artifact_sha256=str(value["artifact_sha256"]),
-        default_signature_enforced=value.get("default_signature_enforced") is True,
-        extension_version=str(value["extension_version"]),
-        public_contract_sha256=str(value["public_contract_sha256"]),
-    )

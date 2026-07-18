@@ -169,6 +169,31 @@ A success conclusion is a candidate build row, not evidence of Community
 signing, deployment, stock-host behavior, platform compatibility, or public
 support. Those meanings remain with later custody and Query gates.
 
+## Native build bytes are not deployed bytes
+
+The official native deployment path does not preserve the complete
+build-artifact digest. The Actions ZIP contains one
+`duckdb_api.duckdb_extension` whose final
+256 bytes are an all-zero signature placeholder. DuckDB's deployment script
+signs the bytes before that block, replaces the placeholder with the 256-byte
+Community signature, gzip-compresses the complete result, and serves those
+different bytes from the Community endpoint.
+
+Deployment admission must retain five distinct custody identities: the Actions
+ZIP, unsigned extension, shared pre-signature payload, served gzip, and signed
+extension. It must prove exact extension-byte equality before the signature
+block and bind the exact successful main-branch build/deploy run plus freshly
+downloaded endpoint bytes. A nonzero signature block is only transition
+evidence; it is not local cryptographic validation. Only Query's stock-DuckDB
+lifecycle with default extension policy proves that DuckDB accepts the deployed
+signature. Query admits the exact anchored deployment record and cannot place
+the unsigned digest in the support matrix.
+
+This contract is native-only. The official `wasm_mvp` row produces a `.wasm`
+artifact and uses Brotli during deployment. Preserve that provider row as
+explicitly unclaimed; do not interpret it with the ZIP/gzip native helper or
+include it in the stock-native support matrix.
+
 Run the deterministic slice with:
 
 ```sh
