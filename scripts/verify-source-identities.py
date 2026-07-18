@@ -51,6 +51,24 @@ HISTORICAL_RELEASES = {
             "bbba900cb94f6289c9282750ed6d15a5356f6c0de9aa00fa5ae3a0ed8e452160"
         ),
     },
+    "0.3.0": {
+        "identities": {
+            "native_connector_source": {
+                "path": "src/connector.cpp",
+                "sha256": "d9cf66acedb97b0325ca9c9883afceaa91a491fe48e2f6d5d3744137f8d13e86",
+            },
+            "public_contract": {
+                "canonical_json_sha256": "f5d9a5c14ef603fef34bf7154ad2272e86742fec0af994aacfbfec4afe84c8e9",
+                "path": "release/0.3.0/public_contract.json",
+            },
+        },
+        "pins_canonical_json_sha256": (
+            "8d19569b10759139708e08e98b84079f0c0c1cde8c1a5380ffd17d57a78ab4a0"
+        ),
+        "public_contract_sha256": (
+            "f5d9a5c14ef603fef34bf7154ad2272e86742fec0af994aacfbfec4afe84c8e9"
+        ),
+    },
 }
 GIT_ID = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -63,6 +81,14 @@ EXTENSION_CONFIG = re.compile(
     r"\)[ \t\r\n]*"
 )
 MAX_IDENTITY_FILE_BYTES = 16 * 1024 * 1024
+PATH_BOUND_SHA256 = "sha256-length-prefixed-path-and-bytes-v1"
+CONTROLLED_PRODUCT_SOURCE_PATHS = (
+    "test/cpp/controlled_duckdb_api_extension.cpp",
+    "test/cpp/support/controlled_product_composition.cpp",
+    "test/cpp/support/controlled_product_composition.hpp",
+    "test/cpp/support/loopback_curl_runtime.cpp",
+    "test/cpp/support/loopback_curl_runtime.hpp",
+)
 
 
 class RepositoryReader:
@@ -182,10 +208,55 @@ class RepositoryReader:
     def digest(self, relative: str) -> str:
         return hashlib.sha256(self.read_bytes(relative)).hexdigest()
 
+    def list_regular_files(self, relative_root: str) -> tuple[str, ...]:
+        """Inventories a source subtree without accepting links or special files."""
+        parts = self._relative_parts(relative_root)
+        root = self.root.joinpath(*parts)
+        try:
+            root_status = root.lstat()
+        except OSError as error:
+            raise AssertionError(f"identity source root cannot be read: {relative_root}") from error
+        if stat.S_ISLNK(root_status.st_mode) or not stat.S_ISDIR(root_status.st_mode):
+            raise AssertionError("identity source root is not a real directory")
+
+        result = []
+
+        def visit(directory: pathlib.Path) -> None:
+            try:
+                entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
+            except OSError as error:
+                raise AssertionError("identity source inventory cannot be read") from error
+            for entry in entries:
+                relative = pathlib.Path(entry.path).relative_to(self.root).as_posix()
+                if entry.is_symlink():
+                    raise AssertionError("identity source inventory contains a symlink")
+                if entry.is_dir(follow_symlinks=False):
+                    visit(pathlib.Path(entry.path))
+                elif entry.is_file(follow_symlinks=False):
+                    result.append(relative)
+                else:
+                    raise AssertionError("identity source inventory contains a special file")
+
+        visit(root)
+        return tuple(result)
+
 
 def canonical_digest(value: object) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def path_bound_digest(reader: RepositoryReader, paths: tuple[str, ...]) -> str:
+    """Binds normalized repository paths and bytes, never an absolute checkout root."""
+    result = hashlib.sha256()
+    for path in paths:
+        encoded_path = path.encode("utf-8")
+        content = reader.read_bytes(path)
+        result.update(len(encoded_path).to_bytes(8, "big"))
+        result.update(encoded_path)
+        result.update(len(content).to_bytes(8, "big"))
+        result.update(content)
+    return result.hexdigest()
 
 
 def release_record(reader: RepositoryReader, version: str) -> tuple[dict, dict]:
@@ -239,55 +310,99 @@ def validate_duckdb(pins: dict, public_contract: dict) -> dict:
     return duckdb
 
 
-def validate_legacy_identities(pins: dict, version: str) -> dict:
-    identities = pins.get("identities")
-    expected_keys = {
-        "compiled_connector_sha256",
-        "fixture_sha256",
-        "public_contract_sha256",
-    }
-    if not isinstance(identities, dict) or set(identities) != expected_keys:
-        raise AssertionError(f"historical {version} source identities are incomplete")
-    if any(
-        not isinstance(value, str) or SHA256.fullmatch(value) is None
-        for value in identities.values()
+def validate_source_set_identity(record: object, label: str) -> tuple[str, ...]:
+    if not isinstance(record, dict) or set(record) != {"algorithm", "paths", "sha256"}:
+        raise AssertionError(f"current {label} identity is malformed")
+    if record["algorithm"] != PATH_BOUND_SHA256:
+        raise AssertionError(f"current {label} identity uses an unknown algorithm")
+    paths = record["paths"]
+    if (
+        not isinstance(paths, list)
+        or not paths
+        or any(not isinstance(path, str) for path in paths)
+        or paths != sorted(set(paths))
     ):
-        raise AssertionError(
-            f"historical {version} source identity is not a lowercase SHA-256"
-        )
-    return identities
+        raise AssertionError(f"current {label} paths are not a sorted unique list")
+    for path in paths:
+        RepositoryReader._relative_parts(path)
+    if not isinstance(record["sha256"], str) or SHA256.fullmatch(record["sha256"]) is None:
+        raise AssertionError(f"current {label} digest is not a lowercase SHA-256")
+    return tuple(paths)
 
 
-def validate_current_identities(pins: dict) -> dict:
+def validate_translation_units(value: object, label: str) -> tuple[str, ...]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(path, str) for path in value)
+        or len(value) != len(set(value))
+    ):
+        raise AssertionError(f"current {label} translation units are malformed")
+    for path in value:
+        RepositoryReader._relative_parts(path)
+        if not path.endswith(".cpp"):
+            raise AssertionError(f"current {label} contains a non-translation-unit path")
+    return tuple(value)
+
+
+def validate_current_identities(pins: dict, reader: RepositoryReader) -> dict:
     identities = pins.get("identities")
     if not isinstance(identities, dict) or set(identities) != {
-        "native_connector_source",
+        "build_graph",
+        "controlled_product_sources",
+        "native_product_sources",
         "public_contract",
     }:
-        raise AssertionError("current 0.3 source identity pins are incomplete")
-    expected = {
-        "native_connector_source": ("path", "sha256"),
-        "public_contract": ("canonical_json_sha256", "path"),
-    }
-    for name, keys in expected.items():
-        record = identities.get(name)
-        if not isinstance(record, dict) or set(record) != set(keys):
-            raise AssertionError(f"current 0.3 {name} identity is malformed")
-        path = record.get("path")
-        if (
-            not isinstance(path, str)
-            or pathlib.PurePosixPath(path).is_absolute()
-            or ".." in pathlib.PurePosixPath(path).parts
-        ):
-            raise AssertionError(f"current 0.3 {name} path is not repository-relative")
-        digest_key = next(key for key in keys if key != "path")
-        value = record.get(digest_key)
-        if not isinstance(value, str) or SHA256.fullmatch(value) is None:
-            raise AssertionError(f"current 0.3 {name} digest is not a lowercase SHA-256")
-    if identities["native_connector_source"]["path"] != "src/connector.cpp":
-        raise AssertionError("current 0.3 connector identity names the wrong source")
-    if identities["public_contract"]["path"] != "release/0.3.0/public_contract.json":
-        raise AssertionError("current 0.3 public contract identity names the wrong source")
+        raise AssertionError("current 0.4 source identity pins are incomplete")
+
+    native_paths = validate_source_set_identity(
+        identities["native_product_sources"], "native product source"
+    )
+    if native_paths != reader.list_regular_files("src"):
+        raise AssertionError("current native product source inventory is incomplete")
+
+    controlled_paths = validate_source_set_identity(
+        identities["controlled_product_sources"], "controlled product source"
+    )
+    if controlled_paths != CONTROLLED_PRODUCT_SOURCE_PATHS:
+        raise AssertionError("current controlled product source inventory is incomplete")
+
+    build_graph = identities["build_graph"]
+    if not isinstance(build_graph, dict) or set(build_graph) != {
+        "controlled_translation_units",
+        "public_translation_units",
+    }:
+        raise AssertionError("current build graph identity is malformed")
+    public_units = validate_translation_units(
+        build_graph["public_translation_units"], "public product"
+    )
+    controlled_units = validate_translation_units(
+        build_graph["controlled_translation_units"], "controlled product"
+    )
+    native_units = {path for path in native_paths if path.endswith(".cpp")}
+    controlled_only_units = {path for path in controlled_paths if path.endswith(".cpp")}
+    if set(public_units) != native_units:
+        raise AssertionError("current public build graph omits a native translation unit")
+    expected_controlled = (
+        native_units
+        - {"src/duckdb_api_extension.cpp", "src/product_composition.cpp"}
+    ) | controlled_only_units
+    if set(controlled_units) != expected_controlled:
+        raise AssertionError("current controlled build graph has the wrong composition")
+
+    public_contract = identities["public_contract"]
+    if not isinstance(public_contract, dict) or set(public_contract) != {
+        "canonical_json_sha256",
+        "path",
+    }:
+        raise AssertionError("current public contract identity is malformed")
+    if public_contract["path"] != "release/0.4.0/public_contract.json":
+        raise AssertionError("current public contract identity names the wrong source")
+    if (
+        not isinstance(public_contract["canonical_json_sha256"], str)
+        or SHA256.fullmatch(public_contract["canonical_json_sha256"]) is None
+    ):
+        raise AssertionError("current public contract digest is not a lowercase SHA-256")
     return identities
 
 
@@ -299,8 +414,7 @@ def validate_historical_releases(reader: RepositoryReader) -> dict[str, dict]:
             raise AssertionError(f"historical {version} pins record drifted")
         validate_project(pins, version)
         validate_duckdb(pins, contract)
-        identities = validate_legacy_identities(pins, version)
-        if identities != expected_release["identities"]:
+        if pins.get("identities") != expected_release["identities"]:
             raise AssertionError(f"historical {version} source identities drifted")
         if canonical_digest(contract) != expected_release["public_contract_sha256"]:
             raise AssertionError(f"historical {version} public contract drifted")
@@ -328,15 +442,17 @@ def verify(root: pathlib.Path = ROOT) -> dict[str, str]:
 
     validate_historical_releases(reader)
 
-    if version != "0.3.0":
-        raise AssertionError("current source identity verifier supports only 0.3.0")
-    identities = validate_current_identities(pins)
-    connector = identities["native_connector_source"]
-    actual_connector = reader.digest(connector["path"])
-    if actual_connector != connector["sha256"]:
-        raise AssertionError(
-            "native connector source digest does not match the current release pin"
-        )
+    if version != "0.4.0":
+        raise AssertionError("current source identity verifier supports only 0.4.0")
+    identities = validate_current_identities(pins, reader)
+    native_identity = identities["native_product_sources"]
+    native_digest = path_bound_digest(reader, tuple(native_identity["paths"]))
+    if native_digest != native_identity["sha256"]:
+        raise AssertionError("native product source digest does not match the current release pin")
+    controlled_identity = identities["controlled_product_sources"]
+    controlled_digest = path_bound_digest(reader, tuple(controlled_identity["paths"]))
+    if controlled_digest != controlled_identity["sha256"]:
+        raise AssertionError("controlled product source digest does not match the current release pin")
     public_identity = identities["public_contract"]
     actual_public_contract = canonical_digest(public_contract)
     if actual_public_contract != public_identity["canonical_json_sha256"]:
@@ -344,7 +460,8 @@ def verify(root: pathlib.Path = ROOT) -> dict[str, str]:
     return {
         "duckdb_commit": duckdb["commit"],
         "duckdb_version": duckdb["version"],
-        "native_connector_source_sha256": actual_connector,
+        "controlled_product_sources_sha256": controlled_digest,
+        "native_product_sources_sha256": native_digest,
         "public_contract_sha256": actual_public_contract,
         "version": version,
     }
