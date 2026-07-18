@@ -83,7 +83,7 @@ class RepositoryReader:
     def read_bytes(self, relative: str) -> bytes:
         parts = self._relative_parts(relative)
         directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-        file_flags = os.O_RDONLY | os.O_NOFOLLOW
+        file_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
         if hasattr(os, "O_CLOEXEC"):
             directory_flags |= os.O_CLOEXEC
             file_flags |= os.O_CLOEXEC
@@ -110,6 +110,8 @@ class RepositoryReader:
             before = os.fstat(file_descriptor)
             if not stat.S_ISREG(before.st_mode):
                 raise AssertionError("identity path does not name a regular file")
+            if before.st_nlink != 1:
+                raise AssertionError("identity file has multiple hard links")
             if before.st_size > MAX_IDENTITY_FILE_BYTES:
                 raise AssertionError("identity file exceeds the verification byte ceiling")
 
@@ -127,7 +129,16 @@ class RepositoryReader:
                 chunks.append(chunk)
 
             after = os.fstat(file_descriptor)
-            stable_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+            if after.st_nlink != 1:
+                raise AssertionError("identity file has multiple hard links")
+            stable_fields = (
+                "st_dev",
+                "st_ino",
+                "st_nlink",
+                "st_size",
+                "st_mtime_ns",
+                "st_ctime_ns",
+            )
             if any(getattr(before, field) != getattr(after, field) for field in stable_fields):
                 raise AssertionError("identity file changed while it was being read")
             if size != before.st_size:
@@ -150,8 +161,18 @@ class RepositoryReader:
             raise AssertionError("identity file is not valid UTF-8") from error
 
     def read_json(self, relative: str) -> dict:
+        def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise AssertionError("identity file contains a duplicate JSON key")
+                result[key] = value
+            return result
+
         try:
-            value = json.loads(self.read_text(relative))
+            value = json.loads(
+                self.read_text(relative), object_pairs_hook=reject_duplicate_keys
+            )
         except json.JSONDecodeError as error:
             raise AssertionError("identity file is not valid JSON") from error
         if not isinstance(value, dict):

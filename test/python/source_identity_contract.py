@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -139,6 +142,63 @@ class SourceIdentityContractTests(unittest.TestCase):
         (self.root / "src").symlink_to(external, target_is_directory=True)
         with self.assertRaisesRegex(AssertionError, "identity path contains a symlink"):
             VERIFIER.verify(self.root)
+
+    def test_rejects_connector_hard_link_into_legacy_fixture_tree(self) -> None:
+        legacy = self.root / "fixtures/example"
+        legacy.mkdir(parents=True)
+        os.link(self.root / "src/connector.cpp", legacy / "connector.cpp")
+        with self.assertRaisesRegex(AssertionError, "identity file has multiple hard links"):
+            VERIFIER.verify(self.root)
+
+    def test_rejects_duplicate_json_keys_at_every_depth(self) -> None:
+        relative = "release/0.2.0/pins.json"
+        path = self.root / relative
+        original = path.read_text()
+        mutations = {
+            "top level": original.rstrip()[:-1] + ',\n  "project": {}\n}\n',
+            "nested": original.replace(
+                '    "version": "0.2.0"',
+                '    "version": "0.2.0",\n    "version": "0.2.0"',
+                1,
+            ),
+        }
+        for label, mutation in mutations.items():
+            with self.subTest(label=label):
+                path.write_text(mutation)
+                with self.assertRaisesRegex(
+                    AssertionError, "identity file contains a duplicate JSON key"
+                ):
+                    VERIFIER.verify(self.root)
+                path.write_text(original)
+
+    def test_rejects_connector_fifo_without_blocking(self) -> None:
+        connector = self.root / "src/connector.cpp"
+        connector.unlink()
+        os.mkfifo(connector)
+        probe = """
+import importlib.util
+import pathlib
+import sys
+
+spec = importlib.util.spec_from_file_location("source_identity_verifier", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+try:
+    module.verify(pathlib.Path(sys.argv[2]))
+except AssertionError as error:
+    print(error)
+    raise SystemExit(0)
+raise SystemExit("FIFO was accepted")
+"""
+        completed = subprocess.run(
+            [sys.executable, "-I", "-B", "-c", probe, str(VERIFIER_PATH), str(self.root)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("identity path does not name a regular file", completed.stdout)
 
     def test_rejects_current_public_contract_and_connector_drift(self) -> None:
         contract = self.json("release/0.3.0/public_contract.json")
