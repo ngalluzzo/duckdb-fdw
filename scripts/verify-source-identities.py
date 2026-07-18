@@ -12,10 +12,20 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HISTORICAL_VERSION = "0.1.0"
+HISTORICAL_PUBLIC_CONTRACT_SHA256 = (
+    "a18df636619ffd09eae963cc5c6e7d3aa0670e69644380ab6a7c0fb340de2fb2"
+)
 PRESERVED_BEHAVIOR_BASES = {"0.2.0": HISTORICAL_VERSION}
 GIT_ID = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
-VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
+VERSION_PATTERN = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+EXTENSION_CONFIG = re.compile(
+    r"[ \t\r\n]*duckdb_extension_load\([ \t\r\n]*"
+    r"duckdb_api[ \t\r\n]+"
+    r"SOURCE_DIR[ \t\r\n]+\$\{CMAKE_CURRENT_LIST_DIR\}[ \t\r\n]+"
+    rf'EXTENSION_VERSION[ \t\r\n]+"(?P<version>{VERSION_PATTERN})"[ \t\r\n]*'
+    r"\)[ \t\r\n]*"
+)
 
 
 def digest(path: pathlib.Path) -> str:
@@ -50,13 +60,12 @@ def release_record(root: pathlib.Path, version: str) -> tuple[dict, dict]:
 
 def current_extension_version(root: pathlib.Path) -> str:
     extension_config = (root / "extension_config.cmake").read_text()
-    versions = re.findall(r'EXTENSION_VERSION\s+"([^"]+)"', extension_config)
-    if len(versions) != 1:
-        raise AssertionError(f"extension version sources drifted: {versions!r}")
-    version = versions[0]
-    if VERSION.fullmatch(version) is None:
-        raise AssertionError(f"current extension version is invalid: {version!r}")
-    return version
+    match = EXTENSION_CONFIG.fullmatch(extension_config)
+    if match is None:
+        raise AssertionError(
+            "extension_config.cmake does not match the sole accepted extension declaration"
+        )
+    return match.group("version")
 
 
 def validate_project(pins: dict, version: str) -> None:
@@ -116,8 +125,14 @@ def validate_historical_contract(root: pathlib.Path) -> dict:
         expected_digest = historical_pins["identities"]["public_contract_sha256"]
     except (KeyError, TypeError) as error:
         raise AssertionError("historical 0.1 public contract pin is missing") from error
-    if canonical_digest(historical_contract) != expected_digest:
-        raise AssertionError("historical 0.1 public contract digest does not match its pin")
+    if expected_digest != HISTORICAL_PUBLIC_CONTRACT_SHA256:
+        raise AssertionError(
+            "historical 0.1 adjacent pin does not match the accepted canonical digest"
+        )
+    if canonical_digest(historical_contract) != HISTORICAL_PUBLIC_CONTRACT_SHA256:
+        raise AssertionError(
+            "historical 0.1 public contract does not match the accepted canonical digest"
+        )
     if historical_contract.get("extension") != ["duckdb_api", HISTORICAL_VERSION]:
         raise AssertionError("historical 0.1 public contract identity drifted")
     return historical_contract

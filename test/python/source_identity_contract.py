@@ -72,7 +72,7 @@ class SourceIdentityContractTests(unittest.TestCase):
         historical_pins = self.json("release/0.1.0/pins.json")
         historical_pins["identities"]["public_contract_sha256"] = "0" * 64
         self.write_json("release/0.1.0/pins.json", historical_pins)
-        with self.assertRaisesRegex(AssertionError, "historical 0.1 public contract"):
+        with self.assertRaisesRegex(AssertionError, "historical 0.1"):
             VERIFIER.verify(self.root)
 
     def test_rejects_public_behavior_drift_even_when_repinned(self) -> None:
@@ -86,6 +86,21 @@ class SourceIdentityContractTests(unittest.TestCase):
         )
         self.write_json("release/0.2.0/pins.json", pins)
         with self.assertRaisesRegex(AssertionError, "beyond extension version"):
+            VERIFIER.verify(self.root)
+
+    def test_rejects_jointly_repinned_historical_and_current_behavior(self) -> None:
+        for version in ("0.1.0", "0.2.0"):
+            contract_path = f"release/{version}/public_contract.json"
+            pins_path = f"release/{version}/pins.json"
+            contract = self.json(contract_path)
+            contract["rows"][0][1] = "coordinated-drift"
+            self.write_json(contract_path, contract)
+            pins = self.json(pins_path)
+            pins["identities"]["public_contract_sha256"] = (
+                VERIFIER.canonical_digest(contract)
+            )
+            self.write_json(pins_path, pins)
+        with self.assertRaisesRegex(AssertionError, "historical 0.1 adjacent pin"):
             VERIFIER.verify(self.root)
 
     def test_rejects_project_and_duckdb_identity_drift(self) -> None:
@@ -106,12 +121,33 @@ class SourceIdentityContractTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "different DuckDB identity"):
             VERIFIER.verify(self.root)
 
-    def test_rejects_nonrelease_version_before_selecting_pins(self) -> None:
-        (self.root / "extension_config.cmake").write_text(
-            'EXTENSION_VERSION "../../0.1.0"\n'
-        )
-        with self.assertRaisesRegex(AssertionError, "extension version is invalid"):
-            VERIFIER.verify(self.root)
+    def test_rejects_anything_except_the_single_extension_declaration(self) -> None:
+        accepted = (REPOSITORY / "extension_config.cmake").read_text()
+        invalid = {
+            "comment decoy": '# EXTENSION_VERSION "0.1.0"\n',
+            "false block": (
+                "if(FALSE)\n"
+                "  duckdb_extension_load(duckdb_api\n"
+                "    SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}\n"
+                '    EXTENSION_VERSION "0.1.0"\n'
+                "  )\n"
+                "endif()\n"
+            ),
+            "decoy command": 'set(DECOY "EXTENSION_VERSION 0.1.0")\n',
+            "extra command": accepted + "set(EXTRA_COMMAND TRUE)\n",
+            "missing version": (
+                "duckdb_extension_load(duckdb_api\n"
+                "  SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}\n"
+                ")\n"
+            ),
+            "unquoted version": accepted.replace('"0.2.0"', "0.2.0"),
+            "nonrelease version": accepted.replace('"0.2.0"', '"../../0.1.0"'),
+        }
+        for label, content in invalid.items():
+            with self.subTest(label=label):
+                (self.root / "extension_config.cmake").write_text(content)
+                with self.assertRaisesRegex(AssertionError, "sole accepted"):
+                    VERIFIER.verify(self.root)
 
 
 if __name__ == "__main__":
