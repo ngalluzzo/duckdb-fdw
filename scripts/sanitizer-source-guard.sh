@@ -2,28 +2,19 @@
 
 set -euo pipefail
 
-if [[ "$#" -ne 2 ]]; then
-    echo "usage: sanitizer-source-guard.sh EXPECTED_COMMIT VERIFIED_BASE_IMAGE" >&2
+if [[ "$#" -ne 1 ]]; then
+    echo "usage: sanitizer-source-guard.sh NEW_BUILD_ROOT" >&2
     exit 2
 fi
 
-readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly EXPECTED_COMMIT="$1"
-readonly VERIFIED_IMAGE="$2"
-readonly REQUIRED_IMAGE='docker.io/library/ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90'
+readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source "${REPOSITORY_ROOT}/scripts/lib/release-common.sh"
+readonly BUILD_ROOT="$(release_resolve_path "$1")"
 
-if [[ "${VERIFIED_IMAGE}" != "${REQUIRED_IMAGE}" ]]; then
-    echo "sanitizer base-image identity is not the release pin" >&2
-    exit 1
-fi
-if [[ "$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)" != "${EXPECTED_COMMIT}" ]]; then
-    echo "sanitizer source commit does not match the verified launcher identity" >&2
-    exit 1
-fi
-if [[ -n "$(git -C "${REPOSITORY_ROOT}" status --porcelain --untracked-files=all)" ]]; then
-    echo "sanitizer source worktree is not clean" >&2
-    exit 1
-fi
-"${REPOSITORY_ROOT}/scripts/verify-source-identities.py" >/dev/null
-
-echo "sanitizer source and image guard passed"
+# Image provenance belongs to the outer Docker launcher. The inner source guard
+# accepts no caller-authored commit or image assertions; it measures the exact
+# detached, tagged source mounted into the container.
+"${REPOSITORY_ROOT}/scripts/release-source-guard.sh" "${BUILD_ROOT}" >/dev/null
+echo "sanitizer source guard passed"
+echo "source_commit=$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)"
+echo "source_tree=$(git -C "${REPOSITORY_ROOT}" rev-parse 'HEAD^{tree}')"

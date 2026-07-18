@@ -7,16 +7,20 @@ if [[ "$#" -ne 1 ]]; then
     exit 2
 fi
 
-readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly BUILD_ROOT="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$1")"
+readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source "${REPOSITORY_ROOT}/scripts/lib/release-common.sh"
+readonly BUILD_ROOT="$(release_resolve_path "$1")"
 readonly EXPECTED_TAG="v0.1.0"
 
-if [[ -e "${BUILD_ROOT}" ]]; then
-    echo "release build root must not already exist: ${BUILD_ROOT}" >&2
-    exit 1
-fi
+release_require_safe_generated_root "${REPOSITORY_ROOT}" "release build root" "${BUILD_ROOT}"
+release_require_new_root "release build root" "${BUILD_ROOT}"
 if [[ -n "$(git -C "${REPOSITORY_ROOT}" status --porcelain --untracked-files=all)" ]]; then
     echo "release source worktree is not clean" >&2
+    exit 1
+fi
+if [[ -n "$(git -C "${REPOSITORY_ROOT}" ls-files --others --ignored --exclude-standard -- \
+    src test fixtures CMakeLists.txt Makefile extension_config.cmake)" ]]; then
+    echo "release source contains ignored bytes in build-input paths" >&2
     exit 1
 fi
 if ! git -C "${REPOSITORY_ROOT}" rev-parse --verify --quiet "refs/tags/${EXPECTED_TAG}^{commit}" >/dev/null; then
@@ -29,8 +33,15 @@ if [[ "${HEAD_COMMIT}" != "${TAG_COMMIT}" ]]; then
     echo "release tag and HEAD are not identical" >&2
     exit 1
 fi
-"${REPOSITORY_ROOT}/scripts/verify-source-identities.py" >/dev/null
+readonly HEAD_TREE="$(git -C "${REPOSITORY_ROOT}" rev-parse 'HEAD^{tree}')"
+readonly TAG_TREE="$(git -C "${REPOSITORY_ROOT}" rev-parse "${EXPECTED_TAG}^{tree}")"
+if [[ "${HEAD_TREE}" != "${TAG_TREE}" ]]; then
+    echo "release tag and HEAD trees are not identical" >&2
+    exit 1
+fi
+python3 -I "${REPOSITORY_ROOT}/scripts/verify-source-identities.py" >/dev/null
 
 echo "release source guard passed"
 echo "source_commit=${HEAD_COMMIT}"
+echo "source_tree=${HEAD_TREE}"
 echo "source_tag=${EXPECTED_TAG}"

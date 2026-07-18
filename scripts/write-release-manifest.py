@@ -30,17 +30,25 @@ def cache_value(cache: pathlib.Path, name: str) -> str:
 
 
 def main() -> int:
-    if len(sys.argv) != 6:
+    if len(sys.argv) != 7:
         raise SystemExit(
-            "usage: write-release-manifest.py REPOSITORY BUILD_ROOT ARTIFACT BEHAVIOR_JSON OUTPUT"
+            "usage: write-release-manifest.py REPOSITORY BUILD_ROOT ARTIFACT "
+            "BEHAVIOR_JSON MISMATCH_JSON OUTPUT"
         )
     repository = pathlib.Path(sys.argv[1]).resolve(strict=True)
     build_root = pathlib.Path(sys.argv[2]).resolve(strict=True)
     artifact = pathlib.Path(sys.argv[3]).resolve(strict=True)
     behavior_path = pathlib.Path(sys.argv[4]).resolve(strict=True)
-    output = pathlib.Path(sys.argv[5]).resolve()
+    mismatch_path = pathlib.Path(sys.argv[5]).resolve(strict=True)
+    output = pathlib.Path(sys.argv[6]).resolve()
     pins = json.loads((repository / "release/0.1.0/pins.json").read_text())
     behavior_record = json.loads(behavior_path.read_text())
+    mismatch_record = json.loads(mismatch_path.read_text())
+    dependencies = json.loads(
+        (build_root / "observed-dependencies.json").read_text()
+    )
+    if dependencies != pins["dependencies"]:
+        raise AssertionError("observed build dependencies drifted before manifest creation")
     cache = build_root / "extension-template/build/release/CMakeCache.txt"
     compiler = pathlib.Path(cache_value(cache, "CMAKE_CXX_COMPILER"))
     compiler_version = command(str(compiler), "--version").splitlines()[0]
@@ -52,6 +60,7 @@ def main() -> int:
         "cell": "osx_arm64",
         "source": {
             "commit": command("git", "-C", str(repository), "rev-parse", "HEAD"),
+            "tree": command("git", "-C", str(repository), "rev-parse", "HEAD^{tree}"),
             "tag": pins["project"]["tag"],
         },
         "project": {
@@ -59,7 +68,7 @@ def main() -> int:
             "version": pins["project"]["version"],
             "load_mode": "unsigned_direct_local",
         },
-        "dependencies": pins["dependencies"],
+        "dependencies": dependencies,
         "toolchain": {
             "architecture": platform.machine(),
             "build_profile": "release",
@@ -80,6 +89,7 @@ def main() -> int:
         },
         "public_contract": behavior_record["behavior"],
         "public_contract_sha256": behavior_record["behavior_sha256"],
+        "compatibility": {"mismatched_host": mismatch_record},
         "artifact": {
             "filename": artifact.name,
             "sha256": sha256(artifact),

@@ -327,8 +327,10 @@ the `0.2.0` installation outcome.
 A separate named engineering evidence cell, `linux_amd64-sanitized`, builds the
 same production sources with Clang C++11, AddressSanitizer, and
 UndefinedBehaviorSanitizer in a container image pinned by digest. Its exact OS
-image, compiler, DuckDB source, flags, and artifact identity appear in the gate
-manifest. This is a safety-evidence cell, not a supported product cell.
+image, compiler, DuckDB source, flags, and artifact identity appear in the
+anchored inner manifest and outer Docker-launcher envelope. The retained compile
+database permits the sanitizer-flags oracle to be re-run from custody. This is a
+safety-evidence cell, not a supported product cell.
 
 Other DuckDB versions, operating systems, architectures, compilers, loading
 modes, and reused build trees are unsupported even if they happen to work. A

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 
@@ -28,7 +29,16 @@ def main() -> int:
     ).fetchall()
     if functions:
         raise AssertionError(f"mismatched host registered functions: {functions!r}")
-    print("mismatched DuckDB host rejected the artifact before registration")
+    print(
+        json.dumps(
+            {
+                "duckdb": list(identity[:2]),
+                "outcome": "rejected_before_registration",
+                "registered_functions": [],
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 

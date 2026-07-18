@@ -12,9 +12,22 @@ permissions:
 jobs:
   sanitizer:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
       - name: Run in the pinned Linux amd64 cell
-        run: scripts/run-linux-sanitized-cell.sh "$PWD/.build/linux-amd64-sanitized"
+        run: |
+          mkdir -p .build
+          scripts/run-linux-sanitized-cell.sh "$PWD/.build/linux-amd64-sanitized" \
+            2>&1 | tee .build/linux-amd64-sanitized.log
+      - name: Retain sanitizer evidence for release binding
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: linux-amd64-sanitized-${{ github.sha }}
+          path: |
+            .build/linux-amd64-sanitized
+            .build/linux-amd64-sanitized.log
+          if-no-files-found: error
+          retention-days: 90

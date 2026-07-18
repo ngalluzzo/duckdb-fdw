@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 readonly TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/duckdb-api-guards.XXXXXX")"
 trap '"${CMAKE_COMMAND:-cmake}" -E remove_directory "${TEMP_ROOT}"' EXIT
 
@@ -33,6 +33,12 @@ expect_failure dirty-tracked "${dirty_tracked}/scripts/release-source-guard.sh" 
 dirty_untracked="$(clone_case dirty-untracked)"
 touch "${dirty_untracked}/unexpected.txt"
 expect_failure dirty-untracked "${dirty_untracked}/scripts/release-source-guard.sh" "${TEMP_ROOT}/dirty-untracked-build"
+
+ignored_input="$(clone_case ignored-input)"
+printf 'src/ignored-shadow.hpp\n' >>"${ignored_input}/.git/info/exclude"
+touch "${ignored_input}/src/ignored-shadow.hpp"
+expect_failure ignored-build-input "${ignored_input}/scripts/release-source-guard.sh" \
+    "${TEMP_ROOT}/ignored-input-build"
 
 tag_mismatch="$(clone_case tag-mismatch)"
 git -C "${tag_mismatch}" tag --force v0.1.0 HEAD^
