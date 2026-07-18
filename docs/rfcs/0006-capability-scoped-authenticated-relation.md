@@ -3,7 +3,7 @@
 ```yaml
 rfc: "0006"
 title: "Add one capability-scoped authenticated relation"
-status: "In review"
+status: "Accepted"
 rfc_type: "Product"
 sponsor_team: "Query Experience"
 technical_decision_owner: "Lead agent"
@@ -11,9 +11,9 @@ product_approver: "ngalluzzo"
 authors:
   - "Query Experience agent"
 required_reviewers:
-  - "Connector Experience"
-  - "Relational Semantics"
-  - "Remote Runtime"
+  - "auth_rfc_connector_review"
+  - "auth_rfc_semantics_review"
+  - "auth_rfc_runtime_review"
 affected_teams:
   - "Query Experience"
   - "Connector Experience"
@@ -513,12 +513,13 @@ explicitly outside the decision rather than unresolved implementation choices.
 
 | Required reviewer | Team | Result | Evidence or objection | Disposition by decision owner |
 | --- | --- | --- | --- | --- |
-| Connector Experience | Connector Experience | Pending | Pending review of relation-catalog metadata, logical secret policy, authoring exclusion, and credential-free snapshot boundary | Pending |
-| Relational Semantics | Relational Semantics | Pending | Pending review of exactly-one-on-success cardinality, secret-reference meaning, offline planning, and DuckDB relational ownership | Pending |
-| Remote Runtime | Remote Runtime | Pending | Pending review of capability scope, bearer placement, redirect denial, redaction, rotation isolation, and cleanup | Pending |
+| `auth_rfc_connector_review` | Connector Experience | Approved | The immutable relation catalog and logical bearer/host/header policy preserve Connector's credential-free `CompiledConnector` boundary and do not activate YAML. Delivery must prove stable two-relation metadata, no token or DuckDB secret name in the snapshot, and low-friction consumer use. | Approved. The deterministic metadata oracle, credential-absence checks, and Connector interaction-exit audit are incorporated as acceptance requirements, not objections. |
+| `auth_rfc_semantics_review` | Relational Semantics | Approved | Exactly-one-on-success cardinality, fail-closed auth errors, the opaque secret reference, offline planning, and DuckDB ownership of all relational operators preserve the semantic contract. Delivery must prove both relation plans and that no consumer reclassifies auth or cardinality. | Approved. The planner oracles and Semantics interaction-exit audit are incorporated as acceptance requirements, not objections. |
+| `auth_rfc_runtime_review` | Remote Runtime | Approved | Exact-name execution-time resolution, a move-only per-scan capability, fixed bearer placement at `api.github.com`, redirect denial, and explicit redaction/lifetime limits satisfy least-authority Runtime obligations. Delivery must prove rotation isolation, non-forwarding, cancellation, cleanup, and sentinel absence. | Approved. The security/lifecycle oracles and Runtime interaction-exit audit are incorporated as acceptance requirements, not objections. |
 
-The RFC remains `In review` until all required perspectives are recorded and
-the lead agent makes the technical decision.
+All required perspectives approved the decision. The lead agent accepts their
+delivery conditions as verification and interaction-exit requirements; RFC
+acceptance does not claim implementation or contract-propagation completion.
 
 ## Decision and rationale
 
@@ -529,11 +530,20 @@ the lead agent makes the technical decision.
   at `api.github.com`; preservation of the anonymous relation; and exclusion of
   YAML, OAuth, caller URLs, redirects, pagination, retries, caching, environment
   lookup, and persistent-secret claims.
-- **Rationale:** Pending required affected-team review and the lead agent's
-  technical decision. Primary-source evidence establishes the selected
-  endpoint and pinned DuckDB mechanism; it does not itself accept the shared
-  interfaces.
-- **Material objections:** None recorded yet.
+- **Rationale:** Accepted by the lead agent. Official GitHub evidence
+  establishes the fixed authenticated endpoint, bearer placement, response
+  fields, failure statuses, token permissions, and current API-version support.
+  Pinned DuckDB 1.5.4 source establishes custom temporary-secret registration,
+  exact-name lookup, and execution initialization with the current
+  `ClientContext`. Connector Experience approved the credential-free metadata
+  boundary, Relational Semantics approved the offline exactly-one plan and
+  DuckDB ownership, and Remote Runtime approved the least-authority capability,
+  host/placement, redaction, and lifecycle boundary. The proposal is the
+  narrowest path that delivers the approved authenticated-user outcome while
+  preserving the anonymous relation and every explicit exclusion.
+- **Material objections:** None. All three reviewers approved; their stated
+  delivery evidence and interaction-exit conditions are incorporated into
+  acceptance verification rather than dispositioned as objections.
 - **Superseded by:** Not applicable.
 
 ## Follow-on goals
