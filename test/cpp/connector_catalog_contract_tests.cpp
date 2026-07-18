@@ -1,0 +1,298 @@
+#include "duckdb_api/connector_catalog.hpp"
+#include "support/connector_catalog_contract.hpp"
+#include "support/connector_catalog_test_access.hpp"
+#include "support/require.hpp"
+
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+namespace {
+
+using duckdb_api_test::ConnectorCatalogTestAccess;
+using duckdb_api_test::Require;
+
+#define DEFINE_MEMBER_PROBE(PROBE_NAME, MEMBER_NAME)                                                                   \
+	template <typename T>                                                                                              \
+	class PROBE_NAME {                                                                                                 \
+		template <typename U>                                                                                          \
+		static char Test(decltype(&U::MEMBER_NAME));                                                                   \
+		template <typename U>                                                                                          \
+		static long Test(...);                                                                                         \
+                                                                                                                       \
+	public:                                                                                                            \
+		static const bool VALUE = sizeof(Test<T>(0)) == sizeof(char);                                                  \
+	}
+
+DEFINE_MEMBER_PROBE(HasBaseUrlMember, base_url);
+DEFINE_MEMBER_PROBE(HasPathMember, path);
+DEFINE_MEMBER_PROBE(HasQueryMember, query);
+DEFINE_MEMBER_PROBE(HasFragmentMember, fragment);
+DEFINE_MEMBER_PROBE(HasAuthenticationEnabledMember, authentication_enabled);
+DEFINE_MEMBER_PROBE(HasSecretNameMember, secret_name);
+DEFINE_MEMBER_PROBE(HasCredentialValueMember, credential_value);
+DEFINE_MEMBER_PROBE(HasTokenValueMember, token_value);
+DEFINE_MEMBER_PROBE(HasSecretHandleMember, secret_handle);
+
+#undef DEFINE_MEMBER_PROBE
+
+static_assert(!HasBaseUrlMember<duckdb_api::CompiledRestRequest>::VALUE,
+              "CompiledRestRequest must not restore a parseable base URL");
+static_assert(!HasPathMember<duckdb_api::CompiledRestOrigin>::VALUE,
+              "CompiledRestOrigin must not carry a path component");
+static_assert(!HasQueryMember<duckdb_api::CompiledRestOrigin>::VALUE,
+              "CompiledRestOrigin must not carry a query component");
+static_assert(!HasFragmentMember<duckdb_api::CompiledRestOrigin>::VALUE,
+              "CompiledRestOrigin must not carry a fragment component");
+static_assert(!HasAuthenticationEnabledMember<duckdb_api::CompiledOperation>::VALUE,
+              "authentication must have one owner in the relation policy");
+static_assert(!HasSecretNameMember<duckdb_api::CompiledAuthenticationPolicy>::VALUE,
+              "credential policy must not expose a DuckDB secret name");
+static_assert(!HasCredentialValueMember<duckdb_api::CompiledAuthenticationPolicy>::VALUE,
+              "credential policy must not expose credential bytes");
+static_assert(!HasTokenValueMember<duckdb_api::CompiledAuthenticationPolicy>::VALUE,
+              "credential policy must not expose token bytes");
+static_assert(!HasSecretHandleMember<duckdb_api::CompiledAuthenticationPolicy>::VALUE,
+              "credential policy must not expose a provider handle");
+static_assert(std::is_same<decltype(duckdb_api::CompiledRestOrigin::scheme), duckdb_api::CompiledUrlScheme>::value,
+              "CompiledRestOrigin scheme must remain typed");
+static_assert(std::is_same<decltype(duckdb_api::CompiledRestOrigin::host), duckdb_api::CompiledRestHost>::value,
+              "CompiledRestOrigin host must remain a validated exact host component");
+static_assert(std::is_same<decltype(duckdb_api::CompiledRestOrigin::port), std::uint16_t>::value,
+              "CompiledRestOrigin port must remain an explicit uint16_t");
+static_assert(std::is_copy_constructible<duckdb_api::CompiledConnector>::value,
+              "immutable catalog must support bind/composition copies");
+static_assert(std::is_move_constructible<duckdb_api::CompiledConnector>::value,
+              "immutable catalog must support ownership transfer");
+static_assert(!std::is_copy_assignable<duckdb_api::CompiledConnector>::value,
+              "catalog assignment would permit post-construction replacement");
+static_assert(!std::is_move_assignable<duckdb_api::CompiledConnector>::value,
+              "catalog assignment would permit post-construction replacement");
+static_assert(!std::is_default_constructible<duckdb_api::CompiledConnector>::value,
+              "catalog must not admit partial construction");
+static_assert(
+    !std::is_constructible<duckdb_api::CompiledConnector, duckdb_api::CompiledConnectorOrigin, std::string, std::string,
+                           std::vector<duckdb_api::CompiledRelation>, duckdb_api::CompiledNetworkPolicy>::value,
+    "production callers must not construct arbitrary catalog provenance or authority");
+static_assert(std::is_copy_constructible<duckdb_api::CompiledRelation>::value,
+              "immutable relation must support catalog copies");
+static_assert(std::is_move_constructible<duckdb_api::CompiledRelation>::value,
+              "immutable relation must support catalog ownership transfer");
+static_assert(!std::is_copy_assignable<duckdb_api::CompiledRelation>::value,
+              "relation assignment would permit post-construction replacement");
+static_assert(!std::is_move_assignable<duckdb_api::CompiledRelation>::value,
+              "relation assignment would permit post-construction replacement");
+static_assert(!std::is_default_constructible<duckdb_api::CompiledRelation>::value,
+              "relation must not admit partial construction");
+static_assert(!std::is_constructible<duckdb_api::CompiledRelation, std::string, std::vector<duckdb_api::CompiledColumn>,
+                                     duckdb_api::CompiledOperation, duckdb_api::CompiledAuthenticationPolicy,
+                                     duckdb_api::CompiledResourceCeilings>::value,
+              "production callers must not construct arbitrary relation authority");
+
+template <typename Callable>
+void RequireInvalid(const std::string &message, Callable callback) {
+	bool rejected = false;
+	try {
+		callback();
+	} catch (const std::invalid_argument &) {
+		rejected = true;
+	}
+	Require(rejected, message);
+}
+
+duckdb_api::CompiledConnector BuildValidCatalogFixture() {
+	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledRestHost("api.github.com"), 443};
+	const std::vector<duckdb_api::CompiledColumn> columns = {{"id", "BIGINT", false, "$.id"}};
+	const std::vector<duckdb_api::CompiledHttpHeader> headers = {{"X-Fixture", "safe"}};
+
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    "anonymous_rows", columns,
+	    duckdb_api::CompiledOperation {"fixture_anonymous_rows",
+	                                   true,
+	                                   duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	                                   duckdb_api::CompiledProtocol::REST,
+	                                   duckdb_api::CompiledHttpMethod::GET,
+	                                   duckdb_api::CompiledReplaySafety::SAFE,
+	                                   false,
+	                                   false,
+	                                   {origin, "/rows", {}, headers},
+	                                   duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
+	                                   "$.items[*]"},
+	    ConnectorCatalogTestAccess::Anonymous(), duckdb_api::CompiledResourceCeilings {2, 64}));
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    "current_row", columns,
+	    duckdb_api::CompiledOperation {"fixture_current_row",
+	                                   true,
+	                                   duckdb_api::CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS,
+	                                   duckdb_api::CompiledProtocol::REST,
+	                                   duckdb_api::CompiledHttpMethod::GET,
+	                                   duckdb_api::CompiledReplaySafety::SAFE,
+	                                   false,
+	                                   false,
+	                                   {origin, "/row", {}, headers},
+	                                   duckdb_api::CompiledResponseSource::ROOT_OBJECT,
+	                                   "$"},
+	    ConnectorCatalogTestAccess::RequiredBearer(), duckdb_api::CompiledResourceCeilings {1, 64}));
+	return ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "fixture", "1.0.0", std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"api.github.com"}, false, false, false, false, 4096});
+}
+
+void TestSafeImmutableService() {
+	const auto catalog = BuildValidCatalogFixture();
+	Require(catalog.Relations().size() == 2, "validated fixture catalog lost relations");
+	Require(catalog.FindRelation("anonymous_rows") == &catalog.Relations()[0],
+	        "exact lookup did not return the owned anonymous relation");
+	Require(catalog.FindRelation("current_row") == &catalog.Relations()[1],
+	        "exact lookup did not return the owned authenticated relation");
+	Require(catalog.FindRelation("Current_Row") == nullptr, "exact lookup folded identifier case");
+	Require(catalog.FindRelation("missing") == nullptr, "exact lookup fabricated a relation");
+
+	const auto copy = catalog;
+	Require(copy.Snapshot() == catalog.Snapshot(), "copy construction changed immutable catalog metadata");
+	Require(&copy.Relations()[0] != &catalog.Relations()[0], "copy did not own its immutable relation storage");
+	Require(catalog.Relations()[0].Authentication().Destination() == nullptr,
+	        "anonymous policy retained credential destination authority");
+	Require(catalog.Relations()[1].Authentication().LogicalCredential() == "token",
+	        "required policy lost its safe logical identifier");
+	Require(catalog.Relations()[1].Authentication().Destination() != nullptr,
+	        "required policy lost its exact destination");
+	Require(catalog.Snapshot().find("Authorization=") == std::string::npos,
+	        "safe snapshot rendered credential placement as a fixed header");
+	Require(catalog.Snapshot().find("secret_name=") == std::string::npos,
+	        "safe snapshot rendered a secret-binding identifier");
+}
+
+void TestClosedValidation() {
+	const auto catalog = BuildValidCatalogFixture();
+	const auto &anonymous = catalog.Relations()[0];
+	const auto &authenticated = catalog.Relations()[1];
+
+	const std::vector<std::string> invalid_hosts = {
+	    "service.example:444",      "service.example/root", "service.example?pre=1",
+	    "service.example#fragment", "user@service.example", "https://service.example:444/root?pre=1#fragment",
+	    "Service.example",          ".service.example"};
+	for (const auto &value : invalid_hosts) {
+		RequireInvalid("CompiledRestHost accepted URL structure: " + value,
+		               [value]() { duckdb_api::CompiledRestHost host(value); });
+	}
+
+	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledRestHost("api.github.com"), 443};
+	RequireInvalid("required bearer policy accepted an empty logical credential",
+	               [origin]() { ConnectorCatalogTestAccess::ValidateRequiredBearer("", origin); });
+	RequireInvalid("required bearer policy accepted an open-ended logical credential",
+	               [origin]() { ConnectorCatalogTestAccess::ValidateRequiredBearer("password", origin); });
+	RequireInvalid("required bearer policy accepted a cleartext destination", []() {
+		const duckdb_api::CompiledRestOrigin destination = {duckdb_api::CompiledUrlScheme::HTTP,
+		                                                    duckdb_api::CompiledRestHost("api.github.com"), 80};
+		ConnectorCatalogTestAccess::ValidateRequiredBearer("token", destination);
+	});
+	RequireInvalid("required bearer policy accepted an alternate port", []() {
+		const duckdb_api::CompiledRestOrigin destination = {duckdb_api::CompiledUrlScheme::HTTPS,
+		                                                    duckdb_api::CompiledRestHost("api.github.com"), 444};
+		ConnectorCatalogTestAccess::ValidateRequiredBearer("token", destination);
+	});
+	RequireInvalid("required bearer policy accepted an alternate host", []() {
+		const duckdb_api::CompiledRestOrigin destination = {duckdb_api::CompiledUrlScheme::HTTPS,
+		                                                    duckdb_api::CompiledRestHost("other.example"), 443};
+		ConnectorCatalogTestAccess::ValidateRequiredBearer("token", destination);
+	});
+
+	RequireInvalid("relation accepted a fixed Authorization header", [&authenticated]() {
+		auto operation = authenticated.Operation();
+		operation.request.headers.push_back({"authorization", "x"});
+		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(operation),
+		                                     authenticated.Authentication(), authenticated.ResourceCeilings());
+	});
+	RequireInvalid("relation accepted root-object shape with zero-to-many cardinality", [&anonymous]() {
+		auto operation = anonymous.Operation();
+		operation.response_source = duckdb_api::CompiledResponseSource::ROOT_OBJECT;
+		operation.records_extractor = "$";
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operation),
+		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
+	});
+	RequireInvalid("relation accepted multi-record shape with exactly-one cardinality", [&authenticated]() {
+		auto operation = authenticated.Operation();
+		operation.response_source = duckdb_api::CompiledResponseSource::JSON_PATH_MANY;
+		operation.records_extractor = "$.items[*]";
+		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(operation),
+		                                     authenticated.Authentication(), authenticated.ResourceCeilings());
+	});
+	RequireInvalid("exactly-one relation accepted a wider record ceiling", [&authenticated]() {
+		auto ceilings = authenticated.ResourceCeilings();
+		ceilings.max_records = 2;
+		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), authenticated.Operation(),
+		                                     authenticated.Authentication(), ceilings);
+	});
+	RequireInvalid("authenticated relation accepted a query-bearing request", [&authenticated]() {
+		auto operation = authenticated.Operation();
+		operation.request.query_parameters.push_back({"page", "1"});
+		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(operation),
+		                                     authenticated.Authentication(), authenticated.ResourceCeilings());
+	});
+	RequireInvalid("authenticated relation accepted a mismatched credential destination", [&authenticated]() {
+		auto operation = authenticated.Operation();
+		operation.request.origin.host = duckdb_api::CompiledRestHost("other.example");
+		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(operation),
+		                                     ConnectorCatalogTestAccess::RequiredBearer(),
+		                                     authenticated.ResourceCeilings());
+	});
+	RequireInvalid("relation accepted duplicate output columns", [&anonymous]() {
+		auto columns = anonymous.Columns();
+		columns.push_back(columns[0]);
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), std::move(columns), anonymous.Operation(),
+		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
+	});
+	RequireInvalid("relation accepted an invalid request path", [&anonymous]() {
+		auto operation = anonymous.Operation();
+		operation.request.path = "/rows?escape=1";
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operation),
+		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
+	});
+	RequireInvalid("relation accepted header injection", [&anonymous]() {
+		auto operation = anonymous.Operation();
+		operation.request.headers[0].value = "value\r\ninjected";
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operation),
+		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
+	});
+	RequireInvalid("relation accepted query injection", [&anonymous]() {
+		auto operation = anonymous.Operation();
+		operation.request.query_parameters.push_back({"page", "value&injected=1"});
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operation),
+		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
+	});
+	RequireInvalid("relation accepted an empty resource ceiling", [&anonymous]() {
+		auto ceilings = anonymous.ResourceCeilings();
+		ceilings.max_extracted_string_bytes = 0;
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), anonymous.Operation(),
+		                                     anonymous.Authentication(), ceilings);
+	});
+
+	RequireInvalid("catalog accepted duplicate relation identifiers", [&catalog]() {
+		std::vector<duckdb_api::CompiledRelation> relations = {catalog.Relations()[0], catalog.Relations()[0]};
+		ConnectorCatalogTestAccess::Catalog(catalog.Origin(), catalog.ConnectorName(), catalog.Version(),
+		                                    std::move(relations), catalog.NetworkPolicy());
+	});
+	RequireInvalid("catalog accepted a destination outside its network policy", [&catalog]() {
+		auto policy = catalog.NetworkPolicy();
+		policy.allowed_hosts = {"other.example"};
+		ConnectorCatalogTestAccess::Catalog(catalog.Origin(), catalog.ConnectorName(), catalog.Version(),
+		                                    catalog.Relations(), std::move(policy));
+	});
+}
+
+} // namespace
+
+namespace duckdb_api_test {
+
+void RunConnectorCatalogContractTests() {
+	TestSafeImmutableService();
+	TestClosedValidation();
+}
+
+} // namespace duckdb_api_test

@@ -101,19 +101,33 @@ Connector
 
 ### 1.4 Native product metadata boundary
 
-The native preview compiles the exact `github.duckdb_login_search_page`
-metadata directly into the extension with the explicit
-`native_product_metadata` origin. This repository-owned product snapshot is not
-an implementation of this draft authoring specification: it does not parse or
-validate arbitrary YAML, load connector directories, resolve caller-selected
-paths, expose author tooling, or establish package compatibility.
+The native 0.4 preview compiles one exact two-relation `github` catalog directly
+into the extension with the explicit `native_product_metadata` origin. Its
+stable order is `github.duckdb_login_search_page` followed by
+`github.authenticated_user`. The first relation retains the anonymous GitHub
+login-search request. The second declares a required logical credential named
+`token`, bearer authentication, the exact `https://api.github.com:443`
+destination, `Authorization` placement, the `/user` root-object response, and
+`EXACTLY_ONE_ON_SUCCESS` source cardinality. The declaration contains neither a
+DuckDB secret name nor credential bytes; binding and placement are later-stage
+execution responsibilities.
+
+This repository-owned product catalog is not an implementation of this draft
+authoring specification: it does not parse or validate arbitrary YAML, load
+connector directories, resolve caller-selected paths, read environment
+variables, expose author tooling, or establish package compatibility. Existing
+package and YAML syntax therefore remains inactive and unchanged.
 
 The durable internal provider boundary is the immutable `CompiledConnector`
-value. Its consumers may rely on stable connector, relation, and operation
-identifiers; typed columns and extractors; structural request metadata; and
-explicit connector policy and resource ceilings for the lifetime of the
-snapshot. That C++ team API is neither a public native ABI nor a promise that
-the same metadata can be authored or distributed as a connector package.
+catalog. Consumers select a relation by exact identifier and receive a const
+relation or absence. They may rely on stable catalog order and identifiers;
+typed columns, extractors, response source, and cardinality; structural request
+metadata; a closed anonymous-or-required-bearer policy; and explicit connector
+network policy and relation resource ceilings for the lifetime of the catalog.
+Whole-catalog and per-relation snapshots expose deterministic native provenance
+without secret names or credential values. This C++ team API is neither a
+public native ABI nor a promise that the same metadata can be authored or
+distributed as a connector package.
 
 The preview's `duckdb_api_scan` dispatcher is likewise not a general mapping
 from connector packages to SQL names. Package loading, registration, reload,
@@ -2939,8 +2953,8 @@ Custom code is not permission to bypass host security policy.
 
 Package loading is intended to be local and explicit when this draft becomes
 an implemented authoring contract. The native preview embeds one exact
-repository-owned `CompiledConnector` snapshot and does not implement the
-loading behavior below.
+repository-owned `CompiledConnector` catalog containing the two fixed native
+relations and does not implement the loading behavior below.
 
 ### 33.1 Local packages
 
