@@ -18,6 +18,8 @@ static_assert(std::is_nothrow_destructible<duckdb_api::BatchStream>::value,
               "batch stream teardown must be non-throwing");
 static_assert(std::is_nothrow_destructible<duckdb_api::ScanExecutor>::value,
               "scan executor teardown must be non-throwing");
+static_assert(duckdb_api::ErrorStage::AUTHENTICATION != duckdb_api::ErrorStage::AUTHORIZATION,
+              "authentication and authorization must remain distinct stages");
 
 void TestTypedValuesAndSchemaAlignment() {
 	duckdb_api::TypedBatch batch;
@@ -51,6 +53,13 @@ void TestStableErrorContract() {
 
 	const duckdb_api::ExecutionCancelled cancellation;
 	Require(std::string(cancellation.what()) == "execution cancelled", "cancellation marker drifted");
+
+	const duckdb_api::ExecutionError authentication(duckdb_api::ErrorStage::AUTHENTICATION, "authorization",
+	                                                "authentication failed");
+	const duckdb_api::ExecutionError authorization(duckdb_api::ErrorStage::AUTHORIZATION, "authorization",
+	                                               "authorization failed");
+	Require(authentication.Stage() == duckdb_api::ErrorStage::AUTHENTICATION, "authentication error stage drifted");
+	Require(authorization.Stage() == duckdb_api::ErrorStage::AUTHORIZATION, "authorization error stage drifted");
 }
 
 } // namespace
