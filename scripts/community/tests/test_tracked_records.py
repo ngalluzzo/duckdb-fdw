@@ -21,9 +21,21 @@ from record_format import load_canonical_object  # noqa: E402
 from descriptor_expectation import validate_expectation  # noqa: E402
 from descriptor_cycle import APPROVED_CYCLE_SHA256, validate_descriptor_cycle  # noqa: E402
 from descriptor_proposal import validate_proposal  # noqa: E402
+from build_evidence_authority import (  # noqa: E402
+    APPROVED_REGISTRY_SHA256,
+    validate_registry,
+)
 
 
 class TrackedRecordTest(unittest.TestCase):
+    def test_tracked_build_authority_starts_empty_and_code_reviewed(self) -> None:
+        registry, registry_digest = load_canonical_object(
+            (ENABLEMENT / "build-authorities.json").resolve(),
+            "tracked build authority registry",
+        )
+        self.assertEqual(registry_digest, APPROVED_REGISTRY_SHA256)
+        self.assertEqual(validate_registry(registry, registry_digest), [])
+
     def test_tracked_descriptor_proposal_is_exact_for_published_candidate(self) -> None:
         pins, _pins_digest = load_canonical_object(
             (ENABLEMENT / "pins.json").resolve(), "tracked Community pins"

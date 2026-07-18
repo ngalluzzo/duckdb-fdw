@@ -16,6 +16,9 @@ MODULES = (
     "test_descriptor_proposal",
     "test_descriptor_authority",
     "test_descriptor_filesystem",
+    "test_build_evidence_authority",
+    "test_build_evidence_inventory",
+    "test_build_evidence_downloads",
     "test_dependency_admission",
     "test_candidate_admission",
 )

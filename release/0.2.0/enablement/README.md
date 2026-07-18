@@ -86,6 +86,89 @@ admission of a proposal. It does not claim submission, upstream CI, signing,
 deployment, artifact production, platform compatibility, publication, or
 support.
 
+## Offline Community build normalization
+
+`build-authorities.json` is the independent trust root for build collection.
+Its canonical digest is pinned in `build_evidence_authority.py`, and its
+`approved` list is intentionally empty. PR 2256 or any later run therefore
+cannot produce admitted build evidence until maintainers review one exact set
+of descriptor and export bytes, add its immutable identity row, and update the
+pinned registry digest. A caller cannot grant itself that authority by
+supplying a consistent replacement registry or by changing co-located export
+fields.
+
+The collector is offline and does not invoke `gh`, read GitHub authentication,
+or inspect ambient environment state. Before invoking it, a maintainer exports
+five minimal canonical JSON files from the intended
+`duckdb/community-extensions` PR run and downloads the API artifact archives
+and complete job logs into explicit roots named `artifacts/` and `logs/`.
+Export preparation is a separate external operation; copied web URLs, branch
+display state, or a run number alone are never authority.
+
+The canonical export contracts are:
+
+- `pull-request.json`: repository, PR number and state, plus exact head
+  repository/ref/commit and base ref/commit;
+- `run.json`: repository, workflow id/path, run id/attempt, event, completion
+  state, PR linkage, source/base refs, base commit, and exact run head commit.
+  GitHub may execute a pull-request merge commit, so the reviewed run head is
+  recorded separately from the descriptor-bound PR source commit;
+- `matrix.json`: every reviewed matrix combination with either
+  `job_expected` or `excluded_unclaimed`. Excluded combinations create no
+  GitHub job, runner, log, or artifact, so they remain explicit only in this
+  authority-bound inventory and never become support exclusions;
+- `jobs.json`: `total_count` and every completed job, including failed,
+  cancelled, skipped, and other non-success conclusions. Each job preserves
+  its raw matrix scalars, runner name/group/labels, exact DuckDB identity when
+  it produces an artifact, declared artifact names, and one log filename,
+  byte size, and SHA-256;
+- `artifacts.json`: `total_count` and every declared output, binding its API
+  id/name, producing job, archive filename, byte size, SHA-256, expiry state,
+  run id, and attempt.
+
+All five files use sorted-key, two-space canonical JSON with one trailing
+newline and only their versioned fields. `total_count` must equal the supplied
+inventory. Every `job_expected` matrix combination must create exactly one
+matrix job, while `excluded_unclaimed` combinations must create none.
+Non-matrix workflow jobs remain visible with an empty raw matrix. Artifact-
+producing jobs may not collide on raw matrix labels, and the job declarations
+and artifact export must describe exactly the same output names. Artifact and
+log roots contain exactly the named regular files—no directories, symlinks,
+missing files, or extras. Each root is opened once as a non-following directory
+descriptor; enumeration and child reads remain relative to that stable
+descriptor, and any concurrent root replacement, entry replacement, or
+inventory change stops collection.
+
+Once a real authority row is approved, run:
+
+```sh
+python3 -I -B scripts/community/collect_build_evidence.py \
+  --authority-registry "$PWD/release/0.2.0/enablement/build-authorities.json" \
+  --pins "$PWD/release/0.2.0/enablement/pins.json" \
+  --descriptor-admission /absolute/descriptor-output/descriptor-admission.json \
+  --descriptor-anchor /absolute/descriptor-output/descriptor-admission.sha256 \
+  --pull-request-export /absolute/export/pull-request.json \
+  --run-export /absolute/export/run.json \
+  --jobs-export /absolute/export/jobs.json \
+  --matrix-export /absolute/export/matrix.json \
+  --artifacts-export /absolute/export/artifacts.json \
+  --artifacts-root /absolute/downloads/artifacts \
+  --logs-root /absolute/downloads/logs \
+  --output-root /absolute/new/community-build-output
+```
+
+The command emits `community-builds.json` plus its anchor and one
+`jobs/job-<id>/community-build.json` plus anchor for every job. Records contain
+logical download-relative paths, exact byte identities, raw upstream labels,
+raw conclusions, and the separately reviewed excluded/unclaimed combinations.
+The Community descriptor PR head repository/commit and workflow execution head
+are distinct from the `ngalluzzo/duckdb-fdw` extension source repository and
+commit; the registry and output preserve all three rather than conflating
+them. They grant only local Community build-evidence authority.
+A success conclusion is a candidate build row, not evidence of Community
+signing, deployment, stock-host behavior, platform compatibility, or public
+support. Those meanings remain with later custody and Query gates.
+
 Run the deterministic slice with:
 
 ```sh

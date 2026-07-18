@@ -33,7 +33,7 @@ credentials, absolute runner paths, or unrestricted environment data.
 | Candidate admission | Exact source commit, `0.2.0` pins, extension metadata, root MIT license, latest-stable DuckDB identity, and exact Community toolchain layout | `candidate.json` and `candidate.sha256` | Binds source commit/tree, project version, DuckDB identity, descriptor inputs, license digest, the complete pinned gitlink set, and exact `.gitmodules` metadata without consulting `HEAD`, index, or worktree. It contains no supported-platform claim |
 | Dependency audit | Admitted source, actual Community build graph, lock/configuration inputs, and primary license texts | `dependency-audit.json`, notices inventory, and anchor | Requires every compiled, linked, bundled, or redistributed dependency to have identity, provenance, license evidence, and an explicit disposition; ambiguity is a hard failure |
 | Descriptor admission | Tracked exact `description.yml`, reviewed `descriptor-cycle.json`, anchored candidate and dependency records, pins, and approved maintainer metadata | `descriptor-admission.json` and `descriptor-admission.sha256` in a new caller-owned output root | Requires MIT, `duckdb_api`, version `0.2.0`, C++/cmake, and the exact immutable candidate commit. The reviewed cycle—not co-located custody anchors—authorizes the handoff. It admits only a local proposal and never accepts a branch name, exclusion field, support claim, or self-reported ref as authority |
-| Community build evidence | Explicit `duckdb/community-extensions` repository, workflow run, descriptor, job inventory, logs, and downloaded outputs | One `community-build.json` and anchor per row, a complete `community-builds.json` inventory, and explicit artifact paths | Records every job conclusion, DuckDB/toolchain/platform identity, artifact size/digest, and Community origin. A build pass is only a candidate row, not product support |
+| Community build evidence | Explicit `duckdb/community-extensions` repository, workflow run, descriptor, reviewed expected/excluded matrix, complete job inventory, logs, and downloaded outputs | One `community-build.json` and anchor per job, a complete `community-builds.json` workflow inventory with excluded/unclaimed combinations, and explicit artifact paths | Separately binds the descriptor source, Community PR head/base, run execution head, every job conclusion, DuckDB/toolchain/platform identity, artifact/log size and digest, and Community origin. A build pass is only a candidate row, not product support |
 | Query handoff | Verified candidate, descriptor, Community job inventory, and admitted artifact paths | `query-inputs.json` plus read-only artifacts and manifests | Gives Query only stable identities and explicit paths. Query does not import build, descriptor, workflow, dependency, or custody internals |
 | Release binding | Anchored provider records and a Query-owned result inventory supplied as opaque bytes | `release-evidence.json` and anchor | Binds provider and Query evidence without evaluating SQL, diagnostics, or supported-row meaning |
 | Hosted custody | Exact release-evidence allowlist, staged root, and freshly downloaded root | `custody.json`, anchor, and staged/downloaded equality result | Verifies names, modes, sizes, digests, inner anchors, and byte equality across upload/download; the hosted artifact is a transfer mechanism, not a historical-availability promise |
@@ -57,6 +57,7 @@ change.
 | `release/0.2.0/enablement/descriptor.json` | Non-authoritative candidate-bound expectation with source and maintainer authority still unset |
 | `release/0.2.0/enablement/description.yml` | Exact Community descriptor proposal for the published immutable candidate; no exclusions, docs, or support claims |
 | `release/0.2.0/enablement/descriptor-cycle.json` | Reviewed authority binding the published source and exact proposal/candidate/dependency custody identities |
+| `release/0.2.0/enablement/build-authorities.json` | Code-review-pinned allowlist of exact descriptor and Community export identities authorized for build normalization; remains empty until maintainers approve a real run |
 | `release/0.2.0/enablement/evidence-allowlist.json` | Exact files allowed through hosted custody and final release binding |
 | `release/0.2.0/enablement/schemas/` | Versioned provider-record schemas only; no Query result or public support schema |
 | `release/0.2.0/enablement/README.md` | Provider command contracts and failure categories for Query and the release gate |
@@ -67,12 +68,22 @@ change.
 | `scripts/community/descriptor_cycle.py` | Reviewed descriptor-handoff authority validation; self-anchors remain custody only |
 | `scripts/community/descriptor_proposal.py` | Dependency-free exact Community YAML grammar and proposal semantics |
 | `scripts/community/verify_descriptor.py` | Thin anchored composition boundary for local descriptor admission |
-| `scripts/community/collect_build_evidence.py` | Community run/job/output collection and provenance normalization |
+| `scripts/community/build_evidence_authority.py` | Reviewed registry, accepted descriptor, and immutable Community identity admission |
+| `scripts/community/build_evidence_exports.py` | Minimal canonical PR, workflow-run, reviewed expected/excluded matrix, complete-job, and artifact export validation |
+| `scripts/community/build_evidence_downloads.py` | Exact artifact/log directory inventory, safe regular-file reads, and byte verification |
+| `scripts/community/collect_build_evidence.py` | Thin composition boundary that writes per-job and complete Community build records without interpreting support |
 | `scripts/community/write_query_inputs.py` | Read-only provider-to-Query artifact/path handoff |
 | `scripts/community/bind_release_evidence.py` | Provider records plus opaque Query inventory binding |
 | `scripts/community/stage_release_evidence.py` | Exact visible allowlist staging for hosted transfer |
 | `scripts/community/verify_hosted_roundtrip.py` | Staged/downloaded inventories, inner anchors, and byte equality |
-| `scripts/community/tests/` | Focused provider, descriptor, dependency, provenance, custody, and tamper oracles with deterministic fake upstream records |
+| `scripts/community/tests/build_evidence_authority_fixture.py` | Synthetic accepted descriptor and independently reviewed registry construction |
+| `scripts/community/tests/build_evidence_export_fixture.py` | Minimal canonical PR, run, complete-job, and artifact export values |
+| `scripts/community/tests/build_evidence_download_fixture.py` | Exact artifact archive and per-job log download bytes |
+| `scripts/community/tests/build_evidence_test_support.py` | Thin command wiring across the authority, export, and download fixtures |
+| `scripts/community/tests/test_build_evidence_authority.py` | Repository, PR, workflow, run, attempt, head/base, export-digest, and self-approval rejection |
+| `scripts/community/tests/test_build_evidence_inventory.py` | Complete job inventory, nonpassing-row preservation, raw label retention, duplicate and collision rejection |
+| `scripts/community/tests/test_build_evidence_downloads.py` | Artifact/log byte, exact inventory, symlink, canonical-input, and output-root boundaries |
+| `scripts/community/tests/` | Remaining focused candidate, descriptor, dependency, record-boundary, custody, and tamper oracles with deterministic fake upstream records |
 | `scripts/test-community-enablement.sh` | Stable focused entry point and structural workflow guard |
 | `.github/workflows/community-evidence-custody.yml` | Minimum-permission hosted provider gates, exact staging, pinned upload/download, and post-download verification |
 | `docs/releases/0.2.0-supply-chain.md` | Maintainer runbook for descriptor, dependency, provenance, custody, and evidence commands; no ordinary-user installation guidance |
