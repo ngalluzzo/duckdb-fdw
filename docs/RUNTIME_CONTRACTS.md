@@ -72,35 +72,33 @@ The runtime contracts do not require:
 - Deep optimizer integration through DuckDB internal C++ APIs.
 - Columnar remote-source batches.
 
-### 1.2 Accepted native `0.1.0` mapping
+### 1.2 Accepted native `0.3.0` mapping
 
-RFC 0001 maps the minimum end-to-end subset of these contracts into a private
-native C++ implementation. Those C++ types are neither a public ABI nor a
+RFC 0005 replaces the fixture preview with a bounded live REST subset mapped
+into private native C++ types. Those types are neither a public ABI nor a
 replacement for the intended portable Rust runtime.
 
 | Semantic artifact | Native preview mapping |
 |---|---|
-| `CompiledConnector` | Immutable `example` version `0.1.0` snapshot with one `items` relation, three non-null columns, one fallback many-row REST operation, fixed extractors, and a content-addressed embedded fixture |
+| `CompiledConnector` | Immutable `github` version `0.3.0` snapshot with the bounded `duckdb_login_search_page` relation, three required columns, one fixed many-row REST operation, typed HTTPS origin, ordered query and headers, extraction paths, and connector-owned ceilings |
 | `ScanRequest` | Full projection closure; `TRUE` predicate; empty ordering; unset limit and offset; no SQL text or I/O capability |
-| `ScanPlan` | Fixed `GET /items` and `$.items[*]` fixture executor; `TRUE` remote and runtime residuals; DuckDB ownership of filtering, ordering, limit, and offset; explicit hard budgets |
-| `BatchStream` | Synchronous single-task pull stream with two-row internal batches, strict conversion, cancellation checks, and idempotent close |
+| `ScanPlan` | Fixed `GET /search/users?q=duckdb+in%3Alogin&per_page=3`, `$.items[*]`, typed destination capability, `TRUE` remote and residual predicates, DuckDB ownership of filtering/order/limit/offset, disabled pagination/retry/cache/auth/providers, and explicit hard budgets |
+| `BatchStream` | Synchronous one-request pull stream with whole-response bounded JSON decode, schema-aligned two-row batches, one deadline initialized by the first execution work and retained across later pulls, cancellation checks, and idempotent close |
 
-The native adapter receives an immutable `ScanExecutor` from example
-composition and asks it to open each `BatchStream`. The executor owns concrete
-fixture-provider state; the adapter retains no `FixtureFactory` or
-`FixtureSource`, and construction transfers exclusive provider ownership so no
-external mutable alias can change content behind the frozen fixture digest. A
-call-scoped `ExecutionControl` supplies a non-throwing
+The native adapter receives an immutable `ScanExecutor` from product
+composition and asks it to open each `BatchStream`. The production executor
+owns one fixed HTTPS transport authority; private deterministic tests link a
+separate controlled-loopback composition that is absent from installed and
+loadable targets. A call-scoped `ExecutionControl` supplies a non-throwing
 cancellation query to executor open and stream pull. Runtime code must not
 retain that view. It reports cancellation through a runtime marker that the
 adapter translates to DuckDB interruption, so `ClientContext` and DuckDB
 exceptions remain outside runtime interfaces.
 
-No connector compiler, package loader, protocol registry, network transport,
-secret capability, provider pipeline, pagination, retry, cache, async runtime,
-or cross-language FFI exists in this profile. The embedded snapshot is built
-from repository metadata at extension construction; arbitrary connector syntax
-is not accepted.
+No connector compiler, package loader, protocol registry, secret capability,
+provider pipeline, pagination, retry, cache, async runtime, or cross-language
+FFI exists in this profile. The snapshot is built from repository metadata at
+extension construction; arbitrary connector syntax is not accepted.
 
 ---
 
@@ -756,10 +754,11 @@ Ordinary bind and scan planning operate only on:
 - DuckDB scan metadata exposed by the active adapter capability profile.
 - Cached local observations.
 
-Network I/O begins after a `ScanPlan` has been accepted and execution starts.
-The native preview has no network capability at any phase. Its fixture source
-is also unopened until global scan initialization, so a bind-only oracle can
-distinguish metadata work from execution.
+Network I/O begins after a `ScanPlan` has been accepted and the first stream
+pull starts. The native profile validates the complete plan capability during
+executor open without acquiring a socket. Its one fixed HTTPS request is
+therefore distinguishable from bind, planning, prepare, copy, and stream-open
+work by controlled request-count oracles.
 
 ### 6.2 Parallel DuckDB scan state
 
@@ -828,6 +827,16 @@ The async runtime is owned by the DuckDB database/extension state, not by an
 individual scan. Extension shutdown cancels scans, closes transports, drains
 bounded queues, and joins worker threads. Panics are caught at every FFI
 callback and converted to internal errors; unwinding never crosses the C ABI.
+
+The native `0.3.0` profile has no async worker. Before any version inspection,
+its process owner calls `curl_global_init(CURL_GLOBAL_DEFAULT)`, then verifies
+the exact supported libcurl version, TLS-backend identity, and
+`CURL_VERSION_THREADSAFE` capability. A rejected, unpublished initialization
+is balanced immediately with `curl_global_cleanup()`. Accepted global state is
+deliberately process-resident and left to OS process reclamation: service,
+extension, DSO, and `atexit` teardown register no cleanup hook because shutdown
+ordering cannot prove that every curl user has ended. Dynamic extension
+unload/reload is unsupported in this profile.
 
 ---
 
@@ -1483,10 +1492,14 @@ pub trait ScanExecutor: Send + Sync {
 The native preview maps this service to an immutable C++ `ScanExecutor` whose
 `Open` method accepts the immutable `ScanPlan` and a call-scoped
 `ExecutionControl`, then returns one independently owned `BatchStream`. The
-fixture implementation validates its supported execution capability envelope,
-fixture identity, and hard budgets before opening a source. It may reject
-runtime work it cannot perform, but it does not recompute residual ownership,
-ordering, limit safety, or any other relational decision.
+live implementation validates the fixed request, typed origin, network
+capability, schema, disabled features, and hard budgets before transport work.
+Its closed construction profile carries an executable decoded-record ceiling;
+production fixes that authority at three, private tests may only narrow it, and
+zero or above-three profiles fail during executor construction. A plan above
+the profile ceiling fails before I/O. Runtime may reject work it cannot perform,
+but it does not recompute residual ownership, ordering, limit safety, or any
+other relational decision.
 
 The executor:
 
@@ -1547,20 +1560,21 @@ For the native preview, `BatchStream::Next` accepts a non-owning
 `ExecutionControl` instead of a DuckDB host object. The control view is valid
 only for that open or pull call and must not be stored by a stream, source, or
 decoder. Runtime checkpoints combine the view with their own deadline and
-idempotent canceled state. A runtime-owned cancellation marker crosses to the
-adapter, which converts it once to DuckDB interruption. Concrete fixture
-source and factory APIs remain behind `ScanExecutor` and are available only to
-runtime implementation and direct runtime tests. Native construction transfers
-exclusive factory ownership into the executor; callers may retain observation
-probes but not a mutable provider alias.
+idempotent canceled state. The first execution work initializes one deadline
+that transport, decoding, batch construction, and every later pull share; a
+consumer pause cannot reset it. A runtime-owned cancellation marker crosses to
+the adapter, which converts it once to DuckDB interruption. The installed curl
+transport remains behind `ScanExecutor`; controlled transport and loopback curl
+composition are private test-support objects and cannot enter production
+source inventories.
 
 Native `Cancel`, `Close`, and runtime interface destructors are non-throwing.
-If source acquisition or an open hook fails after a resource is acquired, the
-executor performs best-effort non-throwing cleanup and preserves the original
-failure. Failures from interruption and close hooks are contained; they cannot
-mask `ExecutionCancelled`, a structured execution error, or the unknown error
-that the adapter will redact. This rule is required because connection
-destruction invokes close outside an ordinary scan-callback error path.
+Stream-owned easy handles, sockets, buffers, and decoded rows use bounded RAII
+cleanup that preserves the original failure. Failures from interruption and
+close paths are contained; they cannot mask `ExecutionCancelled`, a structured
+execution error, or the unknown error that the adapter will redact. Accepted
+process-global curl state is governed separately by Section 6.4 and is never
+cleaned by stream or service teardown.
 
 ### 18.1 Async bridge
 
@@ -2331,15 +2345,15 @@ enforces request and wall-time deadlines; it does not claim interactive
 DuckDB cancellation unless the capability is verified.
 
 The native preview represents the host signal with a call-scoped,
-protocol-neutral `ExecutionControl`. Global initialization checks it before
-opening a fixture source, and fixture reading, JSON decoding, conversion, and
-batch emission checkpoint it during synchronous pull. The control view is not
-an owned future cancellation token and cannot outlive the adapter callback.
+protocol-neutral `ExecutionControl`. Executor open checks it before creating a
+stream, and curl transfer, JSON decoding, conversion, and batch emission
+checkpoint it during synchronous pull. The control view is not an owned future
+cancellation token and cannot outlive the adapter callback.
 The stream's `Cancel` and `Close` operations remain idempotent and runtime
 owned, and both are non-throwing. Host interruption is never reported as a
 retryable or public project error. Once runtime observes cancellation, a
-provider interruption or cleanup-hook failure cannot replace the cancellation
-marker translated by the adapter.
+transport or close failure cannot replace the cancellation marker translated
+by the adapter.
 
 ```mermaid
 flowchart LR

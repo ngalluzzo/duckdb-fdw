@@ -19,7 +19,7 @@ implementation consumes their declarations.
 | Artifact | Remote Runtime responsibility |
 | --- | --- |
 | `src/include/duckdb_api/execution.hpp` and `src/execution_error.cpp` | DuckDB-free typed values, schema-aligned batches, execution control, pull stream, executor, and redacted structured error contract |
-| `src/include/duckdb_api/http_runtime.hpp` and `src/http_runtime.cpp` | Process-lifetime libcurl capability verification, checked pre-registration initialization, balanced teardown, and the production executor factory for the fixed installed authority |
+| `src/include/duckdb_api/http_runtime.hpp` and `src/http_runtime.cpp` | Process-lifetime libcurl initialization and capability verification, rejected-init cleanup, deliberately process-resident accepted state, and the production executor factory for the fixed installed authority |
 | `src/include/duckdb_api/internal/http_transport.hpp` | Protocol-neutral one-attempt request/response boundary used by the executor and private deterministic tests |
 | `src/include/duckdb_api/internal/curl_transfer.hpp` and `src/curl_transfer.cpp` | Shared one-attempt curl algorithm: HTTP/1.1 pinning, TLS verification, redirect/proxy/auth/cookie/netrc disablement, post-DNS socket callback, body/header/deadline ceilings, cancellation, and redaction |
 | `src/include/duckdb_api/internal/curl_http_transport.hpp` and `src/curl_http_transport.cpp` | Installed HTTPS-only fixed-authority composition and public-address/port policy; contains no caller-selected authority or loopback path |
@@ -29,10 +29,15 @@ implementation consumes their declarations.
 | `test/cpp/execution_contract_tests.cpp` | Typed batch and stable redacted error contract oracles |
 | `test/cpp/network_policy_tests.cpp` | Public and denied IPv4/IPv6 address-class oracles, including mapped and transition forms |
 | `test/cpp/json_decoder_tests.cpp` | Strict syntax, field conversion, and every decode-budget boundary |
-| `test/cpp/http_scan_executor_tests.cpp` | Attempt, batching, cancellation, plan-capability rejection, failure staging, and close/recovery oracles |
-| `test/cpp/curl_http_transport_tests.cpp` | Curl option, transfer cancellation, deadline, status, body/header ceiling, and redaction oracles against private loopback composition |
+| `test/cpp/http_scan_executor_tests.cpp` | Attempt, batching, persistent-deadline, valid-plan/private-profile record-authority narrowing, invalid-profile construction rejection, cancellation, plan-capability rejection, failure staging, and close/recovery oracles |
+| `test/cpp/curl_http_transport_tests.cpp` | Exact request, hostile ambient-state exclusion, status/redirect/disconnect, resolved-address denial, and one-socket/multiple-address oracles |
+| `test/cpp/curl_http_budget_tests.cpp` | Malformed JSON, wire/header ceilings, and compressed exact/+1 decompressed-byte oracles |
+| `test/cpp/curl_http_lifecycle_tests.cpp` | Concurrent checked initialization, fixed five-second transfer deadline, concurrent close, and recovery oracles |
+| `test/cpp/curl_tls_security_tests.cpp` and `test/python/runtime_curl_tls_tests.py` | Real-curl trusted-peer success plus untrusted-peer and hostname-mismatch TLS counterexamples against an isolated Python TLS service |
 | `test/cpp/support/controlled_http_transport.hpp` and `.cpp` | Non-installable scripted transport and observations used only by focused runtime tests |
 | `test/cpp/support/loopback_curl_runtime.hpp` and `.cpp` | Non-installable numeric-loopback composition that exercises the shared curl algorithm and executor; the implementation and its permissive socket policy are excluded from every loadable target |
+| `test/cpp/support/controlled_socket_service.hpp` and `.cpp`, `runtime_http_test_support.hpp` and `.cpp`, and `private_curl_probe.hpp` and `.cpp` | Reusable controlled socket, execution, and private curl-profile support; the private probe and `DUCKDB_API_PRIVATE_CURL_TESTS` definition are excluded from every production object |
+| `test/fixtures/runtime_tls/` | Deterministic non-production CA/server certificate and base64 PKCS#8 DER key for the isolated TLS harness; excluded from all artifact source inventories |
 
 Build graph, root scripts, release identities, product composition, DuckDB
 adapter code, public SQL, and durable product documentation belong to the lead,
@@ -70,7 +75,10 @@ only test-owned composition may supply the controlled loopback transport.
   absent or explicitly disabled.
 - One stream owns at most one wire attempt. Response, header, decompressed,
   record, string, nesting, decoded-memory, batch-row, wall-time, and concurrency
-  ceilings fail closed at their exact boundaries.
+  ceilings fail closed at their exact boundaries. The installed execution
+  profile fixes decoded-record authority at three, private profiles can only
+  narrow it, and a plan wider than its executor fails before I/O. One deadline
+  starts with the first execution work and remains fixed across every later pull.
 - Cancellation is polled by transfer and decoding. `Cancel`, `Close`, and
   destructors are idempotent and non-throwing; no failure crosses the native
   boundary with URL, authority, response bytes, or dependency text.
@@ -78,13 +86,16 @@ only test-owned composition may supply the controlled loopback transport.
   and `CURL_VERSION_THREADSAFE` out of process. Before registration, the process
   runtime performs exactly one checked `curl_global_init(CURL_GLOBAL_DEFAULT)`,
   then safely verifies the initialized identity. Rejection balances cleanup
-  immediately. Initialization is never query-lazy; an accepted service remains
-  resident and calls one balanced `curl_global_cleanup()` at process teardown
-  after all streams have ended.
+  immediately. Initialization is never query-lazy. Accepted state is
+  deliberately process-resident and left to OS process reclamation; service,
+  extension, DSO, and `atexit` teardown register no cleanup hook because total
+  curl-user shutdown ordering is unproved. Dynamic unload/reload is unsupported.
 - Focused deterministic tests prove success, exact request observations,
-  status/redirect/malformed/oversized/disconnect/deadline/cancellation failures,
-  recovery, active-stream teardown ordering, and redaction. Public GitHub is
-  compatibility evidence only and is not a correctness oracle.
+  hostile proxy/netrc/auth/cookie exclusion, TLS peer and hostname verification,
+  denied resolved addresses, one-socket multiple-address containment,
+  status/redirect/malformed/oversized/gzip/disconnect/deadline/cancellation
+  failures, recovery, active-stream teardown ordering, and redaction. Public
+  GitHub is compatibility evidence only and is not a correctness oracle.
 
 ## Interaction exit
 

@@ -124,9 +124,9 @@ explicit `native_product_metadata` origin; `github` connector, `0.3.0` metadata,
 and `duckdb_login_search_page` relation identity; and exactly one stable
 fallback, zero-to-many, replay-safe-but-retry-disabled REST GET operation with
 internal identifier `github_search_duckdb_login_page`.
-Request metadata is
-structural rather than a prejoined URL: base `https://api.github.com`, path
-`/search/users`, and canonical ordered query fields
+Request metadata is structural rather than a prejoined URL: typed scheme
+`https`, exact host `api.github.com`, port `443`, path `/search/users`, and
+canonical ordered query fields
 `q=duckdb+in%3Alogin` then `per_page=3`. Fixed headers are exactly
 `Accept: application/vnd.github+json`, `User-Agent: duckdb-api/0.3.0`, and
 `X-GitHub-Api-Version: 2022-11-28`. Response metadata selects `$.items[*]` and
@@ -195,14 +195,15 @@ executor, stream, typed batch, cancellation, and structured errors.
   prompt cancellation contract. `Cancel`, `Close`, and destructors are
   idempotent and non-throwing; connection close is contained by the five-second
   hard execution deadline but is not promised to cancel promptly.
-- Before table-function registration, the runtime verifies the linked libcurl
-  version, SSL backend, and `CURL_VERSION_THREADSAFE` feature bit, then performs
-  exactly one checked `curl_global_init(CURL_GLOBAL_DEFAULT)`. A missing feature
-  bit or failed initialization fails extension load before function
-  registration. Initialization is never query-lazy. The runtime service remains
-  resident for the process lifetime; `0.3.0` does not support dynamic extension
-  unload/reload. It performs exactly one balanced `curl_global_cleanup()` during
-  process teardown only after every stream has ended.
+- Before table-function registration, the runtime performs exactly one checked
+  `curl_global_init(CURL_GLOBAL_DEFAULT)`, then verifies the linked libcurl
+  version, SSL backend, and `CURL_VERSION_THREADSAFE` feature bit. Initialization
+  or identity rejection fails extension load before function registration and
+  balances the unpublished initialization immediately. Initialization is never
+  query-lazy. Accepted global state is deliberately process-resident and left
+  to OS process reclamation; no service, extension, DSO, or `atexit` cleanup
+  hook is registered because complete curl-user shutdown ordering is unproved.
+  Dynamic extension unload/reload is unsupported in `0.3.0`.
 - The sole `0.3.0` cell uses the platform-provided macOS libcurl without
   redistributing curl or TLS dependency bytes: macOS 26.5.1 build `25F80`,
   Command Line Tools SDK 15.5, SDK libcurl 8.7.1 headers/stub, artifact install
@@ -252,8 +253,10 @@ lifecycle, and Query knows DuckDB.
   stream and its transfer/response/decoder state. The accepted preview permits
   one active transfer per stream under the plan concurrency ceiling.
 - **FFI, initialization, reload, shutdown, and containment:** libcurl global
-  lifetime belongs to runtime composition. No exception crosses DuckDB's
-  native boundary; cancellation is translated once; teardown is non-throwing.
+  initialization belongs to runtime composition. Rejected unpublished state is
+  cleaned immediately; accepted state is process-resident. No exception crosses
+  DuckDB's native boundary; cancellation is translated once; stream/service
+  teardown is non-throwing and never calls global curl cleanup.
 - **Diagnostics and observability:** stable stage/field/safe-message errors and
   request-count test observations exist. The preview adds no public metrics or
   custom explain surface.
@@ -282,7 +285,7 @@ cell.
 | Are failures and work bounded? | Status, redirect, malformed, oversized, disconnect, deadline, interrupt, close, and recovery counterexamples | Controlled failure/lifecycle runner | Passed ten requests; connection close relies on the hard deadline |
 | Is destination policy applied after DNS? | Resolved-address denial and public-address acceptance | Runtime policy tests and curl socket callback | Passed on the recorded trial cell |
 | Can DuckDB's bundled client supply HTTPS? | Actual HTTPS execution | DuckDB 1.5.4 native client probe | No; the inspected client path was HTTP-only |
-| Is libcurl production-ready for the claimed cell? | Constrained SDK/header/stub, artifact install-name, runtime version/SSL-backend/thread-safe feature, and clean permanent-build identities | `0.3.0` pins plus dependency/source/artifact/fresh-product gates; libcurl global-init, cleanup, and version-info contracts | Platform choice decided; exact digest and permanent gate evidence pending implementation ([official init](https://curl.se/libcurl/c/curl_global_init.html), [cleanup](https://curl.se/libcurl/c/curl_global_cleanup.html), and [feature identity](https://curl.se/libcurl/c/curl_version_info.html)) |
+| Is libcurl production-ready for the claimed cell? | Constrained SDK/header/stub, artifact install-name, runtime version/SSL-backend/thread-safe feature, and clean permanent-build identities | `0.3.0` pins plus dependency/source/artifact/fresh-product gates; init-before-version-info, rejected-init cleanup, and accepted process-resident lifetime contracts | Platform choice decided; exact digest and permanent gate evidence pending implementation ([official init](https://curl.se/libcurl/c/curl_global_init.html), [cleanup](https://curl.se/libcurl/c/curl_global_cleanup.html), and [feature identity](https://curl.se/libcurl/c/curl_version_info.html)) |
 | Does the permanent planner preserve conservative ownership? | Golden plans plus negative/property oracles | Focused planner and differential DuckDB tests | Pending permanent implementation |
 
 The completed trial is sufficient decision evidence for mechanism feasibility.
@@ -371,7 +374,8 @@ declarative authoring rather than runtime configuration.
   verification, and artifact inventory cover SDK version, canonical curl
   header-tree/stub digests, configured target/path/version, dylib install name,
   runtime version/SSL backend/`CURL_VERSION_THREADSAFE` bit, pre-registration
-  initialization failure, balanced process-lifetime cleanup, public-artifact
+  initialization/identity rejection cleanup, absence of accepted-state cleanup
+  hooks, public-artifact
   exclusion of loopback/test seams, and the compiled connector/controlled
   fixture/public-contract source identities. Only transport-bearing targets
   link `CURL::libcurl`.
@@ -406,7 +410,7 @@ declarative authoring rather than runtime configuration.
 | Query permanent-delivery reviewer | Query Experience | Approved | Initial objection required separation of the fixed installed authority from the controlled loopback oracle, removal of an unproved DuckDB-visible `NOT NULL` claim, and executable retained-operator coverage; revised draft approved | Incorporated: private non-installable composition and artifact canaries are explicit; required/non-null decode behavior is separated from DuckDB logical types; controlled relational queries require one request per scan |
 | Connector live-contract reviewer | Connector Experience | Approved | Initial objection required an exact native metadata subset, structural request fields and headers, connector-vs-host policy ownership, non-response provenance, preview migration, and connector-package distribution clarity; revised draft approved | Incorporated, including the exact internal operation identifier `github_search_duckdb_login_page` before snapshot freeze |
 | Relational permanent-delivery reviewer | Relational Semantics | Approved | Initial objection found that `github.users` plus fixed search and `per_page=3` misrepresented the relation domain and resembled hidden predicate/limit pushdown; revised draft approved | Corrected to the bounded `github.duckdb_login_search_page` domain; source-definition constants, `R = TRUE` scope, no remote/runtime limit, and differential request/result oracles are explicit |
-| Remote Runtime permanent-delivery reviewer | Remote Runtime | Approved | Approved the constrained platform dependency after requiring `CURL_VERSION_THREADSAFE` in runtime identity/gates and checked pre-registration process-lifetime init/cleanup | Incorporated; exact digests and passing lifecycle/network-policy tests remain delivery evidence |
+| Remote Runtime permanent-delivery reviewer | Remote Runtime | Approved | Approved the constrained platform dependency after requiring `CURL_VERSION_THREADSAFE` in runtime identity/gates, init-before-version-info ordering, rejected-init cleanup, and deliberately process-resident accepted state with unsupported dynamic unload/reload | Incorporated; exact digests and passing lifecycle/network-policy tests remain delivery evidence |
 | Engineering Enablement live-build reviewer | Engineering Enablement | Approved | Initially objected that dependency acquisition was deferred; revised RFC selects the constrained macOS system-libcurl cell without redistribution and specifies current-cell pins, exact CMake resolution, identity verification, controlled-test exclusion, and fresh-build service | Incorporated; exact digests and successful gates remain delivery evidence rather than an unresolved decision |
 
 ## Decision and rationale
@@ -425,7 +429,7 @@ declarative authoring rather than runtime configuration.
   incorporated.
 - **Material objections:** Query's controlled-authority/test-seam objection,
   Relational Semantics' hidden-domain/limit objection, Connector Experience's
-  incomplete metadata objection, Remote Runtime's process-lifetime curl
+  incomplete metadata objection, Remote Runtime's process-resident curl
   objection, and Engineering Enablement's unresolved dependency-acquisition
   objection were incorporated as recorded in the review table.
 - **Superseded by:** Not applicable.
