@@ -19,12 +19,20 @@ relational decisions.
 | File | Responsibility |
 | --- | --- |
 | `src/include/duckdb_api/scan_plan.hpp` | Typed immutable plan meaning, ownership classifications, applied capability and resource envelope, and safe explanation |
+| `src/scan_plan.cpp` | Immutable plan access and stable safe explanation rendering |
 | `src/scan_planner.cpp` | Side-effect-free validation and construction from the compiled connector plus conservative request |
-| `test/cpp/scan_planner_tests.cpp` | Golden, negative, determinism, ownership, and conservative-fallback oracles |
+| `test/cpp/scan_plan_contract_tests.cpp` | Typed plan shape, ownership, golden explanation, and determinism oracles |
+| `test/cpp/scan_planner_tests.cpp` | Connector/request counterexamples, domain and host budget intersections, source-constant classification, and controlled-origin planning |
+| `test/cpp/support/live_scan_request.hpp` | Shared construction of the conservative Query-to-Semantics test request |
+| `docs/ARCHITECTURE.md` | Accepted native-preview architecture and evidence boundary under RFC 0005 |
 
 Relational Semantics does not edit Connector metadata, Query request/adapter
-code, Remote Runtime execution, build files, or shared design documents in
-this workstream.
+code, Remote Runtime execution, build files, or shared design documents beyond
+the targeted architecture propagation in this workstream.
+
+The accepted contract-propagation task adds the targeted architecture edit
+above. Engineering Enablement remains responsible for adding the new source
+and focused test target to the integrated build graph.
 
 ## Provider dependency
 
@@ -87,6 +95,10 @@ Focused planner evidence proves:
   so filter-before-limit cannot be delegated or applied early;
 - connector ceilings and host ceilings are intersected; a connector cannot
   widen destination or resource authority;
+- the fixed `per_page=3` source definition is a semantic ceiling in addition
+  to the general host decoder ceiling: Connector may narrow `max_records` to
+  one or two, but a mutated value of four is rejected during planning rather
+  than deferred to Runtime;
 - unknown identity, schema or extractor drift, operation drift, reordered or
   altered request metadata, policy widening, incomplete projection, non-TRUE
   unavailable predicate, ordering, bounds, or unsupported adapter capability
@@ -98,6 +110,37 @@ Query integration supplies the differential oracle: byte-identical request
 targets for `WHERE`, `ORDER BY`, `LIMIT/OFFSET`, and filter-before-limit
 variants, with results equal to DuckDB evaluation over the same returned base
 rows.
+
+## Responsibility audit
+
+The original `src/scan_planner.cpp` combined two independently changing
+responsibilities: validating and constructing a plan from provider inputs, and
+implementing the immutable plan's accessors and safe explanation format. The
+same pressure appeared in one test executable that mixed type-shape and golden
+snapshot checks with planner counterexamples and resource-intersection laws.
+The split above makes plan representation/explanation and planning policy
+independently readable and testable without changing the public API or adding a
+catch-all module. Test support contains only the shared conservative request at
+the Query-to-Semantics boundary.
+
+The public header remains one cohesive team API because every declaration is
+part of the same immutable `ScanPlan` handoff. Its adjacent documentation now
+distinguishes relational-domain bounds, host bounds, explanation provenance,
+and Runtime enforcement authority. A further header split would fragment one
+consumer contract without an independent reason to change.
+
+## Contract propagation audit
+
+| Layer | Disposition and evidence |
+| --- | --- |
+| Architecture | Updated the accepted native preview, bounded domain, typed team boundaries, exclusions, and controlled-versus-public evidence. |
+| Connector syntax | Unaffected: RFC 0005 keeps package/YAML authoring inactive; this consumes only the compiled native snapshot. |
+| Schema and validation | Connector's existing snapshot fixes `max_records=3`; planner counterexamples now reject a widened compiled value before returning a plan. |
+| Compiled IR | Unchanged shape; the existing connector ceiling retains its distinct narrowing meaning. |
+| Planning | The effective decoded-record budget accepts nonzero narrowing through three and cannot widen beyond the fixed response-page domain. |
+| Execution | Unchanged service authority; Runtime enforces the accepted typed plan and may still fail closed on unsupported executable facts. |
+| Diagnostics | Unchanged safe planning error class; no URL, credential, or response content is added. |
+| Tests and fixtures | Separate plan-contract and planner-policy suites cover the golden value, one/two-row narrowing, the four-row counterexample, and immutable relational ownership. |
 
 ## Interaction exit
 
@@ -112,3 +155,13 @@ Until all three conditions are supported by final source and test dependencies,
 the Relational Semantics collaboration remains **Open**. Once satisfied, the
 typed `ScanPlan` becomes an X-as-a-Service boundary maintained by Relational
 Semantics.
+
+Semantics-owned exit evidence is complete for Connector: focused tests consume
+only `CompiledConnector`, reject inconsistent or widened declarations, and
+produce the golden plan without YAML or Connector implementation knowledge.
+Query and Runtime exits remain **Open** in this worktree until the lead agent
+integrates their final consumer sources and proves that Query constructs only
+`ScanRequest` while Runtime consumes only typed executable plan facts. The new
+source and oracle target also require Engineering Enablement's build-graph
+integration before the project-wide exit audit can mark the service boundary
+satisfied.

@@ -14,6 +14,10 @@ static const uint64_t HOST_MAX_RESPONSE_BYTES = 65536;
 static const uint64_t HOST_MAX_HEADER_BYTES = 16384;
 static const uint64_t HOST_MAX_DECOMPRESSED_BYTES = 65536;
 static const uint64_t HOST_MAX_DECODED_RECORDS = 32;
+// `per_page=3` defines this relation's complete base domain. Connector
+// metadata may narrow the decoded-record ceiling, but cannot widen it past the
+// source definition even when the host-level decoder could accept more rows.
+static const uint64_t LIVE_RELATION_MAX_RECORDS = 3;
 static const uint64_t HOST_MAX_EXTRACTED_STRING_BYTES = 256;
 static const uint64_t HOST_MAX_JSON_NESTING = 16;
 static const uint64_t HOST_MAX_DECODED_MEMORY_BYTES = 131072;
@@ -100,7 +104,8 @@ struct NetworkCapability {
 	bool loopback_addresses_enabled;
 };
 
-// Effective connector/host resource intersection. Remote Runtime owns
+// Effective connector/host resource intersection. The decoded-record field is
+// additionally bounded by the fixed relation domain. Remote Runtime owns
 // enforcement and reports exhaustion without widening any field.
 struct ResourceBudgets {
 	uint64_t request_attempts;
@@ -115,8 +120,8 @@ struct ResourceBudgets {
 	uint64_t wall_milliseconds;
 	uint64_t concurrency;
 
-	// True for any nonzero effective envelope at or below host caps. Request
-	// and concurrency remain exactly one for the single-attempt preview.
+	// True for any nonzero effective envelope at or below host caps and the
+	// fixed relation-domain ceiling. Request and concurrency remain exactly one.
 	bool IsWithinLiveRestBounds() const;
 };
 
@@ -165,6 +170,9 @@ public:
 	const ResourceBudgets &Budgets() const;
 	const std::string &ClassificationReason() const;
 
+	// Stable safe explanation of identity, relational ownership, executable
+	// facts, and applied bounds. It is not a serialization format or a source of
+	// runtime authority.
 	std::string Snapshot() const;
 
 private:
