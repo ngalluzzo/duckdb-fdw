@@ -2,9 +2,9 @@
 
 Follow `docs/PRODUCT_DELIVERY.md`.
 
-Status: **Active**. RFC 0007 is Accepted. Product delivery may establish the
-approved public and shared contracts through the topology-owned workstreams
-linked below.
+Status: **Achieved on 2026-07-18**. RFC 0007 is Accepted. The topology-owned
+workstreams delivered the approved public and shared contracts and exited
+their product interactions.
 
 ## PM brief
 
@@ -158,6 +158,14 @@ privacy-safe live compatibility check loaded the `0.5.0` artifact and recorded
 the fixed five-column schema, an aggregate count of 432 repositories, and the
 accepted one-at-a-time, 32-page, 30-second, zero-retry request envelope. It
 recorded no credential, repository identity, row value, or Link value.
+
+The committed-source fresh cell in a new root outside the developer cache
+completed 967 cold build steps, all 30 focused native/curl targets, 93 SQL
+assertions, artifact inventory, and all four product oracles. It produced
+public artifact SHA-256
+`c1e7b7618c2b330a82ed4ac36bbc7b621c6c60430b9567a8b56e879381a0028b`.
+Independent review findings were repaired and their final fix-delta review
+reported no findings.
 
 ## Responsibility and dependency map
 

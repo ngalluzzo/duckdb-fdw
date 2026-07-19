@@ -10,8 +10,8 @@ scan. Mutable traversal order is not DuckDB ordering, per-response cardinality
 is not a limit, and pagination grants no filter, ordering, limit, or offset
 authority outside DuckDB.
 
-Status: **Implemented; provider interactions exited; final product gates open**.
-RFC 0007 is Accepted and the parent goal is Active. Query Experience remains
+Status: **Delivered; provider interactions and product gates satisfied**.
+RFC 0007 is Accepted and the parent goal is Achieved. Query Experience remains
 accountable for the product outcome. Relational Semantics owns only the
 offline semantic handoff and its proof; it does not own Connector declarations,
 pagination mechanics, or the DuckDB adapter.
@@ -232,7 +232,7 @@ its shape and safe fixture API compile.
 ## Sequencing and gates
 
 1. **Governance gate — satisfied.** RFC 0007 is Accepted with product approval
-   and the amended bag/ordering decision; the product goal is Active.
+   and the amended bag/ordering decision; product-goal activation is recorded.
 2. **Provider-shape gate.** Connector and Semantics freeze the public const
    declaration-to-plan mapping, scoped resource fields, disabled state, and
    safe explanations. Runtime confirms the plan carries every required
@@ -329,11 +329,11 @@ and keep explanation separate from runtime authority.
   execute sequentially without reclassifying base domain, consistency,
   ordering, limit, or budgets; and routine execution changes no longer require
   planner-internal knowledge.
-- **Relational Semantics workstream — Implemented; cached exit evidence
-  satisfied.** Focused plan, planner, and fixture targets prove all
+- **Relational Semantics workstream — Delivered; exit evidence satisfied.**
+  Focused plan, planner, and fixture targets prove all
   positive/negative properties; final source,
   includes, construction points, consumer call sites, build graph, adjacent
   documentation, contract propagation, preserved-relation regressions, and
-  cached gates support the three provider exits with no unresolved semantic or
-  dependency finding. The lead retains the fresh product cell, final review,
-  Git integration, and goal closure.
+  cached and fresh gates support the three provider exits with no unresolved
+  semantic or dependency finding. Lead-owned review, Git integration, and goal
+  closure are complete.

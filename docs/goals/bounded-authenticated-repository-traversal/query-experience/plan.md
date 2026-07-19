@@ -8,14 +8,12 @@ DuckDB user receives the required five-column duplicate-preserving row bag
 across the accepted bounded page sequence, or one actionable redacted failure;
 the user never supplies or observes page state.
 
-Status: **Query implementation and controlled acceptance evidence complete**.
+Status: **Delivered; Query outcome and all activation evidence complete**.
 The three-relation public contract, conservative request/bind path, separate
 controlled composition, adapter stream contract, and real curl/runtime/adapter
 repository oracle are implemented in the shared integration worktree. The
-parent goal remains Active until the lead records a fresh native product cell,
-and final independent review. The privacy-safe opt-in live compatibility check
-has passed. Those remaining activation gates do not leave a Query-owned
-implementation placeholder or provider-interface workaround.
+privacy-safe live compatibility check, committed-source fresh native product
+cell, and final independent review passed, so the parent goal is Achieved.
 
 ## Query ownership boundary
 
@@ -252,11 +250,10 @@ parallel Query writing surfaces.
   Runtime service exposes only its executor to composition, and independent
   Runtime plus real DuckDB product evidence proves cancellation, early close,
   late failure, capability release, redaction, and recovery.
-- **Query Experience outcome — Implemented; activation evidence still open.**
+- **Query Experience outcome — Delivered; activation evidence satisfied.**
   The exact SQL with local `ORDER BY id` returns the controlled five-column bag
   across multiple pages and an empty intermediate page; meaningful late and
   budget failures are non-truncating and redacted; both prior relations regress
-  cleanly; and installed artifacts exclude controlled authority. Exit the
-  parent activation gate after the lead records the privacy-safe live check,
-  fresh native product cell, final dependency audit, and independent review
-  with no unresolved findings.
+  cleanly; installed artifacts exclude controlled authority; and the
+  privacy-safe live check, fresh native product cell, final dependency audit,
+  and independent review pass with no unresolved findings.

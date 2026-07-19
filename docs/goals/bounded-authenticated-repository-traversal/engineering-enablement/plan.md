@@ -2,7 +2,7 @@
 
 ## Facilitation objective and routing
 
-Status: **Implemented; cached evidence satisfied; fresh product cell open**.
+Status: **Delivered; cached and fresh product evidence satisfied**.
 
 Make RFC 0007's responsibility-owned production modules, focused oracles,
 controlled product proof, and `0.5.0` artifact reproducibly buildable and
@@ -71,7 +71,7 @@ publication, tagging, and external delivery are outside this workstream.
 | Relational Semantics | Exited to X-as-a-Service | Final planning production, pagination fixtures, and focused tests build and run without hidden dependencies |
 | Remote Runtime | Exited to X-as-a-Service | Final runtime modules and controlled/curl-free test targets are built, linkage-classified, and run |
 | Query Experience | Collaboration complete | Query's settled production, controlled composition, examples, and three product oracles are wired and pass without Enablement owning their behavior |
-| Lead agent | Integration remains open | Lead owns the fresh native product cell, final review set, staging refresh, commit, and goal closure |
+| Lead agent | Integration complete | Fresh native product cell, final review set, staging, topology-shaped commits, and goal closure are complete |
 
 ## Delivered evidence
 
@@ -94,7 +94,7 @@ publication, tagging, and external delivery are outside this workstream.
   93 SQL assertions, artifact inventory, and the anonymous, authenticated-user,
   and repository-pagination controlled product oracles. `make demo` passed
   against the public `0.5.0` artifact.
-- Native formatting and staged/unstaged whitespace checks pass. The only
-  remaining Enablement evidence is execution of the fresh native product cell
-  from committed source; final adversarial review and Git history remain lead
-  responsibilities.
+- Native formatting and staged/unstaged whitespace checks pass. The committed
+  fresh cell completed 967 build steps, all 30 targets, 93 SQL assertions, and
+  all product oracles; final adversarial fix-delta review reported no findings,
+  and the delivery is recorded as topology-shaped Conventional Commits.

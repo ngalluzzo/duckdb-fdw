@@ -2,7 +2,7 @@
 
 ## Outcome and boundary
 
-Status: **Native `0.5.0` provider activated; interactions exited; final product gates open**.
+Status: **Delivered; native `0.5.0` provider and interactions exited**.
 
 Provide RFC 0007's permanent Connector Experience service: an immutable,
 deterministically explainable `CompiledConnector` catalog whose native `0.5.0`
@@ -253,7 +253,7 @@ added to bridge teams.
 ## Sequencing gates
 
 1. **Governance gate — satisfied.** RFC 0007 is Accepted, product approval and
-   affected-team reviews are recorded, and the product goal is Active.
+   affected-team reviews and product-goal activation are recorded.
 2. **Provider-shape gate — satisfied.** Connector and Semantics agree on the const
    `CompiledPagination` and scoped resource fields, ownership, validation, and
    snapshot contract. Runtime confirms the proposed plan can carry every
@@ -329,7 +329,7 @@ This workstream does not implement or expose:
 
 ## Interaction exits and evidence
 
-Current status: **Connector provider activated; propagation and overall product exit remain open**.
+Current status: **Connector provider and overall product exit satisfied**.
 
 Activation evidence:
 
@@ -343,8 +343,8 @@ Activation evidence:
 - the Connector-owned generic and paginated fixture runners remain green, and
   root integration reports passing Semantics planning plus exact Runtime
   root-array decoding and sequential authenticated HTTP scan fixtures; and
-- authoritative contract, release-identity, complete cached/fresh product, and
-  final SQL evidence remain the lead-owned propagation and exit gate.
+- authoritative contract, release identity, complete cached/fresh product, and
+  final SQL evidence passed through lead-owned integration.
 
 ### Connector Experience to Relational Semantics
 

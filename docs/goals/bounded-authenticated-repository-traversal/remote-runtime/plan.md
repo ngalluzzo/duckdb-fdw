@@ -2,7 +2,7 @@
 
 ## Outcome and status
 
-Status: **Implemented; provider interactions exited; fresh verification open**.
+Status: **Delivered; provider interactions and fresh verification satisfied**.
 
 Provide Query Experience with RFC 0007's permanent DuckDB-free execution
 service for `github.authenticated_repositories`. Runtime consumes one complete
@@ -15,7 +15,7 @@ complete-looking partial result.
 
 This is a supporting platform workstream for the Query Experience outcome
 **Bounded authenticated repository traversal**. RFC 0007 is Accepted and the
-product goal is Active. Remote Runtime owns normalized Link capture, Link
+product goal is Achieved. Remote Runtime owns normalized Link capture, Link
 parsing and page state, repeated authorization execution, transport, decoding,
 aggregate accounting, backpressure, cancellation, close, and structured
 redacted failures. It does not acquire product accountability, Connector
@@ -57,9 +57,9 @@ rejects the plan before I/O; it never degrades to page 1.
   made the unchanged active-close oracle pass in 5.97 seconds, and was followed
   by a green full cached `make test`.
 - Source identity, dependency-verifier unit tests, native developer guards,
-  native formatting, and staged/unstaged whitespace checks pass. A fresh native
-  product cell and the final independent adversarial-review set remain lead
-  integration evidence rather than provider-interaction blockers.
+  native formatting, and staged/unstaged whitespace checks pass. The committed
+  967-step fresh native product cell and final independent fix-delta review
+  also pass with no unresolved finding.
 
 ## Runtime ownership boundary and invariants
 
@@ -324,7 +324,7 @@ acceptable bridge between tracks.
 ## Sequencing and gates
 
 1. **Governance gate — satisfied.** RFC 0007 is Accepted, product approval and
-   all affected-team reviews are recorded, and the product goal is Active.
+   all affected-team reviews and product-goal activation are recorded.
 2. **Provider-interface gate — satisfied.** Connector and Semantics landed the
    closed pagination/resource provider shapes and focused fixtures. Runtime's
    immutable plan contains every execution fact and requires no Connector
@@ -354,12 +354,12 @@ acceptable bridge between tracks.
    repository plan, three-relation `0.5.0` catalog, and version identities only
    after the real Runtime consumer path passed focused evidence. The controlled
    SQL and product narratives now pass.
-9. **Verification and exit gate — cached evidence satisfied; fresh evidence
-   open.** Focused Runtime targets, integrated `make build`, `make test`,
+9. **Verification and exit gate — satisfied.** Focused Runtime targets,
+   integrated `make build`, `make test`,
    `make demo`, source identity, dependency-verifier unit tests, native
-   formatting, and whitespace gates pass. The lead still owns a fresh native
-   product cell, the final independent adversarial-review set, and final staged
-   dependency and contract audits.
+   formatting, and whitespace gates pass. The committed-source fresh product
+   cell, final independent adversarial-review set, and dependency/contract
+   audits pass.
 
 ## Code documentation obligations
 
@@ -441,7 +441,7 @@ scope and RFC assessment rather than being hidden in Runtime internals.
   agree across independent Runtime and Query tests, and controlled composition
   obtains Runtime's executor separately from Connector's catalog with no
   Runtime-internal include or pagination workaround.
-- **Remote Runtime workstream — Implemented; cached exit evidence satisfied.** DuckDB-free parser,
+- **Remote Runtime workstream — Delivered; exit evidence satisfied.** DuckDB-free parser,
   authority-denial, resource, repeated-authorization, request-sequence,
   decoder, cancellation, close, deadline, redaction, failure, concurrency,
   recovery, real-curl, and preserved-profile oracles pass; adjacent API/state-
@@ -449,9 +449,8 @@ scope and RFC assessment rather than being hidden in Runtime internals.
   contain no controlled authority or test hook; final source/include/factory/
   build/test dependencies match this plan; required adversarial findings are
   resolved or rejected with evidence; authoritative Runtime contracts are
-  propagated by integration; and all focused and cached product gates pass.
-  Final goal closure additionally requires the lead-owned fresh product cell
-  and independent adversarial-review set.
+  propagated by integration; and all focused, cached, and fresh product gates
+  pass with independent review complete.
 
 An interaction remains **Open** if consumers need routine knowledge of Link
 grammar, page state, transport, credential decoration, or counters; Runtime
