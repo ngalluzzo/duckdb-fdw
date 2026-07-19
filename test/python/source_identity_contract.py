@@ -112,7 +112,7 @@ class SourceIdentityContractTests(unittest.TestCase):
             ),
             (
                 "controlled",
-                "test/cpp/support/controlled_product_composition.cpp",
+                "test/cpp/query/integration/support/controlled_product_composition.cpp",
                 "controlled product source digest",
             ),
         ):

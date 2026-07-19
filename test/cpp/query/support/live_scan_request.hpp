@@ -7,9 +7,9 @@
 
 namespace duckdb_api_test {
 
-// Semantics-local request fixtures deliberately use Query's public builder.
-// They neither reproduce request construction nor know native relation names,
-// schemas, or Connector authentication-policy internals.
+// Query's request fixture service deliberately exposes only the public builder
+// to consumer tests. It neither reproduces request construction nor knows
+// native relation names, schemas, or Connector authentication-policy internals.
 inline duckdb_api::ScanRequest BuildAnonymousScanRequest(const duckdb_api::CompiledConnector &connector,
                                                          const std::string &relation_name) {
 	return duckdb_api::BuildConservativeScanRequest(connector, relation_name, duckdb_api::LogicalSecretReference());

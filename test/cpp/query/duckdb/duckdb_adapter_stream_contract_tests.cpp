@@ -1,6 +1,6 @@
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
-#include "support/duckdb_adapter_test_support.hpp"
+#include "query/support/duckdb_adapter_test_support.hpp"
 #include "support/require.hpp"
 
 #include <cstdlib>

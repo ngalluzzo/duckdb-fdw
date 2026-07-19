@@ -1,4 +1,4 @@
-#include "support/duckdb_adapter_auth_test_support.hpp"
+#include "query/support/duckdb_adapter_auth_test_support.hpp"
 
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"

@@ -1,4 +1,4 @@
-#include "support/controlled_product_composition.hpp"
+#include "query/integration/support/controlled_product_composition.hpp"
 
 #include "support/loopback_curl_runtime.hpp"
 

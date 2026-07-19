@@ -22,7 +22,7 @@
         "src/connector/pagination_declaration.cpp",
         "src/connector/resource_ceiling_declaration.cpp",
         "src/connector/native_github_composition.cpp",
-        "src/scan_request.cpp",
+        "src/query/scan_request.cpp",
         "src/semantics/scan_plan.cpp",
         "src/semantics/scan_plan_explain.cpp",
         "src/semantics/scan_planner.cpp",
@@ -41,18 +41,18 @@
         "src/curl_transfer.cpp",
         "src/curl_http_transport.cpp",
         "src/http_runtime.cpp",
-        "src/duckdb_secret.cpp",
-        "src/duckdb_api_adapter.cpp",
+        "src/query/duckdb/secret_integration.cpp",
+        "src/query/duckdb/table_function_adapter.cpp",
         "test/cpp/support/loopback_curl_runtime.cpp",
-        "test/cpp/support/controlled_product_composition.cpp",
-        "test/cpp/controlled_duckdb_api_extension.cpp"
+        "test/cpp/query/integration/support/controlled_product_composition.cpp",
+        "test/cpp/query/integration/controlled_extension_entrypoint.cpp"
       ],
       "public_translation_units": [
         "src/connector/catalog_model.cpp",
         "src/connector/pagination_declaration.cpp",
         "src/connector/resource_ceiling_declaration.cpp",
         "src/connector/native_github_composition.cpp",
-        "src/scan_request.cpp",
+        "src/query/scan_request.cpp",
         "src/semantics/scan_plan.cpp",
         "src/semantics/scan_plan_explain.cpp",
         "src/semantics/scan_planner.cpp",
@@ -71,22 +71,22 @@
         "src/curl_transfer.cpp",
         "src/curl_http_transport.cpp",
         "src/http_runtime.cpp",
-        "src/product_composition.cpp",
-        "src/duckdb_secret.cpp",
-        "src/duckdb_api_adapter.cpp",
-        "src/duckdb_api_extension.cpp"
+        "src/query/product_composition.cpp",
+        "src/query/duckdb/secret_integration.cpp",
+        "src/query/duckdb/table_function_adapter.cpp",
+        "src/query/duckdb/extension_entrypoint.cpp"
       ]
     },
     "controlled_product_sources": {
       "algorithm": "sha256-length-prefixed-path-and-bytes-v1",
       "paths": [
-        "test/cpp/controlled_duckdb_api_extension.cpp",
-        "test/cpp/support/controlled_product_composition.cpp",
-        "test/cpp/support/controlled_product_composition.hpp",
+        "test/cpp/query/integration/controlled_extension_entrypoint.cpp",
+        "test/cpp/query/integration/support/controlled_product_composition.cpp",
+        "test/cpp/query/integration/support/controlled_product_composition.hpp",
         "test/cpp/support/loopback_curl_runtime.cpp",
         "test/cpp/support/loopback_curl_runtime.hpp"
       ],
-      "sha256": "ccaf06c55bef94e46fd2368cf606b7401bbe96486ec94fe32c93235459dde7ad"
+      "sha256": "b27281b539e12a4d1f04f4c35ec7dc13dfa60644600aab6e7d7ccbb05f12b0f3"
     },
     "native_product_sources": {
       "algorithm": "sha256-length-prefixed-path-and-bytes-v1",
@@ -99,9 +99,6 @@
         "src/connector/resource_ceiling_declaration.cpp",
         "src/curl_http_transport.cpp",
         "src/curl_transfer.cpp",
-        "src/duckdb_api_adapter.cpp",
-        "src/duckdb_api_extension.cpp",
-        "src/duckdb_secret.cpp",
         "src/execution_error.cpp",
         "src/fixed_github_user_bearer_authenticator.cpp",
         "src/http_chunk_decoder.cpp",
@@ -137,8 +134,12 @@
         "src/json_decoder.cpp",
         "src/link_pagination.cpp",
         "src/network_policy.cpp",
-        "src/product_composition.cpp",
-        "src/scan_request.cpp",
+        "src/query/README.md",
+        "src/query/duckdb/extension_entrypoint.cpp",
+        "src/query/duckdb/secret_integration.cpp",
+        "src/query/duckdb/table_function_adapter.cpp",
+        "src/query/product_composition.cpp",
+        "src/query/scan_request.cpp",
         "src/scan_resource_accounting.cpp",
         "src/semantics/README.md",
         "src/semantics/scan_plan.cpp",
@@ -148,7 +149,7 @@
         "src/semantics/scan_planner_validation.cpp",
         "src/uri_reference.cpp"
       ],
-      "sha256": "fef84a6d28cd25b8ff60959216d2bc440a7e95942b0955fcd9694c464fb2d646"
+      "sha256": "96ac23a5918667857eeedbc99475be35390f7b0ae7714cf854bb634a4a7e1f17"
     },
     "public_contract": {
       "canonical_json_sha256": "c0d7b2ff6160874390a4f06d1b9954ba74604769efcfcf70420fa2702c26fae6",

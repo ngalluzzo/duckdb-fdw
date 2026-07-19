@@ -4,7 +4,7 @@
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
-#include "support/controlled_product_composition.hpp"
+#include "query/integration/support/controlled_product_composition.hpp"
 
 #include <cstdint>
 #include <cstdlib>

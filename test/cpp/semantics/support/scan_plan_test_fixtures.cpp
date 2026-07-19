@@ -1,6 +1,6 @@
 #include "semantics/support/scan_plan_test_fixtures.hpp"
 
-#include "support/live_scan_request.hpp"
+#include "query/support/live_scan_request.hpp"
 
 #include <stdexcept>
 

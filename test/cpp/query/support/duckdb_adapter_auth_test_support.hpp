@@ -2,7 +2,7 @@
 
 #include "duckdb/main/secret/secret.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
-#include "support/duckdb_adapter_test_support.hpp"
+#include "query/support/duckdb_adapter_test_support.hpp"
 
 #include <atomic>
 #include <memory>

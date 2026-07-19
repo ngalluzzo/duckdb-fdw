@@ -1,8 +1,8 @@
 #include "duckdb_api/connector.hpp"
 #include "duckdb_api/scan_request.hpp"
 #include "connector/support/connector_catalog_test_fixtures.hpp"
+#include "query/support/scan_request_test_support.hpp"
 #include "support/require.hpp"
-#include "support/scan_request_test_support.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -245,12 +245,13 @@ void TestEnvironmentIndependenceAndCredentialAbsence() {
 	const auto baseline = duckdb_api::BuildConservativeScanRequest(
 	    connector, AUTHENTICATED_RELATION, duckdb_api::LogicalSecretReference::Named("github_default"));
 	const auto canary = RuntimeCredentialCanary();
-	for (const auto &path : {"src/include/duckdb_api/scan_request.hpp", "src/scan_request.cpp",
-	                         "test/cpp/scan_request_tests.cpp", "test/cpp/support/scan_request_test_support.hpp"}) {
+	for (const auto &path : {"src/include/duckdb_api/scan_request.hpp", "src/query/scan_request.cpp",
+	                         "test/cpp/query/scan_request_tests.cpp",
+	                         "test/cpp/query/support/scan_request_test_support.hpp"}) {
 		Require(ReadText(path).find(canary) == std::string::npos, "credential canary pre-existed in request source");
 	}
 	const auto production_source =
-	    ReadText("src/include/duckdb_api/scan_request.hpp") + ReadText("src/scan_request.cpp");
+	    ReadText("src/include/duckdb_api/scan_request.hpp") + ReadText("src/query/scan_request.cpp");
 	for (const auto &ambient_api :
 	     {"getenv(", "std::getenv", "::getenv", "setenv(", "unsetenv(", "**environ", "*environ["}) {
 		Require(production_source.find(ambient_api) == std::string::npos,

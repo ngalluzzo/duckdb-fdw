@@ -1,7 +1,7 @@
 #pragma once
 
 #include "duckdb_api/connector.hpp"
-#include "support/query_runtime_scenarios.hpp"
+#include "query/support/query_runtime_scenarios.hpp"
 
 #include <memory>
 #include <string>

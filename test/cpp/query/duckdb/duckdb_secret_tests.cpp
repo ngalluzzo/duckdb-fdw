@@ -1,4 +1,4 @@
-#include "support/duckdb_secret_test_support.hpp"
+#include "query/support/duckdb_secret_test_support.hpp"
 
 #include <cstdlib>
 #include <exception>

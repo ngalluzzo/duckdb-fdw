@@ -94,9 +94,9 @@ EXTENSION_CONFIG = re.compile(
 MAX_IDENTITY_FILE_BYTES = 16 * 1024 * 1024
 PATH_BOUND_SHA256 = "sha256-length-prefixed-path-and-bytes-v1"
 CONTROLLED_PRODUCT_SOURCE_PATHS = (
-    "test/cpp/controlled_duckdb_api_extension.cpp",
-    "test/cpp/support/controlled_product_composition.cpp",
-    "test/cpp/support/controlled_product_composition.hpp",
+    "test/cpp/query/integration/controlled_extension_entrypoint.cpp",
+    "test/cpp/query/integration/support/controlled_product_composition.cpp",
+    "test/cpp/query/integration/support/controlled_product_composition.hpp",
     "test/cpp/support/loopback_curl_runtime.cpp",
     "test/cpp/support/loopback_curl_runtime.hpp",
 )
@@ -396,7 +396,10 @@ def validate_current_identities(pins: dict, reader: RepositoryReader) -> dict:
         raise AssertionError("current public build graph omits a native translation unit")
     expected_controlled = (
         native_units
-        - {"src/duckdb_api_extension.cpp", "src/product_composition.cpp"}
+        - {
+            "src/query/duckdb/extension_entrypoint.cpp",
+            "src/query/product_composition.cpp",
+        }
     ) | controlled_only_units
     if set(controlled_units) != expected_controlled:
         raise AssertionError("current controlled build graph has the wrong composition")

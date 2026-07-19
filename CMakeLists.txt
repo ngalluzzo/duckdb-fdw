@@ -87,7 +87,7 @@ set(CONNECTOR_METADATA_SOURCES
     ${CONNECTOR_NATIVE_PROFILE_SOURCES})
 set(CONNECTOR_TEST_SERVICE_SOURCES
     test/cpp/connector/support/connector_catalog_test_fixtures.cpp)
-set(QUERY_REQUEST_SOURCES src/scan_request.cpp)
+set(QUERY_REQUEST_SOURCES src/query/scan_request.cpp)
 set(RELATIONAL_PLANNING_SOURCES
     src/semantics/scan_plan.cpp
     src/semantics/scan_plan_explain.cpp
@@ -138,25 +138,25 @@ set(REMOTE_RUNTIME_CURL_TEST_SUPPORT_SOURCES
     test/cpp/support/loopback_curl_runtime.cpp
     test/cpp/support/runtime_http_test_support.cpp
     test/cpp/support/private_curl_probe.cpp)
-set(QUERY_PRODUCT_COMPOSITION_SOURCES src/product_composition.cpp)
-set(QUERY_DUCKDB_SECRET_SOURCES src/duckdb_secret.cpp)
+set(QUERY_PRODUCT_COMPOSITION_SOURCES src/query/product_composition.cpp)
+set(QUERY_DUCKDB_SECRET_SOURCES src/query/duckdb/secret_integration.cpp)
 set(QUERY_DUCKDB_ADAPTER_SOURCES
-    src/duckdb_api_adapter.cpp
-    src/duckdb_api_extension.cpp)
+    src/query/duckdb/table_function_adapter.cpp
+    src/query/duckdb/extension_entrypoint.cpp)
 set(QUERY_ADAPTER_TEST_SUPPORT_SOURCES
-    test/cpp/support/query_runtime_scenarios.cpp
-    test/cpp/support/duckdb_adapter_test_support.cpp)
+    test/cpp/query/support/query_runtime_scenarios.cpp
+    test/cpp/query/support/duckdb_adapter_test_support.cpp)
 set(QUERY_AUTH_ADAPTER_TEST_SUPPORT_SOURCES
-    test/cpp/support/duckdb_adapter_auth_test_support.cpp)
+    test/cpp/query/support/duckdb_adapter_auth_test_support.cpp)
 set(QUERY_SECRET_TEST_SUPPORT_SOURCES
-    test/cpp/support/duckdb_secret_test_support.cpp)
+    test/cpp/query/support/duckdb_secret_test_support.cpp)
 set(REMOTE_RUNTIME_EXECUTOR_TEST_SUPPORT_SOURCES
     test/cpp/support/controlled_http_transport.cpp
     test/cpp/support/http_scan_executor_test_support.cpp)
 set(QUERY_CONTROLLED_COMPOSITION_SOURCES
     test/cpp/support/loopback_curl_runtime.cpp
-    test/cpp/support/controlled_product_composition.cpp
-    test/cpp/controlled_duckdb_api_extension.cpp)
+    test/cpp/query/integration/support/controlled_product_composition.cpp
+    test/cpp/query/integration/controlled_extension_entrypoint.cpp)
 set(PRODUCTION_SOURCES
     ${CONNECTOR_METADATA_SOURCES}
     ${QUERY_REQUEST_SOURCES}
@@ -173,7 +173,7 @@ set(CONTROLLED_PRODUCT_SOURCES
     ${REMOTE_RUNTIME_INTERFACE_SOURCES}
     ${REMOTE_RUNTIME_SOURCES}
     ${QUERY_DUCKDB_SECRET_SOURCES}
-    src/duckdb_api_adapter.cpp
+    src/query/duckdb/table_function_adapter.cpp
     ${QUERY_CONTROLLED_COMPOSITION_SOURCES})
 
 build_static_extension(${TARGET_NAME} ${PRODUCTION_SOURCES})
@@ -240,7 +240,7 @@ target_include_directories(duckdb_api_connector_catalog_fixture_tests PRIVATE te
 
 add_executable(
   duckdb_api_scan_request_tests
-  test/cpp/scan_request_tests.cpp
+  test/cpp/query/scan_request_tests.cpp
   ${CONNECTOR_METADATA_SOURCES}
   ${CONNECTOR_TEST_SERVICE_SOURCES}
   ${QUERY_REQUEST_SOURCES})
@@ -460,16 +460,16 @@ target_link_libraries(
 
 add_executable(
   duckdb_api_duckdb_secret_tests
-  test/cpp/duckdb_secret_tests.cpp
-  test/cpp/duckdb_secret_creation_tests.cpp
-  test/cpp/duckdb_secret_resolution_tests.cpp
+  test/cpp/query/duckdb/duckdb_secret_tests.cpp
+  test/cpp/query/duckdb/duckdb_secret_creation_tests.cpp
+  test/cpp/query/duckdb/duckdb_secret_resolution_tests.cpp
   ${QUERY_SECRET_TEST_SUPPORT_SOURCES}
   ${CONNECTOR_METADATA_SOURCES}
   ${QUERY_REQUEST_SOURCES}
   ${RELATIONAL_PLANNING_SOURCES}
   ${REMOTE_RUNTIME_INTERFACE_SOURCES}
   ${QUERY_DUCKDB_SECRET_SOURCES}
-  src/duckdb_api_adapter.cpp)
+  src/query/duckdb/table_function_adapter.cpp)
 target_link_libraries(
   duckdb_api_duckdb_secret_tests
   dummy_static_extension_loader
@@ -480,16 +480,16 @@ configure_duckdb_api_cpp_target(duckdb_api_duckdb_secret_tests)
 
 add_executable(
   duckdb_api_adapter_tests
-  test/cpp/duckdb_adapter_tests.cpp
-  test/cpp/duckdb_adapter_auth_bind_tests.cpp
-  test/cpp/duckdb_adapter_auth_lifecycle_tests.cpp
+  test/cpp/query/duckdb/duckdb_adapter_tests.cpp
+  test/cpp/query/duckdb/duckdb_adapter_auth_bind_tests.cpp
+  test/cpp/query/duckdb/duckdb_adapter_auth_lifecycle_tests.cpp
   ${CONNECTOR_METADATA_SOURCES}
   ${CONNECTOR_TEST_SERVICE_SOURCES}
   ${QUERY_REQUEST_SOURCES}
   ${RELATIONAL_PLANNING_SOURCES}
   ${REMOTE_RUNTIME_INTERFACE_SOURCES}
   ${QUERY_DUCKDB_SECRET_SOURCES}
-  src/duckdb_api_adapter.cpp
+  src/query/duckdb/table_function_adapter.cpp
   ${QUERY_ADAPTER_TEST_SUPPORT_SOURCES}
   ${QUERY_AUTH_ADAPTER_TEST_SUPPORT_SOURCES})
 target_link_libraries(
@@ -502,13 +502,13 @@ configure_duckdb_api_cpp_target(duckdb_api_adapter_tests)
 
 add_executable(
   duckdb_api_adapter_stream_contract_tests
-  test/cpp/duckdb_adapter_stream_contract_tests.cpp
+  test/cpp/query/duckdb/duckdb_adapter_stream_contract_tests.cpp
   ${CONNECTOR_METADATA_SOURCES}
   ${QUERY_REQUEST_SOURCES}
   ${RELATIONAL_PLANNING_SOURCES}
   ${REMOTE_RUNTIME_INTERFACE_SOURCES}
   ${QUERY_DUCKDB_SECRET_SOURCES}
-  src/duckdb_api_adapter.cpp
+  src/query/duckdb/table_function_adapter.cpp
   ${QUERY_ADAPTER_TEST_SUPPORT_SOURCES})
 target_link_libraries(
   duckdb_api_adapter_stream_contract_tests

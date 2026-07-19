@@ -1,4 +1,4 @@
-#include "support/duckdb_secret_test_support.hpp"
+#include "query/support/duckdb_secret_test_support.hpp"
 
 #include "duckdb/catalog/catalog_transaction.hpp"
 #include "duckdb/main/client_context.hpp"
