@@ -37,7 +37,8 @@ turn a self-built unsigned extension into an ordinarily trusted distribution.
 
 | Artifact | Primary reason to change |
 | --- | --- |
-| `experiments/repeatable-installation/README.md` | Document the exact trial invocation, user journey, input boundary, and non-product limitations |
+| `experiments/repeatable-installation/README.md` | Summarize trial status and outcome and route a reproducer to the integrated command, results, and runbook |
+| `experiments/repeatable-installation/RUNBOOK.md` | Document the exact trial invocation, user journey, input boundary, and non-product limitations |
 | `experiments/repeatable-installation/install_oracle.py` | Preserve the public CLI and compose admitted inputs, temporary state, scenario execution, and retained evidence |
 | `experiments/repeatable-installation/trial_inputs.py` | Preserve explicit path admission and compose provider, manifest, and fixture verification into the immutable `VerifiedBundle` consumed by scenarios |
 | `experiments/repeatable-installation/trial_snapshot.py` | Freeze byte-bearing provider inputs, the self-contained verifier, and the Query host into private read-only trial storage before verification and use |

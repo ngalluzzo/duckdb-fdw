@@ -1,80 +1,82 @@
-# Remote Runtime source ownership
+# Remote runtime
 
-Owning charter: [Remote Runtime](../../docs/teams/REMOTE_RUNTIME.md).
+This package executes an immutable `ScanPlan` as a bounded, cancelable stream
+of typed batches. It owns authentication execution, HTTP transport, decoding,
+pagination, network and resource enforcement, and stream lifecycle.
 
-This tree implements the reusable, bounded remote-execution service. It accepts
-an immutable Relational Semantics `ScanPlan`, matches an explicit authorization
-capability, and returns the stable synchronous `BatchStream` contract. It owns
-transport, authentication execution, decoding, pagination state, network and
-resource enforcement, cancellation, and stream lifecycle. It does not construct
-connector metadata, plan relational meaning, or depend on DuckDB adapter state.
+Runtime accepts a complete plan and explicit authorization capability. It does
+not construct connector metadata, classify relational operations, or depend on
+DuckDB callback state.
 
-## Team APIs
+## Directory guide
 
-Remote Runtime consumes:
-
-- Relational Semantics' immutable `ScanPlan`; Runtime validates only whether a
-  complete plan is admitted by the installed execution profile and never
-  reinterprets predicate, ordering, limit, or residual ownership.
-- Query Experience's call-scoped `ExecutionControl` and move-only
-  `ScanAuthorization` envelope.
-
-Remote Runtime provides the stable headers in `src/include/duckdb_api/`:
-
-- `authorization.hpp` for the closed move-only authorization capability;
-- `execution.hpp` for redacted failures, cancellation, typed batches,
-  `BatchStream`, and `ScanExecutor`; and
-- `http_runtime.hpp` for process-lifetime curl initialization and the immutable
-  executor composition.
-
-Private headers mirror these packages under
-`src/include/duckdb_api/internal/runtime/`. Consumers must not import those
-headers as a team API.
-
-## Package responsibilities and dependency direction
-
-- `api/` implements the stable authorization and execution-error contracts.
-- `authentication/` materializes the fixed bearer header after plan/capability
-  admission and enforces the request-header envelope.
-- `decoding/` validates complete JSON syntax and projects strict typed rows
-  within record, string, nesting, deadline, and retained-memory budgets.
-- `execution/` admits immutable plans, constructs isolated streams, and owns
-  pull, cancellation, terminal failure, close, and page lifecycle state.
-- `pagination/` validates URI and Link grammar, then applies the separate fixed
-  sequential transition policy. Received targets never become requests.
-- `policy/` enforces socket-address policy and aggregate page/scan resource
-  accounting.
-- `transport/` owns curl process lifetime, fixed HTTPS transport composition,
-  easy-handle configuration, callbacks, response accumulation, and HTTP/1.1
-  chunk framing.
-
-Dependencies point from execution toward the narrower authentication,
-decoding, pagination, policy, and transport services. Transport may consume
-policy predicates and budgets but cannot grant plan or credential authority.
-Pagination transition policy consumes generic Link and URI grammar; grammar
-does not depend on the GitHub transition profile. Production Runtime depends on
-the public `ScanPlan` value only, never Connector, Query, or Semantics internals.
-
-## Implementation units
-
-| Unit | Primary reason to change |
+| Directory | Change it for |
 | --- | --- |
-| `api/authorization.cpp` | The closed authorization capability's ownership, validation, or destruction contract changes. |
-| `api/execution_error.cpp` | Stable Runtime error, cancellation, typed-value, or batch mechanics change. |
-| `authentication/fixed_github_user_bearer_authenticator.cpp` | Fixed bearer placement or header-envelope enforcement changes. |
-| `decoding/json_decoder.cpp` | Accepted JSON syntax, typed projection, schema conversion, or decoded-memory accounting changes. |
-| `execution/http_plan_admission.cpp` | The installed immutable-plan admission profile changes. |
-| `execution/http_scan_executor.cpp` | Single-response stream construction, pull state, or executor dispatch changes. |
-| `execution/http_paginated_scan.cpp` | Sequential paginated stream state, page request reconstruction, or page lifecycle changes. |
-| `pagination/uri_reference.cpp` | RFC URI/URI-reference grammar changes. |
-| `pagination/link_header.cpp` | Generic Link field-value grammar changes. |
-| `pagination/link_pagination.cpp` | Fixed next-target authority or sequential transition-state policy changes. |
-| `policy/network_policy.cpp` | Address-family or private/link-local/loopback enforcement changes. |
-| `policy/scan_resource_accounting.cpp` | Page/scan reservation, commitment, exhaustion, or deadline accounting changes. |
-| `transport/http_runtime.cpp` | Curl process lifetime or installed HTTP runtime composition changes. |
-| `transport/curl_http_transport.cpp` | Fixed request-to-curl profile mapping or socket-policy binding changes. |
-| `transport/curl_transfer.cpp` | Curl easy-handle configuration, transfer orchestration, or terminal error classification changes. |
-| `transport/curl_response_accumulator.cpp` | No-throw callbacks, response/header accumulation, metadata retention, or callback counters change. |
-| `transport/http_chunk_decoder.cpp` | HTTP/1.1 chunk framing grammar or decoded-body ceiling enforcement changes. |
-| `decoding/decoded_page_buffer.hpp` | Header-only decoded-page release and ownership accounting changes. |
-| `policy/request_header_budget.hpp` | Header-only aggregate request-header byte accounting changes. |
+| `api/` | Authorization and stable execution/error value behavior |
+| `authentication/` | Credential placement and request-header enforcement |
+| `decoding/` | JSON syntax, typed projection, conversion, and decoded-memory ownership |
+| `execution/` | Plan admission, executor dispatch, pull state, cancellation, failure, close, and page lifecycle |
+| `pagination/` | URI and Link grammar or the fixed sequential next-page policy |
+| `policy/` | Network-address rules and page/scan resource accounting |
+| `transport/` | Curl lifetime, request configuration, callbacks, response accumulation, and HTTP framing |
+
+Public consumer contracts are
+[`authorization.hpp`](../include/duckdb_api/authorization.hpp),
+[`execution.hpp`](../include/duckdb_api/execution.hpp), and
+[`http_runtime.hpp`](../include/duckdb_api/http_runtime.hpp). Headers under
+`duckdb_api/internal/runtime/` are private. Production and test inventories are
+in the package `sources.cmake` and `targets.cmake` files.
+
+## Before changing execution code
+
+- Admit the complete plan and authorization capability before materializing
+  credentials or starting side effects.
+- Keep credentials inside opaque, move-only capabilities bound to approved
+  authenticators, placements, and hosts. Diagnostics must remain redacted.
+- Treat terminal failure as failure, never clean exhaustion.
+- Keep `Cancel` and `Close` non-throwing and idempotent. Each scan owns an
+  isolated stream and call-scoped `ExecutionControl`.
+- Keep pagination sequential. A received Link target is validated and converted
+  back into typed plan state; it never becomes a request directly.
+- Preserve explicit page and scan resource ownership and release ordering.
+- Curl initialization has process lifetime. Dynamic unload/reload is not a
+  supported cleanup boundary.
+- Keep private curl observers confined to test targets and out of product
+  artifacts.
+
+The exact state machines, error taxonomy, resource authority, and protocol
+rules are in [RUNTIME_CONTRACTS.md](../../docs/RUNTIME_CONTRACTS.md).
+
+## Tests
+
+Tests mirror the production directories under `test/cpp/runtime/`:
+
+- `api/` covers authorization, batches, errors, and stream contracts;
+- `policy/`, `pagination/`, and `decoding/` contain deterministic unit oracles;
+- `execution/` uses controlled transports and Semantics-owned plan fixtures;
+- `transport/` contains real-curl, TLS, budget, pagination, policy, and lifecycle
+  oracles;
+- `support/` contains bounded test services and private probes, not production
+  APIs.
+
+| Change area | Focused targets |
+| --- | --- |
+| Authorization and stream values | `duckdb_api_authorization_contract_tests`, `duckdb_api_execution_contract_tests` |
+| Network and resource policy | `duckdb_api_network_policy_tests`, `duckdb_api_scan_resource_accounting_tests` |
+| URI and Link pagination | `duckdb_api_uri_reference_tests`, `duckdb_api_link_pagination_tests` |
+| JSON and decoded-page ownership | `duckdb_api_json_decoder_tests`, `duckdb_api_json_root_array_decoder_tests`, `duckdb_api_decoded_page_buffer_tests` |
+| Executor and page lifecycle | `duckdb_api_http_scan_executor_tests`, `duckdb_api_http_scan_executor_policy_tests`, `duckdb_api_http_scan_pagination_tests` |
+| Curl transport and lifecycle | Targets beginning `duckdb_api_curl_` in `test/cpp/runtime/targets.cmake` |
+
+`make test` runs every focused Runtime executable. Run `make build` before
+invoking a target from `<build_root>/extension/duckdb_api/`, where `build_root`
+is printed by `make paths`. Run `make verify` before handoff on the supported
+product cell.
+
+Security, credential, network, resource, pagination, concurrency, or lifecycle
+changes require the independent review defined in [AGENTS.md](../../AGENTS.md).
+Apply the [RFC triggers](../../docs/RFC_PROCESS.md) when the change makes a
+durable contract decision; an internal refactor or strict restoration of an
+existing contract does not require an RFC by default. Repository workflow is
+in [CONTRIBUTING.md](../../CONTRIBUTING.md), and maintainer accountability is
+recorded in the [Remote Runtime charter](../../docs/teams/REMOTE_RUNTIME.md).

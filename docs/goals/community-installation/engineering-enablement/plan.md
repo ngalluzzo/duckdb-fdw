@@ -61,7 +61,8 @@ change.
 | `release/0.2.0/enablement/build-authorities.json` | Code-review-pinned allowlist of exact descriptor and Community export identities authorized for build normalization; remains empty until maintainers approve a real run |
 | `release/0.2.0/enablement/evidence-allowlist.json` | Exact files allowed through hosted custody and final release binding |
 | `release/0.2.0/enablement/schemas/` | Versioned provider-record schemas only; no Query result or public support schema |
-| `release/0.2.0/enablement/README.md` | Provider command contracts and failure categories for Query and the release gate |
+| `release/0.2.0/enablement/README.md` | Concise status, record inventory, validation entry point, and route to exact procedures |
+| `release/0.2.0/enablement/RUNBOOK.md` | Provider command contracts and failure categories for Query and the release gate |
 | `scripts/community/verify_candidate.py` | Exact candidate commit/tree, version, license, DuckDB gitlink, and toolchain layout admission |
 | `scripts/community/audit_dependencies.py` | Dependency enumeration and canonical license-evidence production |
 | `scripts/community/descriptor_expectation.py` | Candidate-bound non-authoritative descriptor expectation validation |
@@ -90,7 +91,7 @@ change.
 | `scripts/community/tests/` | Remaining focused candidate, descriptor, dependency, record-boundary, custody, and tamper oracles with deterministic fake upstream records |
 | `scripts/test-community-enablement.sh` | Stable focused entry point and structural workflow guard |
 | `.github/workflows/community-evidence-custody.yml` | Minimum-permission hosted provider gates, exact staging, pinned upload/download, and post-download verification |
-| `docs/releases/0.2.0-supply-chain.md` | Maintainer runbook for descriptor, dependency, provenance, custody, and evidence commands; no ordinary-user installation guidance |
+| `docs/releases/0.2.0-supply-chain.md` | Maintainer interpretation of descriptor, dependency, provenance, custody, and evidence boundaries; exact provider commands live in the enablement runbook |
 
 The upstream descriptor lives in `duckdb/community-extensions`; this repository
 does not keep a mutable YAML mirror. Enablement prepares and validates the patch

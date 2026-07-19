@@ -1,35 +1,74 @@
-# Source ownership and dependency map
+# Source guide
 
-Production source is partitioned by durable responsibility, with one owning
-charter and one primary reason to change per package. Package-local
-`sources.cmake` files are the build inventories that owning teams maintain;
-the root build composes those inventories without redefining ownership.
+Use this guide to find the production code, public interface, and tests for a
+change. Production code is split by responsibility so that connector metadata,
+relational planning, remote execution, and DuckDB integration can evolve
+without importing one another's internals.
+
+## Request flow
 
 ```text
-Connector metadata -----> Relational planning <----- Query request
-       |                         |                         ^
-       |                         v                         |
-       |                     ScanPlan -----> Remote Runtime
-       |                         |                 |
-       +-----------------> DuckDB adapter <--------+
+DuckDB SQL
+    |
+    v
+Query adapter ----> ScanRequest
+                        |
+Connector catalog ----> Relational planner ----> ScanPlan
+                                                  |
+                                                  v
+                                           Remote Runtime
+                                                  |
+                                                  v
+                                             typed batches
+                                                  |
+                                                  v
+                                           Query adapter
+                                                  |
+                                                  v
+                                           DuckDB DataChunk
 ```
 
-Arrows point from provider to consumer. Query supplies the protocol-neutral
-request consumed by Semantics, while its DuckDB adapter consumes the immutable
-connector, plan, and runtime stream services. Runtime executes a complete plan;
-it does not reconstruct Connector or Query state or reclassify relational
-meaning.
+The adapter translates DuckDB state into a protocol-neutral request. The
+planner combines that request with immutable connector metadata and produces a
+complete plan. Runtime executes the plan and returns typed batches; it does not
+reconstruct connector or relational meaning.
 
-| Package | Owning charter | Provides | May consume |
+## Where to make a change
+
+| If you are changing... | Start in | Public headers | Tests |
 | --- | --- | --- | --- |
-| [`connector/`](connector/) | [Connector Experience](../docs/teams/CONNECTOR_EXPERIENCE.md) | Immutable compiled connector metadata and native catalog composition | Standard library and Connector-private helpers |
-| [`semantics/`](semantics/) | [Relational Semantics](../docs/teams/RELATIONAL_SEMANTICS.md) | Deterministic `ScanRequest` to immutable `ScanPlan` planning | Connector and Query public values |
-| [`runtime/`](runtime/) | [Remote Runtime](../docs/teams/REMOTE_RUNTIME.md) | Bounded authenticated execution, transport, decoding, pagination, policy, and stream lifecycle | Immutable public `ScanPlan` and execution controls |
-| [`query/`](query/) | [Query Experience](../docs/teams/QUERY_EXPERIENCE.md) | Protocol-neutral requests, installed composition, and DuckDB integration | Public Connector, Semantics, and Runtime services |
+| Installed connector metadata, relation schemas, pagination declarations, or resource ceilings | [`connector/`](connector/) | `src/include/duckdb_api/connector*.hpp` | `test/cpp/connector/` |
+| Planning, conservative fallback, plan validation, or plan explanation | [`semantics/`](semantics/) | `scan_plan.hpp`, `scan_planner.hpp` | `test/cpp/semantics/` |
+| Authentication execution, HTTP, decoding, pagination, policy, resources, cancellation, or streams | [`runtime/`](runtime/) | `authorization.hpp`, `execution.hpp`, `http_runtime.hpp` | `test/cpp/runtime/` |
+| DuckDB registration, bind/init/scan callbacks, secrets, request construction, or installed composition | [`query/`](query/) | `scan_request.hpp`, `duckdb_secret.hpp`, `product_composition.hpp`, `duckdb_api_extension.hpp` | `test/cpp/query/` |
 
-Stable provider facades share the `src/include/duckdb_api/` namespace so
-consumers do not depend on physical implementation layout. Private headers are
-grouped beneath `src/include/duckdb_api/internal/<provider>/` and are not team
-APIs. Tests mirror production packages under `test/cpp/`; a consumer links a
-bounded provider fixture service or an explicit integration target instead of
-compiling and constructing provider internals.
+Stable consumer headers live directly under `src/include/duckdb_api/`; the
+DuckDB extension entry facade is the root-level
+`src/include/duckdb_api_extension.hpp`. Provider-private headers live under
+`src/include/duckdb_api/internal/` and must not be included by another package.
+Each package owns its `sources.cmake` and `targets.cmake`; update both the
+production and mirrored test inventories when adding or moving a translation
+unit.
+
+## Build and test
+
+Run the supported development loop from the repository root:
+
+```sh
+make build
+make test
+make demo
+```
+
+`make test` runs every focused package executable and the cross-layer product
+oracles. Package READMEs map common changes to the relevant focused target.
+Before handoff, run `make verify` on the supported product cell; it allocates a
+fresh build root instead of reusing the developer cache.
+
+For cross-package changes, read [the architecture](../docs/ARCHITECTURE.md),
+[connector specifications](../docs/CONNECTOR_SPECIFICATIONS.md),
+[runtime contracts](../docs/RUNTIME_CONTRACTS.md), and the
+[contribution guide](../CONTRIBUTING.md) before changing an interface. The
+[team topology](../docs/TEAM_TOPOLOGY.md) records accountability and review
+routing; it is not a substitute for the package guides or code-level API
+contracts.

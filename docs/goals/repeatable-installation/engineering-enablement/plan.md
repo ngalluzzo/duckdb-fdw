@@ -40,7 +40,9 @@ than a catch-all helper: `trusted-release.json`, `verify_trial_trust.py`,
 `verify_assembled_bundle.py`,
 `make_negative_fixture.py`, `verify_reproduced_artifacts.py`,
 the focused test modules mapped below, `distribution-paths.md`, and a short
-`README.md` that documents their command contracts. The tracked trust record
+`README.md` that summarizes the provider and routes maintainers to its tests,
+plus `RUNBOOK.md` for exact command contracts, custody rules, and procedures.
+The tracked trust record
 is the reviewed trial authority for the exact tag object, peeled commit/tree,
 release manifest, and artifact; the caller-supplied manifest and anchor cannot
 authorize new bytes. The owned shell runner invokes Query's clean-host oracle
@@ -65,9 +67,12 @@ evidence during assembly and reproduction.
 | `test_path_boundaries.py` | Symlink-leaf and custody-output path escape rejection |
 | `test_enablement.py` | Stable aggregate entry that discovers only the five named oracle modules above |
 
-Query Experience owns its separate plan and exactly the four root experiment
-files named there: `experiments/repeatable-installation/README.md`,
-`query_host.py`, `install_oracle.py`, and `RESULTS.md`. Those files own the
+Query Experience owns its separate plan and the root experiment entry artifacts
+named here: `experiments/repeatable-installation/README.md`, `RUNBOOK.md`,
+`query_host.py`, `install_oracle.py`, and `RESULTS.md`. Its additional modules
+are mapped in the Query plan. The README
+owns trial status, outcome, and the entry command; the runbook owns exact
+procedures and boundaries. Together with the executable files, they own the
 user-facing demonstration and guidance, the installed-extension process
 oracle, and all assertions about SQL rows, DuckDB catalog/install metadata,
 diagnostics, restart, name-based load, and absence of registered extension

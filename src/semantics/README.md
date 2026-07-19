@@ -1,36 +1,64 @@
-# Relational Semantics source package
+# Relational planning
 
-This package is owned by the
-[Relational Semantics team](../../docs/teams/RELATIONAL_SEMANTICS.md). It
-implements the deterministic, network-free transformation from an immutable
-Connector definition and Query request into an immutable, explainable scan
-plan.
+This package turns an immutable connector definition and protocol-neutral
+`ScanRequest` into a complete, immutable, explainable `ScanPlan`. Planning is
+deterministic and performs no network I/O.
 
-## Team APIs
+The planner decides what may run remotely and what DuckDB must still evaluate.
+Runtime consumes the finished plan; it must never need to repeat relational
+classification.
 
-The package consumes Connector Experience's validated, immutable
-`CompiledConnector` and Query Experience's protocol-neutral `ScanRequest` and
-capability profile. It provides the stable `duckdb_api/scan_plan.hpp` facade:
-the immutable `ScanPlan`, its relational ownership and resource obligations,
-its normalized logical-secret selector, and its explanation snapshot. Runtime
-links the corresponding plan-value service without Connector, Query, or planner
-construction dependencies. The separate `duckdb_api/scan_planner.hpp` facade
-provides `BuildConservativeScanPlan` to Query and Semantics fixtures.
+The current native profile is intentionally conservative: it requests the full
+projection, accepts only `TRUE` as the remote predicate, carries no remote
+ordering, limit, or offset, and reports those DuckDB capabilities as
+unavailable. The architecture describes broader semantic contracts; support is
+not present until the planner, adapter, and property oracles prove it.
 
-Dependencies point from Semantics to the bounded Connector and Query public
-facades only inside planner construction. Query consumes the planner facade;
-Remote Runtime consumes only the plan facade. Neither consumer constructs or
-reinterprets planner internals.
+## Start here
 
-## Implementation units
+| Change | Production code | Focused test |
+| --- | --- | --- |
+| Plan values, guarded payloads, or resource predicates | `scan_plan.cpp`, `duckdb_api/scan_plan.hpp` | `duckdb_api_scan_plan_contract_tests` |
+| Human-readable plan snapshots | `scan_plan_explain.cpp` | `duckdb_api_scan_plan_contract_tests`, `duckdb_api_scan_plan_fixture_tests` |
+| Capability narrowing or conservative classification | `scan_planner.cpp`, `duckdb_api/scan_planner.hpp` | `duckdb_api_scan_planner_tests` |
+| Connector, request, authorization, or pagination admission | `scan_planner_validation.cpp` | `duckdb_api_scan_planner_tests`, `duckdb_api_scan_plan_pagination_contract_tests` |
+| Private normalization shared by construction and validation | `scan_planner_internal.hpp` | `duckdb_api_scan_planner_tests` |
+| Reusable plan fixtures for Runtime consumers | `test/cpp/semantics/support/` | `duckdb_api_scan_plan_fixture_tests` |
 
-- `scan_plan.cpp` owns immutable plan value behavior, guarded optional payloads,
-  resource-bound predicates, and accessors.
-- `scan_plan_explain.cpp` owns the stable deterministic rendering of plan facts,
-  ownership, obligations, budgets, and classification reasons.
-- `scan_planner.cpp` owns capability and resource narrowing, conservative
-  classification, and construction of a complete plan.
-- `scan_planner_validation.cpp` owns exact provider selection and validation of
-  Connector facts, Query requests, authorization, and pagination envelopes.
-- `scan_planner_internal.hpp` is the private vocabulary-normalization seam shared
-  by construction and validation; it is not a consumer-facing team API.
+`scan_plan.hpp` is the value-only consumer interface. It intentionally carries
+no Connector, Query, or planner-construction dependency. `scan_planner.hpp` is
+the separate planning entry point used by Query. Keep that split intact when
+adding plan fields or planner inputs.
+
+## Correctness checklist
+
+- Remote predicate `R` is safe only when DuckDB predicate `D` implies `R`;
+  exact pushdown also requires `R` to imply `D`.
+- Every residual predicate has exactly one owner.
+- Required filtering and ordering happen before limit or offset.
+- Providers preserve base-row cardinality.
+- Missing DuckDB capabilities produce conservative behavior, never SQL-text
+  reconstruction.
+- Every classification has an explainable reason and a counterexample or
+  property oracle where appropriate.
+
+The complete semantic contract is in
+[ARCHITECTURE.md](../../docs/ARCHITECTURE.md) and
+[RUNTIME_CONTRACTS.md](../../docs/RUNTIME_CONTRACTS.md). For operation
+selection, declared capabilities, and connector-facing proof inputs, also read
+[CONNECTOR_SPECIFICATIONS.md](../../docs/CONNECTOR_SPECIFICATIONS.md).
+
+## Tests
+
+`make test` runs the focused planner, plan-contract, pagination-contract, and
+fixture executables declared in `test/cpp/semantics/targets.cmake`. Run
+`make build` before invoking one directly from
+`<build_root>/extension/duckdb_api/`, where `build_root` is printed by
+`make paths`. Run `make verify` before handoff on the supported product cell.
+
+Changes to a shared `ScanRequest`, `ScanPlan`, plan explanation, or relational
+rule require affected producer and consumer review and the trigger decision in
+the [RFC process](../../docs/RFC_PROCESS.md) before implementation crosses the
+boundary. Repository workflow is in [CONTRIBUTING.md](../../CONTRIBUTING.md),
+and maintainer accountability is recorded in the
+[Relational Semantics charter](../../docs/teams/RELATIONAL_SEMANTICS.md).

@@ -1,9 +1,10 @@
 # Controlled TLS fixtures
 
-These certificate materials are deterministic test-only fixtures generated for
-the `localhost` TLS oracle. The encoded key is an unencrypted PKCS#8 DER value,
-not a production credential. The Python harness reconstructs a temporary PEM
-file only for its isolated loopback server and deletes it on exit.
+These files provide the certificate authority, localhost server certificate,
+and private key used by `test/python/runtime_curl_tls_tests.py`. The harness
+decodes the PKCS#8 key into a temporary PEM file for its isolated loopback
+server and deletes that file on exit.
 
-This directory is test data and must remain excluded from every production,
-installed, and loadable source inventory.
+The key is an unencrypted, deterministic test credential. Never reuse it
+outside the test suite. This directory must remain excluded from production,
+installed, and loadable source inventories.

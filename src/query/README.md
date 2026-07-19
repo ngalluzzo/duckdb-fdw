@@ -1,49 +1,62 @@
-# Query source package
+# DuckDB integration
 
-**Owning charter:** [Query Experience](../../docs/teams/QUERY_EXPERIENCE.md)
+This package is the DuckDB-facing edge of the extension. It translates a SQL
+call into a protocol-neutral request, assembles the installed services, manages
+DuckDB secret and scan state, pulls typed runtime batches, and writes
+`DataChunk` output.
 
-This package owns the path from a DuckDB SQL question to an immutable,
-protocol-neutral request, the assembly of the installed provider services, and
-the DuckDB-facing registration, bind, initialization, scan, credential, and
-extension-entry boundaries. It does not compile connector packages, classify
-relational operations, implement transport or authentication, or reconstruct
-query structure that DuckDB does not expose.
+Connector compilation, relational classification, and remote execution stay
+behind their public interfaces; do not reproduce those rules in the adapter.
 
-## Provider boundaries
+## Lifecycle at a glance
 
-Stable Query interfaces remain in `src/include/duckdb_api/` as
-`scan_request.hpp`, `product_composition.hpp`, and `duckdb_secret.hpp`; the
-stable extension header remains `src/include/duckdb_api_extension.hpp`. Query
-consumes Connector Experience's immutable `CompiledConnector`, Relational
-Semantics' immutable `ScanPlan`, and Remote Runtime's `ScanExecutor`,
-`BatchStream`, `ExecutionControl`, structured errors, authorization capability,
-and production runtime factory only through their public headers. Production
-code does not include provider-private headers. Request and adapter tests use
-Connector's named `connector/support/` fixtures, the controlled integration
-uses Runtime's `runtime/support/` loopback service, and Relational Semantics
-consumes Query's public-builder fixture through `query/support/`.
+1. The extension entry point builds the installed composition and registers
+   the secret type and `duckdb_api_scan` table function.
+2. Bind validates constant arguments, constructs a `ScanRequest`, and asks the
+   planner for one immutable `ScanPlan`. Bind performs no network I/O.
+3. Global initialization resolves an explicitly named temporary secret and
+   opens one Runtime stream.
+4. Each scan pull validates a bounded typed batch before writing a `DataChunk`.
+5. Interruption cancels the stream. Exhaustion marks it complete. Destruction
+   cancels unfinished work and closes the stream without throwing.
+6. The adapter translates provider failures at the DuckDB exception boundary;
+   providers retain ownership of their structured, redacted errors.
 
-## DuckDB callback and lifecycle path
+## Start here
 
-The installed extension entry point builds the product composition and calls
-`RegisterDuckdbApi`. Registration completes the DuckDB secret type and provider
-before publishing `duckdb_api_scan`. Bind reads constant relation metadata,
-builds a conservative `ScanRequest`, asks Relational Semantics for one immutable
-plan, and copies that plan into DuckDB bind state without network I/O. Global
-initialization resolves any named temporary-memory secret into an
-execution-scoped authorization capability and opens exactly one Runtime stream.
-Each scan pull validates a bounded typed batch before writing a `DataChunk`.
-Interruption cancels the stream, exhaustion marks it complete, and global-state
-destruction cancels unfinished work and closes the stream without throwing.
-The adapter owns translation across the DuckDB exception boundary; providers
-retain ownership of their safe structured failures.
+| Change | Production code | Focused evidence |
+| --- | --- | --- |
+| `ScanRequest` values or DuckDB capability reporting | `scan_request.cpp`, `duckdb_api/scan_request.hpp` | `duckdb_api_scan_request_tests` |
+| Installed connector/runtime assembly | `product_composition.cpp`, `duckdb_api/product_composition.hpp` | `test/python/source_demo_contract.py` through `make test`; `make demo` for the live path |
+| Table-function registration, bind/init/scan, cancellation, or batch transfer | `duckdb/table_function_adapter.cpp` | `duckdb_api_adapter_tests`, `duckdb_api_adapter_stream_contract_tests` |
+| Secret registration, validation, or exact-name resolution | `duckdb/secret_integration.cpp`, `duckdb_api/duckdb_secret.hpp` | `duckdb_api_duckdb_secret_tests` |
+| Extension identity, load order, or initialization containment | `duckdb/extension_entrypoint.cpp`, `duckdb_api_extension.hpp` | `test/sql/duckdb_api.test`, `test/python/source_demo_contract.py` |
+| Controlled end-to-end composition | `test/cpp/query/integration/` | `test/python/live_rest_product_contract.py`, `test/python/authenticated_relation_product_contract.py`, `test/python/repository_pagination_product_contract.py` |
 
-## Implementation units
+Production and test inventories are in `src/query/{sources,targets}.cmake` and
+`test/cpp/query/{sources,targets}.cmake`. Shared test helpers live under
+`test/cpp/query/support/`; controlled product composition belongs under
+`test/cpp/query/integration/`.
 
-| Unit | Primary reason to change |
-| --- | --- |
-| `scan_request.cpp` | Protocol-neutral request identity, conservative DuckDB capability reporting, or deterministic request snapshot behavior changes. |
-| `product_composition.cpp` | The installed selection or assembly of public Connector and Runtime provider services changes. |
-| `duckdb/table_function_adapter.cpp` | DuckDB table-function registration, bind/init/scan callbacks, typed `DataChunk` transfer, cancellation, close, or execution-error translation changes. |
-| `duckdb/extension_entrypoint.cpp` | Installed extension identity, load sequencing, version exposure, or initialization exception containment changes. |
-| `duckdb/secret_integration.cpp` | DuckDB Secret Manager registration, temporary-memory secret validation, exact-name resolution, or authorization-capability transfer changes. |
+## Tests
+
+Run the ordinary developer loop from the repository root:
+
+```sh
+make build
+make test
+make demo
+```
+
+After `make build`, focused binaries are under
+`<build_root>/extension/duckdb_api/`, where `build_root` is printed by
+`make paths`. `make test` runs all four Query targets plus SQL, controlled
+service, artifact, and direct-load oracles. Run `make verify` before handoff on
+the supported product cell.
+
+Read [ARCHITECTURE.md](../../docs/ARCHITECTURE.md) for query semantics and
+[RUNTIME_CONTRACTS.md](../../docs/RUNTIME_CONTRACTS.md) for state, cancellation,
+error, and execution contracts. Shared-interface changes follow
+[CONTRIBUTING.md](../../CONTRIBUTING.md) and the
+[RFC process](../../docs/RFC_PROCESS.md). Maintainer accountability is recorded
+in the [Query Experience charter](../../docs/teams/QUERY_EXPERIENCE.md).

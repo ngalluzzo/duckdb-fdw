@@ -25,7 +25,7 @@ fix(auth)!: reject cross-host token redirects
 ## Native developer workflow
 
 On the exact supported cell documented in the
-[README](README.md#supported-cell), the repository root is the public
+[README](README.md#quick-start), the repository root is the public
 source-development boundary:
 
 ```sh
@@ -53,6 +53,28 @@ fresh product cell. The tagged release and sanitizer procedure remains the
   contract changes.
 - Treat network access, secrets, resource budgets, redaction, cancellation, and
   replay safety as part of the functional contract.
+
+### READMEs
+
+A README is an entry point for the person using or changing the directory, not
+a history of the work that created it.
+
+- Write the root README for a prospective user or first-time contributor. Lead
+  with what the product does, its current usable surface, the shortest working
+  example, prerequisites, and the supported build and test commands.
+- Write a source-package README for a developer about to change that package.
+  Map common changes to code, public interfaces, focused tests, and relevant
+  invariants. Link to the owning charter; do not restate team-process prose.
+- Write an experiment README for someone deciding whether to reproduce, inspect,
+  or retire the trial. State its status, question, outcome, one reproduction
+  command, and links to results and any detailed runbook.
+- Write a release-directory README for the maintainer inspecting those records.
+  Explain what the files are and where the exact operational procedure lives.
+- Move long exact procedures, evidence formats, and operator failure handling
+  to a named `RUNBOOK.md`. Keep durable behavior in the authoritative contract,
+  rationale in an RFC, and product history in release notes or the changelog.
+- Verify every command and local link. Prefer a concise route to one
+  authoritative source over copying material that can drift.
 
 ## Code organization
 

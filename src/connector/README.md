@@ -1,33 +1,52 @@
-# Connector source package
+# Connector metadata
 
-**Owning charter:** [Connector Experience](../../docs/teams/CONNECTOR_EXPERIENCE.md)
+This package defines the immutable catalog that describes the extension's
+installed connectors and relations. Change it when a relation, schema,
+pagination declaration, resource ceiling, catalog validation rule, or safe
+catalog explanation changes.
 
-This package owns the immutable connector catalog model, its closed pagination
-and resource declarations, and the native GitHub catalog composition. It
-performs deterministic construction, validation, and safe explanation only; it
-does not plan SQL, execute requests, resolve credentials, or perform network
-I/O.
+Connector construction is deterministic and network-free. The resulting
+`CompiledConnector` contains metadata only: no credentials, active requests,
+DuckDB callback state, or runtime objects.
 
-## Provider boundary
+## Start here
 
-The public provider facades remain `duckdb_api/connector.hpp`, which exposes
-`BuildNativeGithubConnector`, and `duckdb_api/connector_catalog.hpp`, which
-exposes the immutable compiled catalog values consumed by Query Experience,
-Relational Semantics, and Remote Runtime. Connector-private collaboration
-between implementation units lives in `duckdb_api/internal/connector/` and is
-not a consumer API.
+| Change | Production code | Test |
+| --- | --- | --- |
+| Add or change an installed GitHub relation | `native_github_composition.cpp`, `duckdb_api/connector.hpp` | `connector_contract_tests.cpp` |
+| Change catalog values, validation, lookup, or snapshots | `catalog_model.cpp`, `duckdb_api/connector_catalog.hpp` | `connector_catalog_contract_tests.cpp` |
+| Change a pagination declaration | `pagination_declaration.cpp` and its internal header | `connector_pagination_contract_tests.cpp` |
+| Change resource ceilings | `resource_ceiling_declaration.cpp` and its internal header | `connector_pagination_contract_tests.cpp`; `connector_contract_tests.cpp` for installed values |
+| Add a deterministic catalog fixture | `test/cpp/connector/support/connector_catalog_test_fixtures.*` | `connector_catalog_test_fixtures_tests.cpp` |
 
-Production units may depend on the C++ standard library and Connector's public
-or private headers. They must not depend on query requests, scan plans, runtime
-execution, transport, DuckDB integration, or consumer test internals. Consumers
-depend on the public compiled values; deterministic private construction access
-and catalog factories live under `test/cpp/connector/support/`.
+Production sources are inventoried in `sources.cmake`; provider targets are in
+`targets.cmake`. Tests and their targets mirror those files under
+`test/cpp/connector/`.
 
-## Implementation units
+The supported consumer interfaces are
+[`connector.hpp`](../include/duckdb_api/connector.hpp) and
+[`connector_catalog.hpp`](../include/duckdb_api/connector_catalog.hpp).
+Headers under `duckdb_api/internal/connector/` are implementation details.
+Tests in other packages that need non-production catalogs use the
+Connector-owned fixture service. Connector's own contract tests may use
+`test/cpp/connector/support/catalog_test_access.hpp` to exercise private model
+invariants; that construction access must not become a consumer API.
 
-| Unit | Primary reason to change |
-| --- | --- |
-| `native_github_composition.cpp` | The installed native GitHub relation inventory or its declared catalog policy changes. |
-| `catalog_model.cpp` | Compiled catalog value validation, immutable ownership, lookup, or safe explanation changes. |
-| `pagination_declaration.cpp` | The intrinsic laws or explanation of the closed compiled pagination declaration change. |
-| `resource_ceiling_declaration.cpp` | The intrinsic laws or explanation of compiled resource-ceiling declarations change. |
+## Tests
+
+`make test` runs both focused Connector executables:
+
+- `duckdb_api_connector_tests` for catalog, schema, pagination, and resource
+  contracts;
+- `duckdb_api_connector_catalog_fixture_tests` for the bounded fixture API.
+
+Run `make build` before invoking a focused binary from
+`<build_root>/extension/duckdb_api/`, where `build_root` is printed by
+`make paths`. Run `make verify` before handoff on the supported product cell.
+
+If a change affects connector-package syntax or author-visible validation,
+start with [the connector specification](../../docs/CONNECTOR_SPECIFICATIONS.md).
+If it changes a consumer interface or public behavior, follow the routing in
+[CONTRIBUTING.md](../../CONTRIBUTING.md) and the
+[RFC process](../../docs/RFC_PROCESS.md). Maintainer accountability is recorded
+in the [Connector Experience charter](../../docs/teams/CONNECTOR_EXPERIENCE.md).
