@@ -1,4 +1,4 @@
-#include "support/scan_plan_test_fixtures.hpp"
+#include "semantics/support/scan_plan_test_fixtures.hpp"
 
 #include "support/live_scan_request.hpp"
 

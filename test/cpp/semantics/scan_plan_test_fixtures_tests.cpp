@@ -1,7 +1,7 @@
-#include "support/scan_plan_test_fixture_test_support.hpp"
+#include "semantics/support/scan_plan_test_fixture_test_support.hpp"
 
-#include "support/scan_plan_contract_test_support.hpp"
-#include "support/scan_plan_test_fixtures.hpp"
+#include "semantics/support/scan_plan_contract_test_support.hpp"
+#include "semantics/support/scan_plan_test_fixtures.hpp"
 
 #include <cstdlib>
 #include <iostream>

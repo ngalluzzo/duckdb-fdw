@@ -1,4 +1,4 @@
-#include "support/scan_plan_test_access.hpp"
+#include "semantics/support/scan_plan_test_access.hpp"
 
 #include <stdexcept>
 

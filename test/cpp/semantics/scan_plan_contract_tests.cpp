@@ -2,7 +2,7 @@
 #include "connector/support/connector_catalog_test_fixtures.hpp"
 #include "support/live_scan_request.hpp"
 #include "support/require.hpp"
-#include "support/scan_plan_contract_test_support.hpp"
+#include "semantics/support/scan_plan_contract_test_support.hpp"
 
 #include <algorithm>
 #include <cstdlib>

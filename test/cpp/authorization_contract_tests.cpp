@@ -1,6 +1,6 @@
 #include "duckdb_api/execution.hpp"
 #include "support/require.hpp"
-#include "support/scan_plan_test_fixtures.hpp"
+#include "semantics/support/scan_plan_test_fixtures.hpp"
 
 #include <cstdlib>
 #include <functional>

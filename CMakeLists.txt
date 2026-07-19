@@ -89,28 +89,30 @@ set(CONNECTOR_TEST_SERVICE_SOURCES
     test/cpp/connector/support/connector_catalog_test_fixtures.cpp)
 set(QUERY_REQUEST_SOURCES src/scan_request.cpp)
 set(RELATIONAL_PLANNING_SOURCES
-    src/scan_plan.cpp
-    src/scan_planner.cpp)
+    src/semantics/scan_plan.cpp
+    src/semantics/scan_plan_explain.cpp
+    src/semantics/scan_planner.cpp
+    src/semantics/scan_planner_validation.cpp)
 set(RELATIONAL_PLAN_TEST_SERVICE_SOURCES
-    test/cpp/support/scan_plan_test_fixtures.cpp
-    test/cpp/support/scan_plan_operation_test_fixtures.cpp
-    test/cpp/support/scan_plan_auth_test_fixtures.cpp
-    test/cpp/support/scan_plan_response_test_fixtures.cpp
-    test/cpp/support/scan_plan_network_test_fixtures.cpp
-    test/cpp/support/scan_plan_feature_test_fixtures.cpp
-    test/cpp/support/scan_plan_resource_test_fixtures.cpp
-    test/cpp/support/scan_plan_fixture_consumer_probe.cpp)
+    test/cpp/semantics/support/scan_plan_test_fixtures.cpp
+    test/cpp/semantics/support/scan_plan_operation_test_fixtures.cpp
+    test/cpp/semantics/support/scan_plan_auth_test_fixtures.cpp
+    test/cpp/semantics/support/scan_plan_response_test_fixtures.cpp
+    test/cpp/semantics/support/scan_plan_network_test_fixtures.cpp
+    test/cpp/semantics/support/scan_plan_feature_test_fixtures.cpp
+    test/cpp/semantics/support/scan_plan_resource_test_fixtures.cpp
+    test/cpp/semantics/support/scan_plan_fixture_consumer_probe.cpp)
 set(RELATIONAL_PLAN_PAGINATION_TEST_SERVICE_SOURCES
-    test/cpp/support/scan_plan_pagination_test_fixtures.cpp)
+    test/cpp/semantics/support/scan_plan_pagination_test_fixtures.cpp)
 set(RELATIONAL_PLAN_TEST_CONTRACT_SOURCES
-    test/cpp/support/scan_plan_test_fixture_test_support.cpp
-    test/cpp/scan_plan_operation_test_fixture_tests.cpp
-    test/cpp/scan_plan_auth_test_fixture_tests.cpp
-    test/cpp/scan_plan_response_test_fixture_tests.cpp
-    test/cpp/scan_plan_network_test_fixture_tests.cpp
-    test/cpp/scan_plan_feature_test_fixture_tests.cpp
-    test/cpp/scan_plan_resource_test_fixture_tests.cpp
-    test/cpp/scan_plan_fixture_consumer_boundary_tests.cpp)
+    test/cpp/semantics/support/scan_plan_test_fixture_test_support.cpp
+    test/cpp/semantics/scan_plan_operation_test_fixture_tests.cpp
+    test/cpp/semantics/scan_plan_auth_test_fixture_tests.cpp
+    test/cpp/semantics/scan_plan_response_test_fixture_tests.cpp
+    test/cpp/semantics/scan_plan_network_test_fixture_tests.cpp
+    test/cpp/semantics/scan_plan_feature_test_fixture_tests.cpp
+    test/cpp/semantics/scan_plan_resource_test_fixture_tests.cpp
+    test/cpp/semantics/scan_plan_fixture_consumer_boundary_tests.cpp)
 set(REMOTE_RUNTIME_INTERFACE_SOURCES
     src/authorization.cpp
     src/execution_error.cpp)
@@ -247,7 +249,7 @@ target_include_directories(duckdb_api_scan_request_tests PRIVATE test/cpp)
 
 add_executable(
   duckdb_api_scan_planner_tests
-  test/cpp/scan_planner_tests.cpp
+  test/cpp/semantics/scan_planner_tests.cpp
   ${CONNECTOR_METADATA_SOURCES}
   ${CONNECTOR_TEST_SERVICE_SOURCES}
   ${QUERY_REQUEST_SOURCES}
@@ -257,7 +259,7 @@ target_include_directories(duckdb_api_scan_planner_tests PRIVATE test/cpp)
 
 add_executable(
   duckdb_api_scan_plan_contract_tests
-  test/cpp/scan_plan_contract_tests.cpp
+  test/cpp/semantics/scan_plan_contract_tests.cpp
   ${CONNECTOR_METADATA_SOURCES}
   ${CONNECTOR_TEST_SERVICE_SOURCES}
   ${QUERY_REQUEST_SOURCES}
@@ -267,7 +269,7 @@ target_include_directories(duckdb_api_scan_plan_contract_tests PRIVATE test/cpp)
 
 add_executable(
   duckdb_api_scan_plan_pagination_contract_tests
-  test/cpp/scan_plan_pagination_contract_tests.cpp
+  test/cpp/semantics/scan_plan_pagination_contract_tests.cpp
   ${CONNECTOR_METADATA_SOURCES}
   ${CONNECTOR_TEST_SERVICE_SOURCES}
   ${QUERY_REQUEST_SOURCES}
@@ -278,7 +280,7 @@ target_include_directories(duckdb_api_scan_plan_pagination_contract_tests PRIVAT
 
 add_executable(
   duckdb_api_scan_plan_fixture_tests
-  test/cpp/scan_plan_test_fixtures_tests.cpp
+  test/cpp/semantics/scan_plan_test_fixtures_tests.cpp
   ${CONNECTOR_METADATA_SOURCES}
   ${QUERY_REQUEST_SOURCES}
   ${RELATIONAL_PLANNING_SOURCES}
@@ -302,7 +304,7 @@ add_executable(
   ${CONNECTOR_METADATA_SOURCES}
   ${QUERY_REQUEST_SOURCES}
   ${RELATIONAL_PLANNING_SOURCES}
-  test/cpp/support/scan_plan_test_fixtures.cpp
+  test/cpp/semantics/support/scan_plan_test_fixtures.cpp
   ${REMOTE_RUNTIME_INTERFACE_SOURCES})
 configure_duckdb_api_cpp_target(duckdb_api_authorization_contract_tests)
 target_include_directories(duckdb_api_authorization_contract_tests PRIVATE test/cpp)
@@ -365,7 +367,7 @@ add_executable(
   ${CONNECTOR_METADATA_SOURCES}
   ${QUERY_REQUEST_SOURCES}
   ${RELATIONAL_PLANNING_SOURCES}
-  test/cpp/support/scan_plan_test_fixtures.cpp
+  test/cpp/semantics/support/scan_plan_test_fixtures.cpp
   ${REMOTE_RUNTIME_INTERFACE_SOURCES}
   ${REMOTE_RUNTIME_EXECUTOR_SOURCES})
 configure_duckdb_api_cpp_target(duckdb_api_http_scan_executor_tests)
@@ -380,7 +382,7 @@ add_executable(
   ${CONNECTOR_TEST_SERVICE_SOURCES}
   ${QUERY_REQUEST_SOURCES}
   ${RELATIONAL_PLANNING_SOURCES}
-  test/cpp/support/scan_plan_test_fixtures.cpp
+  test/cpp/semantics/support/scan_plan_test_fixtures.cpp
   ${RELATIONAL_PLAN_PAGINATION_TEST_SERVICE_SOURCES}
   ${REMOTE_RUNTIME_INTERFACE_SOURCES}
   ${REMOTE_RUNTIME_EXECUTOR_SOURCES})

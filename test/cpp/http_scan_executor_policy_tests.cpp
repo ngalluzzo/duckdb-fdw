@@ -4,7 +4,7 @@
 #include "support/controlled_http_transport.hpp"
 #include "support/http_scan_executor_test_support.hpp"
 #include "support/require.hpp"
-#include "support/scan_plan_test_fixtures.hpp"
+#include "semantics/support/scan_plan_test_fixtures.hpp"
 
 #include <cstdlib>
 #include <iostream>

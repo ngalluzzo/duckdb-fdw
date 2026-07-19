@@ -1,9 +1,9 @@
-#include "support/scan_plan_test_fixture_test_support.hpp"
+#include "semantics/support/scan_plan_test_fixture_test_support.hpp"
 
 #include "support/live_scan_request.hpp"
 #include "support/require.hpp"
-#include "support/scan_plan_contract_test_support.hpp"
-#include "support/scan_plan_test_fixtures.hpp"
+#include "semantics/support/scan_plan_contract_test_support.hpp"
+#include "semantics/support/scan_plan_test_fixtures.hpp"
 
 #include <fstream>
 #include <string>
@@ -52,8 +52,8 @@ void TestValidFactoriesUsePublicPlanningPath() {
 
 void TestSafeConsumerHeaderBoundary() {
 	const std::string root = DUCKDB_API_SOURCE_ROOT;
-	const auto header = ReadText(root + "/test/cpp/support/scan_plan_test_fixtures.hpp");
-	const auto consumer = ReadText(root + "/test/cpp/support/scan_plan_fixture_consumer_probe.cpp");
+	const auto header = ReadText(root + "/test/cpp/semantics/support/scan_plan_test_fixtures.hpp");
+	const auto consumer = ReadText(root + "/test/cpp/semantics/support/scan_plan_fixture_consumer_probe.cpp");
 	const std::vector<std::string> forbidden = {"scan_plan_test_access",
 	                                            "connector_catalog_test_access",
 	                                            "duckdb/main",
@@ -75,7 +75,7 @@ void TestSafeConsumerHeaderBoundary() {
 	const auto first_include = consumer.find("#include");
 	Require(first_include != std::string::npos &&
 	            consumer.find("#include", first_include + std::string("#include").size()) == std::string::npos &&
-	            consumer.find("support/scan_plan_test_fixtures.hpp") != std::string::npos,
+	            consumer.find("semantics/support/scan_plan_test_fixtures.hpp") != std::string::npos,
 	        "consumer probe included more than the safe fixture header");
 }
 
