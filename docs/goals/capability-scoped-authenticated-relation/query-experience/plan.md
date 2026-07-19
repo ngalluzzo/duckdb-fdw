@@ -9,9 +9,11 @@ registration, relation-specific SQL argument behavior, offline bind and copy,
 execution-time exact-name lookup, adapter lifecycle and diagnostics, product
 composition, and the user-visible controlled and public acceptance oracles.
 
-Status: **Active**. No product implementation is claimed by this plan. The
-accepted provider interfaces and permanent source, tests, contract propagation,
-review, and interaction exits remain delivery work.
+Status: **Implementation delivered; provider interactions satisfied**. The
+permanent source, controlled evidence, contract propagation, independent
+review, cached/fresh gates, and live mechanism proof are complete. Product
+acceptance remains pending only on the RFC's exact short-lived fine-grained
+credential pedigree or an approved evidence deviation.
 
 ## Ownership boundary
 
@@ -184,29 +186,34 @@ file overlap is treated as boundary evidence, not solved by joint editing.
 
 ## Interaction exits
 
-- **Connector Experience — Open; Collaboration, then X-as-a-Service.** Exit
-  when Query resolves both relations and binds their schemas through the public
-  immutable catalog, contains no copied request/auth policy or Connector
-  implementation include, and controlled/public contract oracles agree with
-  Connector's independent metadata evidence.
-- **Relational Semantics — Open; Collaboration, then X-as-a-Service.** Exit
-  when Query constructs only its protocol-neutral `ScanRequest`, retains the
-  returned immutable `ScanPlan`, and neither resolves credentials nor
+- **Connector Experience — Satisfied; X-as-a-Service.** Query resolves both
+  relations and binds their schemas through the public immutable catalog,
+  contains no copied request/auth policy or Connector implementation include,
+  and controlled/public contract oracles agree with Connector's independent
+  metadata evidence. Re-enter Collaboration if these conditions cease to hold.
+- **Relational Semantics — Satisfied; X-as-a-Service.** Query constructs only
+  its protocol-neutral request and consumes the immutable plan through public
+  services, retains the returned immutable `ScanPlan`, and neither resolves
+  credentials nor
   reclassifies cardinality, authentication, host/placement, or relational
-  ownership; provider and Query oracles must agree for both relations.
-- **Remote Runtime — Open; Collaboration, then X-as-a-Service.** Exit when
-  Query hands one opaque scan-scoped capability to the documented executor,
-  consumes only public stream/batch/control/error APIs, and has no
-  `Authorization`, bearer, host, redirect, curl, transport, decoder, or Runtime
-  internal dependency. Focused Runtime and Query lifecycle/redaction oracles
-  must pass independently.
-- **Query Experience outcome — Open.** Exit when the permanent public artifact
-  exposes the accepted secret and SQL surfaces, the complete controlled and
-  opt-in public narratives pass, contract propagation and independent review
-  are complete, and cached/fresh gates support every acceptance signal without
-  provider-boundary violations.
+  ownership. Provider and Query oracles agree for both relations. Re-enter
+  Collaboration if these conditions cease to hold.
+- **Remote Runtime — Satisfied; X-as-a-Service.** Query uses the public
+  authorization/executor/stream surface without Runtime internal imports or
+  header, host, curl, transport, or decoder construction. Query hands one
+  opaque scan-scoped capability to the documented executor and consumes only
+  public stream/batch/control/error APIs. Focused Runtime and Query lifecycle
+  oracles pass independently. Re-enter Collaboration if these conditions cease
+  to hold.
+- **Query Experience outcome — Acceptance pending.** The permanent public
+  artifact exposes the accepted secret and SQL surfaces, the complete
+  controlled and opt-in public narratives pass, contract propagation and
+  independent review are complete, and cached/fresh gates support every
+  acceptance signal without provider-boundary violations. Only the live
+  credential-pedigree decision remains open.
 
-No interaction is satisfied by this planning commit. Exit status is audited
-against final includes, construction points, state ownership, tests, adjacent
-code documentation, and artifact inventory after all provider branches are
-integrated.
+The final audit inspected includes, construction points, state ownership,
+tests, adjacent code documentation, and artifact inventory on committed tree
+`861b14b`. Provider interactions are satisfied. The Query outcome remains open
+only for product management's decision on the live credential-pedigree evidence
+recorded in the parent goal.

@@ -2,7 +2,7 @@
 
 ## Facilitation objective and routing
 
-Status: **Active; Facilitation open**.
+Status: **Delivered; Facilitation satisfied and handed back**.
 
 Make RFC 0006's permanent provider modules, focused oracles, controlled product
 oracle, and `0.4.0` public artifact reproducibly buildable and difficult to omit
@@ -163,3 +163,14 @@ Enablement maintains only the reusable build, identity, and inventory
 mechanisms. A later provider source addition should require a bounded manifest
 update, not renewed cross-team design or an Enablement approval queue. Domain
 quality and product acceptance explicitly return to their charter owners.
+
+### Exit evidence
+
+Commits `06eb6d8`, `f472372`, and `861b14b` integrate the provider graph,
+publish the `0.4.0` identities, and close the final header-budget gap. Every
+provider target is independently runnable; public and controlled artifacts
+have distinct admitted source graphs; source, dependency, symbol, linkage,
+private-seam, and credential canaries pass. Cached `make test PROFILE=debug`
+and the no-cache 757-step `make verify PROFILE=debug` both reach the complete
+product path. Ownership therefore returns to the provider teams without an
+Enablement approval queue.

@@ -2,7 +2,7 @@
 
 ## Outcome and boundary
 
-Status: **Planned; Collaboration open**.
+Status: **Delivered; interaction satisfied as X-as-a-Service**.
 
 Provide RFC 0006's permanent native product with one deterministic, immutable
 `CompiledConnector` catalog containing the existing anonymous GitHub relation
@@ -168,7 +168,7 @@ graph. Consumer-owned files are not authorized edits on this branch.
 
 ## Collaboration to X-as-a-Service exit
 
-Current status: **Open; Collaboration**.
+Current status: **Satisfied; X-as-a-Service**.
 
 Learning objective: prove that exact relation lookup plus the typed relation
 and credential-policy API lets Query and Semantics consume the catalog without
@@ -195,6 +195,17 @@ snapshot lifetime; it is not a public ABI or authoring promise. The exit remains
 Open if any consumer infers auth from a name or boolean, needs constructor
 details, mutates a relation for integration, duplicates bearer/host/header
 policy, or requires routine coordinated edits outside this provider contract.
+
+### Exit evidence
+
+Commits `2280fff` and `1047667` deliver the immutable two-relation catalog and
+its independent fixture boundary. Focused catalog/contract tests, source
+identity, public artifact canaries, cached product tests, and the 757-step
+fresh product build pass. Final dependency inspection confirms Query and
+Semantics use public const catalog accessors, Runtime receives policy only
+through `ScanPlan`, and no credential value or DuckDB secret name enters
+Connector state. The documented service boundary is now the routine
+interaction; any condition in the paragraph above reopens Collaboration.
 
 ## Explicit exclusions
 

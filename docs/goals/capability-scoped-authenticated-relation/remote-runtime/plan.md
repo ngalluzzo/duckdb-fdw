@@ -11,11 +11,10 @@ executable authorization and network envelope before decoration, preserves the
 anonymous `0.3.0` relation, and owns bounded cancellation, redacted failures,
 and cleanup of every transient credential-bearing object.
 
-This is the Runtime workstream for the Query Experience outcome **First
-capability-scoped authenticated relation**. RFC 0006 is Accepted. The branch is
-`goal/0.4-auth/runtime` in the isolated `.worktrees/auth-delivery/runtime`
-worktree. Implementation and the Runtime-to-Query interaction exit are
-**Open**; this plan does not claim delivered behavior.
+This is the delivered Runtime workstream for the Query Experience outcome
+**First capability-scoped authenticated relation**. RFC 0006 is Accepted.
+Implementation and the Runtime-to-Query interaction exit are **Satisfied** on
+the integrated product tree.
 
 Remote Runtime remains a supporting platform team. It does not acquire product
 accountability, DuckDB secret-manager coupling, connector metadata ownership,
@@ -248,30 +247,35 @@ diagnostic identity.
 
 ## Interaction exits
 
-- **Query Experience — Open; Collaboration → X-as-a-Service.** Exit when Query
+- **Query Experience — Satisfied; X-as-a-Service.** Query
   resolves DuckDB secrets and moves token bytes through the documented Runtime
   factory, opens and consumes streams through public authorization/execution
   APIs, and translates structured errors without constructing auth headers or
   importing Runtime internals. Runtime must import no DuckDB header or secret
   object. Query's end-to-end rotation/drop/cancellation narrative and Runtime's
   DuckDB-free capability/lifecycle tests must agree.
-- **Relational Semantics — Open; Collaboration → X-as-a-Service.** Exit when
+- **Relational Semantics — Satisfied; X-as-a-Service.**
   Runtime consumes public immutable plan accessors for the exact executable
   auth/network envelope, focused tests use provider-owned plans or builders,
   and no Runtime source constructs, mutates, reparses, or reclassifies
   relational or policy internals.
-- **Connector Experience — Open; Collaboration → X-as-a-Service.** Exit when
+- **Connector Experience — Satisfied; X-as-a-Service.**
   Runtime receives credential-free policy only through the accepted plan,
   neither imports Connector construction internals nor accepts a secret or
   DuckDB name from metadata, and wrong-policy tests demonstrate fail-closed
   consumption without bespoke coordination.
 
-The Runtime interaction is not satisfied merely because an opaque type exists
-or an end-to-end query passes. Exit requires the final declarations, public
-headers, includes, factories, stream state, build targets, focused tests, and
-code documentation to show that Runtime independently owns authorization and
-transport enforcement while Query remains a low-friction consumer. Until that
-audit passes, all three collaborations remain Open.
+The final audit covered declarations, public headers, includes, factories,
+stream state, build targets, focused tests, and adjacent code documentation.
+Commits `98c7138`, `d4e53f1`, and `861b14b` provide the opaque capability,
+authenticated execution, and bounded header enforcement. Runtime production
+imports no DuckDB or Connector construction header; Query imports no Runtime
+internal header and constructs no wire authorization or destination; Runtime
+consumes relational meaning through public immutable plan accessors. Two
+exact-tree re-reviews reported no remaining P0-P3 transport, credential,
+resource, or lifecycle finding after the final repair. All three
+collaborations are therefore satisfied; a boundary violation reopens the
+relevant interaction.
 
 ## Explicit non-work
 

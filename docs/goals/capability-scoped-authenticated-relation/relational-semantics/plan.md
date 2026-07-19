@@ -9,10 +9,10 @@ successful `/user` object as its complete base domain and records
 `EXACTLY_ONE_ON_SUCCESS` source cardinality. That cardinality is not `LIMIT 1`,
 a row estimate, or a decoder budget and grants no early row-removal authority.
 
-Status: **Planned; collaboration Open**. RFC 0006 is Accepted at `28d9a83`.
-Query Experience remains accountable for the product outcome; Relational
-Semantics provides the planning service until the exits below support
-X-as-a-Service.
+Status: **Delivered; interactions satisfied as X-as-a-Service**. RFC 0006 is
+Accepted. Query Experience remains accountable for the product outcome;
+Relational Semantics now provides the completed planning service through its
+documented boundary.
 
 ## Permanent ownership
 
@@ -187,9 +187,13 @@ consumer reclassification.
   obligation/budgets plus the separate capability and do not derive relational
   meaning or import planner construction/explanation internals.
 
-All three exits remain **Open** until final declarations, includes,
-construction points, focused and consumer tests, and contract propagation
-support them. Then the complete immutable, credential-plaintext-free
-`ScanPlan` is the normal Semantics X-as-a-Service boundary for both native
-relations. Material changes to cardinality, reference meaning, auth obligation,
-ownership, or dependency direction return through RFC review.
+All three exits are **Satisfied; X-as-a-Service**. Commits `23d2393` and
+`4c39d55` provide the permanent plan and closed fixtures. Final declarations,
+includes, construction points, focused tests, controlled/public consumers,
+contract propagation, source identity, and the cached/fresh product gates show
+that Connector supplies immutable metadata, Query supplies only a logical
+request/reference, and Runtime consumes public plan accessors plus its separate
+capability. The immutable credential-plaintext-free `ScanPlan` is the normal
+service boundary for both relations. Material changes to cardinality,
+reference meaning, auth obligation, ownership, or dependency direction return
+through RFC review.

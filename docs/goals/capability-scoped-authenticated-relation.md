@@ -2,10 +2,13 @@
 
 Follow `docs/PRODUCT_DELIVERY.md`.
 
-Status: **Active**. The product manager approved the outcome and guardrails,
-RFC 0006 is Accepted, and Query Experience is the accountable stream team.
-Delivery evidence and interaction exits remain open until the permanent product
-path passes the complete acceptance narrative.
+Status: **Acceptance pending**. The permanent product path, contract
+propagation, team interaction exits, controlled evidence, independent review,
+cached gate, fresh gate, and a live GitHub compatibility execution are
+complete. Product acceptance remains open only because the available live
+credential was a GitHub CLI OAuth token whose short-lived, fine-grained
+pedigree could not be attested; RFC 0006 names that credential pedigree for the
+operator-supplied compatibility check.
 
 ## PM brief
 
@@ -171,3 +174,46 @@ becoming an empty result or anonymous fallback.
    preserving the anonymous relation.
 3. Prove current GitHub compatibility, complete independent review and
    interaction-exit audits, and pass the cached and fresh product gates.
+
+## Delivery evidence record
+
+The permanent `0.4.0` path is implemented through the team-owned catalog,
+planner, authorization/runtime, DuckDB secret/adapter, composition, build, and
+release modules. The accepted SQL creates an explicitly named temporary
+`duckdb_api` secret, resolves its current value only at execution
+initialization, and returns the fixed `id BIGINT`, `login VARCHAR`, and
+`site_admin BOOLEAN` row from `github.authenticated_user`. The anonymous
+relation remains credential-free.
+
+Evidence on committed product tree `861b14b75f0cae8aaa76e333429e5f7cc9752060`:
+
+- cached `make test PROFILE=debug` passed all focused native suites, 58 SQL
+  assertions, public artifact reconstruction, the 20-request anonymous matrix,
+  and the 20-request authenticated matrix;
+- fresh `make verify PROFILE=debug` executed 757 build steps without developer
+  cache reuse and reproduced the same evidence; its public artifact SHA-256 is
+  `4b9fa78a8282b191e4d577c83a9a554463260790bfe6f7394de5b237e6b51bb5`;
+- source identities are native
+  `89e32b32074aba6046959ad6a47d872cdbcbcce6c9f4acb77c9c986e7df690d0`,
+  controlled
+  `620f25af26070565a70709d2d4c03b7374d1557a338f7bf0579a9177a727ad2e`,
+  and canonical public contract
+  `02e6eb66801e665ed6be5db70706505842ee726090ecc39025d592cad95023b5`;
+- independent exact-tree reviews closed the outbound-header resource defect
+  and the public-contract evidence gap, then reported no remaining P0-P3
+  findings for the frozen repair diff; and
+- a safe live execution loaded `duckdb_api 0.4.0` in DuckDB 1.5.4 and observed
+  exactly one row with the declared schema without retaining the token or
+  personal row contents in evidence.
+
+Connector Experience, Relational Semantics, and Remote Runtime have exited
+Collaboration to their documented X-as-a-Service boundaries. Engineering
+Enablement has exited Facilitation. Query Experience owns the assembled public
+outcome without routine cross-team edits.
+
+The live execution proves current endpoint and mechanism compatibility, but it
+does not satisfy the RFC's credential-pedigree oracle: the operator credential
+available from GitHub CLI was OAuth, had broader scopes, and advertised no
+expiration. Product management must either accept that safe compatibility
+execution as a one-time evidence deviation or supply and operate a short-lived
+fine-grained token without placing it in repository or chat evidence.
