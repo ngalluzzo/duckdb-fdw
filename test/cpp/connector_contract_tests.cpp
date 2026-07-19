@@ -1,5 +1,6 @@
 #include "duckdb_api/connector.hpp"
 #include "support/connector_catalog_contract.hpp"
+#include "support/connector_pagination_contract.hpp"
 #include "support/require.hpp"
 
 #include <cstdlib>
@@ -40,6 +41,16 @@ void RequireSharedSchema(const duckdb_api::CompiledRelation &relation) {
 	RequireColumn(columns[2], "site_admin", "BOOLEAN", "$.site_admin");
 }
 
+void RequireRepositorySchema(const duckdb_api::CompiledRelation &relation) {
+	const auto &columns = relation.Columns();
+	Require(columns.size() == 5, "authenticated repository schema width drifted");
+	RequireColumn(columns[0], "id", "BIGINT", "$.id");
+	RequireColumn(columns[1], "full_name", "VARCHAR", "$.full_name");
+	RequireColumn(columns[2], "private", "BOOLEAN", "$.private");
+	RequireColumn(columns[3], "fork", "BOOLEAN", "$.fork");
+	RequireColumn(columns[4], "archived", "BOOLEAN", "$.archived");
+}
+
 void RequireQueryParameter(const duckdb_api::CompiledQueryParameter &parameter, const std::string &name,
                            const std::string &encoded_value) {
 	Require(parameter.name == name, "CompiledOperation query name drifted: " + name);
@@ -54,7 +65,7 @@ void RequireHeader(const duckdb_api::CompiledHttpHeader &header, const std::stri
 void RequireFixedHeaders(const std::vector<duckdb_api::CompiledHttpHeader> &headers) {
 	Require(headers.size() == 3, "CompiledOperation fixed header width drifted");
 	RequireHeader(headers[0], "Accept", "application/vnd.github+json");
-	RequireHeader(headers[1], "User-Agent", "duckdb-api/0.4.0");
+	RequireHeader(headers[1], "User-Agent", "duckdb-api/0.5.0");
 	RequireHeader(headers[2], "X-GitHub-Api-Version", "2022-11-28");
 	for (const auto &header : headers) {
 		Require(header.name != "Authorization" && header.name != "authorization",
@@ -70,14 +81,26 @@ void RequireGithubOrigin(const duckdb_api::CompiledRestOrigin &origin) {
 	Require(origin.port == 443, "CompiledOperation origin port drifted");
 }
 
+void RequireRequiredBearer(const duckdb_api::CompiledRelation &relation) {
+	const auto &authentication = relation.Authentication();
+	Require(authentication.Requirement() == duckdb_api::CompiledCredentialRequirement::REQUIRED,
+	        "authenticated relation no longer requires a credential");
+	Require(authentication.LogicalCredential() == "token", "authenticated logical credential identifier drifted");
+	Require(authentication.Authenticator() == duckdb_api::CompiledAuthenticator::BEARER,
+	        "authenticated relation authenticator drifted");
+	Require(authentication.Placement() == duckdb_api::CompiledCredentialPlacement::AUTHORIZATION_HEADER,
+	        "authenticated relation placement drifted");
+	Require(authentication.Destination() != nullptr, "authenticated relation lost its credential destination");
+	RequireGithubOrigin(*authentication.Destination());
+}
+
 void RequireBaseOperation(const duckdb_api::CompiledOperation &operation) {
 	Require(operation.fallback, "CompiledOperation is no longer the fallback");
 	Require(operation.protocol == duckdb_api::CompiledProtocol::REST, "CompiledOperation protocol drifted");
 	Require(operation.method == duckdb_api::CompiledHttpMethod::GET, "CompiledOperation method drifted");
 	Require(operation.replay_safety == duckdb_api::CompiledReplaySafety::SAFE,
 	        "CompiledOperation replay safety drifted");
-	Require(!operation.retry_enabled && !operation.pagination_enabled,
-	        "CompiledOperation enabled an excluded capability");
+	Require(!operation.retry_enabled, "CompiledOperation enabled retry");
 	RequireGithubOrigin(operation.request.origin);
 	RequireFixedHeaders(operation.request.headers);
 }
@@ -87,18 +110,24 @@ void TestCatalogAndLookup() {
 	Require(connector.Origin() == duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA,
 	        "CompiledConnector origin drifted");
 	Require(connector.ConnectorName() == "github", "CompiledConnector identifier drifted");
-	Require(connector.Version() == "0.4.0", "CompiledConnector metadata version drifted");
-	Require(connector.Relations().size() == 2, "CompiledConnector relation catalog width drifted");
+	Require(connector.Version() == "0.5.0", "CompiledConnector metadata version drifted");
+	Require(connector.Relations().size() == 3, "CompiledConnector relation catalog width drifted");
 	Require(connector.Relations()[0].Name() == "duckdb_login_search_page",
 	        "CompiledConnector anonymous relation order drifted");
 	Require(connector.Relations()[1].Name() == "authenticated_user",
 	        "CompiledConnector authenticated relation order drifted");
+	Require(connector.Relations()[2].Name() == "authenticated_repositories",
+	        "CompiledConnector authenticated repository relation order drifted");
 	Require(connector.FindRelation("duckdb_login_search_page") == &connector.Relations()[0],
 	        "CompiledConnector exact lookup did not return the catalog relation");
 	Require(connector.FindRelation("authenticated_user") == &connector.Relations()[1],
 	        "CompiledConnector exact lookup did not return the authenticated relation");
+	Require(connector.FindRelation("authenticated_repositories") == &connector.Relations()[2],
+	        "CompiledConnector exact lookup did not return the authenticated repository relation");
 	Require(connector.FindRelation("Authenticated_User") == nullptr,
 	        "CompiledConnector lookup unexpectedly folded relation case");
+	Require(connector.FindRelation("Authenticated_Repositories") == nullptr,
+	        "CompiledConnector repository lookup unexpectedly folded relation case");
 	Require(connector.FindRelation("missing") == nullptr, "CompiledConnector lookup fabricated an unknown relation");
 
 	const auto &policy = connector.NetworkPolicy();
@@ -108,7 +137,7 @@ void TestCatalogAndLookup() {
 	Require(!policy.redirects_enabled && !policy.private_addresses_enabled && !policy.link_local_addresses_enabled &&
 	            !policy.loopback_addresses_enabled,
 	        "CompiledConnector widened network authority");
-	Require(policy.max_response_bytes == 65536, "CompiledConnector response-byte ceiling drifted");
+	Require(policy.max_response_bytes == 8388608, "CompiledConnector response-byte ceiling drifted");
 }
 
 void TestAnonymousRelation() {
@@ -119,6 +148,8 @@ void TestAnonymousRelation() {
 
 	const auto &operation = relation->Operation();
 	RequireBaseOperation(operation);
+	Require(operation.pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::DISABLED,
+	        "anonymous relation gained pagination");
 	Require(operation.name == "github_search_duckdb_login_page", "anonymous operation identifier drifted");
 	Require(operation.cardinality == duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
 	        "anonymous operation cardinality drifted");
@@ -139,8 +170,13 @@ void TestAnonymousRelation() {
 	Require(authentication.Placement() == duckdb_api::CompiledCredentialPlacement::NONE,
 	        "anonymous relation retained credential placement");
 	Require(authentication.Destination() == nullptr, "anonymous relation retained a credential destination");
-	Require(relation->ResourceCeilings().max_records == 3, "anonymous record ceiling drifted");
-	Require(relation->ResourceCeilings().max_extracted_string_bytes == 256,
+	Require(relation->ResourceCeilings().HasResponseByteNarrowing() &&
+	            relation->ResourceCeilings().MaxResponseBytesPerPage() == 65536 &&
+	            relation->ResourceCeilings().MaxResponseBytesPerScan() == 65536 &&
+	            relation->ResourceCeilings().MaxRecordsPerPage() == 3 &&
+	            relation->ResourceCeilings().MaxRecordsPerScan() == 3,
+	        "anonymous resource scope drifted");
+	Require(relation->ResourceCeilings().MaxExtractedStringBytes() == 256,
 	        "anonymous extracted-string ceiling drifted");
 }
 
@@ -152,6 +188,8 @@ void TestAuthenticatedRelation() {
 
 	const auto &operation = relation->Operation();
 	RequireBaseOperation(operation);
+	Require(operation.pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::DISABLED,
+	        "authenticated user relation gained pagination");
 	Require(operation.name == "github_authenticated_user", "authenticated operation identifier drifted");
 	Require(operation.cardinality == duckdb_api::CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS,
 	        "authenticated operation cardinality drifted");
@@ -161,20 +199,57 @@ void TestAuthenticatedRelation() {
 	        "authenticated response source drifted");
 	Require(operation.records_extractor == "$", "authenticated root-object extractor drifted");
 
-	const auto &authentication = relation->Authentication();
-	Require(authentication.Requirement() == duckdb_api::CompiledCredentialRequirement::REQUIRED,
-	        "authenticated relation no longer requires a credential");
-	Require(authentication.LogicalCredential() == "token", "authenticated logical credential identifier drifted");
-	Require(authentication.Authenticator() == duckdb_api::CompiledAuthenticator::BEARER,
-	        "authenticated relation authenticator drifted");
-	Require(authentication.Placement() == duckdb_api::CompiledCredentialPlacement::AUTHORIZATION_HEADER,
-	        "authenticated relation placement drifted");
-	Require(authentication.Destination() != nullptr, "authenticated relation lost its credential destination");
-	RequireGithubOrigin(*authentication.Destination());
-	Require(relation->ResourceCeilings().max_records == 1,
+	RequireRequiredBearer(*relation);
+	Require(relation->ResourceCeilings().HasResponseByteNarrowing() &&
+	            relation->ResourceCeilings().MaxResponseBytesPerPage() == 65536 &&
+	            relation->ResourceCeilings().MaxResponseBytesPerScan() == 65536 &&
+	            relation->ResourceCeilings().MaxRecordsPerPage() == 1 &&
+	            relation->ResourceCeilings().MaxRecordsPerScan() == 1,
 	        "authenticated relation lacks a distinct one-record ceiling");
-	Require(relation->ResourceCeilings().max_extracted_string_bytes == 256,
+	Require(relation->ResourceCeilings().MaxExtractedStringBytes() == 256,
 	        "authenticated extracted-string ceiling drifted");
+}
+
+void TestAuthenticatedRepositoriesRelation() {
+	const auto connector = duckdb_api::BuildNativeGithubConnector();
+	const auto *relation = connector.FindRelation("authenticated_repositories");
+	Require(relation != nullptr, "authenticated repository relation disappeared");
+	RequireRepositorySchema(*relation);
+
+	const auto &operation = relation->Operation();
+	RequireBaseOperation(operation);
+	Require(operation.name == "github_authenticated_repositories",
+	        "authenticated repository operation identifier drifted");
+	Require(operation.cardinality == duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	        "authenticated repository cardinality drifted");
+	Require(operation.request.path == "/user/repos", "authenticated repository request path drifted");
+	Require(operation.request.query_parameters.size() == 2, "authenticated repository fixed query width drifted");
+	RequireQueryParameter(operation.request.query_parameters[0], "per_page", "100");
+	RequireQueryParameter(operation.request.query_parameters[1], "page", "1");
+	Require(operation.response_source == duckdb_api::CompiledResponseSource::ROOT_ARRAY,
+	        "authenticated repository response source drifted");
+	Require(operation.records_extractor == "$", "authenticated repository root-array extractor drifted");
+
+	const auto &pagination = operation.pagination;
+	Require(pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::LINK_HEADER &&
+	            pagination.LinkRelation() == duckdb_api::CompiledLinkRelation::NEXT &&
+	            pagination.Dependency() == duckdb_api::CompiledPageDependency::SEQUENTIAL &&
+	            pagination.Consistency() == duckdb_api::CompiledPageConsistency::MUTABLE,
+	        "authenticated repository pagination profile drifted");
+	Require(pagination.PageSizeParameter() == "per_page" && pagination.PageSize() == 100 &&
+	            pagination.PageNumberParameter() == "page" && pagination.FirstPage() == 1 &&
+	            pagination.PageIncrement() == 1 && pagination.MaxPagesPerScan() == 32,
+	        "authenticated repository page bindings drifted");
+	Require(pagination.TargetScope() == duckdb_api::CompiledContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH &&
+	            !pagination.SupportsTotal() && !pagination.SupportsResume(),
+	        "authenticated repository continuation authority drifted");
+
+	RequireRequiredBearer(*relation);
+	const auto &ceilings = relation->ResourceCeilings();
+	Require(ceilings.HasResponseByteNarrowing() && ceilings.MaxResponseBytesPerPage() == 8388608 &&
+	            ceilings.MaxResponseBytesPerScan() == 67108864 && ceilings.MaxRecordsPerPage() == 100 &&
+	            ceilings.MaxRecordsPerScan() == 3200 && ceilings.MaxExtractedStringBytes() == 512,
+	        "authenticated repository resource envelope drifted");
 }
 
 const std::string ANONYMOUS_SNAPSHOT =
@@ -182,32 +257,51 @@ const std::string ANONYMOUS_SNAPSHOT =
     "site_admin:BOOLEAN!:$.site_admin;operation=github_search_duckdb_login_page:fallback:zero_to_many:REST:GET:"
     "replay_safe;request=origin:[scheme:https,host:api.github.com,port:443],path:/search/users,"
     "query:[q=duckdb+in%3Alogin,per_page=3],headers:[Accept=application/vnd.github+json,"
-    "User-Agent=duckdb-api/0.4.0,X-GitHub-Api-Version=2022-11-28];response=source:json_path_many,"
+    "User-Agent=duckdb-api/0.5.0,X-GitHub-Api-Version=2022-11-28];response=source:json_path_many,"
     "records:$.items[*];features=retry:disabled,pagination:disabled;authentication=requirement:none,"
-    "logical_credential:none,authenticator:none,destination:none,placement:none;ceilings=records:3,"
-    "extracted_string_bytes:256";
+    "logical_credential:none,authenticator:none,destination:none,placement:none;"
+    "ceilings=response_bytes_per_page:65536,response_bytes_per_scan:65536,records_per_page:3,"
+    "records_per_scan:3,extracted_string_bytes:256";
 
 const std::string AUTHENTICATED_SNAPSHOT =
     "relation=authenticated_user;schema=id:BIGINT!:$.id,login:VARCHAR!:$.login,site_admin:BOOLEAN!:$.site_admin;"
     "operation=github_authenticated_user:fallback:exactly_one_on_success:REST:GET:replay_safe;"
     "request=origin:[scheme:https,host:api.github.com,port:443],path:/user,query:[],"
-    "headers:[Accept=application/vnd.github+json,User-Agent=duckdb-api/0.4.0,"
+    "headers:[Accept=application/vnd.github+json,User-Agent=duckdb-api/0.5.0,"
     "X-GitHub-Api-Version=2022-11-28];response=source:root_object,records:$;"
     "features=retry:disabled,pagination:disabled;authentication=requirement:required,logical_credential:token,"
     "authenticator:bearer,destination:[scheme:https,host:api.github.com,port:443],placement:Authorization;"
-    "ceilings=records:1,extracted_string_bytes:256";
+    "ceilings=response_bytes_per_page:65536,response_bytes_per_scan:65536,records_per_page:1,"
+    "records_per_scan:1,extracted_string_bytes:256";
+
+const std::string AUTHENTICATED_REPOSITORIES_SNAPSHOT =
+    "relation=authenticated_repositories;schema=id:BIGINT!:$.id,full_name:VARCHAR!:$.full_name,"
+    "private:BOOLEAN!:$.private,fork:BOOLEAN!:$.fork,archived:BOOLEAN!:$.archived;"
+    "operation=github_authenticated_repositories:fallback:zero_to_many:REST:GET:replay_safe;"
+    "request=origin:[scheme:https,host:api.github.com,port:443],path:/user/repos,"
+    "query:[per_page=100,page=1],headers:[Accept=application/vnd.github+json,User-Agent=duckdb-api/0.5.0,"
+    "X-GitHub-Api-Version=2022-11-28];response=source:root_array,records:$;"
+    "features=retry:disabled,pagination:link_header[relation:next,dependency:sequential,consistency:mutable,"
+    "total:none,resume:none,page_size:per_page=100,page_number:page=1,increment:1,"
+    "target:exact_operation_origin_and_path,max_pages:32];authentication=requirement:required,"
+    "logical_credential:token,authenticator:bearer,"
+    "destination:[scheme:https,host:api.github.com,port:443],placement:Authorization;"
+    "ceilings=response_bytes_per_page:8388608,response_bytes_per_scan:67108864,records_per_page:100,"
+    "records_per_scan:3200,extracted_string_bytes:512";
 
 void TestCanonicalSnapshotsAndProvenance() {
 	const auto first = duckdb_api::BuildNativeGithubConnector();
 	const auto second = duckdb_api::BuildNativeGithubConnector();
 	const std::string expected =
-	    "origin=native_product_metadata;connector=github;version=0.4.0;network=schemes:[https],"
+	    "origin=native_product_metadata;connector=github;version=0.5.0;network=schemes:[https],"
 	    "hosts:[api.github.com],redirects:denied,private:denied,link_local:denied,loopback:denied,"
-	    "max_response_bytes:65536;relations=[{" +
-	    ANONYMOUS_SNAPSHOT + "},{" + AUTHENTICATED_SNAPSHOT + "}]";
+	    "max_response_bytes:8388608;relations=[{" +
+	    ANONYMOUS_SNAPSHOT + "},{" + AUTHENTICATED_SNAPSHOT + "},{" + AUTHENTICATED_REPOSITORIES_SNAPSHOT + "}]";
 
 	Require(first.Relations()[0].Snapshot() == ANONYMOUS_SNAPSHOT, "anonymous relation snapshot drifted");
 	Require(first.Relations()[1].Snapshot() == AUTHENTICATED_SNAPSHOT, "authenticated relation snapshot drifted");
+	Require(first.Relations()[2].Snapshot() == AUTHENTICATED_REPOSITORIES_SNAPSHOT,
+	        "authenticated repository relation snapshot drifted");
 	Require(first.Snapshot() == expected, "CompiledConnector canonical snapshot drifted");
 	Require(second.Snapshot() == first.Snapshot(), "CompiledConnector construction is not deterministic");
 	const auto copy = first;
@@ -227,8 +321,8 @@ void TestCanonicalSnapshotsAndProvenance() {
 	Require(localized_snapshot == expected, "CompiledConnector snapshot depends on the process-global locale");
 
 	const std::vector<std::string> prohibited = {
-	    "github_default", "fixture=",     "digest=",           "package_root=",
-	    ".yaml",          "secret_name=", "credential_value=", "Authorization="};
+	    "github_default", "fixture=",          "digest=",        "package_root=", ".yaml",
+	    "secret_name=",   "credential_value=", "Authorization=", "response_url=", "Link="};
 	for (const auto &value : prohibited) {
 		Require(first.Snapshot().find(value) == std::string::npos,
 		        "CompiledConnector snapshot retained prohibited provenance or credential material: " + value);
@@ -244,9 +338,11 @@ void TestCanonicalSnapshotsAndProvenance() {
 int main() {
 	try {
 		duckdb_api_test::RunConnectorCatalogContractTests();
+		duckdb_api_test::RunConnectorPaginationContractTests();
 		TestCatalogAndLookup();
 		TestAnonymousRelation();
 		TestAuthenticatedRelation();
+		TestAuthenticatedRepositoriesRelation();
 		TestCanonicalSnapshotsAndProvenance();
 		std::cout << "connector contract tests passed" << std::endl;
 		return EXIT_SUCCESS;

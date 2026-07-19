@@ -2,8 +2,9 @@
 
 namespace duckdb_api_test {
 
-// Runs representation-level immutability, credential-policy, structural URL,
-// and validation counterexamples independently of the native GitHub catalog.
+// Runs catalog/relation identity, immutable ownership, credential-policy,
+// structural request, and authority counterexamples independently of the
+// native GitHub inventory and pagination value laws.
 void RunConnectorCatalogContractTests();
 
 } // namespace duckdb_api_test

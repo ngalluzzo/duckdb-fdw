@@ -1,5 +1,8 @@
 #include "duckdb_api/connector_catalog.hpp"
+#include "duckdb_api/internal/connector_pagination.hpp"
+#include "duckdb_api/internal/connector_resource_ceilings.hpp"
 
+#include <limits>
 #include <locale>
 #include <sstream>
 #include <stdexcept>
@@ -128,6 +131,8 @@ const char *ResponseSourceName(CompiledResponseSource source) {
 	switch (source) {
 	case CompiledResponseSource::JSON_PATH_MANY:
 		return "json_path_many";
+	case CompiledResponseSource::ROOT_ARRAY:
+		return "root_array";
 	case CompiledResponseSource::ROOT_OBJECT:
 		return "root_object";
 	}
@@ -238,8 +243,7 @@ void ValidateHeaders(const std::vector<CompiledHttpHeader> &headers) {
 }
 
 void ValidateOperation(const CompiledOperation &operation) {
-	if (!IsIdentifier(operation.name) || !operation.fallback || operation.retry_enabled ||
-	    operation.pagination_enabled) {
+	if (!IsIdentifier(operation.name) || !operation.fallback || operation.retry_enabled) {
 		throw std::invalid_argument("compiled relation contains an unsupported base operation");
 	}
 	(void)ProtocolName(operation.protocol);
@@ -258,16 +262,45 @@ void ValidateOperation(const CompiledOperation &operation) {
 		    operation.records_extractor.empty() || operation.records_extractor == "$") {
 			throw std::invalid_argument("multi-record response source has contradictory cardinality or extraction");
 		}
-		return;
-	}
-	if (operation.response_source == CompiledResponseSource::ROOT_OBJECT) {
+	} else if (operation.response_source == CompiledResponseSource::ROOT_ARRAY) {
+		if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY || operation.records_extractor != "$") {
+			throw std::invalid_argument("root-array response source has contradictory cardinality or extraction");
+		}
+	} else if (operation.response_source == CompiledResponseSource::ROOT_OBJECT) {
 		if (operation.cardinality != CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS ||
 		    operation.records_extractor != "$") {
 			throw std::invalid_argument("root-object response source has contradictory cardinality or extraction");
 		}
+	} else {
+		throw std::invalid_argument("compiled relation contains an unknown response source");
+	}
+	internal::ValidatePagination(operation);
+}
+
+void ValidateResourceCeilings(const CompiledOperation &operation, const CompiledResourceCeilings &ceilings) {
+	internal::ValidateResourceCeilingsValue(ceilings);
+
+	if (operation.pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
+		if (ceilings.MaxRecordsPerScan() != ceilings.MaxRecordsPerPage() ||
+		    (ceilings.HasResponseByteNarrowing() &&
+		     ceilings.MaxResponseBytesPerScan() != ceilings.MaxResponseBytesPerPage())) {
+			throw std::invalid_argument("unpaginated relation contains different page and scan ceilings");
+		}
 		return;
 	}
-	throw std::invalid_argument("compiled relation contains an unknown response source");
+
+	if (!ceilings.HasResponseByteNarrowing() || operation.pagination.PageSize() > ceilings.MaxRecordsPerPage()) {
+		throw std::invalid_argument("paginated relation lacks bounded page resources");
+	}
+	const auto max_pages = operation.pagination.MaxPagesPerScan();
+	if (ceilings.MaxRecordsPerPage() > std::numeric_limits<std::uint64_t>::max() / max_pages ||
+	    ceilings.MaxResponseBytesPerPage() > std::numeric_limits<std::uint64_t>::max() / max_pages) {
+		throw std::invalid_argument("compiled pagination resource envelope overflows");
+	}
+	if (ceilings.MaxRecordsPerScan() > ceilings.MaxRecordsPerPage() * max_pages ||
+	    ceilings.MaxResponseBytesPerScan() > ceilings.MaxResponseBytesPerPage() * max_pages) {
+		throw std::invalid_argument("compiled pagination scan ceiling exceeds its bounded page sequence");
+	}
 }
 
 void ValidateNetworkPolicy(const CompiledNetworkPolicy &policy) {
@@ -426,7 +459,7 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
                                    CompiledOperation operation_p, CompiledAuthenticationPolicy authentication_p,
                                    CompiledResourceCeilings resource_ceilings_p)
     : name(std::move(name_p)), columns(std::move(columns_p)), operation(std::move(operation_p)),
-      authentication(std::move(authentication_p)), resource_ceilings(resource_ceilings_p) {
+      authentication(std::move(authentication_p)), resource_ceilings(std::move(resource_ceilings_p)) {
 	if (!IsIdentifier(name) || columns.empty()) {
 		throw std::invalid_argument("compiled relation contains incomplete identity or schema");
 	}
@@ -439,11 +472,9 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
 		}
 	}
 	ValidateOperation(operation);
-	if (resource_ceilings.max_records == 0 || resource_ceilings.max_extracted_string_bytes == 0) {
-		throw std::invalid_argument("compiled relation contains an empty resource ceiling");
-	}
+	ValidateResourceCeilings(operation, resource_ceilings);
 	if (operation.cardinality == CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS &&
-	    resource_ceilings.max_records != 1) {
+	    (resource_ceilings.MaxRecordsPerPage() != 1 || resource_ceilings.MaxRecordsPerScan() != 1)) {
 		throw std::invalid_argument("exactly-one relation must carry a distinct one-record ceiling");
 	}
 
@@ -454,8 +485,9 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
 		return;
 	}
 	const auto destination = authentication.Destination();
-	if (operation.cardinality != CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS || destination == nullptr ||
-	    !OriginsEqual(*destination, operation.request.origin) || !operation.request.query_parameters.empty()) {
+	if (destination == nullptr || !OriginsEqual(*destination, operation.request.origin) ||
+	    (operation.cardinality == CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS &&
+	     !operation.request.query_parameters.empty())) {
 		throw std::invalid_argument("authenticated relation contains inconsistent operation and credential policy");
 	}
 }
@@ -495,10 +527,12 @@ std::string CompiledRelation::Snapshot() const {
 	AppendHeaders(result, operation.request.headers);
 	result << "];response=source:" << ResponseSourceName(operation.response_source)
 	       << ",records:" << operation.records_extractor << ";features=retry:" << EnabledState(operation.retry_enabled)
-	       << ",pagination:" << EnabledState(operation.pagination_enabled) << ";authentication=";
+	       << ",pagination:";
+	internal::AppendPagination(result, operation.pagination);
+	result << ";authentication=";
 	AppendAuthentication(result, authentication);
-	result << ";ceilings=records:" << resource_ceilings.max_records
-	       << ",extracted_string_bytes:" << resource_ceilings.max_extracted_string_bytes;
+	result << ";ceilings=";
+	internal::AppendResourceCeilings(result, resource_ceilings);
 	return result.str();
 }
 
@@ -528,6 +562,11 @@ CompiledConnector::CompiledConnector(CompiledConnectorOrigin origin_p, std::stri
 		    (!Contains(network_policy.allowed_schemes, UrlSchemeName(credential_destination->scheme)) ||
 		     !Contains(network_policy.allowed_hosts, credential_destination->host.Value()))) {
 			throw std::invalid_argument("compiled credential destination is outside connector network policy");
+		}
+		const auto &ceilings = relations[index].ResourceCeilings();
+		if (ceilings.HasResponseByteNarrowing() &&
+		    ceilings.MaxResponseBytesPerPage() > network_policy.max_response_bytes) {
+			throw std::invalid_argument("compiled relation response ceiling widens connector policy");
 		}
 	}
 }

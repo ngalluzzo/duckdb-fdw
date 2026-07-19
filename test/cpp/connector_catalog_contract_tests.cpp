@@ -118,11 +118,11 @@ duckdb_api::CompiledConnector BuildValidCatalogFixture() {
 	                                   duckdb_api::CompiledHttpMethod::GET,
 	                                   duckdb_api::CompiledReplaySafety::SAFE,
 	                                   false,
-	                                   false,
+	                                   ConnectorCatalogTestAccess::DisabledPagination(),
 	                                   {origin, "/rows", {}, headers},
 	                                   duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
 	                                   "$.items[*]"},
-	    ConnectorCatalogTestAccess::Anonymous(), duckdb_api::CompiledResourceCeilings {2, 64}));
+	    ConnectorCatalogTestAccess::Anonymous(), ConnectorCatalogTestAccess::UnpaginatedResources(2, 64)));
 	relations.push_back(ConnectorCatalogTestAccess::Relation(
 	    "current_row", columns,
 	    duckdb_api::CompiledOperation {"fixture_current_row",
@@ -132,11 +132,11 @@ duckdb_api::CompiledConnector BuildValidCatalogFixture() {
 	                                   duckdb_api::CompiledHttpMethod::GET,
 	                                   duckdb_api::CompiledReplaySafety::SAFE,
 	                                   false,
-	                                   false,
+	                                   ConnectorCatalogTestAccess::DisabledPagination(),
 	                                   {origin, "/row", {}, headers},
 	                                   duckdb_api::CompiledResponseSource::ROOT_OBJECT,
 	                                   "$"},
-	    ConnectorCatalogTestAccess::RequiredBearer(), duckdb_api::CompiledResourceCeilings {1, 64}));
+	    ConnectorCatalogTestAccess::RequiredBearer(), ConnectorCatalogTestAccess::UnpaginatedResources(1, 64)));
 	return ConnectorCatalogTestAccess::Catalog(
 	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "fixture", "1.0.0", std::move(relations),
 	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"api.github.com"}, false, false, false, false, 4096});
@@ -223,11 +223,24 @@ void TestClosedValidation() {
 		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(operation),
 		                                     authenticated.Authentication(), authenticated.ResourceCeilings());
 	});
+	RequireInvalid("relation accepted root-array shape with exactly-one cardinality", [&authenticated]() {
+		auto operation = authenticated.Operation();
+		operation.response_source = duckdb_api::CompiledResponseSource::ROOT_ARRAY;
+		operation.records_extractor = "$";
+		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(operation),
+		                                     authenticated.Authentication(), authenticated.ResourceCeilings());
+	});
+	RequireInvalid("relation inferred a root array from an extractor", [&anonymous]() {
+		auto operation = anonymous.Operation();
+		operation.response_source = duckdb_api::CompiledResponseSource::ROOT_ARRAY;
+		operation.records_extractor = "$[*]";
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operation),
+		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
+	});
 	RequireInvalid("exactly-one relation accepted a wider record ceiling", [&authenticated]() {
-		auto ceilings = authenticated.ResourceCeilings();
-		ceilings.max_records = 2;
 		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), authenticated.Operation(),
-		                                     authenticated.Authentication(), ceilings);
+		                                     authenticated.Authentication(),
+		                                     ConnectorCatalogTestAccess::UnpaginatedResources(2, 64));
 	});
 	RequireInvalid("authenticated relation accepted a query-bearing request", [&authenticated]() {
 		auto operation = authenticated.Operation();
@@ -266,13 +279,6 @@ void TestClosedValidation() {
 		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operation),
 		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
 	});
-	RequireInvalid("relation accepted an empty resource ceiling", [&anonymous]() {
-		auto ceilings = anonymous.ResourceCeilings();
-		ceilings.max_extracted_string_bytes = 0;
-		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), anonymous.Operation(),
-		                                     anonymous.Authentication(), ceilings);
-	});
-
 	RequireInvalid("catalog accepted duplicate relation identifiers", [&catalog]() {
 		std::vector<duckdb_api::CompiledRelation> relations = {catalog.Relations()[0], catalog.Relations()[0]};
 		ConnectorCatalogTestAccess::Catalog(catalog.Origin(), catalog.ConnectorName(), catalog.Version(),

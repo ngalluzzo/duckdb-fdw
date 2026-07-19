@@ -14,6 +14,34 @@ namespace duckdb_api_test {
 // support and emits no product symbol.
 class ConnectorCatalogTestAccess final {
 public:
+	static duckdb_api::CompiledPagination DisabledPagination() {
+		return duckdb_api::CompiledPagination::Disabled();
+	}
+
+	static duckdb_api::CompiledPagination SequentialLink(std::string page_size_parameter, std::uint64_t page_size,
+	                                                     std::string page_number_parameter, std::uint64_t first_page,
+	                                                     std::uint64_t page_increment,
+	                                                     std::uint64_t max_pages_per_scan) {
+		return duckdb_api::CompiledPagination(std::move(page_size_parameter), page_size,
+		                                      std::move(page_number_parameter), first_page, page_increment,
+		                                      max_pages_per_scan);
+	}
+
+	static duckdb_api::CompiledResourceCeilings UnpaginatedResources(std::uint64_t max_records,
+	                                                                 std::uint64_t max_extracted_string_bytes) {
+		return duckdb_api::CompiledResourceCeilings(max_records, max_extracted_string_bytes);
+	}
+
+	static duckdb_api::CompiledResourceCeilings PaginatedResources(std::uint64_t max_response_bytes_per_page,
+	                                                               std::uint64_t max_response_bytes_per_scan,
+	                                                               std::uint64_t max_records_per_page,
+	                                                               std::uint64_t max_records_per_scan,
+	                                                               std::uint64_t max_extracted_string_bytes) {
+		return duckdb_api::CompiledResourceCeilings(max_response_bytes_per_page, max_response_bytes_per_scan,
+		                                            max_records_per_page, max_records_per_scan,
+		                                            max_extracted_string_bytes);
+	}
+
 	static duckdb_api::CompiledAuthenticationPolicy Anonymous() {
 		return duckdb_api::CompiledAuthenticationPolicy::Anonymous();
 	}

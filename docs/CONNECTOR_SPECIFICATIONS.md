@@ -101,16 +101,26 @@ Connector
 
 ### 1.4 Native product metadata boundary
 
-The native 0.4 preview compiles one exact two-relation `github` catalog directly
-into the extension with the explicit `native_product_metadata` origin. Its
-stable order is `github.duckdb_login_search_page` followed by
-`github.authenticated_user`. The first relation retains the anonymous GitHub
-login-search request. The second declares a required logical credential named
-`token`, bearer authentication, the exact `https://api.github.com:443`
-destination, `Authorization` placement, the `/user` root-object response, and
-`EXACTLY_ONE_ON_SUCCESS` source cardinality. The declaration contains neither a
-DuckDB secret name nor credential bytes; binding and placement are later-stage
-execution responsibilities.
+The native 0.5 preview compiles one exact three-relation `github` catalog
+directly into the extension with the explicit `native_product_metadata`
+origin. Its stable order is `github.duckdb_login_search_page`,
+`github.authenticated_user`, then `github.authenticated_repositories`. The first
+two relations retain the accepted 0.4 anonymous search-page and authenticated
+root-object declarations. The third declares the required logical credential
+`token`, bearer authentication, exact `https://api.github.com:443` destination,
+`Authorization` placement, and a root-array `GET
+/user/repos?per_page=100&page=1` operation with five required columns.
+
+The repository declaration contains a closed, immutable Link-pagination
+profile: registered `next` relation, sequential dependency, mutable-source
+consistency, exact operation origin and path, `per_page=100`, first page 1,
+unit page increments, one attempt per page, and separate hard per-page and
+per-scan ceilings. It grants no ordering, snapshot, total-count, resume,
+parallel-page, retry, rate-wait, or remote-limit capability. Disabled
+pagination for the two existing relations has no accessible payload. None of
+the declarations contains a DuckDB secret name, credential bytes, or received
+Link state; binding, capability construction, and transition validation are
+later-stage responsibilities.
 
 This repository-owned product catalog is not an implementation of this draft
 authoring specification: it does not parse or validate arbitrary YAML, load
@@ -2953,7 +2963,7 @@ Custom code is not permission to bypass host security policy.
 
 Package loading is intended to be local and explicit when this draft becomes
 an implemented authoring contract. The native preview embeds one exact
-repository-owned `CompiledConnector` catalog containing the two fixed native
+repository-owned `CompiledConnector` catalog containing the three fixed native
 relations and does not implement the loading behavior below.
 
 ### 33.1 Local packages

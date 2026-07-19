@@ -5,13 +5,29 @@
 
 namespace duckdb_api {
 
+namespace {
+
+// The 0.5.0 catalog-wide response policy rises for repository pages. Keep both
+// existing relations explicitly narrowed to their accepted 64 KiB effective
+// plans instead of allowing them to inherit that wider outer policy.
+constexpr std::uint64_t PREVIOUS_RELATION_MAX_RESPONSE_BYTES = 64ULL * 1024ULL;
+constexpr std::uint64_t REPOSITORY_MAX_RESPONSE_BYTES_PER_PAGE = 8ULL * 1024ULL * 1024ULL;
+constexpr std::uint64_t REPOSITORY_MAX_RESPONSE_BYTES_PER_SCAN = 64ULL * 1024ULL * 1024ULL;
+
+} // namespace
+
 CompiledConnector BuildNativeGithubConnector() {
 	const CompiledRestOrigin github_origin = {CompiledUrlScheme::HTTPS, CompiledRestHost("api.github.com"), 443};
 	const std::vector<CompiledColumn> columns = {{"id", "BIGINT", false, "$.id"},
 	                                             {"login", "VARCHAR", false, "$.login"},
 	                                             {"site_admin", "BOOLEAN", false, "$.site_admin"}};
+	const std::vector<CompiledColumn> repository_columns = {{"id", "BIGINT", false, "$.id"},
+	                                                        {"full_name", "VARCHAR", false, "$.full_name"},
+	                                                        {"private", "BOOLEAN", false, "$.private"},
+	                                                        {"fork", "BOOLEAN", false, "$.fork"},
+	                                                        {"archived", "BOOLEAN", false, "$.archived"}};
 	const std::vector<CompiledHttpHeader> headers = {{"Accept", "application/vnd.github+json"},
-	                                                 {"User-Agent", "duckdb-api/0.4.0"},
+	                                                 {"User-Agent", "duckdb-api/0.5.0"},
 	                                                 {"X-GitHub-Api-Version", "2022-11-28"}};
 
 	std::vector<CompiledRelation> relations;
@@ -24,11 +40,13 @@ CompiledConnector BuildNativeGithubConnector() {
 	                       CompiledHttpMethod::GET,
 	                       CompiledReplaySafety::SAFE,
 	                       false,
-	                       false,
+	                       CompiledPagination::Disabled(),
 	                       {github_origin, "/search/users", {{"q", "duckdb+in%3Alogin"}, {"per_page", "3"}}, headers},
 	                       CompiledResponseSource::JSON_PATH_MANY,
 	                       "$.items[*]"},
-	    CompiledAuthenticationPolicy::Anonymous(), CompiledResourceCeilings {3, 256}));
+	    CompiledAuthenticationPolicy::Anonymous(),
+	    CompiledResourceCeilings {PREVIOUS_RELATION_MAX_RESPONSE_BYTES, PREVIOUS_RELATION_MAX_RESPONSE_BYTES, 3, 3,
+	                              256}));
 	relations.push_back(CompiledRelation("authenticated_user", columns,
 	                                     CompiledOperation {"github_authenticated_user",
 	                                                        true,
@@ -37,15 +55,34 @@ CompiledConnector BuildNativeGithubConnector() {
 	                                                        CompiledHttpMethod::GET,
 	                                                        CompiledReplaySafety::SAFE,
 	                                                        false,
-	                                                        false,
+	                                                        CompiledPagination::Disabled(),
 	                                                        {github_origin, "/user", {}, headers},
 	                                                        CompiledResponseSource::ROOT_OBJECT,
 	                                                        "$"},
 	                                     CompiledAuthenticationPolicy::RequiredBearer(),
-	                                     CompiledResourceCeilings {1, 256}));
+	                                     CompiledResourceCeilings {PREVIOUS_RELATION_MAX_RESPONSE_BYTES,
+	                                                               PREVIOUS_RELATION_MAX_RESPONSE_BYTES, 1, 1, 256}));
+	relations.push_back(CompiledRelation(
+	    "authenticated_repositories", repository_columns,
+	    CompiledOperation {"github_authenticated_repositories",
+	                       true,
+	                       CompiledOperationCardinality::ZERO_TO_MANY,
+	                       CompiledProtocol::REST,
+	                       CompiledHttpMethod::GET,
+	                       CompiledReplaySafety::SAFE,
+	                       false,
+	                       CompiledPagination("per_page", 100, "page", 1, 1, 32),
+	                       {github_origin, "/user/repos", {{"per_page", "100"}, {"page", "1"}}, headers},
+	                       CompiledResponseSource::ROOT_ARRAY,
+	                       "$"},
+	    CompiledAuthenticationPolicy::RequiredBearer(),
+	    CompiledResourceCeilings {REPOSITORY_MAX_RESPONSE_BYTES_PER_PAGE, REPOSITORY_MAX_RESPONSE_BYTES_PER_SCAN, 100,
+	                              3200, 512}));
 
-	return CompiledConnector(CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "github", "0.4.0", std::move(relations),
-	                         CompiledNetworkPolicy {{"https"}, {"api.github.com"}, false, false, false, false, 65536});
+	return CompiledConnector(
+	    CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "github", "0.5.0", std::move(relations),
+	    CompiledNetworkPolicy {
+	        {"https"}, {"api.github.com"}, false, false, false, false, REPOSITORY_MAX_RESPONSE_BYTES_PER_PAGE});
 }
 
 } // namespace duckdb_api

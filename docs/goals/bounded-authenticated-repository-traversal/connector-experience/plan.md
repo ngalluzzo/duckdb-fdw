@@ -2,7 +2,7 @@
 
 ## Outcome and boundary
 
-Status: **Planned; Collaboration open**.
+Status: **Native `0.5.0` provider activated; interactions exited; final product gates open**.
 
 Provide RFC 0007's permanent Connector Experience service: an immutable,
 deterministically explainable `CompiledConnector` catalog whose native `0.5.0`
@@ -22,10 +22,10 @@ enforcement, `BatchStream`, DuckDB lifecycle, or product demonstration.
 
 The semantic delta is:
 
-- **Current:** the `0.4.0` catalog has two relations, every operation carries a
+- **Before this workstream:** the `0.4.0` catalog has two relations, every operation carries a
   pagination boolean fixed to false, and the planner rejects enabled
   pagination without an explicit strategy or request-transition contract.
-- **Delivered:** the `0.5.0` catalog retains those relations and adds one exact
+- **Activated:** the `0.5.0` catalog retains those relations and adds one exact
   many-row relation whose immutable metadata distinguishes disabled pagination
   from a sequential mutable Link profile, including typed page bindings,
   continuation constraints, and relation-owned resource narrowings.
@@ -39,20 +39,29 @@ distribution compatibility, or a public native ABI.
 | Artifact | Connector Experience responsibility |
 | --- | --- |
 | `src/include/duckdb_api/connector_catalog.hpp` | Private pre-`1.0` metadata API for explicit pagination, relation resource narrowings, immutable consumer access, and adjacent ownership/compatibility documentation |
-| `src/connector_catalog.cpp` | Closed-state validation, cross-field consistency checks, safe accessors, and locale-independent canonical explanation for generic catalog values |
+| `src/include/duckdb_api/internal/connector_pagination.hpp` and `src/connector_pagination.cpp` | Connector-private pagination module boundary: immutable pagination value behavior, operation/profile validation, and deterministic pagination explanation; no execution state or consumer construction API |
+| `src/include/duckdb_api/internal/connector_resource_ceilings.hpp` and `src/connector_resource_ceilings.cpp` | Connector-private scoped-resource module boundary: immutable value behavior, intrinsic scope validation, and deterministic scoped-resource explanation; no counters or Runtime enforcement |
+| `src/connector_catalog.cpp` | Relation/catalog identity and authority validation, operation/resource cross-field consistency, and composition of locale-independent relation and catalog snapshots through the two private value-module services |
 | `src/include/duckdb_api/connector.hpp` | Documentation of the no-I/O canonical native builder and its `0.5.0` product-metadata boundary |
 | `src/connector.cpp` | Sole production construction of the three stable native relations; final addition and version activation are integration-gated |
-| `test/cpp/connector_catalog_contract_tests.cpp` | Representation, immutability, unavailable-state, validation-counterexample, credential-absence, and authority-separation tests independent of the native catalog |
+| `test/cpp/connector_catalog_contract_tests.cpp` | Catalog/relation identity, immutable ownership, structural request, credential-absence, authority-separation, and general validation tests independent of the native catalog |
+| `test/cpp/connector_pagination_contract_tests.cpp` and `test/cpp/support/connector_pagination_contract.hpp` | Focused runner for closed pagination value shape, operation-binding agreement, scoped-resource laws, and their safe deterministic explanation |
 | `test/cpp/connector_contract_tests.cpp` | Exact `0.5.0` native inventory, schemas, structural requests, policies, pagination declaration, preserved-relation regression, provenance, and canonical snapshot tests |
 | `test/cpp/support/connector_catalog_test_access.hpp` | Connector-owned non-installable construction access for invalid values and consumer fixtures; never a production constructor |
 | `test/cpp/support/connector_catalog_test_fixtures.hpp` and `.cpp` | A deterministic explicit-pagination catalog service that Semantics and Query tests consume through public const metadata accessors only |
 | `test/cpp/connector_catalog_test_fixtures_tests.cpp` | Direct proof that the consumer fixture is stable, explicit, credential-free, and does not require request-field inference |
 
-No new production module is planned. Generic metadata and validation continue
-to change together in `connector_catalog.*`; the fixed GitHub inventory remains
-separate in `connector.cpp`. The existing fixture service is extended rather
-than adding a new build target, so Connector work does not require a parallel
-edit to root build registration.
+Pagination declaration behavior and scoped-resource value behavior are
+permanent Connector modules because they have independent validation and
+explanation reasons to change. Their narrow internal headers are consumed only
+by `connector_catalog.cpp`; public consumers continue to include
+`connector_catalog.hpp` and use the same const metadata API. Catalog code owns
+only relation/catalog composition and cross-field checks, while the fixed
+GitHub inventory remains separate in `connector.cpp`. Lead-agent integration
+registers the two new production sources in existing Connector source lists and
+source-identity gates; no separate build target or consumer dependency is
+introduced. The existing fixture service remains the deterministic consumer
+oracle.
 
 `docs/CONNECTOR_SPECIFICATIONS.md` is an affected authoritative contract, but
 the active goal reserves authoritative contract propagation to lead-agent
@@ -162,7 +171,7 @@ relation gains pagination.
 - one fallback replay-safe `ZERO_TO_MANY` REST `GET` operation named
   `github_authenticated_repositories`;
 - exact `https://api.github.com:443/user/repos`, ordered fixed query
-  `per_page=100` then `page=1`, root-array records extractor `$[*]`, and only
+  `per_page=100` then `page=1`, typed root-array records extractor `$`, and only
   the accepted non-sensitive `Accept`, `User-Agent: duckdb-api/0.5.0`, and
   `X-GitHub-Api-Version: 2022-11-28` headers;
 - the existing required logical `token`, bearer authenticator, exact GitHub
@@ -219,21 +228,21 @@ Query consume only the fixture factory and public const API; they do not gain
 | Query Experience | Exact relation request/bind behavior, adapter lifecycle, provider-fake tests, and final SQL evidence | Must not construct catalog internals, parse pagination, or activate the native relation before the real plan/runtime path exists |
 | Lead-agent integration | CMake/build registration if needed, source/version identities, authoritative contract propagation, product composition, changelog, final gates, dependency audit, and Git history | Must preserve team APIs rather than merging provider and consumer responsibilities |
 
-The current test graph contains a material consumer overlap:
+The previous test graph contained a material consumer overlap:
 `test/cpp/support/scan_plan_contract_test_support.hpp` and
 `test/cpp/support/scan_plan_test_fixtures.cpp` select a relation by requiring a
-unique `CompiledCredentialRequirement::REQUIRED`. The new catalog has two such
-relations. Relational Semantics must replace that assumption with exact service
-identifiers or the Connector-owned paginated fixture before the three-relation
-native catalog is activated; Connector Experience does not edit those files.
+unique `CompiledCredentialRequirement::REQUIRED`. Relational Semantics replaced
+that assumption with exact service identifiers and its Connector-owned
+pagination fixture before activation; the `0.5.0` catalog can therefore carry
+two required-credential relations without selection ambiguity.
 
 The product composition passes `BuildNativeGithubConnector()` directly to the
 table function, and bind accepts any exact catalog relation. Consequently,
 adding `authenticated_repositories` to `src/connector.cpp` is public activation,
-not an isolated metadata commit. The generic `CompiledPagination` API,
-validation, disabled native values, and private consumer fixture may integrate
-before activation, but the third relation and `0.5.0` identity wait for the
-complete Semantics, Runtime, and Query path.
+not an isolated metadata commit. Activation followed the generic pagination
+provider, exact Semantics mapping, and Runtime's passing root-array decoder and
+sequential authenticated HTTP scan evidence; the native builder now publishes
+the third relation and `0.5.0` identity without a page-one fallback.
 
 Parallel writers use disjoint files or separate worktrees. A provider/consumer
 API change may be prepared concurrently after the field contract is frozen,
@@ -245,30 +254,30 @@ added to bridge teams.
 
 1. **Governance gate — satisfied.** RFC 0007 is Accepted, product approval and
    affected-team reviews are recorded, and the product goal is Active.
-2. **Provider-shape gate.** Connector and Semantics agree on the const
+2. **Provider-shape gate — satisfied.** Connector and Semantics agree on the const
    `CompiledPagination` and scoped resource fields, ownership, validation, and
    snapshot contract. Runtime confirms the proposed plan can carry every
    required fact without importing Connector types. No public relation is
    added.
-3. **Generic provider gate.** Land the closed metadata value, validation,
+3. **Generic provider gate — satisfied.** The closed metadata value, validation,
    explanations, disabled values for both `0.4.0` relations, direct generic
-   counterexamples, and the Connector-owned paginated test service. Integrate
-   the corresponding Semantics consumer compile changes without a compatibility
-   shim.
-4. **Planning-service gate.** Semantics maps the private fixture into an
+   counterexamples, and the Connector-owned paginated test service are
+   integrated with the corresponding Semantics consumer changes and no
+   compatibility shim.
+4. **Planning-service gate — satisfied.** Semantics maps the private fixture into an
    immutable pagination plan, rejects contradictions offline, and removes the
    unique-required-relation test assumption. Runtime can then implement and
    exercise its service against Semantics-owned plan fixtures while Query works
    on file-disjoint provider-fake lifecycle evidence.
-5. **Runtime-readiness gate.** DuckDB-free Runtime evidence proves the accepted
+5. **Runtime-readiness gate — satisfied.** DuckDB-free Runtime evidence proves the accepted
    request sequence, denial, budgets, authorization reuse, empty-page
-   same-pull behavior, cancellation, close, late failure, and redaction. No
-   product catalog activation precedes this gate.
-6. **Native activation gate.** Integrate the three-relation builder, exact
-   native snapshots, `0.5.0` identities, real Semantics plan, Runtime executor,
-   Query SQL path, and preserved-relation regressions as one coherent product
-   increment. A profile that cannot execute the declaration rejects before I/O
-   and never degrades to page 1.
+   same-pull behavior, cancellation, close, late failure, and redaction. The
+   exact root-array decoder and sequential authenticated HTTP scan fixtures pass.
+6. **Native activation gate — satisfied for the Connector provider.** The
+   three-relation builder, exact native snapshots, `0.5.0` catalog and header
+   identities, real Semantics plan, Runtime executor, and preserved-relation
+   narrowings are integrated. The executable path rejects unsupported profiles
+   before I/O and never degrades to page 1.
 7. **Propagation and exit gate.** Lead-agent integration updates every affected
    authoritative contract and identity artifact, runs focused and complete
    cached/fresh gates, and audits declarations, includes, construction points,
@@ -320,7 +329,22 @@ This workstream does not implement or expose:
 
 ## Interaction exits and evidence
 
-Current status: **Open; Collaboration**.
+Current status: **Connector provider activated; propagation and overall product exit remain open**.
+
+Activation evidence:
+
+- the warning-fatal C++11 Connector runner proves exact three-relation order,
+  schema, request, required bearer policy, sequential Link declaration,
+  page/scan resources, `0.5.0` identities, canonical snapshots, locale
+  independence, copy independence, and prohibited execution-state absence;
+- both previous relations carry explicit `65,536`-byte page and scan response
+  narrowings, so the catalog's `8 MiB` per-response policy does not widen their
+  effective plans;
+- the Connector-owned generic and paginated fixture runners remain green, and
+  root integration reports passing Semantics planning plus exact Runtime
+  root-array decoding and sequential authenticated HTTP scan fixtures; and
+- authoritative contract, release-identity, complete cached/fresh product, and
+  final SQL evidence remain the lead-owned propagation and exit gate.
 
 ### Connector Experience to Relational Semantics
 

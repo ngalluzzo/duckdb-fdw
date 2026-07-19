@@ -71,11 +71,79 @@ void TestDistinctSchemaCatalogFixture() {
 	        "fixture snapshot contains a DuckDB secret binding");
 }
 
+void TestExplicitPaginationCatalogFixture() {
+	const auto first = duckdb_api_test::BuildPaginationConnectorCatalogFixture();
+	const auto second = duckdb_api_test::BuildPaginationConnectorCatalogFixture();
+	Require(first.ConnectorName() == "fixture_pagination_catalog", "pagination fixture catalog name drifted");
+	Require(first.Relations().size() == 2, "pagination fixture must contain exactly two relations");
+	Require(std::string(duckdb_api_test::PAGINATION_DECOY_RELATION) == "fixture_page_shaped_unpaginated",
+	        "pagination decoy service identifier drifted");
+	Require(std::string(duckdb_api_test::PAGINATION_LINK_RELATION) == "fixture_explicit_link_records",
+	        "pagination Link service identifier drifted");
+
+	const auto *decoy = first.FindRelation(duckdb_api_test::PAGINATION_DECOY_RELATION);
+	const auto *linked = first.FindRelation(duckdb_api_test::PAGINATION_LINK_RELATION);
+	Require(decoy == &first.Relations()[0] && linked == &first.Relations()[1],
+	        "pagination fixture exact lookup or stable order drifted");
+	Require(decoy->Authentication().Requirement() == duckdb_api::CompiledCredentialRequirement::REQUIRED &&
+	            linked->Authentication().Requirement() == duckdb_api::CompiledCredentialRequirement::REQUIRED,
+	        "pagination fixture no longer disproves credential-based selection");
+	const auto &decoy_query = decoy->Operation().request.query_parameters;
+	const auto &linked_query = linked->Operation().request.query_parameters;
+	Require(decoy_query.size() == 2 && linked_query.size() == 2 && decoy_query[0].name == linked_query[0].name &&
+	            decoy_query[0].encoded_value == linked_query[0].encoded_value &&
+	            decoy_query[1].name == linked_query[1].name &&
+	            decoy_query[1].encoded_value == linked_query[1].encoded_value,
+	        "pagination fixture request shapes no longer provide an inference counterexample");
+	Require(decoy->Operation().pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::DISABLED,
+	        "page-shaped decoy unexpectedly enabled pagination");
+	Require(linked->Operation().pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::LINK_HEADER,
+	        "explicit Link relation lost its pagination declaration");
+
+	const auto &pagination = linked->Operation().pagination;
+	Require(pagination.Dependency() == duckdb_api::CompiledPageDependency::SEQUENTIAL &&
+	            pagination.Consistency() == duckdb_api::CompiledPageConsistency::MUTABLE &&
+	            pagination.LinkRelation() == duckdb_api::CompiledLinkRelation::NEXT &&
+	            pagination.TargetScope() ==
+	                duckdb_api::CompiledContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH,
+	        "explicit Link relation capability profile drifted");
+	Require(!pagination.SupportsTotal() && !pagination.SupportsResume(),
+	        "explicit Link relation gained a total or resume claim");
+	Require(pagination.PageSizeParameter() == "batch_size" && pagination.PageSize() == 3 &&
+	            pagination.PageNumberParameter() == "cursor_page" && pagination.FirstPage() == 1 &&
+	            pagination.PageIncrement() == 1 && pagination.MaxPagesPerScan() == 4,
+	        "explicit Link relation typed page bindings drifted");
+
+	const auto &ceilings = linked->ResourceCeilings();
+	Require(ceilings.HasResponseByteNarrowing() && ceilings.MaxResponseBytesPerPage() == 1024 &&
+	            ceilings.MaxResponseBytesPerScan() == 4096 && ceilings.MaxRecordsPerPage() == 3 &&
+	            ceilings.MaxRecordsPerScan() == 12 && ceilings.MaxExtractedStringBytes() == 96,
+	        "pagination fixture page/scan resource scopes drifted");
+	Require(!decoy->ResourceCeilings().HasResponseByteNarrowing() &&
+	            decoy->ResourceCeilings().MaxRecordsPerPage() == 3 &&
+	            decoy->ResourceCeilings().MaxRecordsPerScan() == 3,
+	        "unpaginated fixture lost its one-page resource contract");
+
+	Require(first.Snapshot() == second.Snapshot(), "pagination fixture construction is not deterministic");
+	Require(first.Snapshot().find(
+	            "pagination:link_header[relation:next,dependency:sequential,consistency:mutable,total:none,") !=
+	            std::string::npos,
+	        "pagination fixture snapshot lost its explicit capability declaration");
+	Require(first.Snapshot().find("response_bytes_per_page:1024,response_bytes_per_scan:4096,records_per_page:3,") !=
+	            std::string::npos,
+	        "pagination fixture snapshot lost scoped resource declarations");
+	for (const auto &prohibited : {"Authorization=", "secret_name=", "credential_value=", "response_url=", "Link="}) {
+		Require(first.Snapshot().find(prohibited) == std::string::npos,
+		        "pagination fixture snapshot contains prohibited execution material: " + std::string(prohibited));
+	}
+}
+
 } // namespace
 
 int main() {
 	try {
 		TestDistinctSchemaCatalogFixture();
+		TestExplicitPaginationCatalogFixture();
 		std::cout << "connector catalog fixture tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

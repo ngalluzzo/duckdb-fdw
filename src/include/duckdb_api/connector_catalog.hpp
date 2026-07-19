@@ -13,7 +13,7 @@ namespace duckdb_api {
 class CompiledConnector;
 CompiledConnector BuildNativeGithubConnector();
 
-// Identifies how immutable metadata entered the product. The 0.4.0 native
+// Identifies how immutable metadata entered the product. The 0.5.0 native
 // catalog is repository-owned product metadata, not compiled package syntax,
 // package provenance, or a public connector-authoring/native ABI commitment.
 enum class CompiledConnectorOrigin { NATIVE_PRODUCT_METADATA };
@@ -29,10 +29,11 @@ enum class CompiledHttpMethod { GET };
 
 enum class CompiledReplaySafety { SAFE };
 
-// Distinguishes an array-like JSONPath source from the authenticated relation's
-// single successful root object without asking a consumer to infer shape from
-// an extractor string.
-enum class CompiledResponseSource { JSON_PATH_MANY, ROOT_OBJECT };
+// Distinguishes a nested JSONPath collection, a root array, and a single root
+// object without asking a consumer to infer response shape from an extractor
+// string. ROOT_ARRAY uses the canonical root extractor `$`; its enum value is
+// the executable array contract.
+enum class CompiledResponseSource { JSON_PATH_MANY, ROOT_ARRAY, ROOT_OBJECT };
 
 enum class CompiledCredentialRequirement { NONE, REQUIRED };
 
@@ -101,6 +102,58 @@ struct CompiledRestRequest {
 	std::vector<CompiledHttpHeader> headers;
 };
 
+// Pagination is a closed source declaration, not executable page state. A
+// disabled value has no payload. The only enabled native shape is a sequential
+// Link transition whose typed query bindings must agree with the fixed initial
+// request. Semantics consumes these facts without discovering pagination from
+// request strings; Runtime receives only the resulting immutable plan.
+enum class CompiledPaginationStrategy { DISABLED, LINK_HEADER };
+enum class CompiledPageDependency { SEQUENTIAL };
+enum class CompiledPageConsistency { MUTABLE };
+enum class CompiledLinkRelation { NEXT };
+enum class CompiledContinuationTargetScope { EXACT_OPERATION_ORIGIN_AND_PATH };
+
+class CompiledPagination {
+public:
+	CompiledPagination(const CompiledPagination &) = default;
+	CompiledPagination(CompiledPagination &&) = default;
+	CompiledPagination &operator=(const CompiledPagination &) = delete;
+	CompiledPagination &operator=(CompiledPagination &&) = delete;
+
+	CompiledPaginationStrategy Strategy() const;
+	CompiledPageDependency Dependency() const;
+	CompiledPageConsistency Consistency() const;
+	CompiledLinkRelation LinkRelation() const;
+	CompiledContinuationTargetScope TargetScope() const;
+	bool SupportsTotal() const;
+	bool SupportsResume() const;
+	const std::string &PageSizeParameter() const;
+	std::uint64_t PageSize() const;
+	const std::string &PageNumberParameter() const;
+	std::uint64_t FirstPage() const;
+	std::uint64_t PageIncrement() const;
+	std::uint64_t MaxPagesPerScan() const;
+
+private:
+	friend CompiledConnector BuildNativeGithubConnector();
+	friend class duckdb_api_test::ConnectorCatalogTestAccess;
+
+	static CompiledPagination Disabled();
+	CompiledPagination();
+	CompiledPagination(std::string page_size_parameter, std::uint64_t page_size, std::string page_number_parameter,
+	                   std::uint64_t first_page, std::uint64_t page_increment, std::uint64_t max_pages_per_scan);
+
+	void RequireLinkHeader() const;
+
+	CompiledPaginationStrategy strategy;
+	std::string page_size_parameter;
+	std::uint64_t page_size;
+	std::string page_number_parameter;
+	std::uint64_t first_page;
+	std::uint64_t page_increment;
+	std::uint64_t max_pages_per_scan;
+};
+
 // One base-row operation declaration. Connector owns declared source facts;
 // Semantics owns their conservative meaning and Runtime owns enforcement of the
 // resulting plan. Authentication is derived from the relation policy rather
@@ -113,7 +166,7 @@ struct CompiledOperation {
 	CompiledHttpMethod method;
 	CompiledReplaySafety replay_safety;
 	bool retry_enabled;
-	bool pagination_enabled;
+	CompiledPagination pagination;
 	CompiledRestRequest request;
 	CompiledResponseSource response_source;
 	std::string records_extractor;
@@ -131,11 +184,46 @@ struct CompiledNetworkPolicy {
 	uint64_t max_response_bytes;
 };
 
-// Relation-owned extraction ceilings. Host request, memory, batch, nesting,
-// wall-time, and concurrency ceilings remain Semantics/Runtime responsibilities.
-struct CompiledResourceCeilings {
-	uint64_t max_records;
-	uint64_t max_extracted_string_bytes;
+// Immutable relation-owned resource narrowings. Page and scan scopes are
+// distinct so a per-page decoder ceiling cannot silently truncate a complete
+// paginated source. Absence of a response-byte narrowing inherits the
+// connector-wide per-response policy; records and extracted strings are always
+// explicit. Semantics intersects these declarations with host policy and
+// Runtime owns counters and enforcement. Header, decompression, decode-memory,
+// batch, wall-time, and concurrency mechanics do not enter this type.
+class CompiledResourceCeilings {
+public:
+	CompiledResourceCeilings(const CompiledResourceCeilings &) = default;
+	CompiledResourceCeilings(CompiledResourceCeilings &&) = default;
+	CompiledResourceCeilings &operator=(const CompiledResourceCeilings &) = delete;
+	CompiledResourceCeilings &operator=(CompiledResourceCeilings &&) = delete;
+
+	bool HasResponseByteNarrowing() const;
+	std::uint64_t MaxResponseBytesPerPage() const;
+	std::uint64_t MaxResponseBytesPerScan() const;
+	std::uint64_t MaxRecordsPerPage() const;
+	std::uint64_t MaxRecordsPerScan() const;
+	std::uint64_t MaxExtractedStringBytes() const;
+
+private:
+	friend CompiledConnector BuildNativeGithubConnector();
+	friend class duckdb_api_test::ConnectorCatalogTestAccess;
+
+	// An unpaginated declaration may inherit the connector response ceiling and
+	// always has identical page/scan record scopes. The native 0.5.0 relations
+	// instead use explicit response narrowings.
+	CompiledResourceCeilings(std::uint64_t max_records, std::uint64_t max_extracted_string_bytes);
+	CompiledResourceCeilings(std::uint64_t max_response_bytes_per_page, std::uint64_t max_response_bytes_per_scan,
+	                         std::uint64_t max_records_per_page, std::uint64_t max_records_per_scan,
+	                         std::uint64_t max_extracted_string_bytes);
+	void RequireResponseByteNarrowing() const;
+
+	bool has_response_byte_narrowing;
+	std::uint64_t max_response_bytes_per_page;
+	std::uint64_t max_response_bytes_per_scan;
+	std::uint64_t max_records_per_page;
+	std::uint64_t max_records_per_scan;
+	std::uint64_t max_extracted_string_bytes;
 };
 
 // Closed logical credential policy. Its private Anonymous() state carries no
@@ -210,7 +298,7 @@ private:
 	CompiledResourceCeilings resource_ceilings;
 };
 
-// Immutable Connector Experience service for the native 0.4.0 relation
+// Immutable Connector Experience service for the native 0.5.0 relation
 // catalog. Query and Semantics consume exact lookup and const accessors without
 // constructing policy internals. Copy construction supports immutable bind and
 // composition lifetimes; assignment and partial aggregate mutation are
