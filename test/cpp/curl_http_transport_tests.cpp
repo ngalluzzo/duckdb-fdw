@@ -23,7 +23,8 @@ void TestExactAnonymousCurlRequest() {
 	ControlledSocketService service(ControlledSocketMode::SUCCESS);
 	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
 	ManualControl control;
-	auto stream = runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(runtime->Connector()), control);
+	auto stream =
+	    runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(duckdb_api::BuildNativeGithubConnector()), control);
 	Require(runtime->Observation().request_count == 0 && service.ConnectionCount() == 0, "Open performed socket work");
 	duckdb_api::TypedBatch batch;
 	Require(stream->Next(control, batch) && batch.IsSchemaAligned() && batch.rows.size() == 2,
@@ -38,7 +39,7 @@ void TestExactAnonymousCurlRequest() {
 	Require(wire.find("\r\nHost: 127.0.0.1:" + std::to_string(service.Port()) + "\r\n") != std::string::npos,
 	        "controlled curl authority drifted");
 	Require(wire.find("\r\nAccept: application/vnd.github+json\r\n") != std::string::npos &&
-	            wire.find("\r\nUser-Agent: duckdb-api/0.4.0\r\n") != std::string::npos &&
+	            wire.find("\r\nUser-Agent: duckdb-api/0.5.0\r\n") != std::string::npos &&
 	            wire.find("\r\nX-GitHub-Api-Version: 2022-11-28\r\n") != std::string::npos,
 	        "curl fixed request headers drifted");
 	Require(wire.find("Authorization:") == std::string::npos, "anonymous curl request emitted credential authority");
@@ -57,7 +58,7 @@ void TestAuthenticatedCurlRequestIsolationAndFailures() {
 		auto token = duckdb_api_test::RuntimeCurlBearerToken(index + 1);
 		const auto expected_header = "Authorization: Bearer " + token + "\r\n";
 		auto stream = runtime->Executor()->OpenWithAuthorization(
-		    duckdb_api_test::BuildAuthenticatedRuntimePlan(runtime->Connector()),
+		    duckdb_api_test::BuildAuthenticatedRuntimePlan(duckdb_api::BuildNativeGithubConnector()),
 		    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
 		Require(service.ConnectionCount() == 0, "authorized Open performed socket work");
 		duckdb_api::TypedBatch batch;
@@ -89,7 +90,7 @@ void TestAuthenticatedCurlRequestIsolationAndFailures() {
 		auto token = duckdb_api_test::RuntimeCurlBearerToken(index + 20);
 		const auto credential_canary = token;
 		auto stream = runtime->Executor()->OpenWithAuthorization(
-		    duckdb_api_test::BuildAuthenticatedRuntimePlan(runtime->Connector()),
+		    duckdb_api_test::BuildAuthenticatedRuntimePlan(duckdb_api::BuildNativeGithubConnector()),
 		    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
 		duckdb_api::TypedBatch batch;
 		RequireExecutionError([&]() { stream->Next(control, batch); }, statuses[index].stage, credential_canary,
@@ -106,7 +107,7 @@ void TestAuthenticatedCurlRequestIsolationAndFailures() {
 	const auto redirect_canary = redirect_token;
 	const auto expected_redirect_header = "Authorization: Bearer " + redirect_token + "\r\n";
 	auto redirect_stream = redirect_runtime->Executor()->OpenWithAuthorization(
-	    duckdb_api_test::BuildAuthenticatedRuntimePlan(redirect_runtime->Connector()),
+	    duckdb_api_test::BuildAuthenticatedRuntimePlan(duckdb_api::BuildNativeGithubConnector()),
 	    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(redirect_token)), redirect_control);
 	duckdb_api::TypedBatch redirect_batch;
 	RequireExecutionError([&]() { redirect_stream->Next(redirect_control, redirect_batch); },
@@ -131,10 +132,11 @@ void TestAnonymousStatusRedirectAndTransportFailures() {
 		ControlledSocketService service(cases[index].mode);
 		const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
 		ManualControl control;
-		auto stream = runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(runtime->Connector()), control);
+		auto stream = runtime->Executor()->Open(
+		    duckdb_api_test::BuildRuntimePlan(duckdb_api::BuildNativeGithubConnector()), control);
 		duckdb_api::TypedBatch batch;
 		RequireExecutionError([&]() { stream->Next(control, batch); }, cases[index].stage, cases[index].forbidden);
-		Require(!stream->Next(control, batch), "failed real request was replayed");
+		RequireExecutionError([&]() { stream->Next(control, batch); }, cases[index].stage, cases[index].forbidden);
 		Require(runtime->Observation().request_count == 1 && service.ConnectionCount() == 1,
 		        "real curl failure performed more than one attempt");
 	}

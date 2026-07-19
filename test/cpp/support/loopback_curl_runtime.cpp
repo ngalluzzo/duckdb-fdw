@@ -28,12 +28,26 @@ namespace {
 
 bool HasFixedHeaders(const std::vector<duckdb_api::internal::HttpHeader> &headers) {
 	return headers.size() >= 3 && headers[0].name == "Accept" && headers[0].value == "application/vnd.github+json" &&
-	       headers[1].name == "User-Agent" && headers[1].value == "duckdb-api/0.4.0" &&
+	       headers[1].name == "User-Agent" && headers[1].value == "duckdb-api/0.5.0" &&
 	       headers[2].name == "X-GitHub-Api-Version" && headers[2].value == "2022-11-28";
 }
 
 bool IsBearerHeader(const duckdb_api::internal::HttpHeader &header) {
 	return header.name == "Authorization" && header.value.size() > 7 && header.value.compare(0, 7, "Bearer ") == 0;
+}
+
+bool IsRepositoryTarget(const std::string &target) {
+	const std::string prefix = "/user/repos?per_page=100&page=";
+	if (target.compare(0, prefix.size(), prefix) != 0 || target.size() == prefix.size() ||
+	    target[prefix.size()] == '0') {
+		return false;
+	}
+	for (std::size_t index = prefix.size(); index < target.size(); index++) {
+		if (target[index] < '0' || target[index] > '9') {
+			return false;
+		}
+	}
+	return true;
 }
 
 bool HasExpectedRequest(const duckdb_api::internal::HttpRequest &request) {
@@ -44,7 +58,8 @@ bool HasExpectedRequest(const duckdb_api::internal::HttpRequest &request) {
 	if (request.target == "/search/users?q=duckdb+in%3Alogin&per_page=3") {
 		return request.headers.size() == 3;
 	}
-	return request.target == "/user" && request.headers.size() == 4 && IsBearerHeader(request.headers[3]);
+	return (request.target == "/user" || IsRepositoryTarget(request.target)) && request.headers.size() == 4 &&
+	       IsBearerHeader(request.headers[3]);
 }
 
 bool IsOwnedLoopbackSocket(const sockaddr *address, socklen_t address_length, const void *context) noexcept {
@@ -98,17 +113,12 @@ private:
 } // namespace
 
 LoopbackCurlRuntime::LoopbackCurlRuntime(std::shared_ptr<State> state_p,
-                                         std::shared_ptr<const duckdb_api::ScanExecutor> executor_p,
-                                         duckdb_api::CompiledConnector connector_p)
-    : state(std::move(state_p)), executor(std::move(executor_p)), connector(std::move(connector_p)) {
+                                         std::shared_ptr<const duckdb_api::ScanExecutor> executor_p)
+    : state(std::move(state_p)), executor(std::move(executor_p)) {
 }
 
 std::shared_ptr<const duckdb_api::ScanExecutor> LoopbackCurlRuntime::Executor() const {
 	return executor;
-}
-
-const duckdb_api::CompiledConnector &LoopbackCurlRuntime::Connector() const {
-	return connector;
 }
 
 LoopbackCurlObservation LoopbackCurlRuntime::Observation() const noexcept {
@@ -122,7 +132,6 @@ std::shared_ptr<LoopbackCurlRuntime> BuildLoopbackCurlRuntime(uint16_t port) {
 		                                 "controlled HTTP service port is invalid");
 	}
 	auto state = std::make_shared<LoopbackCurlRuntime::State>(port);
-	auto connector = duckdb_api::BuildNativeGithubConnector();
 	(void)duckdb_api::internal::AcquireCurlProcessLifetime();
 	std::unique_ptr<duckdb_api::internal::HttpTransport> transport(new LoopbackCurlTransport(state));
 	const duckdb_api::internal::HttpExecutionProfile profile {duckdb_api::PlannedUrlScheme::HTTPS,
@@ -132,10 +141,9 @@ std::shared_ptr<LoopbackCurlRuntime> BuildLoopbackCurlRuntime(uint16_t port) {
 	                                                          false,
 	                                                          false,
 	                                                          duckdb_api::MAX_EXECUTION_MILLISECONDS,
-	                                                          3};
+	                                                          duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE};
 	auto executor = duckdb_api::internal::BuildHttpScanExecutorForProfile(std::move(transport), profile);
-	return std::shared_ptr<LoopbackCurlRuntime>(
-	    new LoopbackCurlRuntime(std::move(state), std::move(executor), std::move(connector)));
+	return std::shared_ptr<LoopbackCurlRuntime>(new LoopbackCurlRuntime(std::move(state), std::move(executor)));
 }
 
 } // namespace duckdb_api_test

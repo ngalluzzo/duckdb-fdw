@@ -44,6 +44,7 @@ void TestOneRequestAndSchemaAlignedBatches() {
 	        "second bounded batch drifted");
 	Require(!stream->Next(control, batch) && batch.rows.empty() && batch.column_kinds.empty(),
 	        "stream did not exhaust cleanly");
+	Require(!stream->Next(control, batch), "cleanly exhausted stream did not remain exhausted");
 
 	const auto observation = runtime->Observation();
 	Require(observation.request_count == 1, "batch pulls did not perform exactly one request");
@@ -53,7 +54,7 @@ void TestOneRequestAndSchemaAlignedBatches() {
 	Require(observation.headers.size() == 3 &&
 	            observation.headers[0] ==
 	                std::make_pair(std::string("Accept"), std::string("application/vnd.github+json")) &&
-	            observation.headers[1] == std::make_pair(std::string("User-Agent"), std::string("duckdb-api/0.4.0")) &&
+	            observation.headers[1] == std::make_pair(std::string("User-Agent"), std::string("duckdb-api/0.5.0")) &&
 	            observation.headers[2] ==
 	                std::make_pair(std::string("X-GitHub-Api-Version"), std::string("2022-11-28")),
 	        "fixed request headers drifted");
@@ -63,12 +64,31 @@ void TestOneRequestAndSchemaAlignedBatches() {
 	        "transport did not receive the applied hard budgets");
 }
 
+void TestAnonymousSinglePageIgnoresContinuationMetadata() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({duckdb_api_test::ControlledResponse(
+	    200, ThreeHttpRows(),
+	    {"<https://api.github.com/search/users?q=duckdb+in%3Alogin&per_page=3&page=2>; rel=\"next\""})});
+	ManualHttpExecutionControl control;
+	auto stream = runtime->Executor()->Open(BuildAnonymousHttpPlan(), control);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 2,
+	        "Link-bearing anonymous page did not preserve its first batch");
+	Require(stream->Next(control, batch) && batch.rows.size() == 1 && !stream->Next(control, batch),
+	        "Link-bearing anonymous page changed fixed one-response exhaustion");
+	Require(runtime->Observations().size() == 1,
+	        "unpaginated anonymous relation followed captured continuation metadata");
+	Require(runtime->Observation().max_metadata_bytes == 0,
+	        "unpaginated relation retained ignored Link metadata against decoded memory");
+}
+
 void TestExactBearerRequestAndRootObject() {
 	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
 	runtime->Respond(200, OneAuthenticatedHttpRow());
 	ManualHttpExecutionControl control;
 	auto token = GeneratedHttpBearerToken(1);
 	const auto expected_value = "Bearer " + token;
+	runtime->ExpectBearer(expected_value);
 	const auto plan = BuildAuthenticatedHttpPlan();
 	Require(plan.Snapshot().find(token) == std::string::npos, "credential bytes entered the immutable plan snapshot");
 	auto stream = runtime->Executor()->OpenWithAuthorization(
@@ -83,7 +103,7 @@ void TestExactBearerRequestAndRootObject() {
 	            observation.port == 443 && observation.target == "/user",
 	        "authenticated structural request identity drifted");
 	Require(observation.headers.size() == 4 && observation.headers[3].first == "Authorization" &&
-	            observation.headers[3].second == expected_value,
+	            observation.headers[3].second == "<redacted>" && runtime->ConsumeBearerExpectation(1),
 	        "fixed authenticator did not append exactly one canonical bearer header");
 }
 
@@ -176,14 +196,12 @@ void TestSimultaneousAuthorizationSnapshots() {
 	        "authorization identity crossed its originating stream");
 	const auto observations = runtime->Observations();
 	Require(observations.size() == 2, "isolated scans did not perform two independent requests");
-	uint64_t first_matches = 0;
-	uint64_t second_matches = 0;
 	for (std::size_t index = 0; index < observations.size(); index++) {
 		Require(observations[index].headers.size() == 4, "isolated scan header count drifted");
-		first_matches += observations[index].headers[3].second == first_header ? 1 : 0;
-		second_matches += observations[index].headers[3].second == second_header ? 1 : 0;
+		Require(observations[index].headers[3].first == "Authorization" &&
+		            observations[index].headers[3].second == "<redacted>",
+		        "ordinary observations exposed bearer credential bytes");
 	}
-	Require(first_matches == 1 && second_matches == 1, "authorization snapshots crossed concurrent scans");
 
 	ManualHttpExecutionControl cancelled_control;
 	ManualHttpExecutionControl surviving_control;
@@ -299,7 +317,8 @@ void TestFailureStagesRedactionAndNoReplay() {
 	auto status_stream = status_runtime->Executor()->Open(BuildAnonymousHttpPlan(), control);
 	RequireHttpExecutionError([&]() { status_stream->Next(control, batch); }, duckdb_api::ErrorStage::HTTP_STATUS,
 	                          "SECRET_STATUS_BODY");
-	Require(!status_stream->Next(control, batch), "HTTP status failure was replayed");
+	RequireHttpExecutionError([&]() { status_stream->Next(control, batch); }, duckdb_api::ErrorStage::HTTP_STATUS,
+	                          "SECRET_STATUS_BODY");
 	Require(status_runtime->Observation().request_count == 1, "status failure performed more than one request");
 
 	const auto unknown_runtime = duckdb_api_test::BuildControlledHttpRuntime();
@@ -307,7 +326,8 @@ void TestFailureStagesRedactionAndNoReplay() {
 	auto unknown_stream = unknown_runtime->Executor()->Open(BuildAnonymousHttpPlan(), control);
 	RequireHttpExecutionError([&]() { unknown_stream->Next(control, batch); }, duckdb_api::ErrorStage::TRANSPORT,
 	                          "SECRET_TRANSPORT");
-	Require(!unknown_stream->Next(control, batch), "unknown transport failure was replayed");
+	RequireHttpExecutionError([&]() { unknown_stream->Next(control, batch); }, duckdb_api::ErrorStage::TRANSPORT,
+	                          "SECRET_TRANSPORT");
 
 	const auto oversized_runtime = duckdb_api_test::BuildControlledHttpRuntime();
 	oversized_runtime->Respond(200, std::string(duckdb_api::HOST_MAX_RESPONSE_BYTES + 1, 'x'));
@@ -373,8 +393,24 @@ void TestDeadlinePersistsAcrossBatchPulls() {
 	        "deadline regression did not produce the first batch");
 	std::this_thread::sleep_for(std::chrono::milliseconds(controlled_wall_milliseconds + 20));
 	RequireHttpExecutionError([&]() { stream->Next(control, batch); }, duckdb_api::ErrorStage::RESOURCE);
-	Require(!stream->Next(control, batch), "expired stream resumed after delayed second pull");
+	RequireHttpExecutionError([&]() { stream->Next(control, batch); }, duckdb_api::ErrorStage::RESOURCE);
 	Require(runtime->Observation().request_count == 1, "delayed second pull replayed the request");
+}
+
+void TestCleanExhaustionOutlivesDeadline() {
+	const uint64_t controlled_wall_milliseconds = 30;
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime(controlled_wall_milliseconds);
+	runtime->Respond(200, OneAuthenticatedHttpRow());
+	ManualHttpExecutionControl control;
+	auto stream = runtime->Executor()->OpenWithAuthorization(
+	    BuildAuthenticatedHttpPlan(), duckdb_api::ScanAuthorization::GithubUserBearer(GeneratedHttpBearerToken(90)),
+	    control);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && !stream->Next(control, batch),
+	        "short-deadline fixture did not reach clean exhaustion");
+	std::this_thread::sleep_for(std::chrono::milliseconds(controlled_wall_milliseconds + 20));
+	Require(!stream->Next(control, batch) && runtime->Observation().request_count == 1,
+	        "clean exhaustion changed into a deadline failure or replayed transport");
 }
 
 } // namespace
@@ -382,6 +418,7 @@ void TestDeadlinePersistsAcrossBatchPulls() {
 int main() {
 	try {
 		TestOneRequestAndSchemaAlignedBatches();
+		TestAnonymousSinglePageIgnoresContinuationMetadata();
 		TestExactBearerRequestAndRootObject();
 		TestBearerTokenBoundaryPrecedesTransport();
 		TestAuthenticatedStatusFailures();
@@ -390,6 +427,7 @@ int main() {
 		TestFailureStagesRedactionAndNoReplay();
 		TestCancellationAndIdempotentClose();
 		TestDeadlinePersistsAcrossBatchPulls();
+		TestCleanExhaustionOutlivesDeadline();
 		std::cout << "HTTP scan executor tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

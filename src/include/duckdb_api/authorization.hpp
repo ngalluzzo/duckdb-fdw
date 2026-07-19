@@ -11,14 +11,15 @@ class FixedGithubUserBearerAuthenticator;
 } // namespace internal
 
 // Runtime-owned authority for opening one scan. Callers must choose either the
-// anonymous alternative or the fixed GitHub authenticated-user bearer
+// anonymous alternative or the fixed GitHub authenticated-relations bearer
 // alternative, then move the value into ScanExecutor::OpenWithAuthorization.
 //
 // GithubUserBearer takes ownership of one token snapshot. That alternative is
 // scoped inside Runtime to bearer authentication for the installed GitHub
-// authenticated-user profile; callers cannot select a destination, operation,
-// authenticator, or header placement. Only Runtime's fixed authenticator may
-// consume the opaque state. Moving invalidates the source, and a moved-from
+// user and repository profiles; callers cannot select a destination,
+// operation, authenticator, or header placement. Only Runtime's fixed
+// authenticator may inspect the opaque state. Moving invalidates the source,
+// and a moved-from
 // value fails closed if submitted again.
 //
 // Destruction is non-throwing and releases the owned token state. The token is

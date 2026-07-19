@@ -54,6 +54,7 @@ void RequireMemory(uint64_t current, uint64_t addition, uint64_t limit, uint64_t
 void ValidatePlan(const JsonDecodePlan &plan) {
 	const bool source_valid =
 	    (plan.response_source == JsonResponseSource::JSON_PATH_MANY && !plan.records_field.empty()) ||
+	    (plan.response_source == JsonResponseSource::ROOT_ARRAY && plan.records_field.empty()) ||
 	    (plan.response_source == JsonResponseSource::ROOT_OBJECT && plan.records_field.empty() &&
 	     plan.max_records == 1);
 	if (!source_valid || plan.columns.empty() || plan.max_records == 0 || plan.max_string_bytes == 0 ||
@@ -87,7 +88,9 @@ public:
 	std::vector<TypedRow> ParseResponse() {
 		ValidateDocument();
 		SkipWhitespace();
-		if (Peek() != '{') {
+		const bool root_matches =
+		    plan.response_source == JsonResponseSource::ROOT_ARRAY ? Peek() == '[' : Peek() == '{';
+		if (!root_matches) {
 			throw ExecutionError(ErrorStage::SCHEMA,
 			                     plan.response_source == JsonResponseSource::JSON_PATH_MANY ? plan.records_field : "",
 			                     "response root does not match the declared schema");
@@ -95,7 +98,14 @@ public:
 		if (plan.response_source == JsonResponseSource::ROOT_OBJECT) {
 			return ParseRootObject();
 		}
+		if (plan.response_source == JsonResponseSource::ROOT_ARRAY) {
+			return ParseRootArray();
+		}
 		return ParseRecordArrayResponse();
+	}
+
+	uint64_t RetainedMemoryBytes() const noexcept {
+		return decoded_memory;
 	}
 
 private:
@@ -131,6 +141,16 @@ private:
 	std::vector<TypedRow> ParseRootObject() {
 		auto result = AllocateResult();
 		result.push_back(ParseRecord());
+		SkipWhitespace();
+		if (position != input.size()) {
+			MalformedJson();
+		}
+		return result;
+	}
+
+	std::vector<TypedRow> ParseRootArray() {
+		auto result = AllocateResult();
+		ParseRecords(result);
 		SkipWhitespace();
 		if (position != input.size()) {
 			MalformedJson();
@@ -677,12 +697,13 @@ private:
 
 } // namespace
 
-std::vector<TypedRow> DecodeJsonRows(const std::string &body, const JsonDecodePlan &plan, ExecutionControl &control) {
+DecodedJsonPage DecodeJsonPage(const std::string &body, const JsonDecodePlan &plan, ExecutionControl &control) {
 	ValidatePlan(plan);
 	Checkpoint(control, plan.deadline);
 	try {
 		JsonParser parser(body, plan, control);
-		return parser.ParseResponse();
+		auto rows = parser.ParseResponse();
+		return {std::move(rows), parser.RetainedMemoryBytes()};
 	} catch (const ExecutionCancelled &) {
 		throw;
 	} catch (const ExecutionError &) {
@@ -693,6 +714,11 @@ std::vector<TypedRow> DecodeJsonRows(const std::string &body, const JsonDecodePl
 	} catch (...) {
 		throw ExecutionError(ErrorStage::INTERNAL, "", "JSON decoder failed");
 	}
+}
+
+std::vector<TypedRow> DecodeJsonRows(const std::string &body, const JsonDecodePlan &plan, ExecutionControl &control) {
+	auto page = DecodeJsonPage(body, plan, control);
+	return std::move(page.rows);
 }
 
 } // namespace internal

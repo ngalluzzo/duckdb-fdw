@@ -20,24 +20,28 @@ using duckdb_api_test::Require;
 using duckdb_api_test::RequireHttpExecutionError;
 
 void RequirePlanDeniedBeforeTransport(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
-                                      const duckdb_api::ScanPlan &plan, bool authenticated, uint64_t suffix) {
+                                      const duckdb_api::ScanPlan &plan, bool authenticated, uint64_t suffix,
+                                      const std::string &context) {
 	ManualHttpExecutionControl control;
+	bool rejected = false;
 	if (authenticated) {
 		auto token = GeneratedHttpBearerToken(suffix);
-		RequireHttpExecutionError(
-		    [&]() {
-			    (void)runtime->Executor()->OpenWithAuthorization(
-			        plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
-		    },
-		    duckdb_api::ErrorStage::POLICY);
+		try {
+			(void)runtime->Executor()->OpenWithAuthorization(
+			    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+		} catch (const duckdb_api::ExecutionError &error) {
+			rejected = true;
+			Require(error.Stage() == duckdb_api::ErrorStage::POLICY, context + " used the wrong error stage");
+		}
 	} else {
-		RequireHttpExecutionError(
-		    [&]() {
-			    (void)runtime->Executor()->OpenWithAuthorization(plan, duckdb_api::ScanAuthorization::Anonymous(),
-			                                                     control);
-		    },
-		    duckdb_api::ErrorStage::POLICY);
+		try {
+			(void)runtime->Executor()->OpenWithAuthorization(plan, duckdb_api::ScanAuthorization::Anonymous(), control);
+		} catch (const duckdb_api::ExecutionError &error) {
+			rejected = true;
+			Require(error.Stage() == duckdb_api::ErrorStage::POLICY, context + " used the wrong error stage");
+		}
 	}
+	Require(rejected, context + " did not produce a structured policy error");
 	Require(runtime->Observation().request_count == 0, "invalid provider-owned plan reached transport");
 }
 
@@ -62,7 +66,7 @@ void TestProviderOwnedPlanDenialMatrix() {
 	for (std::size_t index = 0; index < sizeof(operations) / sizeof(operations[0]); index++) {
 		const auto runtime = BuildControlledHttpRuntime();
 		RequirePlanDeniedBeforeTransport(runtime, BuildOperationPlanCounterexample("fixture_secret", operations[index]),
-		                                 true, suffix++);
+		                                 true, suffix++, "operation " + std::to_string(index));
 	}
 
 	const AuthenticatedPlanCounterexample authentication[] = {
@@ -78,8 +82,9 @@ void TestProviderOwnedPlanDenialMatrix() {
 	    AuthenticatedPlanCounterexample::MISSING_SECRET_REFERENCE};
 	for (std::size_t index = 0; index < sizeof(authentication) / sizeof(authentication[0]); index++) {
 		const auto runtime = BuildControlledHttpRuntime();
-		RequirePlanDeniedBeforeTransport(
-		    runtime, BuildAuthenticatedPlanCounterexample("fixture_secret", authentication[index]), true, suffix++);
+		RequirePlanDeniedBeforeTransport(runtime,
+		                                 BuildAuthenticatedPlanCounterexample("fixture_secret", authentication[index]),
+		                                 true, suffix++, "authentication " + std::to_string(index));
 	}
 
 	const AnonymousAuthPlanCounterexample anonymous_auth[] = {
@@ -89,12 +94,12 @@ void TestProviderOwnedPlanDenialMatrix() {
 	for (std::size_t index = 0; index < sizeof(anonymous_auth) / sizeof(anonymous_auth[0]); index++) {
 		const auto runtime = BuildControlledHttpRuntime();
 		RequirePlanDeniedBeforeTransport(runtime, BuildAnonymousAuthPlanCounterexample(anonymous_auth[index]), false,
-		                                 suffix++);
+		                                 suffix++, "anonymous auth " + std::to_string(index));
 	}
 	{
 		const auto runtime = BuildControlledHttpRuntime();
 		RequirePlanDeniedBeforeTransport(runtime, BuildAnonymousSecretReferenceCounterexample("fixture_secret"), false,
-		                                 suffix++);
+		                                 suffix++, "anonymous secret");
 	}
 
 	const ResponsePlanCounterexample responses[] = {
@@ -105,7 +110,7 @@ void TestProviderOwnedPlanDenialMatrix() {
 	for (std::size_t index = 0; index < sizeof(responses) / sizeof(responses[0]); index++) {
 		const auto runtime = BuildControlledHttpRuntime();
 		RequirePlanDeniedBeforeTransport(runtime, BuildResponsePlanCounterexample("fixture_secret", responses[index]),
-		                                 true, suffix++);
+		                                 true, suffix++, "response " + std::to_string(index));
 	}
 
 	const NetworkPlanCounterexample networks[] = {NetworkPlanCounterexample::EMPTY_SCHEMES,
@@ -119,16 +124,39 @@ void TestProviderOwnedPlanDenialMatrix() {
 	for (std::size_t index = 0; index < sizeof(networks) / sizeof(networks[0]); index++) {
 		const auto runtime = BuildControlledHttpRuntime();
 		RequirePlanDeniedBeforeTransport(runtime, BuildNetworkPlanCounterexample("fixture_secret", networks[index]),
-		                                 true, suffix++);
+		                                 true, suffix++, "network " + std::to_string(index));
 	}
 
-	const FeaturePlanCounterexample features[] = {
-	    FeaturePlanCounterexample::PAGINATION_ENABLED, FeaturePlanCounterexample::PROVIDERS_ENABLED,
-	    FeaturePlanCounterexample::RETRY_ENABLED, FeaturePlanCounterexample::CACHE_ENABLED};
+	const FeaturePlanCounterexample features[] = {FeaturePlanCounterexample::PROVIDERS_ENABLED,
+	                                              FeaturePlanCounterexample::RETRY_ENABLED,
+	                                              FeaturePlanCounterexample::CACHE_ENABLED};
 	for (std::size_t index = 0; index < sizeof(features) / sizeof(features[0]); index++) {
 		const auto runtime = BuildControlledHttpRuntime();
 		RequirePlanDeniedBeforeTransport(runtime, BuildFeaturePlanCounterexample("fixture_secret", features[index]),
-		                                 true, suffix++);
+		                                 true, suffix++, "feature " + std::to_string(index));
+	}
+
+	const PaginationPlanCounterexample pagination[] = {PaginationPlanCounterexample::STRATEGY_DISABLED,
+	                                                   PaginationPlanCounterexample::UNKNOWN_DEPENDENCY,
+	                                                   PaginationPlanCounterexample::UNKNOWN_CONSISTENCY,
+	                                                   PaginationPlanCounterexample::UNKNOWN_LINK_RELATION,
+	                                                   PaginationPlanCounterexample::UNKNOWN_TARGET_SCOPE,
+	                                                   PaginationPlanCounterexample::SUPPORTS_TOTAL,
+	                                                   PaginationPlanCounterexample::SUPPORTS_RESUME,
+	                                                   PaginationPlanCounterexample::EMPTY_TARGET_PATH,
+	                                                   PaginationPlanCounterexample::PAGE_REQUEST_ATTEMPTS_WIDENED,
+	                                                   PaginationPlanCounterexample::SCAN_REQUEST_ATTEMPTS_MISMATCH,
+	                                                   PaginationPlanCounterexample::SCAN_RESPONSE_BYTES_BELOW_PAGE,
+	                                                   PaginationPlanCounterexample::SCAN_DECODED_RECORDS_BELOW_PAGE};
+	for (std::size_t index = 0; index < sizeof(pagination) / sizeof(pagination[0]); index++) {
+		const auto runtime = BuildControlledHttpRuntime();
+		try {
+			RequirePlanDeniedBeforeTransport(runtime,
+			                                 BuildPaginationPlanCounterexample("fixture_secret", pagination[index]),
+			                                 true, suffix++, "pagination " + std::to_string(index));
+		} catch (const std::exception &error) {
+			throw std::runtime_error("pagination denial index " + std::to_string(index) + ": " + error.what());
+		}
 	}
 
 	const ResourcePlanCounterexample resources[] = {ResourcePlanCounterexample::REQUEST_ATTEMPTS_ZERO,
@@ -156,7 +184,7 @@ void TestProviderOwnedPlanDenialMatrix() {
 	for (std::size_t index = 0; index < sizeof(resources) / sizeof(resources[0]); index++) {
 		const auto runtime = BuildControlledHttpRuntime();
 		RequirePlanDeniedBeforeTransport(runtime, BuildResourcePlanCounterexample("fixture_secret", resources[index]),
-		                                 true, suffix++);
+		                                 true, suffix++, "resource " + std::to_string(index));
 	}
 }
 
@@ -189,18 +217,18 @@ duckdb_api::internal::HttpRequest FixedAuthenticatedRequest() {
 	request.port = 443;
 	request.target = "/user";
 	request.headers = {{"Accept", "application/vnd.github+json"},
-	                   {"User-Agent", "duckdb-api/0.4.0"},
+	                   {"User-Agent", "duckdb-api/0.5.0"},
 	                   {"X-GitHub-Api-Version", "2022-11-28"}};
 	return request;
 }
 
 void RequireFinalRequestDenied(duckdb_api::internal::HttpRequest request, uint64_t suffix) {
 	auto token = GeneratedHttpBearerToken(suffix);
+	auto authorization = duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token));
 	RequireHttpExecutionError(
 	    [&]() {
 		    (void)duckdb_api::internal::FixedGithubUserBearerAuthenticator::Authorize(
-		        BuildAuthenticatedHttpPlan(), std::move(request),
-		        duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)));
+		        BuildAuthenticatedHttpPlan(), std::move(request), authorization);
 	    },
 	    duckdb_api::ErrorStage::POLICY);
 }
@@ -240,7 +268,10 @@ void TestExecutionProfileNeverWidensRecordAuthority() {
 	    [&]() { (void)duckdb_api_test::BuildControlledHttpRuntime(duckdb_api::MAX_EXECUTION_MILLISECONDS, 0); },
 	    duckdb_api::ErrorStage::INTERNAL);
 	RequireHttpExecutionError(
-	    [&]() { (void)duckdb_api_test::BuildControlledHttpRuntime(duckdb_api::MAX_EXECUTION_MILLISECONDS, 4); },
+	    [&]() {
+		    (void)duckdb_api_test::BuildControlledHttpRuntime(duckdb_api::MAX_EXECUTION_MILLISECONDS,
+		                                                      duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE + 1);
+	    },
 	    duckdb_api::ErrorStage::INTERNAL);
 }
 

@@ -1,4 +1,5 @@
 #include "duckdb_api/internal/curl_transfer.hpp"
+#include "duckdb_api/internal/http_chunk_decoder.hpp"
 #include "duckdb_api/internal/request_header_budget.hpp"
 
 #include <curl/curl.h>
@@ -72,7 +73,10 @@ struct TransferState {
 	TransferState(ExecutionControl &control_p, const HttpLimits &limits_p, const CurlTransferProfile &profile_p)
 	    : control(control_p), limits(limits_p), profile(profile_p), header_bytes(0), response_bytes(0),
 	      cancelled(false), timed_out(false), header_oversized(false), response_oversized(false),
-	      decompressed_oversized(false), allocation_failed(false), address_denied(false), socket_attempted(false) {
+	      decompressed_oversized(false), metadata_oversized(false), body_allocation_failed(false),
+	      metadata_allocation_failed(false), address_denied(false), socket_attempted(false), metadata_bytes(0),
+	      header_section_complete(false), transfer_encoding_seen(false), transfer_chunked(false),
+	      transfer_encoding_unsupported(false), content_encoded(false), easy_handle(nullptr) {
 	}
 
 	bool ShouldContinue() noexcept {
@@ -93,15 +97,52 @@ struct TransferState {
 	uint64_t header_bytes;
 	uint64_t response_bytes;
 	std::string body;
+	std::vector<std::string> link_field_values;
 	bool cancelled;
 	bool timed_out;
 	bool header_oversized;
 	bool response_oversized;
 	bool decompressed_oversized;
-	bool allocation_failed;
+	bool metadata_oversized;
+	bool body_allocation_failed;
+	bool metadata_allocation_failed;
 	bool address_denied;
 	bool socket_attempted;
+	uint64_t metadata_bytes;
+	bool header_section_complete;
+	bool transfer_encoding_seen;
+	bool transfer_chunked;
+	bool transfer_encoding_unsupported;
+	bool content_encoded;
+	CURL *easy_handle;
 };
+
+void ReleaseLinkMetadata(TransferState &state) noexcept {
+	std::vector<std::string>().swap(state.link_field_values);
+	state.metadata_bytes = 0;
+}
+
+bool TryRetainedMetadataBytes(const std::vector<std::string> &values, uint64_t limit, uint64_t &result) noexcept {
+	if (values.capacity() > limit / sizeof(std::string)) {
+		return false;
+	}
+	result = static_cast<uint64_t>(values.capacity()) * sizeof(std::string);
+	for (const auto &value : values) {
+		const auto object_begin = reinterpret_cast<std::uintptr_t>(&value);
+		const auto object_end = object_begin + sizeof(value);
+		const auto data = reinterpret_cast<std::uintptr_t>(value.data());
+		// Inline string storage is already part of sizeof(std::string). External
+		// storage retains capacity()+1 bytes for the terminating NUL.
+		if (data < object_begin || data >= object_end) {
+			const auto allocation = static_cast<uint64_t>(value.capacity()) + 1;
+			if (result > limit || allocation > limit - result) {
+				return false;
+			}
+			result += allocation;
+		}
+	}
+	return result <= limit;
+}
 
 bool AddWithin(uint64_t current, std::size_t amount, uint64_t limit, uint64_t &result) noexcept {
 	if (current > limit || static_cast<uint64_t>(amount) > limit - current) {
@@ -113,6 +154,9 @@ bool AddWithin(uint64_t current, std::size_t amount, uint64_t limit, uint64_t &r
 
 std::size_t WriteBody(char *data, std::size_t size, std::size_t count, void *opaque) noexcept {
 	auto &state = *static_cast<TransferState *>(opaque);
+	if (state.response_oversized) {
+		return 0;
+	}
 	if (!state.ShouldContinue()) {
 		return 0;
 	}
@@ -122,22 +166,84 @@ std::size_t WriteBody(char *data, std::size_t size, std::size_t count, void *opa
 	}
 	const auto length = size * count;
 	uint64_t updated_size = 0;
-	if (!AddWithin(static_cast<uint64_t>(state.body.size()), length, state.limits.max_decompressed_bytes,
-	               updated_size)) {
-		state.decompressed_oversized = true;
+	const auto body_limit =
+	    state.transfer_chunked ? state.limits.max_response_bytes : state.limits.max_decompressed_bytes;
+	if (!AddWithin(static_cast<uint64_t>(state.body.size()), length, body_limit, updated_size)) {
+		if (state.transfer_chunked) {
+			state.response_oversized = true;
+		} else {
+			state.decompressed_oversized = true;
+		}
 		return 0;
 	}
 	(void)updated_size;
 	try {
 		state.body.append(data, length);
 	} catch (...) {
-		state.allocation_failed = true;
+		state.body_allocation_failed = true;
 		return 0;
 	}
 	return length;
 }
 
-std::size_t ReadHeader(char *, std::size_t size, std::size_t count, void *opaque) noexcept {
+char AsciiLower(char value) noexcept {
+	return value >= 'A' && value <= 'Z' ? static_cast<char>(value - 'A' + 'a') : value;
+}
+
+bool IsStatusLine(const char *data, std::size_t length) noexcept {
+	return length >= 5 && AsciiLower(data[0]) == 'h' && AsciiLower(data[1]) == 't' && AsciiLower(data[2]) == 't' &&
+	       AsciiLower(data[3]) == 'p' && data[4] == '/';
+}
+
+bool IsHeaderSectionEnd(const char *data, std::size_t length) noexcept {
+	return (length == 2 && data[0] == '\r' && data[1] == '\n') || (length == 1 && data[0] == '\n');
+}
+
+bool IsNamedField(const char *data, std::size_t length, const char *name, std::size_t &value_offset) noexcept {
+	std::size_t colon = 0;
+	while (colon < length && data[colon] != ':' && data[colon] != '\r' && data[colon] != '\n') {
+		colon++;
+	}
+	std::size_t name_length = 0;
+	while (name[name_length] != '\0') {
+		name_length++;
+	}
+	if (colon != name_length || colon >= length || data[colon] != ':') {
+		return false;
+	}
+	for (std::size_t index = 0; index < colon; index++) {
+		if (AsciiLower(data[index]) != name[index]) {
+			return false;
+		}
+	}
+	value_offset = colon + 1;
+	return true;
+}
+
+bool EqualsFieldValue(const char *data, std::size_t begin, std::size_t end, const char *expected) noexcept {
+	while (begin < end && (data[begin] == ' ' || data[begin] == '\t')) {
+		begin++;
+	}
+	while (end > begin &&
+	       (data[end - 1] == '\r' || data[end - 1] == '\n' || data[end - 1] == ' ' || data[end - 1] == '\t')) {
+		end--;
+	}
+	std::size_t expected_length = 0;
+	while (expected[expected_length] != '\0') {
+		expected_length++;
+	}
+	if (end - begin != expected_length) {
+		return false;
+	}
+	for (std::size_t index = 0; index < expected_length; index++) {
+		if (AsciiLower(data[begin + index]) != AsciiLower(expected[index])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+std::size_t ReadHeader(char *data, std::size_t size, std::size_t count, void *opaque) noexcept {
 	auto &state = *static_cast<TransferState *>(opaque);
 	if (!state.ShouldContinue()) {
 		return 0;
@@ -153,21 +259,109 @@ std::size_t ReadHeader(char *, std::size_t size, std::size_t count, void *opaque
 		return 0;
 	}
 	state.header_bytes = updated_size;
+	// A new HTTP status line begins a new response header section. Resetting the
+	// candidate values here ensures 1xx/interim metadata cannot influence the
+	// terminal response. Redirect following remains disabled independently.
+	if (IsStatusLine(data, length)) {
+		ReleaseLinkMetadata(state);
+		state.header_section_complete = false;
+		state.transfer_encoding_seen = false;
+		state.transfer_chunked = false;
+		state.transfer_encoding_unsupported = false;
+		state.content_encoded = false;
+		return length;
+	}
+	if (IsHeaderSectionEnd(data, length)) {
+		state.header_section_complete = true;
+		return length;
+	}
+	// libcurl sends HTTP trailers through the header callback after the blank
+	// line that ended the terminal response header section. Trailers are still
+	// charged to the header budget, but they cannot grant continuation authority.
+	if (state.header_section_complete) {
+		return length;
+	}
+	std::size_t value_offset = 0;
+	if (IsNamedField(data, length, "transfer-encoding", value_offset)) {
+		if (state.transfer_encoding_seen) {
+			state.transfer_encoding_unsupported = true;
+			return 0;
+		}
+		state.transfer_encoding_seen = true;
+		state.transfer_chunked = EqualsFieldValue(data, value_offset, length, "chunked");
+		state.transfer_encoding_unsupported = !state.transfer_chunked;
+		return state.transfer_encoding_unsupported ? 0 : length;
+	}
+	if (IsNamedField(data, length, "content-encoding", value_offset)) {
+		state.content_encoded = !EqualsFieldValue(data, value_offset, length, "identity");
+		return length;
+	}
+	if (!IsNamedField(data, length, "link", value_offset)) {
+		return length;
+	}
+	if (state.limits.max_metadata_bytes == 0) {
+		return length;
+	}
+	while (value_offset < length && (data[value_offset] == ' ' || data[value_offset] == '\t')) {
+		value_offset++;
+	}
+	std::size_t value_end = length;
+	while (value_end > value_offset && (data[value_end - 1] == '\r' || data[value_end - 1] == '\n' ||
+	                                    data[value_end - 1] == ' ' || data[value_end - 1] == '\t')) {
+		value_end--;
+	}
+	const auto value_length = value_end - value_offset;
+	if (value_length > state.limits.max_metadata_bytes) {
+		state.metadata_oversized = true;
+		return 0;
+	}
+	try {
+		state.link_field_values.push_back(std::string(data + value_offset, value_length));
+		uint64_t retained = 0;
+		if (!TryRetainedMetadataBytes(state.link_field_values, state.limits.max_metadata_bytes, retained)) {
+			state.metadata_oversized = true;
+			ReleaseLinkMetadata(state);
+			return 0;
+		}
+		state.metadata_bytes = retained;
+	} catch (...) {
+		state.metadata_allocation_failed = true;
+		ReleaseLinkMetadata(state);
+		return 0;
+	}
 	return length;
+}
+
+int CountIncomingProtocolData(CURL *handle, curl_infotype type, char *, std::size_t length, void *opaque) noexcept {
+	auto &state = *static_cast<TransferState *>(opaque);
+	// DATA_IN observes the body before content decoding. With HTTP transfer
+	// decoding disabled, the write callback separately bounds raw chunk framing
+	// and replaces this count with its exact buffered size. Count only our easy
+	// handle and never inspect, retain, or log potentially sensitive bytes.
+	if (handle != state.easy_handle || type != CURLINFO_DATA_IN) {
+		return 0;
+	}
+	uint64_t updated_size = 0;
+	if (!AddWithin(state.response_bytes, length, state.limits.max_response_bytes, updated_size)) {
+		state.response_oversized = true;
+		return 0;
+	}
+	state.response_bytes = updated_size;
+	return 0;
 }
 
 int TransferProgress(void *opaque, curl_off_t total, curl_off_t current, curl_off_t, curl_off_t) noexcept {
 	auto &state = *static_cast<TransferState *>(opaque);
+	if (state.response_oversized) {
+		return 1;
+	}
 	if (total > 0 && static_cast<uint64_t>(total) > state.limits.max_response_bytes) {
 		state.response_oversized = true;
 		return 1;
 	}
-	if (current > 0) {
-		state.response_bytes = static_cast<uint64_t>(current);
-		if (state.response_bytes > state.limits.max_response_bytes) {
-			state.response_oversized = true;
-			return 1;
-		}
+	if (current > 0 && static_cast<uint64_t>(current) > state.limits.max_response_bytes) {
+		state.response_oversized = true;
+		return 1;
 	}
 	return state.ShouldContinue() ? 0 : 1;
 }
@@ -263,6 +457,7 @@ void ValidateInputs(const CurlTransferProfile &profile, const HttpRequest &reque
 		throw ExecutionError(ErrorStage::INTERNAL, "", "HTTP transport profile is invalid");
 	}
 	if (limits.max_header_bytes == 0 || limits.max_response_bytes == 0 || limits.max_decompressed_bytes == 0 ||
+	    limits.max_metadata_bytes > limits.max_header_bytes ||
 	    limits.max_decompressed_bytes > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max()) ||
 	    limits.max_response_bytes > static_cast<uint64_t>(std::numeric_limits<curl_off_t>::max())) {
 		throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP transport received an invalid resource budget");
@@ -316,6 +511,7 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 			throw ExecutionError(ErrorStage::TRANSPORT, "", "HTTP transport is unavailable");
 		}
 		auto *handle = easy.Get();
+		state.easy_handle = handle;
 #ifdef DUCKDB_API_PRIVATE_CURL_TESTS
 		const CurlOptionSetter options(handle, profile);
 #else
@@ -356,12 +552,16 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 		options.Set(CURLOPT_NOPROGRESS, 0L);
 		options.Set(CURLOPT_XFERINFOFUNCTION, TransferProgress);
 		options.Set(CURLOPT_XFERINFODATA, &state);
+		options.Set(CURLOPT_VERBOSE, 1L);
+		options.Set(CURLOPT_DEBUGFUNCTION, CountIncomingProtocolData);
+		options.Set(CURLOPT_DEBUGDATA, &state);
 		options.Set(CURLOPT_WRITEFUNCTION, WriteBody);
 		options.Set(CURLOPT_WRITEDATA, &state);
 		options.Set(CURLOPT_HEADERFUNCTION, ReadHeader);
 		options.Set(CURLOPT_HEADERDATA, &state);
-		options.Set(CURLOPT_ACCEPT_ENCODING, "");
+		options.Set(CURLOPT_ACCEPT_ENCODING, "identity");
 		options.Set(CURLOPT_HTTP_CONTENT_DECODING, 1L);
+		options.Set(CURLOPT_HTTP_TRANSFER_DECODING, 0L);
 		options.Set(CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(limits.max_response_bytes));
 		options.Set(CURLOPT_PATH_AS_IS, 1L);
 		// A fresh, unshared handle plus disabled reuse, cookies, netrc, proxy, and
@@ -391,23 +591,44 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 		if (state.response_oversized || transfer_result == CURLE_FILESIZE_EXCEEDED) {
 			throw ExecutionError(ErrorStage::RESOURCE, "response_bytes", "HTTP response exceeded its byte budget");
 		}
+		if (state.transfer_encoding_unsupported) {
+			throw ExecutionError(ErrorStage::TRANSPORT, "", "HTTP response used unsupported transfer framing");
+		}
 		if (state.decompressed_oversized) {
 			throw ExecutionError(ErrorStage::RESOURCE, "decompressed_bytes",
 			                     "HTTP response exceeded its decompressed-byte budget");
 		}
-		if (state.allocation_failed) {
+		if (state.metadata_oversized) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "HTTP response metadata exceeded its memory budget");
+		}
+		if (state.body_allocation_failed) {
 			throw ExecutionError(ErrorStage::RESOURCE, "decompressed_bytes",
 			                     "HTTP response could not be buffered within its budget");
+		}
+		if (state.metadata_allocation_failed) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "HTTP response metadata could not be retained within its memory budget");
 		}
 		if (transfer_result != CURLE_OK) {
 			throw ExecutionError(ErrorStage::TRANSPORT, "", "HTTP request failed");
 		}
+		if (state.transfer_chunked) {
+			if (state.content_encoded) {
+				throw ExecutionError(ErrorStage::TRANSPORT, "",
+				                     "HTTP chunked response used unsupported content encoding");
+			}
+			try {
+				state.response_bytes = static_cast<uint64_t>(state.body.size());
+				state.body = DecodeHttpChunkedBody(state.body, limits.max_decompressed_bytes, control, limits.deadline);
+			} catch (const HttpChunkDecodeError &) {
+				throw ExecutionError(ErrorStage::TRANSPORT, "", "HTTP response used malformed chunk framing");
+			}
+		}
 
 		long response_status = 0;
 		RequireCurlOption(curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &response_status));
-		curl_off_t response_bytes = 0;
-		RequireCurlOption(curl_easy_getinfo(handle, CURLINFO_SIZE_DOWNLOAD_T, &response_bytes));
-		if (response_bytes < 0 || static_cast<uint64_t>(response_bytes) > limits.max_response_bytes) {
+		if (state.response_bytes > limits.max_response_bytes) {
 			throw ExecutionError(ErrorStage::RESOURCE, "response_bytes", "HTTP response exceeded its byte budget");
 		}
 		if (response_status < 0 || static_cast<unsigned long>(response_status) >
@@ -415,10 +636,14 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 			throw ExecutionError(ErrorStage::TRANSPORT, "", "HTTP transport returned invalid metadata");
 		}
 		if (response_status < 200 || response_status >= 300) {
-			state.body.clear();
+			std::string().swap(state.body);
+			ReleaseLinkMetadata(state);
 		}
-		return {static_cast<uint32_t>(response_status), state.header_bytes, static_cast<uint64_t>(response_bytes),
-		        std::move(state.body)};
+		return {static_cast<uint32_t>(response_status),
+		        state.header_bytes,
+		        state.response_bytes,
+		        std::move(state.body),
+		        {std::move(state.link_field_values), state.metadata_bytes}};
 	} catch (const ExecutionCancelled &) {
 		throw;
 	} catch (const ExecutionError &) {

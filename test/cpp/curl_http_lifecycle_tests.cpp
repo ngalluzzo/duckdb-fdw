@@ -59,7 +59,8 @@ void TestPlanDeadlineBoundsBlockedCurlTransfer() {
 	ControlledSocketService blocked(ControlledSocketMode::BLOCK);
 	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(blocked.Port());
 	ManualControl control;
-	auto stream = runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(runtime->Connector()), control);
+	auto stream =
+	    runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(duckdb_api::BuildNativeGithubConnector()), control);
 	duckdb_api::TypedBatch batch;
 	const auto started = std::chrono::steady_clock::now();
 	RequireExecutionError([&]() { stream->Next(control, batch); }, duckdb_api::ErrorStage::RESOURCE);
@@ -75,7 +76,7 @@ void TestConcurrentCloseAndRecovery() {
 	auto token = duckdb_api_test::RuntimeCurlBearerToken(70);
 	const auto expected_header = "Authorization: Bearer " + token + "\r\n";
 	auto stream = runtime->Executor()->OpenWithAuthorization(
-	    duckdb_api_test::BuildAuthenticatedRuntimePlan(runtime->Connector()),
+	    duckdb_api_test::BuildAuthenticatedRuntimePlan(duckdb_api::BuildNativeGithubConnector()),
 	    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
 	duckdb_api::TypedBatch batch;
 	std::atomic<bool> cancelled(false);
@@ -103,7 +104,7 @@ void TestConcurrentCloseAndRecovery() {
 	ManualControl recovered_control;
 	auto recovered_token = duckdb_api_test::RuntimeCurlBearerToken(71);
 	auto recovered_stream = runtime->Executor()->OpenWithAuthorization(
-	    duckdb_api_test::BuildAuthenticatedRuntimePlan(runtime->Connector()),
+	    duckdb_api_test::BuildAuthenticatedRuntimePlan(duckdb_api::BuildNativeGithubConnector()),
 	    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(recovered_token)), recovered_control);
 	Require(recovered_stream->Next(recovered_control, batch) && batch.IsSchemaAligned() && batch.rows.size() == 1,
 	        "same curl runtime did not recover after a cancelled transfer");

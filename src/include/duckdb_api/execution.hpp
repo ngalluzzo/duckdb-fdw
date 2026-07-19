@@ -91,7 +91,11 @@ struct TypedBatch {
 };
 
 // One independently owned scan. Next replaces rows with at most the planned
-// batch size. Cancel and Close are idempotent, non-throwing lifecycle signals.
+// batch size. A true result always carries a schema-aligned nonempty batch;
+// false alone means clean source exhaustion. A terminal failure throws and can
+// never be reported as exhaustion, including after earlier batches crossed the
+// streaming boundary. Cancel and Close are idempotent, non-throwing lifecycle
+// signals.
 class BatchStream {
 public:
 	virtual ~BatchStream() noexcept;

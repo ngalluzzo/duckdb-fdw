@@ -1,4 +1,5 @@
 #include "duckdb_api/internal/link_pagination.hpp"
+#include "duckdb_api/internal/uri_reference.hpp"
 
 #include <limits>
 #include <new>
@@ -9,6 +10,7 @@ namespace internal {
 namespace {
 
 const char *const PAGINATION_FIELD = "pagination.next";
+constexpr std::size_t MAX_IGNORED_EMPTY_LIST_ELEMENTS = 128;
 
 [[noreturn]] void ThrowMalformed() {
 	throw LinkPaginationError(LinkPaginationErrorKind::MALFORMED, PAGINATION_FIELD,
@@ -21,8 +23,7 @@ const char *const PAGINATION_FIELD = "pagination.next";
 }
 
 [[noreturn]] void ThrowState() {
-	throw LinkPaginationError(LinkPaginationErrorKind::STATE, PAGINATION_FIELD,
-	                          "Link pagination state cannot advance");
+	throw LinkPaginationError(LinkPaginationErrorKind::STATE, PAGINATION_FIELD, "Link pagination state cannot advance");
 }
 
 bool IsOws(char value) noexcept {
@@ -48,62 +49,9 @@ void SkipOws(const std::string &value, std::size_t &offset) noexcept {
 }
 
 bool IsTokenCharacter(unsigned char value) noexcept {
-	return IsAsciiAlpha(value) || IsAsciiDigit(value) || value == '!' || value == '#' || value == '$' || value == '%' || value == '&' ||
-	       value == '\'' || value == '*' || value == '+' || value == '-' || value == '.' || value == '^' ||
-	       value == '_' || value == '`' || value == '|' || value == '~';
-}
-
-bool IsHexDigit(unsigned char value) noexcept {
-	return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f') || (value >= 'A' && value <= 'F');
-}
-
-bool IsUriCharacter(unsigned char value) noexcept {
-	if (IsAsciiAlpha(value) || IsAsciiDigit(value) || value == '-' || value == '.' || value == '_' || value == '~') {
-		return true;
-	}
-	switch (value) {
-	case ':':
-	case '/':
-	case '?':
-	case '#':
-	case '[':
-	case ']':
-	case '@':
-	case '!':
-	case '$':
-	case '&':
-	case '\'':
-	case '(':
-	case ')':
-	case '*':
-	case '+':
-	case ',':
-	case ';':
-	case '=':
-	case '%':
-		return true;
-	default:
-		return false;
-	}
-}
-
-void ValidateUriReference(const std::string &target) {
-	if (target.empty()) {
-		ThrowMalformed();
-	}
-	for (std::size_t index = 0; index < target.size(); index++) {
-		const auto byte = static_cast<unsigned char>(target[index]);
-		if (!IsUriCharacter(byte)) {
-			ThrowMalformed();
-		}
-		if (byte == '%') {
-			if (index + 2 >= target.size() || !IsHexDigit(static_cast<unsigned char>(target[index + 1])) ||
-			    !IsHexDigit(static_cast<unsigned char>(target[index + 2]))) {
-				ThrowMalformed();
-			}
-			index += 2;
-		}
-	}
+	return IsAsciiAlpha(value) || IsAsciiDigit(value) || value == '!' || value == '#' || value == '$' || value == '%' ||
+	       value == '&' || value == '\'' || value == '*' || value == '+' || value == '-' || value == '.' ||
+	       value == '^' || value == '_' || value == '`' || value == '|' || value == '~';
 }
 
 std::string ParseToken(const std::string &value, std::size_t &offset) {
@@ -148,8 +96,7 @@ std::string ParseQuotedString(const std::string &value, std::size_t &offset) {
 }
 
 std::string ParseParameterValue(const std::string &value, std::size_t &offset) {
-	return offset < value.size() && value[offset] == '"' ? ParseQuotedString(value, offset)
-	                                                       : ParseToken(value, offset);
+	return offset < value.size() && value[offset] == '"' ? ParseQuotedString(value, offset) : ParseToken(value, offset);
 }
 
 bool EqualsAsciiIgnoreCase(const std::string &left, const char *right) noexcept {
@@ -170,34 +117,43 @@ bool EqualsAsciiIgnoreCase(const std::string &left, const char *right) noexcept 
 	return true;
 }
 
+bool IsRegisteredRelation(const std::string &relation) noexcept {
+	if (relation.empty() || !IsAsciiAlpha(static_cast<unsigned char>(relation[0]))) {
+		return false;
+	}
+	for (std::size_t index = 1; index < relation.size(); index++) {
+		const auto value = static_cast<unsigned char>(relation[index]);
+		if (!IsAsciiAlpha(value) && !IsAsciiDigit(value) && value != '.' && value != '-') {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool RelationContainsNext(const std::string &relation) {
-	if (relation.empty()) {
+	if (relation.empty() || relation.front() == ' ' || relation.back() == ' ') {
 		ThrowMalformed();
 	}
 	std::size_t offset = 0;
-	bool has_relation = false;
 	bool has_next = false;
 	while (offset < relation.size()) {
-		while (offset < relation.size() && relation[offset] == ' ') {
-			offset++;
-		}
-		if (offset == relation.size()) {
-			break;
-		}
 		const auto begin = offset;
 		while (offset < relation.size() && relation[offset] != ' ') {
-			const auto byte = static_cast<unsigned char>(relation[offset]);
-			if (!IsTokenCharacter(byte)) {
-				ThrowMalformed();
-			}
 			offset++;
 		}
 		const auto token = relation.substr(begin, offset - begin);
-		has_relation = true;
-		has_next = has_next || token == "next";
-	}
-	if (!has_relation) {
-		ThrowMalformed();
+		// RFC 8288 relation-types are registered names or absolute-URI
+		// extensions. Relative URI-references are not relation-types and must not
+		// silently convert advertised pagination into clean exhaustion.
+		if (!IsRegisteredRelation(token)) {
+			if (!IsValidUri(token)) {
+				ThrowMalformed();
+			}
+		}
+		has_next = has_next || EqualsAsciiIgnoreCase(token, "next");
+		while (offset < relation.size() && relation[offset] == ' ') {
+			offset++;
+		}
 	}
 	return has_next;
 }
@@ -221,10 +177,13 @@ ParsedLinkValue ParseLinkValue(const std::string &field, std::size_t &offset) {
 		ThrowMalformed();
 	}
 	ParsedLinkValue result {field.substr(target_begin, offset - target_begin), false};
-	ValidateUriReference(result.target);
+	if (!IsValidUriReference(result.target)) {
+		ThrowMalformed();
+	}
 	offset++;
 
 	bool saw_rel = false;
+	bool saw_anchor = false;
 	while (true) {
 		SkipOws(field, offset);
 		if (offset >= field.size() || field[offset] == ',') {
@@ -238,18 +197,46 @@ ParsedLinkValue ParseLinkValue(const std::string &field, std::size_t &offset) {
 		const auto name = ParseToken(field, offset);
 		SkipOws(field, offset);
 		if (offset >= field.size() || field[offset] != '=') {
-			ThrowMalformed();
+			if (EqualsAsciiIgnoreCase(name, "rel")) {
+				if (!saw_rel) {
+					ThrowMalformed();
+				}
+				// Even a valueless later rel occurrence is syntactically a
+				// link-param and is ignored after the authoritative first rel.
+				continue;
+			}
+			if (EqualsAsciiIgnoreCase(name, "anchor")) {
+				ThrowMalformed();
+			}
+			// Link extension parameters may be valueless. Their presence has no
+			// effect on continuation selection.
+			continue;
 		}
 		offset++;
 		SkipOws(field, offset);
 		const auto parameter_value = ParseParameterValue(field, offset);
 		if (EqualsAsciiIgnoreCase(name, "rel")) {
-			if (saw_rel) {
+			// RFC 8288 defines only the first rel parameter on a link-value;
+			// later occurrences are consumed as grammar but otherwise ignored.
+			if (!saw_rel) {
+				saw_rel = true;
+				result.has_next_relation = RelationContainsNext(parameter_value);
+			}
+		} else if (EqualsAsciiIgnoreCase(name, "anchor")) {
+			if (!IsValidUriReference(parameter_value)) {
 				ThrowMalformed();
 			}
-			saw_rel = true;
-			result.has_next_relation = RelationContainsNext(parameter_value);
+			saw_anchor = true;
 		}
+	}
+	if (!saw_rel) {
+		ThrowMalformed();
+	}
+	if (saw_anchor) {
+		// This fixed relation has no authority to resolve an alternate link
+		// context. RFC 8288 requires consumers that cannot apply `anchor` to
+		// ignore the entire link rather than treat it as response-relative.
+		result.has_next_relation = false;
 	}
 	return result;
 }
@@ -272,8 +259,7 @@ uint64_t ParsePositiveDecimal(const std::string &value) {
 	return result;
 }
 
-uint64_t ValidateNextTarget(const std::string &target, uint64_t current_page,
-	                        const std::vector<uint64_t> &seen_pages) {
+uint64_t ValidateNextTarget(const std::string &target, uint64_t current_page, const std::vector<uint64_t> &seen_pages) {
 	const std::string authority = "https://api.github.com";
 	if (target.compare(0, authority.size(), authority) != 0) {
 		ThrowPolicy();
@@ -345,14 +331,23 @@ uint64_t ValidateNextTarget(const std::string &target, uint64_t current_page,
 }
 
 LinkPageTransition ParseTransition(const std::vector<std::string> &fields, uint64_t current_page,
-	                               const std::vector<uint64_t> &seen_pages) {
+                                   const std::vector<uint64_t> &seen_pages) {
 	bool found_next = false;
 	std::string next_target;
+	std::size_t ignored_empty_elements = 0;
+	const auto ignore_empty_element = [&ignored_empty_elements]() {
+		ignored_empty_elements++;
+		if (ignored_empty_elements > MAX_IGNORED_EMPTY_LIST_ELEMENTS) {
+			ThrowMalformed();
+		}
+	};
 	for (const auto &field : fields) {
 		std::size_t offset = 0;
 		SkipOws(field, offset);
-		if (offset == field.size()) {
-			ThrowMalformed();
+		while (offset < field.size() && field[offset] == ',') {
+			ignore_empty_element();
+			offset++;
+			SkipOws(field, offset);
 		}
 		while (offset < field.size()) {
 			const auto parsed = ParseLinkValue(field, offset);
@@ -373,7 +368,16 @@ LinkPageTransition ParseTransition(const std::vector<std::string> &fields, uint6
 			offset++;
 			SkipOws(field, offset);
 			if (offset == field.size()) {
-				ThrowMalformed();
+				ignore_empty_element();
+				break;
+			}
+			while (field[offset] == ',') {
+				ignore_empty_element();
+				offset++;
+				SkipOws(field, offset);
+				if (offset == field.size()) {
+					break;
+				}
 			}
 		}
 	}
@@ -386,8 +390,8 @@ LinkPageTransition ParseTransition(const std::vector<std::string> &fields, uint6
 } // namespace
 
 LinkPaginationError::LinkPaginationError(LinkPaginationErrorKind kind_p, std::string field_p,
-	                                     std::string safe_message_p)
-	: kind(kind_p), field(std::move(field_p)), safe_message(std::move(safe_message_p)) {
+                                         std::string safe_message_p)
+    : kind(kind_p), field(std::move(field_p)), safe_message(std::move(safe_message_p)) {
 }
 
 const char *LinkPaginationError::what() const noexcept {
@@ -431,8 +435,7 @@ LinkPageTransition LinkPaginationState::Advance(const std::vector<std::string> &
 		                          "Link pagination state exceeded available memory");
 	} catch (...) {
 		failed = true;
-		throw LinkPaginationError(LinkPaginationErrorKind::STATE, PAGINATION_FIELD,
-		                          "Link pagination state failed");
+		throw LinkPaginationError(LinkPaginationErrorKind::STATE, PAGINATION_FIELD, "Link pagination state failed");
 	}
 }
 

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "duckdb_api/connector.hpp"
 #include "duckdb_api/execution.hpp"
 
 #include <cstdint>
@@ -22,17 +21,14 @@ public:
 	struct State;
 
 	std::shared_ptr<const duckdb_api::ScanExecutor> Executor() const;
-	const duckdb_api::CompiledConnector &Connector() const;
 	LoopbackCurlObservation Observation() const noexcept;
 
 private:
 	friend std::shared_ptr<LoopbackCurlRuntime> BuildLoopbackCurlRuntime(uint16_t port);
-	LoopbackCurlRuntime(std::shared_ptr<State> state, std::shared_ptr<const duckdb_api::ScanExecutor> executor,
-	                    duckdb_api::CompiledConnector connector);
+	LoopbackCurlRuntime(std::shared_ptr<State> state, std::shared_ptr<const duckdb_api::ScanExecutor> executor);
 
 	std::shared_ptr<State> state;
 	std::shared_ptr<const duckdb_api::ScanExecutor> executor;
-	const duckdb_api::CompiledConnector connector;
 };
 
 std::shared_ptr<LoopbackCurlRuntime> BuildLoopbackCurlRuntime(uint16_t port);

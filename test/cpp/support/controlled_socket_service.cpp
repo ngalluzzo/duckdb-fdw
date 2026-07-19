@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 
@@ -93,9 +94,19 @@ bool ControlledSocketService::WaitForRequest(std::chrono::milliseconds timeout) 
 	return condition.wait_for(guard, timeout, [&]() { return request_ready; });
 }
 
+bool ControlledSocketService::WaitForRequestCount(uint64_t count, std::chrono::milliseconds timeout) {
+	std::unique_lock<std::mutex> guard(mutex);
+	return condition.wait_for(guard, timeout, [&]() { return requests.size() >= count; });
+}
+
 std::string ControlledSocketService::Request() const {
 	std::lock_guard<std::mutex> guard(mutex);
 	return request;
+}
+
+std::vector<std::string> ControlledSocketService::Requests() const {
+	std::lock_guard<std::mutex> guard(mutex);
+	return requests;
 }
 
 uint64_t ControlledSocketService::ConnectionCount() const noexcept {
@@ -146,6 +157,44 @@ std::string ControlledSocketService::Response(ControlledSocketMode response_mode
 		       std::to_string(success_body.size()) + "\r\n" + cookie_header + "Connection: close\r\n\r\n" +
 		       success_body;
 	}
+	if (response_mode == ControlledSocketMode::LINK_SUCCESS) {
+		const std::string previous = "<https://api.github.com/user/repos?per_page=100&page=1>; rel=prev";
+		const std::string next = "<https://api.github.com/user/repos?per_page=100&page=2>; rel=\"next\"";
+		return "HTTP/1.1 200 OK\r\nLink: " + previous + "\r\nlInK:\t" + next +
+		       "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(success_body.size()) +
+		       "\r\nConnection: close\r\n\r\n" + success_body;
+	}
+	if (response_mode == ControlledSocketMode::MANY_LINK_SUCCESS) {
+		std::string headers;
+		for (std::size_t index = 0; index < 40; index++) {
+			headers += "Link: <https://example.test/" + std::to_string(index) + ">; rel=prev\r\n";
+		}
+		return "HTTP/1.1 200 OK\r\n" + headers +
+		       "Content-Type: application/json\r\nContent-Length: " + std::to_string(success_body.size()) +
+		       "\r\nConnection: close\r\n\r\n" + success_body;
+	}
+	if (response_mode == ControlledSocketMode::INTERIM_LINK_SUCCESS) {
+		const std::string interim = "<https://credential-canary.invalid/user/repos?per_page=100&page=2>; rel=next";
+		const std::string second_interim =
+		    "<https://second-credential-canary.invalid/user/repos?per_page=100&page=2>; rel=next";
+		const std::string terminal = "<https://api.github.com/user/repos?per_page=100&page=2>; rel=next";
+		return "HTTP/1.1 100 Continue\r\nLink: " + interim + "\r\nLink: " + second_interim +
+		       "\r\n\r\nHTTP/1.1 200 OK\r\nLink: " + terminal +
+		       "\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(success_body.size()) +
+		       "\r\nConnection: close\r\n\r\n" + success_body;
+	}
+	if (response_mode == ControlledSocketMode::TRAILER_LINK_SUCCESS) {
+		const std::string trailer = "Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel=next\r\n";
+		return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n"
+		       "Trailer: Link\r\nConnection: close\r\n\r\n2\r\n{}\r\n0\r\n" +
+		       trailer + "\r\n";
+	}
+	if (response_mode == ControlledSocketMode::LINK_STATUS) {
+		const std::string body = "LINK_STATUS_PRIVATE_BODY";
+		return "HTTP/1.1 503 Service Unavailable\r\nLink: <https://credential-canary.invalid/>; "
+		       "rel=next\r\nContent-Length: " +
+		       std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
+	}
 	if (response_mode == ControlledSocketMode::STATUS) {
 		const std::string body = "SECRET_STATUS_BODY http://127.0.0.1/private";
 		return "HTTP/1.1 503 Service Unavailable\r\nContent-Length: " + std::to_string(body.size()) +
@@ -175,6 +224,25 @@ std::string ControlledSocketService::Response(ControlledSocketMode response_mode
 	if (response_mode == ControlledSocketMode::OVERSIZED_RESPONSE) {
 		return "HTTP/1.1 200 OK\r\nContent-Length: 65537\r\nConnection: close\r\n\r\n" + std::string(65537, 'b');
 	}
+	if (response_mode == ControlledSocketMode::OVERSIZED_CHUNK_FRAMING) {
+		return "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1;fixture=" +
+		       std::string(65537, 'f') + "\r\n{\r\n0\r\n\r\n";
+	}
+	if (response_mode == ControlledSocketMode::MALFORMED_CHUNK_EXTENSION) {
+		return "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n2;bad "
+		       "name=x\r\n{}\r\n0\r\n\r\n";
+	}
+	if (response_mode == ControlledSocketMode::CHUNKED_SUCCESS) {
+		const auto split = success_body.size() / 2;
+		char first_size[32];
+		char second_size[32];
+		(void)snprintf(first_size, sizeof(first_size), "%zx", split);
+		(void)snprintf(second_size, sizeof(second_size), "%zx", success_body.size() - split);
+		return std::string("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n"
+		                   "Connection: close\r\n\r\n") +
+		       first_size + "; sig=abc; flag\r\n" + success_body.substr(0, split) + "\r\n" + second_size + "\r\n" +
+		       success_body.substr(split) + "\r\n0\r\nX-Checksum: ok\r\n\r\n";
+	}
 	if (response_mode == ControlledSocketMode::GZIP_EXACT_DECOMPRESSED_LIMIT ||
 	    response_mode == ControlledSocketMode::GZIP_OVER_DECOMPRESSED_LIMIT) {
 		const auto body = response_mode == ControlledSocketMode::GZIP_EXACT_DECOMPRESSED_LIMIT
@@ -186,8 +254,23 @@ std::string ControlledSocketService::Response(ControlledSocketMode response_mode
 	return "";
 }
 
+std::string ControlledSocketService::PaginatedResponse(uint64_t page_index) const {
+	const std::string body =
+	    page_index == 1   ? "[{\"id\":1,\"full_name\":\"first\",\"private\":false,\"fork\":false,\"archived\":false}]"
+	    : page_index == 2 ? "[]"
+	                      : "[{\"id\":3,\"full_name\":\"third\",\"private\":false,\"fork\":false,\"archived\":false}]";
+	const std::string link = page_index < 3 ? "Link: <https://api.github.com/user/repos?per_page=100&page=" +
+	                                              std::to_string(page_index + 1) + ">; rel=next\r\n"
+	                                        : "";
+	return "HTTP/1.1 200 OK\r\n" + link +
+	       "Content-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +
+	       "\r\nConnection: close\r\n\r\n" + body;
+}
+
 void ControlledSocketService::Serve() noexcept {
-	const uint64_t expected_connections = mode == ControlledSocketMode::BLOCK_THEN_AUTHENTICATED_SUCCESS ? 2 : 1;
+	const uint64_t expected_connections = mode == ControlledSocketMode::BLOCK_THEN_AUTHENTICATED_SUCCESS ? 2
+	                                      : mode == ControlledSocketMode::PAGINATED_REPOSITORIES         ? 3
+	                                                                                                     : 1;
 	for (uint64_t connection_index = 0; connection_index < expected_connections; connection_index++) {
 		sockaddr_in peer;
 		socklen_t peer_length = sizeof(peer);
@@ -213,6 +296,7 @@ void ControlledSocketService::Serve() noexcept {
 		{
 			std::lock_guard<std::mutex> guard(mutex);
 			request = received;
+			requests.push_back(received);
 			request_ready = true;
 		}
 		condition.notify_all();
@@ -223,6 +307,13 @@ void ControlledSocketService::Serve() noexcept {
 			while (recv(accepted, buffer, sizeof(buffer), 0) > 0) {
 			}
 		} else if (mode != ControlledSocketMode::DISCONNECT) {
+			if (mode == ControlledSocketMode::PAGINATED_REPOSITORIES) {
+				(void)SendAll(accepted, PaginatedResponse(connection_index + 1));
+				(void)shutdown(accepted, SHUT_RDWR);
+				close(accepted);
+				client.store(-1, std::memory_order_release);
+				continue;
+			}
 			const auto response_mode = mode == ControlledSocketMode::BLOCK_THEN_AUTHENTICATED_SUCCESS
 			                               ? ControlledSocketMode::AUTHENTICATED_SUCCESS
 			                               : mode;

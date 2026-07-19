@@ -34,7 +34,20 @@ struct HttpLimits {
 	uint64_t max_header_bytes;
 	uint64_t max_response_bytes;
 	uint64_t max_decompressed_bytes;
+	// Retained normalized response metadata is separately bounded by the
+	// decoder's remaining page-memory authority. Zero disables Link retention
+	// for operations that have no pagination semantics.
+	uint64_t max_metadata_bytes;
 	std::chrono::steady_clock::time_point deadline;
+};
+
+// Narrow protocol metadata returned by one attempt. Transport preserves only
+// physical Link field-values from the terminal response header section, in
+// receipt order. It does not parse relations or URLs and never exposes a
+// general header map, received destination, or dependency response object.
+struct HttpResponseMetadata {
+	std::vector<std::string> link_field_values;
+	uint64_t retained_bytes;
 };
 
 struct HttpResponse {
@@ -42,6 +55,7 @@ struct HttpResponse {
 	uint64_t header_bytes;
 	uint64_t response_bytes;
 	std::string body;
+	HttpResponseMetadata metadata;
 };
 
 // Private protocol-neutral transport boundary. Get performs one synchronous

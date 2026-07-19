@@ -18,7 +18,7 @@ struct JsonColumnPlan {
 
 // Selected explicitly from the already validated operation. The decoder does
 // not derive response shape or relational cardinality from an extractor.
-enum class JsonResponseSource { JSON_PATH_MANY, ROOT_OBJECT };
+enum class JsonResponseSource { JSON_PATH_MANY, ROOT_ARRAY, ROOT_OBJECT };
 
 struct JsonDecodePlan {
 	JsonResponseSource response_source;
@@ -31,11 +31,23 @@ struct JsonDecodePlan {
 	std::chrono::steady_clock::time_point deadline;
 };
 
+struct DecodedJsonPage {
+	std::vector<TypedRow> rows;
+	// Retained storage owned by rows, including vector capacity, typed-value
+	// capacity, and owned VARCHAR capacity. The executor adds normalized
+	// response-metadata storage before committing the page budget.
+	uint64_t retained_memory_bytes;
+};
+
 // Strictly decodes one already bounded JSON document. The decoder validates the
 // complete document, requires each declared non-null field exactly once,
 // retains JSON numeric spelling through BIGINT conversion, and checkpoints
 // cancellation/deadline and every decode budget. ROOT_OBJECT produces exactly
 // one record from the successful response object. It has no request authority.
+DecodedJsonPage DecodeJsonPage(const std::string &body, const JsonDecodePlan &plan, ExecutionControl &control);
+
+// Compatibility convenience for existing one-response consumers and focused
+// decoder tests that do not need retained-memory accounting.
 std::vector<TypedRow> DecodeJsonRows(const std::string &body, const JsonDecodePlan &plan, ExecutionControl &control);
 
 } // namespace internal

@@ -1,4 +1,5 @@
 #include "support/controlled_socket_service.hpp"
+#include "duckdb_api/internal/http_chunk_decoder.hpp"
 #include "support/loopback_curl_runtime.hpp"
 #include "support/private_curl_probe.hpp"
 #include "support/require.hpp"
@@ -31,7 +32,7 @@ uint64_t CompleteRequestHeaderBlockBytes(const std::string &request) {
 uint64_t FixedProjectHeaderBytesWithoutToken() {
 	static const uint64_t line_framing = 4;
 	return (sizeof("Accept") - 1) + (sizeof("application/vnd.github+json") - 1) + line_framing +
-	       (sizeof("User-Agent") - 1) + (sizeof("duckdb-api/0.4.0") - 1) + line_framing +
+	       (sizeof("User-Agent") - 1) + (sizeof("duckdb-api/0.5.0") - 1) + line_framing +
 	       (sizeof("X-GitHub-Api-Version") - 1) + (sizeof("2022-11-28") - 1) + line_framing +
 	       (sizeof("Authorization") - 1) + (sizeof("Bearer ") - 1) + line_framing;
 }
@@ -46,7 +47,7 @@ void TestOutboundHeaderBoundaries() {
 		auto token = std::string(static_cast<std::size_t>(limit), 'e');
 		const auto expected_authorization = "Authorization: Bearer " + token + "\r\n";
 		auto stream = runtime->Executor()->OpenWithAuthorization(
-		    duckdb_api_test::BuildAuthenticatedRuntimePlan(runtime->Connector()),
+		    duckdb_api_test::BuildAuthenticatedRuntimePlan(duckdb_api::BuildNativeGithubConnector()),
 		    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
 		duckdb_api::TypedBatch batch;
 		Require(stream->Next(control, batch), "real curl rejected the exact-limit bearer token");
@@ -66,7 +67,7 @@ void TestOutboundHeaderBoundaries() {
 		bool rejected = false;
 		try {
 			(void)runtime->Executor()->OpenWithAuthorization(
-			    duckdb_api_test::BuildAuthenticatedRuntimePlan(runtime->Connector()),
+			    duckdb_api_test::BuildAuthenticatedRuntimePlan(duckdb_api::BuildNativeGithubConnector()),
 			    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
 		} catch (const duckdb_api::ExecutionError &error) {
 			rejected = true;
@@ -117,17 +118,21 @@ void TestDecodeAndWireBudgetFailures() {
 		duckdb_api::ErrorStage stage;
 		const char *forbidden;
 	};
-	const FailureCase cases[] = {{ControlledSocketMode::MALFORMED, duckdb_api::ErrorStage::DECODE, "SECRET_MALFORMED"},
-	                             {ControlledSocketMode::OVERSIZED_HEADER, duckdb_api::ErrorStage::RESOURCE, ""},
-	                             {ControlledSocketMode::OVERSIZED_RESPONSE, duckdb_api::ErrorStage::RESOURCE, ""}};
+	const FailureCase cases[] = {
+	    {ControlledSocketMode::MALFORMED, duckdb_api::ErrorStage::DECODE, "SECRET_MALFORMED"},
+	    {ControlledSocketMode::OVERSIZED_HEADER, duckdb_api::ErrorStage::RESOURCE, ""},
+	    {ControlledSocketMode::OVERSIZED_RESPONSE, duckdb_api::ErrorStage::RESOURCE, ""},
+	    {ControlledSocketMode::OVERSIZED_CHUNK_FRAMING, duckdb_api::ErrorStage::RESOURCE, ""},
+	    {ControlledSocketMode::MALFORMED_CHUNK_EXTENSION, duckdb_api::ErrorStage::TRANSPORT, ""}};
 	for (std::size_t index = 0; index < sizeof(cases) / sizeof(cases[0]); index++) {
 		ControlledSocketService service(cases[index].mode);
 		const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
 		ManualControl control;
-		auto stream = runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(runtime->Connector()), control);
+		auto stream = runtime->Executor()->Open(
+		    duckdb_api_test::BuildRuntimePlan(duckdb_api::BuildNativeGithubConnector()), control);
 		duckdb_api::TypedBatch batch;
 		RequireExecutionError([&]() { stream->Next(control, batch); }, cases[index].stage, cases[index].forbidden);
-		Require(!stream->Next(control, batch), "budget or decode failure was replayed");
+		RequireExecutionError([&]() { stream->Next(control, batch); }, cases[index].stage, cases[index].forbidden);
 		Require(runtime->Observation().request_count == 1 && service.ConnectionCount() == 1,
 		        "budget or decode failure performed more than one request");
 	}
@@ -137,7 +142,8 @@ void TestCompressedWireBodyAtExactDecompressedLimit() {
 	ControlledSocketService service(ControlledSocketMode::GZIP_EXACT_DECOMPRESSED_LIMIT);
 	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
 	ManualControl control;
-	auto stream = runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(runtime->Connector()), control);
+	auto stream =
+	    runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(duckdb_api::BuildNativeGithubConnector()), control);
 	duckdb_api::TypedBatch batch;
 	Require(service.ResponseBodyBytes() < duckdb_api::HOST_MAX_RESPONSE_BYTES,
 	        "gzip exact-limit fixture did not stay below the wire-byte ceiling");
@@ -148,11 +154,71 @@ void TestCompressedWireBodyAtExactDecompressedLimit() {
 	Require(service.ConnectionCount() == 1, "exact-limit gzip response replayed the request");
 }
 
+void TestChunkedBodyIsBoundedBeforeDecoding() {
+	ControlledSocketService service(ControlledSocketMode::CHUNKED_SUCCESS);
+	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
+	ManualControl control;
+	auto stream =
+	    runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(duckdb_api::BuildNativeGithubConnector()), control);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 2 && stream->Next(control, batch) &&
+	            batch.rows.size() == 1 && !stream->Next(control, batch),
+	        "bounded chunked identity body did not decode into the expected batches");
+	Require(service.ConnectionCount() == 1, "bounded chunked body replayed the request");
+}
+
+void TestChunkDecoderHonorsCallScopedControlAndDeadline() {
+	const std::string framed = "2\r\n[]\r\n0\r\n\r\n";
+	ManualControl cancelled;
+	cancelled.Cancel();
+	bool saw_cancel = false;
+	try {
+		(void)duckdb_api::internal::DecodeHttpChunkedBody(framed, 64, cancelled,
+		                                                  std::chrono::steady_clock::now() + std::chrono::seconds(1));
+	} catch (const duckdb_api::ExecutionCancelled &) {
+		saw_cancel = true;
+	}
+	Require(saw_cancel, "chunk framing decode ignored call-scoped cancellation");
+
+	ManualControl active;
+	bool saw_deadline = false;
+	try {
+		(void)duckdb_api::internal::DecodeHttpChunkedBody(framed, 64, active, std::chrono::steady_clock::now());
+	} catch (const duckdb_api::ExecutionError &error) {
+		saw_deadline = error.Stage() == duckdb_api::ErrorStage::RESOURCE && error.Field() == "wall_milliseconds";
+	}
+	Require(saw_deadline, "chunk framing decode ignored the retained page deadline");
+}
+
+void TestChunkDecoderGrammarBoundaries() {
+	ManualControl control;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+	const std::string valid[] = {"2\r\n[]\r\n0\r\n\r\n",
+	                             "2 ; flag; sig = \"a\\\"b\"\r\n[]\r\n0\r\nX-Checksum: ok\r\n\r\n"};
+	for (const auto &framed : valid) {
+		Require(duckdb_api::internal::DecodeHttpChunkedBody(framed, 64, control, deadline) == "[]",
+		        "valid chunk extension or trailer grammar was rejected");
+	}
+	const std::string malformed[] = {"2   \r\n[]\r\n0\r\n\r\n",      "2;\r\n[]\r\n0\r\n\r\n",
+	                                 "2;=x\r\n[]\r\n0\r\n\r\n",      "2;bad name=x\r\n[]\r\n0\r\n\r\n",
+	                                 "2;flag   \r\n[]\r\n0\r\n\r\n", "2\r\n[]\r\n0\r\nBad Name: x\r\n\r\n"};
+	for (const auto &framed : malformed) {
+		bool rejected = false;
+		try {
+			(void)duckdb_api::internal::DecodeHttpChunkedBody(framed, 64, control, deadline);
+		} catch (const duckdb_api::internal::HttpChunkDecodeError &) {
+			rejected = true;
+		}
+		Require(rejected, "malformed chunk extension or trailer grammar was accepted");
+	}
+}
+
 void TestCompressedWireBodyOverDecompressedLimit() {
 	ControlledSocketService service(ControlledSocketMode::GZIP_OVER_DECOMPRESSED_LIMIT);
 	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
 	ManualControl control;
-	auto stream = runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(runtime->Connector()), control);
+	auto stream =
+	    runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(duckdb_api::BuildNativeGithubConnector()), control);
 	duckdb_api::TypedBatch batch;
 	Require(service.ResponseBodyBytes() < duckdb_api::HOST_MAX_RESPONSE_BYTES,
 	        "gzip over-limit fixture did not stay below the wire-byte ceiling");
@@ -165,7 +231,7 @@ void TestCompressedWireBodyOverDecompressedLimit() {
 		        "gzip +1 counterexample did not exhaust the decompressed-byte ceiling");
 	}
 	Require(rejected, "gzip +1 counterexample was accepted");
-	Require(!stream->Next(control, batch), "over-limit gzip response was replayed");
+	RequireExecutionError([&]() { stream->Next(control, batch); }, duckdb_api::ErrorStage::RESOURCE);
 	Require(runtime->Observation().request_count == 1 && service.ConnectionCount() == 1,
 	        "over-limit gzip response performed more than one request");
 }
@@ -178,6 +244,9 @@ int main() {
 		TestOutboundHeaderBoundaries();
 		TestDecodeAndWireBudgetFailures();
 		TestCompressedWireBodyAtExactDecompressedLimit();
+		TestChunkedBodyIsBoundedBeforeDecoding();
+		TestChunkDecoderHonorsCallScopedControlAndDeadline();
+		TestChunkDecoderGrammarBoundaries();
 		TestCompressedWireBodyOverDecompressedLimit();
 		std::cout << "curl HTTP budget tests passed" << std::endl;
 		return EXIT_SUCCESS;

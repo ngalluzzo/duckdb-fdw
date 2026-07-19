@@ -99,7 +99,7 @@ void TestHostileProxyAndNetrcEnvironmentIsExcluded() {
 	ControlledSocketService service(ControlledSocketMode::SUCCESS);
 	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
 	ManualControl control;
-	const auto plan = duckdb_api_test::BuildRuntimePlan(runtime->Connector());
+	const auto plan = duckdb_api_test::BuildRuntimePlan(duckdb_api::BuildNativeGithubConnector());
 	Require(plan.Operation().origin.scheme == duckdb_api::PlannedUrlScheme::HTTPS &&
 	            plan.Operation().origin.host == "api.github.com" && plan.Operation().origin.port == 443 &&
 	            !plan.Network().loopback_addresses_enabled,
@@ -173,12 +173,16 @@ void TestExactCurlOptionInventory() {
 	                               CURLOPT_NOPROGRESS,
 	                               CURLOPT_XFERINFOFUNCTION,
 	                               CURLOPT_XFERINFODATA,
+	                               CURLOPT_VERBOSE,
+	                               CURLOPT_DEBUGFUNCTION,
+	                               CURLOPT_DEBUGDATA,
 	                               CURLOPT_WRITEFUNCTION,
 	                               CURLOPT_WRITEDATA,
 	                               CURLOPT_HEADERFUNCTION,
 	                               CURLOPT_HEADERDATA,
 	                               CURLOPT_ACCEPT_ENCODING,
 	                               CURLOPT_HTTP_CONTENT_DECODING,
+	                               CURLOPT_HTTP_TRANSFER_DECODING,
 	                               CURLOPT_MAXFILESIZE_LARGE,
 	                               CURLOPT_PATH_AS_IS,
 	                               CURLOPT_FRESH_CONNECT,
@@ -213,7 +217,8 @@ void TestResponseCookieDoesNotCrossFreshScans() {
 		ControlledSocketService service(ControlledSocketMode::SET_COOKIE);
 		const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
 		ManualControl control;
-		auto stream = runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(runtime->Connector()), control);
+		auto stream = runtime->Executor()->Open(
+		    duckdb_api_test::BuildRuntimePlan(duckdb_api::BuildNativeGithubConnector()), control);
 		duckdb_api::TypedBatch batch;
 		Require(stream->Next(control, batch), "cookie-setting response did not complete its scan");
 		Require(service.WaitForRequest(std::chrono::seconds(2)), "cookie-setting service saw no request");
@@ -224,7 +229,8 @@ void TestResponseCookieDoesNotCrossFreshScans() {
 		ControlledSocketService service(ControlledSocketMode::SUCCESS);
 		const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
 		ManualControl control;
-		auto stream = runtime->Executor()->Open(duckdb_api_test::BuildRuntimePlan(runtime->Connector()), control);
+		auto stream = runtime->Executor()->Open(
+		    duckdb_api_test::BuildRuntimePlan(duckdb_api::BuildNativeGithubConnector()), control);
 		duckdb_api::TypedBatch batch;
 		Require(stream->Next(control, batch), "second fresh scan did not complete");
 		Require(service.WaitForRequest(std::chrono::seconds(2)), "second fresh service saw no request");

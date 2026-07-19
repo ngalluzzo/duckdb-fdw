@@ -96,14 +96,7 @@ struct ScanResourceCounters {
 	uint64_t active_requests;
 };
 
-enum class ScanResourceState : uint8_t {
-	READY,
-	REQUEST_ACTIVE,
-	TRANSPORT_COMMITTED,
-	PAGE_DECODED,
-	EXHAUSTED,
-	FAILED
-};
+enum class ScanResourceState : uint8_t { READY, REQUEST_ACTIVE, TRANSPORT_COMMITTED, PAGE_DECODED, EXHAUSTED, FAILED };
 
 // Scan-owned sequential accounting state. The required ordering is:
 //

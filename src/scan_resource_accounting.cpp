@@ -54,7 +54,7 @@ void RequireWithin(uint64_t used, uint64_t allowed, const char *field) {
 } // namespace
 
 ScanResourceError::ScanResourceError(std::string field_p, std::string safe_message_p)
-	: field(std::move(field_p)), safe_message(std::move(safe_message_p)) {
+    : field(std::move(field_p)), safe_message(std::move(safe_message_p)) {
 }
 
 const char *ScanResourceError::what() const noexcept {
@@ -70,8 +70,8 @@ const std::string &ScanResourceError::SafeMessage() const noexcept {
 }
 
 ScanResourceAccounting::ScanResourceAccounting(const ScanResourceProfile &profile_p)
-	: profile(profile_p), counters {0, 0, 0, 0, 0, 0, 0, 0, 0}, state(ScanResourceState::READY),
-	  deadline_started(false), deadline(), active_allowance {0, 0, 0, 0, 0, {}} {
+    : profile(profile_p), counters {0, 0, 0, 0, 0, 0, 0, 0, 0}, state(ScanResourceState::READY),
+      deadline_started(false), deadline(), active_allowance {0, 0, 0, 0, 0, {}} {
 	ValidateProfile(profile);
 }
 
@@ -111,8 +111,8 @@ PageResourceAllowance ScanResourceAccounting::BeginPage(std::chrono::steady_cloc
 		Fail("resource_state", "scan resource state cannot begin a page");
 	}
 	if (!deadline_started) {
-		const auto wall_milliseconds = std::chrono::milliseconds(
-		    static_cast<std::chrono::milliseconds::rep>(profile.scan.max_wall_milliseconds));
+		const auto wall_milliseconds =
+		    std::chrono::milliseconds(static_cast<std::chrono::milliseconds::rep>(profile.scan.max_wall_milliseconds));
 		const auto wall_time = std::chrono::duration_cast<std::chrono::steady_clock::duration>(wall_milliseconds);
 		const auto since_epoch = now.time_since_epoch();
 		if (since_epoch > std::chrono::steady_clock::duration::max() - wall_time) {
@@ -125,17 +125,16 @@ PageResourceAllowance ScanResourceAccounting::BeginPage(std::chrono::steady_cloc
 
 	try {
 		counters.pages = AddChecked(counters.pages, 1, profile.scan.pages);
-		counters.request_attempts =
-		    AddChecked(counters.request_attempts, 1, profile.scan.request_attempts);
+		counters.request_attempts = AddChecked(counters.request_attempts, 1, profile.scan.request_attempts);
 		counters.active_requests = AddChecked(counters.active_requests, 1, profile.scan.active_requests);
 		active_allowance.header_bytes =
 		    std::min(profile.page.header_bytes, Remaining(profile.scan.header_bytes, counters.header_bytes));
-		active_allowance.wire_response_bytes = std::min(
-		    profile.page.wire_response_bytes,
-		    Remaining(profile.scan.wire_response_bytes, counters.wire_response_bytes));
-		active_allowance.decompressed_response_bytes = std::min(
-		    profile.page.decompressed_response_bytes,
-		    Remaining(profile.scan.decompressed_response_bytes, counters.decompressed_response_bytes));
+		active_allowance.wire_response_bytes =
+		    std::min(profile.page.wire_response_bytes,
+		             Remaining(profile.scan.wire_response_bytes, counters.wire_response_bytes));
+		active_allowance.decompressed_response_bytes =
+		    std::min(profile.page.decompressed_response_bytes,
+		             Remaining(profile.scan.decompressed_response_bytes, counters.decompressed_response_bytes));
 		active_allowance.decoded_records =
 		    std::min(profile.page.decoded_records, Remaining(profile.scan.decoded_records, counters.decoded_records));
 		active_allowance.decoded_memory_bytes =
@@ -160,9 +159,9 @@ void ScanResourceAccounting::CommitTransport(const TransportResourceUsage &usage
 		counters.header_bytes = AddChecked(counters.header_bytes, usage.header_bytes, profile.scan.header_bytes);
 		counters.wire_response_bytes =
 		    AddChecked(counters.wire_response_bytes, usage.wire_response_bytes, profile.scan.wire_response_bytes);
-		counters.decompressed_response_bytes = AddChecked(counters.decompressed_response_bytes,
-		                                                    usage.decompressed_response_bytes,
-		                                                    profile.scan.decompressed_response_bytes);
+		counters.decompressed_response_bytes =
+		    AddChecked(counters.decompressed_response_bytes, usage.decompressed_response_bytes,
+		               profile.scan.decompressed_response_bytes);
 		counters.active_requests = 0;
 		state = ScanResourceState::TRANSPORT_COMMITTED;
 	} catch (const ScanResourceError &error) {

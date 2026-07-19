@@ -68,7 +68,7 @@ duckdb_api::internal::HttpRequest BuildRequest(const PrivateCurlProbeOptions &op
 	request.port = options.request_port;
 	request.target = "/search/users?q=duckdb+in%3Alogin&per_page=3";
 	request.headers = {{"Accept", "application/vnd.github+json"},
-	                   {"User-Agent", "duckdb-api/0.4.0"},
+	                   {"User-Agent", "duckdb-api/0.5.0"},
 	                   {"X-GitHub-Api-Version", "2022-11-28"}};
 	return request;
 }
@@ -97,6 +97,7 @@ PrivateCurlProbeResult PerformProbe(const PrivateCurlProbeOptions &options, duck
 	option_observations.reserve(48);
 	const duckdb_api::internal::HttpLimits limits {
 	    duckdb_api::HOST_MAX_HEADER_BYTES, duckdb_api::HOST_MAX_RESPONSE_BYTES, duckdb_api::HOST_MAX_DECOMPRESSED_BYTES,
+	    duckdb_api::HOST_MAX_HEADER_BYTES,
 	    std::chrono::steady_clock::now() + std::chrono::milliseconds(options.wall_milliseconds)};
 	const duckdb_api::internal::CurlTransferProfile profile {
 	    options.url.c_str(),

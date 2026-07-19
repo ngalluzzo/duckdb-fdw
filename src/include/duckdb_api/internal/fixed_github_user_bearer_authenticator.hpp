@@ -11,14 +11,16 @@ namespace internal {
 
 // The sole consumer of ScanAuthorization credential bytes. The fixed
 // authenticator revalidates the already approved plan and structural request
-// before consuming the capability and constructing one canonical bearer
-// header. It returns no generic placement or destination facility.
+// before copying the scan-owned token into one transient canonical bearer
+// header. The capability remains opaque and valid only so its owning stream can
+// decorate a later validated page; terminal stream cleanup releases it. This
+// service returns no generic placement or destination facility.
 class FixedGithubUserBearerAuthenticator {
 public:
-	static HttpRequest Authorize(const ScanPlan &plan, HttpRequest request, ScanAuthorization authorization);
+	static HttpRequest Authorize(const ScanPlan &plan, HttpRequest request, const ScanAuthorization &authorization);
 
 private:
-	static std::string Consume(ScanAuthorization &authorization);
+	static std::string CopyToken(const ScanAuthorization &authorization);
 };
 
 } // namespace internal

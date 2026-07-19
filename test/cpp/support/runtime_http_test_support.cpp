@@ -32,6 +32,13 @@ duckdb_api::ScanPlan BuildAuthenticatedRuntimePlan(const duckdb_api::CompiledCon
 	                   connector, "authenticated_user", duckdb_api::LogicalSecretReference::Named("fixture_secret")));
 }
 
+duckdb_api::ScanPlan BuildAuthenticatedRepositoriesRuntimePlan(const duckdb_api::CompiledConnector &connector) {
+	return duckdb_api::BuildConservativeScanPlan(
+	    connector,
+	    duckdb_api::BuildConservativeScanRequest(connector, "authenticated_repositories",
+	                                             duckdb_api::LogicalSecretReference::Named("fixture_secret")));
+}
+
 std::string RuntimeCurlBearerToken(uint64_t suffix) {
 	return "curl_runtime_generated_" +
 	       std::to_string(static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())) + "_" +

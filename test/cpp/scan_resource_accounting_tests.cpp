@@ -37,8 +37,7 @@ void RequireError(const std::function<void()> &action, const std::string &field,
 		Require(error.Field() == field, label + " used the wrong resource field");
 		Require(!error.SafeMessage().empty() && error.SafeMessage().size() <= 128,
 		        label + " produced an empty or unbounded diagnostic");
-		Require(error.SafeMessage().find(CANARY) == std::string::npos,
-		        label + " exposed caller or response content");
+		Require(error.SafeMessage().find(CANARY) == std::string::npos, label + " exposed caller or response content");
 	}
 	Require(rejected, label + " did not fail");
 }
@@ -61,8 +60,7 @@ void TestProfileValidation() {
 
 	invalid = Profile();
 	invalid.scan.active_requests = 2;
-	RequireError([&]() { ScanResourceAccounting accounting(invalid); }, "resource_profile",
-	             "multiple scan requests");
+	RequireError([&]() { ScanResourceAccounting accounting(invalid); }, "resource_profile", "multiple scan requests");
 
 	invalid = Profile();
 	invalid.page.header_bytes = 0;
@@ -99,8 +97,7 @@ void TestExactSequentialLifecycle() {
 		            allowance.decompressed_response_bytes == 30 && allowance.decoded_records == 4 &&
 		            allowance.decoded_memory_bytes == 50,
 		        "page allowance did not preserve exact per-page ceilings");
-		Require(accounting.State() == ScanResourceState::REQUEST_ACTIVE &&
-		            accounting.Counters().active_requests == 1,
+		Require(accounting.State() == ScanResourceState::REQUEST_ACTIVE && accounting.Counters().active_requests == 1,
 		        "BeginPage did not reserve one request before returning authority");
 
 		accounting.CommitTransport({10, 20, 30});
@@ -111,8 +108,7 @@ void TestExactSequentialLifecycle() {
 		Require(accounting.Counters().retained_decoded_memory_bytes == page * 10,
 		        "decoded-page memory was not retained until page completion");
 		accounting.CompletePage(page != 3, start + std::chrono::milliseconds(page));
-		Require(accounting.Counters().retained_decoded_memory_bytes == 0,
-		        "completed page retained decoded memory");
+		Require(accounting.Counters().retained_decoded_memory_bytes == 0, "completed page retained decoded memory");
 	}
 
 	const auto &counters = accounting.Counters();
@@ -140,8 +136,7 @@ void TestAdvertisedNextFailsAtScanCeilings() {
 	ScanResourceAccounting attempts(attempt_limited);
 	attempts.BeginPage(start);
 	CommitEmptyPage(attempts);
-	RequireError([&]() { attempts.CompletePage(true, start); }, "request_attempts",
-	             "next page at attempt ceiling");
+	RequireError([&]() { attempts.CompletePage(true, start); }, "request_attempts", "next page at attempt ceiling");
 	Require(attempts.State() == ScanResourceState::FAILED && attempts.Counters().request_attempts == 1,
 	        "attempt-ceiling failure did not preserve the reserved attempt debit");
 
@@ -151,8 +146,7 @@ void TestAdvertisedNextFailsAtScanCeilings() {
 	bytes.BeginPage(start);
 	bytes.CommitTransport({10, 0, 0});
 	bytes.CommitDecodedPage({0, 0});
-	RequireError([&]() { bytes.CompletePage(true, start); }, "header_bytes",
-	             "next page at aggregate byte ceiling");
+	RequireError([&]() { bytes.CompletePage(true, start); }, "header_bytes", "next page at aggregate byte ceiling");
 }
 
 void TestPerPageCeilingsFailClosed() {
@@ -177,16 +171,13 @@ void TestPerPageCeilingsFailClosed() {
 	records.BeginPage(start);
 	records.CommitTransport({0, 0, 0});
 	RequireError([&]() { records.CommitDecodedPage({5, 0}); }, "decoded_records", "page record ceiling");
-	Require(records.Counters().retained_decoded_memory_bytes == 0,
-	        "record-ceiling failure retained decoded memory");
+	Require(records.Counters().retained_decoded_memory_bytes == 0, "record-ceiling failure retained decoded memory");
 
 	ScanResourceAccounting memory(Profile());
 	memory.BeginPage(start);
 	memory.CommitTransport({0, 0, 0});
-	RequireError([&]() { memory.CommitDecodedPage({0, 51}); }, "decoded_memory_bytes",
-	             "page decoded-memory ceiling");
-	Require(memory.Counters().retained_decoded_memory_bytes == 0,
-	        "memory-ceiling failure retained decoded memory");
+	RequireError([&]() { memory.CommitDecodedPage({0, 51}); }, "decoded_memory_bytes", "page decoded-memory ceiling");
+	Require(memory.Counters().retained_decoded_memory_bytes == 0, "memory-ceiling failure retained decoded memory");
 }
 
 void TestAggregateRemainingAuthority() {
@@ -210,8 +201,7 @@ void TestAggregateRemainingAuthority() {
 	headers.CompletePage(true, start);
 	const auto second = headers.BeginPage(start);
 	Require(second.header_bytes == 6, "second page did not receive remaining aggregate header authority");
-	RequireError([&]() { headers.CommitTransport({7, 0, 0}); }, "header_bytes",
-	             "aggregate remaining header ceiling");
+	RequireError([&]() { headers.CommitTransport({7, 0, 0}); }, "header_bytes", "aggregate remaining header ceiling");
 
 	profile = Profile();
 	profile.scan.decoded_records = 6;
@@ -224,8 +214,7 @@ void TestAggregateRemainingAuthority() {
 	Require(record_allowance.decoded_records == 2 && record_allowance.decoded_memory_bytes == 50,
 	        "cumulative records and instantaneous memory were not accounted separately");
 	records.CommitTransport({0, 0, 0});
-	RequireError([&]() { records.CommitDecodedPage({3, 0}); }, "decoded_records",
-	             "aggregate remaining record ceiling");
+	RequireError([&]() { records.CommitDecodedPage({3, 0}); }, "decoded_records", "aggregate remaining record ceiling");
 
 	ScanResourceAccounting memory(Profile());
 	memory.BeginPage(start);
@@ -237,8 +226,7 @@ void TestAggregateRemainingAuthority() {
 	memory.CommitTransport({0, 0, 0});
 	memory.CommitDecodedPage({0, 50});
 	memory.CompletePage(false, start);
-	Require(memory.Counters().peak_decoded_memory_bytes == 50 &&
-	            memory.Counters().retained_decoded_memory_bytes == 0,
+	Require(memory.Counters().peak_decoded_memory_bytes == 50 && memory.Counters().retained_decoded_memory_bytes == 0,
 	        "instantaneous decoded-memory accounting drifted");
 }
 
@@ -256,8 +244,7 @@ void TestDeadlineAndRepresentability() {
 
 	ScanResourceAccounting too_late(Profile());
 	const auto near_max = Clock::time_point::max() - std::chrono::milliseconds(50);
-	RequireError([&]() { too_late.BeginPage(near_max); }, "wall_milliseconds",
-	             "unrepresentable absolute deadline");
+	RequireError([&]() { too_late.BeginPage(near_max); }, "wall_milliseconds", "unrepresentable absolute deadline");
 	Require(too_late.State() == ScanResourceState::FAILED && too_late.Counters().pages == 0,
 	        "deadline construction failure reserved a page");
 
@@ -271,10 +258,8 @@ void TestDeadlineAndRepresentability() {
 void TestOrderingAbortAndTerminalState() {
 	const Clock::time_point start;
 	ScanResourceAccounting wrong_order(Profile());
-	RequireError([&]() { wrong_order.CommitTransport({0, 0, 0}); }, "resource_state",
-	             "transport before BeginPage");
-	Require(wrong_order.State() == ScanResourceState::FAILED,
-	        "invalid call ordering did not make accounting terminal");
+	RequireError([&]() { wrong_order.CommitTransport({0, 0, 0}); }, "resource_state", "transport before BeginPage");
+	Require(wrong_order.State() == ScanResourceState::FAILED, "invalid call ordering did not make accounting terminal");
 
 	ScanResourceAccounting active(Profile());
 	active.BeginPage(start);

@@ -91,15 +91,17 @@ ScanAuthorization ScanAuthorization::GithubUserBearer(std::string &&token) {
 	}
 }
 
-std::string internal::FixedGithubUserBearerAuthenticator::Consume(ScanAuthorization &authorization) {
+std::string internal::FixedGithubUserBearerAuthenticator::CopyToken(const ScanAuthorization &authorization) {
 	if (!authorization.valid || authorization.kind != ScanAuthorization::Kind::GITHUB_USER_BEARER ||
 	    !authorization.state) {
 		throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization", "bearer authorization capability is invalid");
 	}
-	authorization.valid = false;
-	auto token = std::move(authorization.state->token);
-	authorization.state.reset();
-	return token;
+	try {
+		return authorization.state->token;
+	} catch (const std::bad_alloc &) {
+		throw ExecutionError(ErrorStage::RESOURCE, "authorization",
+		                     "authorization header could not be allocated within its memory budget");
+	}
 }
 
 } // namespace duckdb_api
