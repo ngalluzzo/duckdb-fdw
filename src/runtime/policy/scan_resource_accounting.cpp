@@ -1,0 +1,236 @@
+#include "duckdb_api/internal/runtime/policy/scan_resource_accounting.hpp"
+
+#include <algorithm>
+#include <limits>
+#include <utility>
+
+namespace duckdb_api {
+namespace internal {
+namespace {
+
+[[noreturn]] void ThrowProfileError() {
+	throw ScanResourceError("resource_profile", "scan resource profile is invalid");
+}
+
+uint64_t Remaining(uint64_t limit, uint64_t used) {
+	if (used > limit) {
+		ThrowProfileError();
+	}
+	return limit - used;
+}
+
+uint64_t AddChecked(uint64_t current, uint64_t amount, uint64_t limit) {
+	if (current > limit || amount > limit - current || amount > std::numeric_limits<uint64_t>::max() - current) {
+		throw ScanResourceError("resource_accounting", "scan resource accounting overflowed");
+	}
+	return current + amount;
+}
+
+void ValidateProfile(const ScanResourceProfile &profile) {
+	const auto &page = profile.page;
+	const auto &scan = profile.scan;
+	if (page.request_attempts != 1 || page.active_requests != 1 || scan.active_requests != 1 ||
+	    page.header_bytes == 0 || page.wire_response_bytes == 0 || page.decompressed_response_bytes == 0 ||
+	    page.decoded_records == 0 || page.decoded_memory_bytes == 0 || scan.request_attempts == 0 || scan.pages == 0 ||
+	    scan.header_bytes == 0 || scan.wire_response_bytes == 0 || scan.decompressed_response_bytes == 0 ||
+	    scan.decoded_records == 0 || scan.retained_decoded_memory_bytes == 0 || scan.max_wall_milliseconds == 0) {
+		ThrowProfileError();
+	}
+	using Milliseconds = std::chrono::milliseconds;
+	const auto max_clock_milliseconds =
+	    std::chrono::duration_cast<Milliseconds>(std::chrono::steady_clock::duration::max()).count();
+	if (scan.max_wall_milliseconds > static_cast<uint64_t>(std::numeric_limits<Milliseconds::rep>::max()) ||
+	    max_clock_milliseconds <= 0 || scan.max_wall_milliseconds > static_cast<uint64_t>(max_clock_milliseconds)) {
+		ThrowProfileError();
+	}
+}
+
+void RequireWithin(uint64_t used, uint64_t allowed, const char *field) {
+	if (used > allowed) {
+		throw ScanResourceError(field, "page exceeded its resource allowance");
+	}
+}
+
+} // namespace
+
+ScanResourceError::ScanResourceError(std::string field_p, std::string safe_message_p)
+    : field(std::move(field_p)), safe_message(std::move(safe_message_p)) {
+}
+
+const char *ScanResourceError::what() const noexcept {
+	return safe_message.c_str();
+}
+
+const std::string &ScanResourceError::Field() const noexcept {
+	return field;
+}
+
+const std::string &ScanResourceError::SafeMessage() const noexcept {
+	return safe_message;
+}
+
+ScanResourceAccounting::ScanResourceAccounting(const ScanResourceProfile &profile_p)
+    : profile(profile_p), counters {0, 0, 0, 0, 0, 0, 0, 0, 0}, state(ScanResourceState::READY),
+      deadline_started(false), deadline(), active_allowance {0, 0, 0, 0, 0, {}} {
+	ValidateProfile(profile);
+}
+
+[[noreturn]] void ScanResourceAccounting::Fail(std::string field, std::string message) {
+	counters.active_requests = 0;
+	counters.retained_decoded_memory_bytes = 0;
+	state = ScanResourceState::FAILED;
+	throw ScanResourceError(std::move(field), std::move(message));
+}
+
+void ScanResourceAccounting::RequireReadyForNext(std::chrono::steady_clock::time_point now) {
+	if (deadline_started && now >= deadline) {
+		Fail("wall_milliseconds", "scan exceeded its wall-time budget");
+	}
+	if (counters.pages >= profile.scan.pages) {
+		Fail("pages", "scan exhausted its page budget");
+	}
+	if (counters.request_attempts >= profile.scan.request_attempts) {
+		Fail("request_attempts", "scan exhausted its request-attempt budget");
+	}
+	if (counters.header_bytes >= profile.scan.header_bytes) {
+		Fail("header_bytes", "scan exhausted its response-header budget");
+	}
+	if (counters.wire_response_bytes >= profile.scan.wire_response_bytes) {
+		Fail("response_bytes", "scan exhausted its wire-response budget");
+	}
+	if (counters.decompressed_response_bytes >= profile.scan.decompressed_response_bytes) {
+		Fail("decompressed_bytes", "scan exhausted its decompressed-response budget");
+	}
+	if (counters.decoded_records >= profile.scan.decoded_records) {
+		Fail("decoded_records", "scan exhausted its decoded-record budget");
+	}
+}
+
+PageResourceAllowance ScanResourceAccounting::BeginPage(std::chrono::steady_clock::time_point now) {
+	if (state != ScanResourceState::READY) {
+		Fail("resource_state", "scan resource state cannot begin a page");
+	}
+	if (!deadline_started) {
+		const auto wall_milliseconds =
+		    std::chrono::milliseconds(static_cast<std::chrono::milliseconds::rep>(profile.scan.max_wall_milliseconds));
+		const auto wall_time = std::chrono::duration_cast<std::chrono::steady_clock::duration>(wall_milliseconds);
+		const auto since_epoch = now.time_since_epoch();
+		if (since_epoch > std::chrono::steady_clock::duration::max() - wall_time) {
+			Fail("wall_milliseconds", "scan wall-time budget cannot be represented");
+		}
+		deadline = std::chrono::steady_clock::time_point(since_epoch + wall_time);
+		deadline_started = true;
+	}
+	RequireReadyForNext(now);
+
+	try {
+		counters.pages = AddChecked(counters.pages, 1, profile.scan.pages);
+		counters.request_attempts = AddChecked(counters.request_attempts, 1, profile.scan.request_attempts);
+		counters.active_requests = AddChecked(counters.active_requests, 1, profile.scan.active_requests);
+		active_allowance.header_bytes =
+		    std::min(profile.page.header_bytes, Remaining(profile.scan.header_bytes, counters.header_bytes));
+		active_allowance.wire_response_bytes =
+		    std::min(profile.page.wire_response_bytes,
+		             Remaining(profile.scan.wire_response_bytes, counters.wire_response_bytes));
+		active_allowance.decompressed_response_bytes =
+		    std::min(profile.page.decompressed_response_bytes,
+		             Remaining(profile.scan.decompressed_response_bytes, counters.decompressed_response_bytes));
+		active_allowance.decoded_records =
+		    std::min(profile.page.decoded_records, Remaining(profile.scan.decoded_records, counters.decoded_records));
+		active_allowance.decoded_memory_bytes =
+		    std::min(profile.page.decoded_memory_bytes, profile.scan.retained_decoded_memory_bytes);
+		active_allowance.deadline = deadline;
+		state = ScanResourceState::REQUEST_ACTIVE;
+		return active_allowance;
+	} catch (const ScanResourceError &error) {
+		Fail(error.Field(), error.SafeMessage());
+	}
+}
+
+void ScanResourceAccounting::CommitTransport(const TransportResourceUsage &usage) {
+	if (state != ScanResourceState::REQUEST_ACTIVE) {
+		Fail("resource_state", "scan resource state cannot commit transport");
+	}
+	try {
+		RequireWithin(usage.header_bytes, active_allowance.header_bytes, "header_bytes");
+		RequireWithin(usage.wire_response_bytes, active_allowance.wire_response_bytes, "response_bytes");
+		RequireWithin(usage.decompressed_response_bytes, active_allowance.decompressed_response_bytes,
+		              "decompressed_bytes");
+		counters.header_bytes = AddChecked(counters.header_bytes, usage.header_bytes, profile.scan.header_bytes);
+		counters.wire_response_bytes =
+		    AddChecked(counters.wire_response_bytes, usage.wire_response_bytes, profile.scan.wire_response_bytes);
+		counters.decompressed_response_bytes =
+		    AddChecked(counters.decompressed_response_bytes, usage.decompressed_response_bytes,
+		               profile.scan.decompressed_response_bytes);
+		counters.active_requests = 0;
+		state = ScanResourceState::TRANSPORT_COMMITTED;
+	} catch (const ScanResourceError &error) {
+		Fail(error.Field(), error.SafeMessage());
+	}
+}
+
+void ScanResourceAccounting::CommitDecodedPage(const DecodedPageResourceUsage &usage) {
+	if (state != ScanResourceState::TRANSPORT_COMMITTED) {
+		Fail("resource_state", "scan resource state cannot commit decoded page");
+	}
+	try {
+		RequireWithin(usage.decoded_records, active_allowance.decoded_records, "decoded_records");
+		RequireWithin(usage.decoded_memory_bytes, active_allowance.decoded_memory_bytes, "decoded_memory_bytes");
+		counters.decoded_records =
+		    AddChecked(counters.decoded_records, usage.decoded_records, profile.scan.decoded_records);
+		counters.retained_decoded_memory_bytes = usage.decoded_memory_bytes;
+		counters.peak_decoded_memory_bytes =
+		    std::max(counters.peak_decoded_memory_bytes, counters.retained_decoded_memory_bytes);
+		state = ScanResourceState::PAGE_DECODED;
+	} catch (const ScanResourceError &error) {
+		Fail(error.Field(), error.SafeMessage());
+	}
+}
+
+void ScanResourceAccounting::CompletePage(bool has_next, std::chrono::steady_clock::time_point now) {
+	if (state != ScanResourceState::PAGE_DECODED) {
+		Fail("resource_state", "scan resource state cannot complete page");
+	}
+	counters.retained_decoded_memory_bytes = 0;
+	if (now >= deadline) {
+		Fail("wall_milliseconds", "scan exceeded its wall-time budget");
+	}
+	if (!has_next) {
+		state = ScanResourceState::EXHAUSTED;
+		return;
+	}
+	state = ScanResourceState::READY;
+	RequireReadyForNext(now);
+}
+
+void ScanResourceAccounting::AbortPage() noexcept {
+	counters.active_requests = 0;
+	counters.retained_decoded_memory_bytes = 0;
+	state = ScanResourceState::FAILED;
+}
+
+const ScanResourceProfile &ScanResourceAccounting::Profile() const noexcept {
+	return profile;
+}
+
+const ScanResourceCounters &ScanResourceAccounting::Counters() const noexcept {
+	return counters;
+}
+
+ScanResourceState ScanResourceAccounting::State() const noexcept {
+	return state;
+}
+
+bool ScanResourceAccounting::DeadlineStarted() const noexcept {
+	return deadline_started;
+}
+
+std::chrono::steady_clock::time_point ScanResourceAccounting::Deadline() const {
+	if (!deadline_started) {
+		throw ScanResourceError("resource_state", "scan deadline has not started");
+	}
+	return deadline;
+}
+
+} // namespace internal
+} // namespace duckdb_api
