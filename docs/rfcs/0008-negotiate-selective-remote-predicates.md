@@ -361,8 +361,8 @@ change. The plan and connector changes remain private pre-`1.0` interfaces.
 | Binding `private = TRUE` to a visibility or legacy type input is unsafe or unproved | Internal/private counterexample and missing REST completeness contract | GitHub visibility documentation, Repository privacy contract, and affected-team reviews | Established: the visibility input omits internal rows satisfying the broader boolean; the legacy type input does not explicitly guarantee their inclusion. Both boolean mappings are rejected. |
 | The authorized live account can supply the missing internal counterexample | Privacy-safe aggregate observation only | 2026-07-19 paginated `GET /user/repos` observation using the approved local credential | Inconclusive: all 432 observed rows were `visibility=public, private=false`; no repository identity or value was recorded. The observation cannot prove a universal mapping. |
 | DuckDB can offer one filter selectively without transferring every filter | Pinned structured optimizer API and residual behavior | Source audit of DuckDB 1.5.4 `table_function.hpp` and `pushdown_get.cpp` | Established: the complex callback receives bound expressions; expressions left in its vector are regenerated as DuckDB filters. Generic `filter_pushdown` stays disabled. |
-| Explain can reflect the selected plan without executing | Pinned post-optimization bind-data explanation path | Source audit of DuckDB 1.5.4 `physical_table_scan.cpp`; controlled `EXPLAIN` oracle required during delivery | Established in source; exact rendering remains implementation evidence. |
-| Every page preserves the narrowing and rejects response widening | Typed reconstruction and counterexamples | Runtime fixed-field pagination fixtures and controlled multi-page service | Pending implementation evidence; required for goal completion, not RFC feasibility. |
+| Explain can reflect the selected plan without executing | Pinned post-optimization bind-data explanation path | Source audit of DuckDB 1.5.4 `physical_table_scan.cpp` plus controlled `EXPLAIN`, prepare, and copy oracles | Delivered: exact labeled remote, accuracy, residual, owner, and scope-aware classification fields render without secret resolution or I/O. |
+| Every page preserves the narrowing and rejects response widening | Typed reconstruction and counterexamples | Runtime fixed-field pagination fixtures and controlled multi-page service | Delivered: selective requests preserve the field on every page; omission, mutation, duplication, and extra-field continuations fail before transport widening. |
 
 No disposable product trial can strengthen an upstream contract. The accepted
 decision uses the endpoint's same-field visibility contract rather than an
@@ -479,12 +479,12 @@ approved outcome. Retained only for unsupported profiles.
 
 | Source of truth or artifact | Impact | Required update | Completion evidence |
 | --- | --- | --- | --- |
-| `docs/ARCHITECTURE.md` | Affected | Replace the native no-filter profile with selective remote narrowing, local residual, request, and explain behavior | Pending delivery |
-| `docs/CONNECTOR_SPECIFICATIONS.md` | Affected only for native-preview mapping | Record the fixed native mapping without activating package/YAML syntax | Pending delivery |
-| `docs/RUNTIME_CONTRACTS.md` | Affected | Update lifecycle timing, structured request, plan classification, pagination fixed inputs, fallback, and explanation | Pending delivery |
-| `docs/TEAM_TOPOLOGY.md` and active charters | Not affected | Existing accountabilities and interactions already place each responsibility | Charter-backed plans and final exit audit |
-| `docs/PRODUCT_DELIVERY.md`, `AGENTS.md`, and skills | Not affected | Existing goal, RFC, contract-change, topology, and review workflow governs the change | Agent-asset validation |
-| Examples, diagnostics, fixtures, tests, changelog, and roadmap | Affected | Add approved SQL, safe explain, deterministic equivalence/request/fallback evidence, and unreleased product note | Pending delivery |
+| `docs/ARCHITECTURE.md` | Affected | Replace the native no-filter profile with selective remote narrowing, local residual, request, and explain behavior | Completed with source, adapter, and product oracles |
+| `docs/CONNECTOR_SPECIFICATIONS.md` | Affected only for native-preview mapping | Record the fixed native mapping without activating package/YAML syntax | Completed; package/YAML syntax remains explicitly inactive |
+| `docs/RUNTIME_CONTRACTS.md` | Affected | Update lifecycle timing, structured request, plan classification, pagination fixed inputs, fallback, and explanation | Completed with plan-admission, request, pagination, and lifecycle oracles |
+| `docs/TEAM_TOPOLOGY.md` and active charters | Not affected | Existing accountabilities and interactions already place each responsibility | Completed through four charter-backed plans and final source-dependency exit audits |
+| `docs/PRODUCT_DELIVERY.md`, `AGENTS.md`, and skills | Not affected | Existing goal, RFC, contract-change, topology, and review workflow governs the change | Completed; agent-asset validation passes |
+| Examples, diagnostics, fixtures, tests, changelog, and roadmap | Affected | Add approved SQL, safe explain, deterministic equivalence/request/fallback evidence, and unreleased product note | Completed; cached and fresh product gates pass |
 
 ## Unresolved questions
 
@@ -497,9 +497,9 @@ inside this RFC.
 | Required reviewer | Team | Result | Evidence or objection | Disposition by decision owner |
 | --- | --- | --- | --- | --- |
 | `predicate_query_review` | Query Experience | Approved | Pinned DuckDB 1.5.4 supplies the structured callback, leaves untouched expressions as DuckDB filters, substitutes bound parameters before the callback, rebinds them per execution, and explains post-optimization bind data | Accepted. Query retains the baseline request and filter vector, recognizes only the resulting exact VARCHAR equality, performs no REST selection, deep-copies plan state, and keeps bind, prepare, and explain offline. |
-| `predicate_connector_review` | Connector Experience | Approved | The same-field contract establishes `D => R`; the immutable mapping, strict trailing VARCHAR extraction, cross-field validation, conservative classification, and retained residual preserve the Connector boundary | Accepted. Implementation and interaction-exit evidence remain delivery gates. |
+| `predicate_connector_review` | Connector Experience | Approved | The same-field contract establishes `D => R`; the immutable mapping, strict trailing VARCHAR extraction, cross-field validation, conservative classification, and retained residual preserve the Connector boundary | Accepted and delivered. Mapping, validation, fixture, and final dependency evidence satisfy the interaction exit. |
 | `predicate_semantics_review` | Relational Semantics | Approved | The endpoint's specified-visibility restriction contains every row satisfying `visibility = 'private'`; internal is a distinct nonmatching value; a bound parameter substituted with that exact typed constant has the same execution predicate; DuckDB remains sole residual owner | Accepted. Unsupported or unresolved shapes retain the complete base-domain plan; prepared executions must refine independently from the unrestricted request. |
-| `predicate_runtime_review` | Remote Runtime | Approved | One closed typed input is admitted with the operation, six-column schema, and pagination target into the immutable profile consumed by first-page, continuation, Link, authorization, and transport paths | Accepted. Runtime never interprets predicates or decoded visibility values; implementation and interaction-exit evidence remain delivery gates. |
+| `predicate_runtime_review` | Remote Runtime | Approved | One closed typed input is admitted with the operation, six-column schema, and pagination target into the immutable profile consumed by first-page, continuation, Link, authorization, and transport paths | Accepted and delivered. Runtime never interprets predicates or decoded visibility values; focused and fresh evidence satisfy the interaction exit. |
 
 ## Decision and rationale
 

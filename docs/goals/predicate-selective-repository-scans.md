@@ -2,9 +2,9 @@
 
 Follow `docs/PRODUCT_DELIVERY.md`.
 
-Status: **Active as of 2026-07-19**. Product approval is recorded in the
-project task. A required RFC must be Accepted before implementation establishes
-the public or shared predicate-pushdown contract.
+Status: **Achieved on 2026-07-19**. RFC 0008 is Accepted. The four
+topology-owned workstreams delivered the approved slice and exited their
+product interactions.
 
 ## PM brief
 
@@ -170,6 +170,51 @@ back to the complete base relation. Ordering remains local.
 4. Propagate durable contracts, run independent review and the complete gates,
    audit interaction exits, commit the coherent goal, and record delivery
    evidence here.
+
+## Delivery evidence record
+
+The permanent `0.6.0` working tree now exposes required trailing
+`visibility VARCHAR` values on `github.authenticated_repositories`. The exact
+structured predicate `visibility = 'private'` selects the reviewed
+`visibility=private` REST input on every page while DuckDB retains the complete
+original filter as sole residual owner. Unsupported, ambiguous, differently
+valued, `NULL`, and mapping-absent cases preserve complete traversal and local
+evaluation.
+
+Evidence on committed product tree
+`0d95901f4c7d2555b758e01a87b1ac82e125fb08`:
+
+- `make build`, `make test`, and `make demo` passed in the pinned DuckDB 1.5.4
+  developer cell; the test gate included every focused native target, 107
+  SQLLogicTest assertions, loadable-artifact inventory, all three controlled
+  product contracts, and the source demo contract;
+- a new-root native product gate rebuilt 759 targets from an archive of the
+  committed tree and reproduced the complete gate. Its public and controlled
+  artifact SHA-256 values are
+  `8bd4f637fc207775112a8429076bacb747e527255f37b0f3c929cee132411a8a`
+  and `397725f0d0def777a54cd6dc6fdb016e96354071e34678abd3e3cf51282fdbee`;
+- the repository product oracle completed 84 exact requests, including a
+  two-page selective trace, compound-filter residual evaluation, a three-page
+  ambiguous-`OR` fallback, mapping-absent fallback, sequential parameter
+  rebinding, concurrent execution, failures, cancellation, close, redaction,
+  and recovery;
+- source identities are native
+  `b178740f8e268dc0d9d9c3327e23514f01426bbc4d734928abb3b12251dc073c`,
+  controlled
+  `2390a8982c3d6ac1f3b0165345f9cf1c656ea67fa2e4bfb150d31b47a1708ebc`,
+  and canonical public contract
+  `580a33b94357b2a539489ff2c2ba69289b89be3ee2ed019efe29832230f1cecf`;
+  and
+- independent Query/Semantics and Runtime/security reviews closed the
+  explanation, copy-isolation, candidate-state, conditional-admission,
+  complete-residual, and black-box fallback gaps, then reported no remaining
+  P0-P3 findings.
+
+Connector Experience, Relational Semantics, and Remote Runtime have exited
+Collaboration to their documented X-as-a-Service boundaries. Query Experience
+owns the assembled SQL outcome. This delivers the first independently useful
+relational-trust slice; projection, ordering, and limit pushdown remain later
+`0.6.0` goals, so no `0.6.0` release or tag is implied.
 
 ## Responsibility and dependency map
 

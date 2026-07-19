@@ -2,6 +2,8 @@
 
 ## Outcome interpretation and authority
 
+Status: **Delivered; provider interactions and semantic gates satisfied**.
+
 Relational Semantics supports Query Experience's product outcome by turning one
 closed structured predicate on `github.authenticated_repositories` into a
 complete, immutable, explainable `ScanPlan` that may narrow remote work without
@@ -196,6 +198,14 @@ construction, Link policy, pagination, and lifecycle execution.
 
 ## Dependencies and interaction exit
 
+Current state: **Satisfied; X-as-a-Service**. The final implementation keeps
+the two-state remote candidate separate from the exact-or-opaque retained
+DuckDB scope. Focused implication, row-bag, mapping-absence, capability,
+counterexample, snapshot, plan-fixture, actual bind-copy, and Runtime admission
+oracles pass. Query supplies structure without assigning accuracy or ownership,
+and Runtime consumes the immutable typed plan without importing classifier or
+Connector internals.
+
 - **RFC gate:** only decision evidence and this plan may precede acceptance.
 - **Connector dependency:** Semantics consumes one immutable declaration for
   the required `visibility` VARCHAR column, equality to `private`, the
@@ -218,8 +228,8 @@ The initial Collaboration exits to X-as-a-Service when:
 - Semantics independently maintains the closed classifier, row-bag property,
   counterexample corpus, plan fixtures, and focused gates.
 
-The interaction remains open until final source and target dependencies prove
-those conditions. A passing end-to-end query alone is insufficient.
+The final source and target dependencies prove those conditions independently
+of the passing end-to-end query.
 
 ## Documentation and verification
 

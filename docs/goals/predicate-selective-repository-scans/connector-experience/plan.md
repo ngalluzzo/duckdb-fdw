@@ -2,8 +2,7 @@
 
 ## Outcome interpretation and authority
 
-Status: **Planned; Connector RFC re-review approved; implementation evidence
-pending**.
+Status: **Delivered; native predicate provider and interactions exited**.
 
 Provide the Connector Experience part of the active Query Experience outcome:
 add one trailing required `VARCHAR` column named `visibility`, extracted from
@@ -292,7 +291,7 @@ final dependency audit, Git history, and goal closure.
 
 ## Interaction exit
 
-Current state: **Open; Collaboration**.
+Current state: **Satisfied; X-as-a-Service**.
 
 The learning objective is to prove that one explicit predicate mapping and a
 bounded fixture service let Semantics classify and bind the supported
@@ -319,7 +318,14 @@ The interaction becomes **Satisfied; X-as-a-Service** only when:
 - the controlled end-to-end row-bag, request-reduction, fallback, lifecycle,
   and complete verification gates pass.
 
-The interaction remains Open if a consumer selects capability by relation,
+Final source dependencies show Semantics consuming the immutable public mapping
+accessors, Query consuming the compiled catalog without reconstructing mapping
+meaning, and Runtime consuming only the resulting plan. Connector declaration,
+invalid-value, decoy, snapshot, provenance, source-inventory, controlled
+mapping-absence, and strict visibility-conversion oracles pass in both cached
+and fresh product cells.
+
+The interaction reopens if a consumer selects capability by relation,
 column, extractor, path, credential, or fixed-query shape; re-declares
 `visibility=private` or another remote-input constant; needs routine Connector
 edits for predicate composition; imports private construction/explanation

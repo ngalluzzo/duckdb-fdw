@@ -2,8 +2,7 @@
 
 ## Outcome, status, and charter disposition
 
-Status: **Planned; Runtime RFC re-review approved; implementation evidence and
-provider-interface handoff pending**.
+Status: **Delivered; provider interactions and fresh verification satisfied**.
 
 Remote Runtime supports Query Experience's active product outcome by executing
 the repository operation that Relational Semantics has already selected and
@@ -274,6 +273,15 @@ bridge while a provider interface is pending.
 
 ## Interaction exit audit
 
+Current state: **Satisfied; X-as-a-Service**. Runtime admits only the public
+immutable plan and authorization capability into one closed request profile.
+First-page construction, sequential continuation, Link validation, bearer
+decoration, and transport validation consume that profile. DuckDB-free legal
+and invalid plan fixtures, exact request traces, conditional-input denial,
+complete-residual admission, security, budget, cancellation, close, and curl
+oracles pass in cached and fresh cells; Query imports no Runtime-internal
+request or pagination implementation.
+
 The Remote Runtime collaboration becomes X-as-a-Service only when source and
 test dependencies, not merely passing end-to-end SQL, show all of the
 following:
@@ -299,7 +307,7 @@ following:
    machines, and all temporary collaboration hooks or trial-only coupling are
    removed.
 
-If one of these conditions fails, the interaction remains Collaboration and
+If one of these conditions regresses, the interaction returns to Collaboration and
 the dependency or interface must be corrected before handoff.
 
 ## Documentation obligations after RFC acceptance

@@ -2,7 +2,7 @@
 
 ## Outcome, status, and authority
 
-Status: **Planned; Query review approved and implementation evidence pending**.
+Status: **Delivered; Query outcome and all interaction exits satisfied**.
 
 Query Experience is accountable for the DuckDB user's path from the existing
 `github.authenticated_repositories` SQL relation to a correct, explainable,
@@ -15,9 +15,9 @@ ordinary `EXPLAIN`. The supported query must return the same row bag as
 complete traversal followed by local DuckDB filtering while the controlled
 optimized trace contains fewer repository requests.
 
-This plan allocates Query-owned implementation and evidence under Accepted RFC
+This plan records Query-owned implementation and evidence under Accepted RFC
 0008. Query review approved the callback, lifecycle, fallback, and explanation
-contract; implementation and interaction-exit evidence remain pending. If the
+contract, and the implementation and interaction-exit evidence now pass. If the
 accepted decision is superseded or materially revised, this plan must be
 re-reviewed before product code establishes the changed contract. Query does
 not decide connector mapping meaning, implication or accuracy, typed HTTP
@@ -307,6 +307,15 @@ acceptable bridge.
 
 ## Interaction exit audit
 
+Current state: **Satisfied**. The adapter recognizes only the pinned structured
+equality, leaves DuckDB's filter vector untouched, and replans each deep-copied
+bind state from an immutable baseline. Focused tests exercise the actual
+`FunctionData::Copy()` boundary concurrently after destroying its ancestor;
+SQLLogicTest and controlled product oracles prove offline planning, truthful
+explanation, selective and compound execution, ambiguous and mapping-absent
+fallback, parameter rebinding, exact rows, and exact request traces. Final
+includes and targets preserve every provider boundary below.
+
 Query Experience's collaborations exit only when final source and target
 dependencies demonstrate all of the following:
 
@@ -328,7 +337,7 @@ dependencies demonstrate all of the following:
   compatibility oracle, bind/init/copy/prepare/explain/cancel/shutdown matrix,
   and its focused build gates.
 
-The interaction remains open if Query tests compile Connector, Semantics, or
+The interaction reopens if Query tests compile Connector, Semantics, or
 Runtime private production sources; if a provider fixture requires private
 construction; if Runtime details appear in the callback; if plan meaning is
 recoverable only from an explanation string; or if residual retention and copy
