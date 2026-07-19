@@ -26,18 +26,21 @@ API. Its public contract is DuckDB-native.
 - [Runtime contracts](docs/RUNTIME_CONTRACTS.md) defines compiled IR, planning,
   execution, and lifecycle contracts.
 - [Changelog](CHANGELOG.md) records user-visible additions and limitations.
+- [0.5.0 release notes](docs/releases/0.5.0-notes.md) define the current bounded
+  authenticated repository product surface and hard execution envelope.
 - [0.1.0 release notes](docs/releases/0.1.0-notes.md) preserve the historical
   fixture-preview contract.
 
-[RFC 0006](docs/rfcs/0006-capability-scoped-authenticated-relation.md) is the
-accepted decision for the source-built `0.4.0` authenticated preview, on top of
-RFC 0005's live REST base. The declarative connector specification remains
-`duckdb_api/draft`: this release compiles two native product relations and does
-not publish connector authoring compatibility.
+[RFC 0007](docs/rfcs/0007-bound-authenticated-repository-pagination.md) is the
+accepted decision for the source-built `0.5.0` bounded repository relation, on
+top of RFC 0006's capability-scoped authentication and RFC 0005's live REST
+base. The declarative connector specification remains `duckdb_api/draft`: this
+release compiles three native product relations and does not publish connector
+authoring compatibility.
 
-## 0.4.0 authenticated REST preview
+## 0.5.0 bounded authenticated REST preview
 
-Version `0.4.0` preserves the bounded, compiled-in public GitHub relation:
+Version `0.5.0` preserves the bounded, compiled-in public GitHub relation:
 
 ```sql
 SELECT id, login, site_admin
@@ -61,7 +64,7 @@ Public-service row identity and service order are not guaranteed. The
 controlled test service is the deterministic correctness oracle; the public
 GitHub query is current-service compatibility evidence.
 
-It also adds one fixed authenticated relation. A user creates one explicitly
+It also preserves one fixed authenticated relation. A user creates one explicitly
 named temporary secret and queries the identity authorized by its current
 token:
 
@@ -87,6 +90,34 @@ network I/O. Replacing or dropping the secret affects the next execution of an
 existing prepared statement. Persistent and environment-backed secrets,
 implicit selection, token arguments, caller-selected URLs or headers, and
 redirects are not supported.
+
+The same explicitly named temporary secret can query every repository exposed
+through one bounded sequential GitHub page chain:
+
+```sql
+SELECT id, full_name, private, fork, archived
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_repositories',
+    secret := 'github_default'
+)
+ORDER BY id;
+```
+
+The relation is a duplicate-preserving bag from a mutable source. It does not
+promise remote order or snapshot consistency; local `ORDER BY` controls only
+presentation. Runtime follows only an exact `rel="next"` transition for the
+fixed `/user/repos?per_page=100&page=N` operation, reconstructs every request
+from typed plan state, and keeps one page and one output batch live at a time.
+A malformed or escaping next target, exhausted budget, cancellation, late-page
+failure, or schema failure fails the statement instead of returning a
+complete-looking truncated result.
+
+The hard repository envelope is 32 sequential pages and requests, 100 records
+per page and 3,200 per scan, 8 MiB wire/decompressed body per page and 64 MiB
+per scan, 16 KiB response headers per page and 512 KiB per scan, 2 MiB retained
+decoded-page memory, 64 output rows per batch, one active request, and 30
+seconds. These ceilings are not retry or parallel-request authority.
 
 ### Supported cell
 
@@ -142,6 +173,25 @@ prints the one typed identity row. The token and returned identity are not
 written to repository evidence. HTTP `401` and `403` remain distinct redacted
 authentication and authorization failures.
 
+### Run the authenticated repository query
+
+Build the artifact, then run the privacy-safe repository example with the
+pinned Python host reported by `make paths`:
+
+```sh
+make build
+make paths
+/absolute/pinned_python -I examples/authenticated_repositories.py /absolute/duckdb_api.duckdb_extension
+```
+
+The runner reads a short-lived GitHub token from a hidden interactive prompt,
+creates only a temporary secret, and executes
+[`examples/authenticated-repositories.sql`](examples/authenticated-repositories.sql).
+It prints schema, aggregate repository count, and the fixed request envelope
+only. It never prints repository IDs, names, privacy flags, Link values, or the
+token. The live result is compatibility evidence; the controlled multipage
+service is the deterministic correctness oracle.
+
 ### Developer commands
 
 The root Make targets form the supported source-development interface:
@@ -174,17 +224,18 @@ product-development gate.
 
 ### Preview limitations
 
-- Only the compiled-in `github.duckdb_login_search_page` and
-  `github.authenticated_user` relations exist. `example.items` was removed in
-  `0.3.0`.
+- Only the compiled-in `github.duckdb_login_search_page`,
+  `github.authenticated_user`, and `github.authenticated_repositories`
+  relations exist. `example.items` was removed in `0.3.0`.
 - The relation represents one fixed public response page, not every GitHub user
   or every matching search result. Public row identity, order, and availability
   are not product guarantees.
 - Authentication is limited to one explicit temporary `duckdb_api/config`
-  bearer secret for `github.authenticated_user`. There is no persistent or
+  bearer secret for the two authenticated relations. Pagination is limited to
+  the fixed sequential repository profile. There is no persistent or
   environment provider, implicit selection, OAuth, caller-selected URL or
-  header, pagination, retry, caching, provider expansion, GraphQL execution,
-  or custom explain surface.
+  header, retry, rate-limit waiting, parallel page request, resume, caching,
+  provider expansion, GraphQL execution, or custom explain surface.
 - Connector YAML/package loading, registries, signing, binary publication,
   automatic installation, and update support remain excluded.
 - The `duckdb_api/draft` connector shape is design material, not a stable

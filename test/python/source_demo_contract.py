@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import pathlib
@@ -18,7 +19,7 @@ EXPECTED_STATIC_SUMMARY = {
         "installed": False,
         "loaded": True,
         "name": "duckdb_api",
-        "version": "0.4.0",
+        "version": "0.5.0",
     },
     "relation": {
         "connector": "github",
@@ -32,6 +33,22 @@ EXPECTED_STATIC_SUMMARY = {
     ],
 }
 EXPECTED_FAILURE = "Binder Error: [duckdb_api][bind] unknown connector identifier"
+EXPECTED_REPOSITORY_SQL = " ".join(
+    (
+        "DESCRIBE SELECT id, full_name, private, fork, archived",
+        "FROM duckdb_api_scan(",
+        "connector := 'github',",
+        "relation := 'authenticated_repositories',",
+        "secret := 'github_default'",
+        ");",
+        "SELECT count(*) AS repository_count",
+        "FROM duckdb_api_scan(",
+        "connector := 'github',",
+        "relation := 'authenticated_repositories',",
+        "secret := 'github_default'",
+        ");",
+    )
+)
 FAILURE_PROGRAM = r'''
 import duckdb
 import sys
@@ -85,6 +102,83 @@ def validate_summary(summary: object) -> None:
             raise AssertionError(f"public row type drifted: {row!r}")
 
 
+def validate_repository_runner_policy(source: str) -> None:
+    tree = ast.parse(source)
+    fetch_all = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "fetchall"
+    ]
+    if len(fetch_all) != 1 or "statements[0]" not in ast.get_source_segment(
+        source, fetch_all[0]
+    ):
+        raise AssertionError("repository runner can fetch row data outside DESCRIBE")
+
+    execute_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "execute"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "connection"
+    ]
+    if len(execute_calls) != 6:
+        raise AssertionError("repository runner SQL execution inventory drifted")
+    execute_sources = [ast.get_source_segment(source, node) or "" for node in execute_calls]
+    if sum("statements[0]" in value for value in execute_sources) != 1 or sum(
+        "statements[1]" in value for value in execute_sources
+    ) != 1:
+        raise AssertionError("repository runner no longer executes only accepted result SQL")
+
+    prints = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "print"
+    ]
+    if len(prints) != 1 or len(prints[0].args) != 1:
+        raise AssertionError("repository runner output inventory drifted")
+    dump_call = prints[0].args[0]
+    if (
+        not isinstance(dump_call, ast.Call)
+        or not isinstance(dump_call.func, ast.Attribute)
+        or dump_call.func.attr != "dumps"
+        or not dump_call.args
+        or not isinstance(dump_call.args[0], ast.Dict)
+    ):
+        raise AssertionError("repository runner output is not one fixed JSON object")
+    keys = [
+        key.value
+        for key in dump_call.args[0].keys
+        if isinstance(key, ast.Constant) and isinstance(key.value, str)
+    ]
+    if keys != [
+        "artifact",
+        "extension",
+        "relation",
+        "repository_count",
+        "request_profile",
+        "schema",
+    ]:
+        raise AssertionError("repository runner public output keys drifted")
+
+
+def normalize_repository_sql(source: str) -> str:
+    statements = []
+    for line in source.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("--"):
+            continue
+        if "--" in stripped or "/*" in stripped or "*/" in stripped:
+            raise AssertionError("repository example SQL contains an inline comment")
+        statements.append(stripped)
+    return " ".join(statements)
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         raise SystemExit("usage: source_demo_contract.py PINNED_PYTHON PATH_TO_EXTENSION")
@@ -98,6 +192,8 @@ def main() -> int:
     example_runner = repository_root / "examples/first_live_rest_relation.py"
     authenticated_runner = repository_root / "examples/authenticated_user.py"
     authenticated_sql = repository_root / "examples/authenticated-user.sql"
+    repositories_runner = repository_root / "examples/authenticated_repositories.py"
+    repositories_sql = repository_root / "examples/authenticated-repositories.sql"
 
     with tempfile.TemporaryDirectory(prefix="duckdb-api-source-demo-") as directory:
         isolated = pathlib.Path(directory)
@@ -174,6 +270,43 @@ def main() -> int:
         ):
             if fragment not in accepted_sql:
                 raise AssertionError("authenticated example SQL drifted")
+
+        repositories_help = run(
+            [str(pinned_python), "-I", str(repositories_runner), "--help"],
+            isolated,
+            environment,
+        )
+        if repositories_help.returncode != 0:
+            raise AssertionError(
+                "repository example help failed:\n"
+                f"stdout:\n{repositories_help.stdout}\n"
+                f"stderr:\n{repositories_help.stderr}"
+            )
+        repositories_source = repositories_runner.read_text(encoding="utf-8")
+        validate_repository_runner_policy(repositories_source)
+        forbidden_credential_paths = ("--token", "GITHUB_TOKEN", "os.environ")
+        if any(
+            value in repositories_help.stdout or value in repositories_source
+            for value in forbidden_credential_paths
+        ):
+            raise AssertionError(
+                "repository example exposed a CLI or environment credential path"
+            )
+        for fragment in (
+            "getpass.getpass",
+            'EXPECTED_EXTENSION = ("duckdb_api", "0.5.0"',
+            '"repository_count": repository_count',
+            '"request_profile": {',
+        ):
+            if fragment not in repositories_source:
+                raise AssertionError(
+                    "repository runner lost privacy-safe identity or aggregate output"
+                )
+        repository_sql = repositories_sql.read_text(encoding="utf-8")
+        if normalize_repository_sql(repository_sql) != EXPECTED_REPOSITORY_SQL:
+            raise AssertionError(
+                "repository example must contain exactly DESCRIBE plus count-only SQL"
+            )
 
         failure = run(
             [str(pinned_python), "-I", "-c", FAILURE_PROGRAM],

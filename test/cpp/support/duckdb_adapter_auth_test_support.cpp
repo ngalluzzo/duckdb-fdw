@@ -6,14 +6,10 @@
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
-#include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/main/secret/secret_storage.hpp"
-#include "duckdb_api_extension.hpp"
 #include "support/connector_catalog_test_fixtures.hpp"
-#include "support/require.hpp"
 
 #include <stdexcept>
-#include <utility>
 #include <vector>
 
 namespace duckdb_api_test {
@@ -28,14 +24,6 @@ public:
 	}
 };
 
-std::shared_ptr<QueryLifecycleProbe> RegisterAdapter(duckdb::DuckDB &database, duckdb_api::CompiledConnector connector,
-                                                     QueryRuntimeScenario scenario) {
-	auto probe = std::shared_ptr<QueryLifecycleProbe>(new QueryLifecycleProbe());
-	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_auth_adapter_test");
-	duckdb::RegisterDuckdbApi(loader, std::move(connector), BuildQueryScenarioExecutor(scenario, probe));
-	return probe;
-}
-
 } // namespace
 
 std::string RuntimeAdapterTokenCanary(char marker) {
@@ -46,18 +34,8 @@ std::string RuntimeAdapterTokenCanary(char marker) {
 	return result;
 }
 
-std::string QueryError(duckdb::Connection &connection, const std::string &sql) {
-	auto result = connection.Query(sql);
-	Require(result->HasError(), "query unexpectedly succeeded: " + sql);
-	return result->GetError();
-}
-
-std::shared_ptr<QueryLifecycleProbe> RegisterNativeAdapter(duckdb::DuckDB &database, QueryRuntimeScenario scenario) {
-	return RegisterAdapter(database, duckdb_api::BuildNativeGithubConnector(), scenario);
-}
-
 std::shared_ptr<QueryLifecycleProbe> RegisterFixtureAdapter(duckdb::DuckDB &database, QueryRuntimeScenario scenario) {
-	return RegisterAdapter(database, BuildDistinctSchemaConnectorCatalogFixture(), scenario);
+	return RegisterQueryAdapter(database, BuildDistinctSchemaConnectorCatalogFixture(), scenario);
 }
 
 void CreateTemporarySecret(duckdb::Connection &connection, const std::string &name, const std::string &token) {

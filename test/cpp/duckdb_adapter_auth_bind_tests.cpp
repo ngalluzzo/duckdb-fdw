@@ -71,6 +71,12 @@ void TestSecretPresenceRulesAndExactSelection() {
 		throw std::runtime_error("anonymous relation without secret did not bind: " + anonymous->GetError());
 	}
 	RequireNoRuntimeEntry(*probe, "anonymous DESCRIBE");
+	auto repositories = connection.Query("DESCRIBE SELECT * FROM duckdb_api_scan(connector := 'github', relation := "
+	                                     "'authenticated_repositories', secret := 'not_created')");
+	if (repositories->HasError()) {
+		throw std::runtime_error("repository relation with a logical secret did not bind: " + repositories->GetError());
+	}
+	RequireNoRuntimeEntry(*probe, "repository DESCRIBE");
 
 	RequireBindFailure(connection,
 	                   "SELECT * FROM duckdb_api_scan(connector := 'github', relation := "
@@ -88,6 +94,18 @@ void TestSecretPresenceRulesAndExactSelection() {
 	                   "secret := '')",
 	                   "named argument secret must not be NULL or empty", probe);
 	RequireBindFailure(connection,
+	                   "SELECT * FROM duckdb_api_scan(connector := 'github', relation := "
+	                   "'authenticated_repositories')",
+	                   "required named argument secret is missing", probe);
+	RequireBindFailure(connection,
+	                   "SELECT * FROM duckdb_api_scan(connector := 'github', relation := "
+	                   "'authenticated_repositories', secret := NULL)",
+	                   "named argument secret must not be NULL or empty", probe);
+	RequireBindFailure(connection,
+	                   "SELECT * FROM duckdb_api_scan(connector := 'github', relation := "
+	                   "'authenticated_repositories', secret := '')",
+	                   "named argument secret must not be NULL or empty", probe);
+	RequireBindFailure(connection,
 	                   "SELECT * FROM duckdb_api_scan(connector := 'GitHub', relation := 'authenticated_user', "
 	                   "secret := 'missing')",
 	                   "unknown connector identifier", probe);
@@ -95,28 +113,59 @@ void TestSecretPresenceRulesAndExactSelection() {
 	                   "SELECT * FROM duckdb_api_scan(connector := 'github', relation := 'Authenticated_User', "
 	                   "secret := 'missing')",
 	                   "unknown relation identifier", probe);
+	RequireBindFailure(connection,
+	                   "SELECT * FROM duckdb_api_scan(connector := 'github', relation := "
+	                   "'Authenticated_Repositories', secret := 'missing')",
+	                   "unknown relation identifier", probe);
 }
 
 void TestAuthenticatedBindStaysOffline() {
 	duckdb::DuckDB database(nullptr);
 	auto probe = RegisterNativeAdapter(database, QueryRuntimeScenario::SUCCESS);
 	duckdb::Connection connection(database);
-	const std::string relation = "duckdb_api_scan(connector := 'github', relation := 'authenticated_user', "
-	                             "secret := 'not_created')";
-
-	auto describe = connection.Query("DESCRIBE SELECT * FROM " + relation);
-	if (describe->HasError()) {
-		throw std::runtime_error("authenticated DESCRIBE resolved a secret: " + describe->GetError());
-	}
-	auto explain = connection.Query("EXPLAIN SELECT * FROM " + relation);
-	if (explain->HasError()) {
-		throw std::runtime_error("authenticated EXPLAIN resolved a secret: " + explain->GetError());
-	}
-	auto prepare = connection.Query("PREPARE authenticated_bind AS SELECT * FROM " + relation);
-	if (prepare->HasError()) {
-		throw std::runtime_error("authenticated PREPARE resolved a secret: " + prepare->GetError());
+	const char *required_relations[] = {"authenticated_user", "authenticated_repositories"};
+	const char *prepared_names[] = {"authenticated_user_bind", "authenticated_repositories_bind"};
+	for (duckdb::idx_t index = 0; index < 2; index++) {
+		const std::string relation = "duckdb_api_scan(connector := 'github', relation := '" +
+		                             std::string(required_relations[index]) + "', secret := 'not_created')";
+		auto describe = connection.Query("DESCRIBE SELECT * FROM " + relation);
+		if (describe->HasError()) {
+			throw std::runtime_error("authenticated DESCRIBE resolved a secret: " + describe->GetError());
+		}
+		auto explain = connection.Query("EXPLAIN SELECT * FROM " + relation);
+		if (explain->HasError()) {
+			throw std::runtime_error("authenticated EXPLAIN resolved a secret: " + explain->GetError());
+		}
+		auto prepare =
+		    connection.Query("PREPARE " + std::string(prepared_names[index]) + " AS SELECT * FROM " + relation);
+		if (prepare->HasError()) {
+			throw std::runtime_error("authenticated PREPARE resolved a secret: " + prepare->GetError());
+		}
 	}
 	RequireNoRuntimeEntry(*probe, "authenticated bind-only operations");
+}
+
+void TestNativeRelationSchemas() {
+	duckdb::DuckDB database(nullptr);
+	auto probe = RegisterNativeAdapter(database, QueryRuntimeScenario::SUCCESS);
+	duckdb::Connection connection(database);
+	const char *row_names[] = {"id", "login", "site_admin"};
+	const char *row_types[] = {"BIGINT", "VARCHAR", "BOOLEAN"};
+	const char *repository_names[] = {"id", "full_name", "private", "fork", "archived"};
+	const char *repository_types[] = {"BIGINT", "VARCHAR", "BOOLEAN", "BOOLEAN", "BOOLEAN"};
+
+	RequireSchema(connection,
+	              "SELECT * FROM duckdb_api_scan(connector := 'github', relation := 'duckdb_login_search_page')",
+	              row_names, row_types, 3);
+	RequireSchema(connection,
+	              "SELECT * FROM duckdb_api_scan(connector := 'github', relation := 'authenticated_user', "
+	              "secret := 'not_created')",
+	              row_names, row_types, 3);
+	RequireSchema(connection,
+	              "SELECT * FROM duckdb_api_scan(connector := 'github', relation := 'authenticated_repositories', "
+	              "secret := 'not_created')",
+	              repository_names, repository_types, 5);
+	RequireNoRuntimeEntry(*probe, "native relation schema binds");
 }
 
 void TestBothRelationSchemasComeFromPlans() {
@@ -161,6 +210,7 @@ void RunDuckdbAdapterAuthBindTests() {
 	TestRegisteredParameterInventory();
 	TestSecretPresenceRulesAndExactSelection();
 	TestAuthenticatedBindStaysOffline();
+	TestNativeRelationSchemas();
 	TestBothRelationSchemasComeFromPlans();
 	TestAnonymousExecutionUsesClosedAuthorizationEntry();
 }

@@ -1,5 +1,5 @@
 # name: test/sql/duckdb_api.test
-# description: static public SQL and secret contract for 0.4.0
+# description: static public SQL and secret contract for 0.5.0
 # group: [duckdb_api]
 
 statement error
@@ -14,7 +14,7 @@ SELECT extension_version
 FROM duckdb_extensions()
 WHERE extension_name = 'duckdb_api';
 ----
-0.4.0
+0.5.0
 
 query TT
 SELECT type, default_provider
@@ -82,6 +82,44 @@ FROM duckdb_api_scan(
 statement ok
 DEALLOCATE authenticated_scan;
 
+# The bounded repository relation is selected exactly and remains offline for
+# describe, explain, and prepare. DuckDB owns presentation order.
+query TTTTTT
+DESCRIBE SELECT *
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_repositories',
+    secret := 'offline_secret'
+);
+----
+id	BIGINT	YES	NULL	NULL	NULL
+full_name	VARCHAR	YES	NULL	NULL	NULL
+private	BOOLEAN	YES	NULL	NULL	NULL
+fork	BOOLEAN	YES	NULL	NULL	NULL
+archived	BOOLEAN	YES	NULL	NULL	NULL
+
+statement ok
+EXPLAIN SELECT id, full_name, private, fork, archived
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_repositories',
+    secret := 'offline_secret'
+)
+ORDER BY id;
+
+statement ok
+PREPARE authenticated_repositories_scan AS
+SELECT id, full_name, private, fork, archived
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_repositories',
+    secret := 'offline_secret'
+)
+ORDER BY id;
+
+statement ok
+DEALLOCATE authenticated_repositories_scan;
+
 statement ok
 CREATE TEMPORARY SECRET sql_contract (
     TYPE duckdb_api,
@@ -115,6 +153,23 @@ SELECT * FROM duckdb_api_scan(
 );
 ----
 Binder Error: [duckdb_api][bind] connector=github relation=authenticated_user: required named argument secret is missing
+
+statement error
+SELECT * FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_repositories'
+);
+----
+Binder Error: [duckdb_api][bind] connector=github relation=authenticated_repositories: required named argument secret is missing
+
+statement error
+SELECT * FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'Authenticated_Repositories',
+    secret := 'offline_secret'
+);
+----
+Binder Error: [duckdb_api][bind] connector=github: unknown relation identifier
 
 statement error
 SELECT * FROM duckdb_api_scan(

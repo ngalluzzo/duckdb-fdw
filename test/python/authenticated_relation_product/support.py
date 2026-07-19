@@ -43,7 +43,7 @@ def assert_authenticated_request(
         "host": [f"127.0.0.1:{server.server_port}"],
         "accept": ["application/vnd.github+json"],
         "authorization": [f"Bearer {expected_token}"],
-        "user-agent": ["duckdb-api/0.4.0"],
+        "user-agent": ["duckdb-api/0.5.0"],
         "x-github-api-version": ["2022-11-28"],
     }
     for name, expected in required.items():

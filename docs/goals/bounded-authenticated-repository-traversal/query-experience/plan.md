@@ -8,10 +8,14 @@ DuckDB user receives the required five-column duplicate-preserving row bag
 across the accepted bounded page sequence, or one actionable redacted failure;
 the user never supplies or observes page state.
 
-Status: **Planned; implementation not begun**. RFC 0007 is Accepted and the
-parent goal is Active. Query Experience is accountable for the DuckDB-visible
-outcome. Connector Experience, Relational Semantics, and Remote Runtime remain
-provider teams under the parent goal's recorded interactions.
+Status: **Query implementation and controlled acceptance evidence complete**.
+The three-relation public contract, conservative request/bind path, separate
+controlled composition, adapter stream contract, and real curl/runtime/adapter
+repository oracle are implemented in the shared integration worktree. The
+parent goal remains Active until the lead records a fresh native product cell,
+and final independent review. The privacy-safe opt-in live compatibility check
+has passed. Those remaining activation gates do not leave a Query-owned
+implementation placeholder or provider-interface workaround.
 
 ## Query ownership boundary
 
@@ -64,12 +68,12 @@ metadata-driven activation is preferred over a relation-name branch.
 | --- | --- |
 | `test/cpp/scan_request_tests.cpp` | Exact repository relation selection; five-column full-projection closure; required logical secret; deterministic copy/snapshot; conservative projection/filter/order/limit/offset/progress capabilities; and absence of page fields, Link data, token sentinels, SQL text, and provider authority. Preserve both existing relation cases. |
 | `test/cpp/duckdb_adapter_auth_bind_tests.cpp` | New relation schema and secret-presence rules; exact case-sensitive identifier selection; offline `DESCRIBE`, `EXPLAIN`, and `PREPARE`; no runtime entry; no change to the registered parameter inventory; and regressions for anonymous and authenticated-user bind behavior. |
-| New focused `test/cpp/duckdb_adapter_repository_lifecycle_tests.cpp` | Five-column repeated-pull consumption; `false`-only exhaustion; rejection of a successful empty batch before it reaches DuckDB; first-batch-then-error translation; cancellation during a later pull; early `LIMIT`/result close; prepared execution, repeated and concurrent scan isolation; and local filter/order/limit/offset behavior over duplicate-preserving synthetic rows. This suite tests the adapter contract, not Link mechanics. |
-| `test/cpp/support/query_runtime_scenarios.hpp` and `.cpp` plus existing Query adapter support | Add only schema-aligned five-column fake batches, empty-success contract violation, late structured failure, blocking-later-pull, and lifecycle observations. The fake never emits a Link header, constructs a request, counts a page, or simulates authority validation. |
+| `test/cpp/duckdb_adapter_stream_contract_tests.cpp`, `test/cpp/duckdb_adapter_tests.cpp`, and existing adapter lifecycle suites | Generic repeated-pull consumption; `false`-only exhaustion; rejection of successful empty batches and rows returned with `false`; first-batch-then-error translation and recovery; cancellation; early result close; prepared execution; and repeated and concurrent scan isolation. Repository-specific page behavior stays out of the adapter fake and is exercised through the real controlled runtime below. |
+| `test/cpp/support/duckdb_adapter_test_support.hpp` and `.cpp` plus `query_runtime_scenarios` | Provide the shared native-catalog registration seam and schema-aligned generic batch, failure, blocking, and lifecycle observations. The fake never emits a Link header, constructs a request, counts a page, or simulates authority validation. |
 | `test/cpp/support/controlled_product_composition.hpp` and `.cpp` and `test/cpp/controlled_duckdb_api_extension.cpp` | Assemble Connector's controlled catalog and Runtime's controlled executor through their separate public test services, then invoke the unchanged production Query registration path. Preserve the private port selector and installed-artifact exclusion. |
 | New `test/python/repository_pagination_product_contract.py` and `test/python/repository_pagination_product/` package | Black-box SQL narrative over a controlled loopback service: exact five-column bag with local `ORDER BY id`, three-page traversal, empty middle page, single-page exhaustion, late status/decode/schema failure, malformed next metadata, cancellation, early close, aggregate resource failure, recovery, and redaction. Request-sequence assertions observe only HTTP facts; Runtime's independent tests remain the parser/state-machine oracle. |
 | `test/sql/duckdb_api.test` | Static `0.5.0` relation inventory and schema, required-secret binder rules, offline explain/bind behavior, stable table-function parameters, and regressions for both `0.4.0` relations without requiring a live credential. |
-| Query-facing example and release-contract assertions | Show temporary-secret creation and the accepted repository SQL, state the 32-page/30-second fail-closed envelope and mutable duplicate-preserving bag limitation, use local `ORDER BY` only for display, and avoid any page argument or snapshot claim. Live evidence records schema and aggregate row/page/request counts only, never repository names, IDs, private flags, Link values, or token material. |
+| Query-facing example and release-contract assertions | Show temporary-secret creation and the accepted repository SQL, state the 32-page/30-second fail-closed envelope and mutable duplicate-preserving bag limitation, use local `ORDER BY` only for display, and avoid any page argument or snapshot claim. Live evidence records extension identity, schema, aggregate count, and the fixed request envelope, never repository names, IDs, private flags, Link values, or token material. Actual page/request counts remain controlled-oracle evidence so delivery does not invent a public telemetry surface. |
 
 The controlled SQL fixture may contain only synthetic repository identities.
 Its service can emit Link values as black-box response input, but Query tests
@@ -82,6 +86,45 @@ short-lived fine-grained credential. It is not a correctness oracle, must not
 become a default repository/CI dependency, and must leave no credential or row
 values in logs, fixtures, evidence, shell history captured by the task, or
 committed files.
+
+## Recorded Query evidence
+
+The integrated `0.5.0` developer cell recorded the following Query-owned
+evidence on 2026-07-18:
+
+- source and native-dependency identity checks passed after the public and
+  controlled digests were sealed;
+- the privacy-safe live compatibility check loaded extension version `0.5.0`,
+  returned the exact five-column schema and an aggregate count of 432 under the
+  fixed request envelope, and emitted no credential, repository identity, row
+  value, or Link value;
+- `make build` completed the full build/link graph, including the public and
+  controlled artifacts and every focused Query target;
+- the independent cached `make test` replay passed all 30 native/curl targets,
+  93 SQL assertions, artifact and installed-inventory checks, the two existing
+  controlled product oracles, and the new repository product oracle;
+- `duckdb_api_scan_request_tests`, `duckdb_api_adapter_tests`, and
+  `duckdb_api_adapter_stream_contract_tests` passed with their exact native
+  three-relation catalog;
+- the SQLLogicTest inventory and the public `artifact_contract.py` agreed with
+  `release/0.5.0/public_contract.json`, including the five-column repository
+  schema, explicit-secret rule, mutable duplicate-preserving bag, and 32-page /
+  30-second ceilings; and
+- the separately linked controlled artifact passed the real
+  curl/runtime/adapter repository oracle in 5.97 seconds. Its JSON-only result
+  was `status=ok` with 59 total requests: seven relational, 45 failure/recovery,
+  and seven lifecycle requests. This covered three pages with an empty middle
+  page, duplicate preservation with DuckDB-local operators, single-page
+  exhaustion, exact request targets and credential placement, early `LIMIT`,
+  later-page cancellation, active close, status/decode/schema/next-policy/page-
+  budget failures, redaction, and recovery.
+
+The first active-close run exposed that the private loopback service had
+inherited the public 30-second maximum. Runtime narrowed only that private
+executor profile to five seconds and resealed the controlled digest; the
+installed executor and public repository plan retain the accepted 30-second
+ceiling. The lifecycle oracle was preserved and then passed, rather than being
+removed or given the public timeout.
 
 ## Provider dependencies and dependency direction
 
@@ -192,28 +235,28 @@ parallel Query writing surfaces.
 
 ## Observable interaction exits
 
-- **Connector Experience — Open; Collaboration, then X-as-a-Service.** Exit
-  when Query's ordinary and prepared binds consume the three-relation catalog
-  through const public accessors, the five-column schema and secret rule agree
-  with independent catalog oracles, controlled composition obtains the catalog
-  from Connector rather than Runtime, and no Query source copies request or
-  pagination metadata.
-- **Relational Semantics — Open; Collaboration, then X-as-a-Service.** Exit
-  when Query constructs only the conservative `ScanRequest`, retains the
-  immutable returned `ScanPlan`, reads only schema/execution facts required at
-  the adapter edge, and controlled SQL proves DuckDB-local filter, ordering,
-  limit, and offset without Query reclassification or page-one fallback.
-- **Remote Runtime — Open; Collaboration, then X-as-a-Service.** Exit when the
-  adapter and Query fakes consume only documented executor/stream/batch/control
-  and error APIs, `true` can never reach DuckDB with an empty batch, Runtime's
-  controlled service no longer owns Connector metadata, and independent
-  Runtime plus Query lifecycle tests prove cancellation, early close, late
-  failure, capability release, redaction, and recovery.
-- **Query Experience outcome — Open.** Exit when the exact SQL with local
-  `ORDER BY id` returns the synthetic controlled five-column row bag across
-  multiple pages and an empty intermediate page; all meaningful failures are
-  non-truncating and redacted; both `0.4.0` relations regress cleanly; installed
-  artifact inventory excludes controlled authority; privacy-safe live evidence
-  confirms current compatibility; provider dependency direction is supported
-  by final source/test/build evidence; and cached/fresh gates plus independent
-  review have no unresolved findings.
+- **Connector Experience — Exited to X-as-a-Service.** Query's ordinary and
+  prepared binds consume the exact three-relation native catalog through public
+  const accessors; independent catalog and Query schema/secret oracles agree;
+  controlled composition now obtains the catalog from
+  `BuildNativeGithubConnector()` rather than Runtime; and Query source contains
+  no copied request or pagination metadata.
+- **Relational Semantics — Exited to X-as-a-Service.** The exact repository
+  `ScanRequest` snapshot remains conservative and protocol-neutral, Query
+  retains the immutable provider plan, and controlled SQL proves DuckDB-local
+  filter, ordering, limit, and offset over the complete multi-page bag without
+  Query reclassification or page-one fallback.
+- **Remote Runtime — Exited to X-as-a-Service.** Query consumes only the public
+  executor/stream/batch/control and structured-error interfaces. The adapter
+  stream oracle fails closed on invalid successful-empty pulls, the controlled
+  Runtime service exposes only its executor to composition, and independent
+  Runtime plus real DuckDB product evidence proves cancellation, early close,
+  late failure, capability release, redaction, and recovery.
+- **Query Experience outcome — Implemented; activation evidence still open.**
+  The exact SQL with local `ORDER BY id` returns the controlled five-column bag
+  across multiple pages and an empty intermediate page; meaningful late and
+  budget failures are non-truncating and redacted; both prior relations regress
+  cleanly; and installed artifacts exclude controlled authority. Exit the
+  parent activation gate after the lead records the privacy-safe live check,
+  fresh native product cell, final dependency audit, and independent review
+  with no unresolved findings.

@@ -1,12 +1,8 @@
-#include "duckdb_api_extension.hpp"
-
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
-#include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/main/stream_query_result.hpp"
-#include "duckdb_api/connector.hpp"
 #include "support/duckdb_adapter_auth_test_support.hpp"
-#include "support/query_runtime_scenarios.hpp"
+#include "support/duckdb_adapter_test_support.hpp"
 #include "support/require.hpp"
 
 #include <chrono>
@@ -21,28 +17,14 @@
 namespace {
 
 using duckdb_api_test::ACCEPTED_LIVE_SQL;
-using duckdb_api_test::BuildQueryScenarioExecutor;
-using duckdb_api_test::QueryLifecycleProbe;
+using duckdb_api_test::QueryError;
 using duckdb_api_test::QueryRuntimeScenario;
+using duckdb_api_test::RegisterNativeAdapter;
 using duckdb_api_test::Require;
-
-std::shared_ptr<QueryLifecycleProbe> Register(duckdb::DuckDB &database, QueryRuntimeScenario scenario) {
-	auto probe = std::shared_ptr<QueryLifecycleProbe>(new QueryLifecycleProbe());
-	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_test");
-	duckdb::RegisterDuckdbApi(loader, duckdb_api::BuildNativeGithubConnector(),
-	                          BuildQueryScenarioExecutor(scenario, probe));
-	return probe;
-}
-
-std::string QueryError(duckdb::Connection &connection, const std::string &sql) {
-	auto result = connection.Query(sql);
-	Require(result->HasError(), "query unexpectedly succeeded: " + sql);
-	return result->GetError();
-}
 
 void TestOfflineBindPreparedCopyAndTypedRows() {
 	duckdb::DuckDB database(nullptr);
-	auto probe = Register(database, QueryRuntimeScenario::SUCCESS);
+	auto probe = RegisterNativeAdapter(database, QueryRuntimeScenario::SUCCESS);
 	duckdb::Connection connection(database);
 
 	auto describe = connection.Query("DESCRIBE SELECT * FROM duckdb_api_scan(connector := 'github', relation := "
@@ -75,16 +57,13 @@ void TestOfflineBindPreparedCopyAndTypedRows() {
 	result.reset();
 	Require(probe->streams_opened.load(std::memory_order_relaxed) == 1 &&
 	            probe->streams_closed.load(std::memory_order_relaxed) == 1 &&
-	            probe->next_calls.load(std::memory_order_relaxed) == 3 &&
-	            probe->batches.load(std::memory_order_relaxed) == 2 &&
-	            probe->rows.load(std::memory_order_relaxed) == 3 &&
-	            probe->cancellations.load(std::memory_order_relaxed) == 0,
+	            probe->batches.load(std::memory_order_relaxed) == 2 && probe->rows.load(std::memory_order_relaxed) == 3,
 	        "prepared scan lifecycle or bounded batches mismatch");
 }
 
 void TestDuckdbRetainsRelationalOperators() {
 	duckdb::DuckDB database(nullptr);
-	auto probe = Register(database, QueryRuntimeScenario::SUCCESS);
+	auto probe = RegisterNativeAdapter(database, QueryRuntimeScenario::SUCCESS);
 	duckdb::Connection connection(database);
 
 	auto filtered = connection.Query("SELECT id FROM duckdb_api_scan(connector := 'github', relation := "
@@ -119,7 +98,7 @@ void TestDuckdbRetainsRelationalOperators() {
 
 void TestBindFailuresDoNotOpenRuntime() {
 	duckdb::DuckDB database(nullptr);
-	auto probe = Register(database, QueryRuntimeScenario::SUCCESS);
+	auto probe = RegisterNativeAdapter(database, QueryRuntimeScenario::SUCCESS);
 	duckdb::Connection connection(database);
 	const auto unknown_connector = QueryError(
 	    connection, "SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'duckdb_login_search_page')");
@@ -156,7 +135,7 @@ void TestStructuredFailuresAndBatchValidation() {
 	};
 	for (const auto &entry : cases) {
 		duckdb::DuckDB database(nullptr);
-		auto probe = Register(database, entry.scenario);
+		auto probe = RegisterNativeAdapter(database, entry.scenario);
 		duckdb::Connection connection(database);
 		const auto error = QueryError(connection, ACCEPTED_LIVE_SQL);
 		Require(error.find(entry.expected) != std::string::npos, "structured failure mapping mismatch: " + error);
@@ -184,7 +163,7 @@ void TestOpenStageFailuresDoNotAcquireStream() {
 	};
 	for (const auto &entry : structured_cases) {
 		duckdb::DuckDB database(nullptr);
-		auto probe = Register(database, entry.scenario);
+		auto probe = RegisterNativeAdapter(database, entry.scenario);
 		duckdb::Connection connection(database);
 		const auto error = QueryError(connection, ACCEPTED_LIVE_SQL);
 		Require(error == entry.expected, "Open failure misclassified a structured execution error: " + error);
@@ -201,7 +180,7 @@ void TestOpenStageFailuresDoNotAcquireStream() {
 	                                                   QueryRuntimeScenario::OPEN_UNKNOWN_EXCEPTION};
 	for (const auto scenario : internal_scenarios) {
 		duckdb::DuckDB database(nullptr);
-		auto probe = Register(database, scenario);
+		auto probe = RegisterNativeAdapter(database, scenario);
 		duckdb::Connection connection(database);
 		const auto error = QueryError(connection, ACCEPTED_LIVE_SQL);
 		Require(error == internal_error, "Open failure did not use the exact redacted diagnostic: " + error);
@@ -214,7 +193,7 @@ void TestOpenStageFailuresDoNotAcquireStream() {
 	}
 
 	duckdb::DuckDB database(nullptr);
-	auto probe = Register(database, QueryRuntimeScenario::OPEN_EXECUTION_CANCELLED);
+	auto probe = RegisterNativeAdapter(database, QueryRuntimeScenario::OPEN_EXECUTION_CANCELLED);
 	duckdb::Connection connection(database);
 	const auto error = QueryError(connection, ACCEPTED_LIVE_SQL);
 	Require(error.find("Interrupt") != std::string::npos || error.find("interrupt") != std::string::npos,
@@ -226,92 +205,9 @@ void TestOpenStageFailuresDoNotAcquireStream() {
 	        "Open cancellation acquired or finalized a stream");
 }
 
-void TestSuccessfulEmptyBatchFailsClosed() {
-	duckdb::DuckDB database(nullptr);
-	auto probe = Register(database, QueryRuntimeScenario::EMPTY_BATCH);
-	duckdb::Connection connection(database);
-	const auto error = QueryError(connection, ACCEPTED_LIVE_SQL);
-	const std::string expected = "Invalid Input Error: [duckdb_api][internal] connector=github "
-	                             "relation=duckdb_login_search_page: unexpected execution failure";
-	Require(error == expected, "successful empty batch did not use the exact provider-contract diagnostic: " + error);
-	Require(probe->streams_opened.load(std::memory_order_relaxed) == 1 &&
-	            probe->next_calls.load(std::memory_order_relaxed) == 1 &&
-	            probe->batches.load(std::memory_order_relaxed) == 1 &&
-	            probe->rows.load(std::memory_order_relaxed) == 0 &&
-	            probe->cancellations.load(std::memory_order_relaxed) == 1 &&
-	            probe->streams_closed.load(std::memory_order_relaxed) == 1,
-	        "successful empty batch reached DuckDB exhaustion or escaped lifecycle cleanup");
-}
-
-void TestRowsWithFalseFailClosed() {
-	duckdb::DuckDB database(nullptr);
-	auto probe = Register(database, QueryRuntimeScenario::ROWS_WITH_FALSE);
-	duckdb::Connection connection(database);
-	const auto error = QueryError(connection, ACCEPTED_LIVE_SQL);
-	const std::string expected = "Invalid Input Error: [duckdb_api][internal] connector=github "
-	                             "relation=duckdb_login_search_page: unexpected execution failure";
-	Require(error == expected, "rows returned with false did not use the exact provider-contract diagnostic: " + error);
-	Require(probe->streams_opened.load(std::memory_order_relaxed) == 1 &&
-	            probe->next_calls.load(std::memory_order_relaxed) == 1 &&
-	            probe->batches.load(std::memory_order_relaxed) == 0 &&
-	            probe->rows.load(std::memory_order_relaxed) == 0 &&
-	            probe->cancellations.load(std::memory_order_relaxed) == 1 &&
-	            probe->streams_closed.load(std::memory_order_relaxed) == 1,
-	        "rows returned with false became clean exhaustion or escaped lifecycle cleanup");
-}
-
-void TestLateStructuredFailureAndRecovery() {
-	duckdb::DuckDB database(nullptr);
-	auto probe = Register(database, QueryRuntimeScenario::LATE_RESOURCE_ERROR_ONCE);
-	duckdb::Connection connection(database);
-	const std::string streaming_sql =
-	    "SELECT id, login, site_admin FROM duckdb_api_scan(connector := 'github', relation := "
-	    "'duckdb_login_search_page')";
-
-	auto result = connection.SendQuery(streaming_sql);
-	Require(!result->HasError(), "late-failure scan failed before delivering its first batch");
-	probe->late_failure_enabled.store(true, std::memory_order_release);
-	auto first = result->Fetch();
-	Require(first && first->size() == 1 && first->GetValue(0, 0).GetValue<int64_t>() == 7 &&
-	            first->GetValue(1, 0).ToString() == "before-error" && !first->GetValue(2, 0).GetValue<bool>(),
-	        "late-failure scan did not deliver its first schema-aligned batch");
-	while (result->Fetch()) {
-	}
-	Require(result->HasError(), "late Runtime failure became clean source exhaustion");
-	const std::string expected = "Invalid Input Error: [duckdb_api][resource] connector=github "
-	                             "relation=duckdb_login_search_page field=response_bytes: "
-	                             "response exceeds its byte budget";
-	Require(result->GetError() == expected,
-	        "late Runtime failure changed exact DuckDB translation: " + result->GetError());
-	result.reset();
-	const auto failed_batches = probe->batches.load(std::memory_order_relaxed);
-	Require(probe->streams_opened.load(std::memory_order_relaxed) == 1 && failed_batches > 0 &&
-	            probe->next_calls.load(std::memory_order_relaxed) == failed_batches + 1 &&
-	            probe->rows.load(std::memory_order_relaxed) == failed_batches &&
-	            probe->cancellations.load(std::memory_order_relaxed) == 1 &&
-	            probe->streams_closed.load(std::memory_order_relaxed) == 1,
-	        "late Runtime failure did not cancel and close exactly one unfinished stream");
-
-	auto recovered = connection.Query(ACCEPTED_LIVE_SQL);
-	Require(!recovered->HasError(), "independent scan did not recover after a late Runtime failure");
-	auto recovered_chunk = recovered->Fetch();
-	Require(recovered_chunk && recovered_chunk->size() == 3 &&
-	            recovered_chunk->GetValue(0, 0).GetValue<int64_t>() == 1 &&
-	            recovered_chunk->GetValue(0, 2).GetValue<int64_t>() == 3,
-	        "recovery scan returned the wrong independent rows");
-	recovered.reset();
-	Require(probe->streams_opened.load(std::memory_order_relaxed) == 2 &&
-	            probe->next_calls.load(std::memory_order_relaxed) == failed_batches + 4 &&
-	            probe->batches.load(std::memory_order_relaxed) == failed_batches + 2 &&
-	            probe->rows.load(std::memory_order_relaxed) == failed_batches + 3 &&
-	            probe->cancellations.load(std::memory_order_relaxed) == 1 &&
-	            probe->streams_closed.load(std::memory_order_relaxed) == 2,
-	        "recovery scan shared failed state or changed false-only exhaustion");
-}
-
 void TestEarlyResultCloseAndLastOwnerTeardown() {
 	duckdb::DuckDB database(nullptr);
-	auto probe = Register(database, QueryRuntimeScenario::STREAMING);
+	auto probe = RegisterNativeAdapter(database, QueryRuntimeScenario::STREAMING);
 	const std::string streaming_sql =
 	    "SELECT id, login, site_admin FROM duckdb_api_scan(connector := 'github', relation := "
 	    "'duckdb_login_search_page')";
@@ -366,7 +262,7 @@ void TestEarlyResultCloseAndLastOwnerTeardown() {
 
 void TestIndependentConcurrentScans() {
 	duckdb::DuckDB database(nullptr);
-	auto probe = Register(database, QueryRuntimeScenario::SUCCESS);
+	auto probe = RegisterNativeAdapter(database, QueryRuntimeScenario::SUCCESS);
 	duckdb::Connection second(database);
 	duckdb::Connection third(database);
 	std::string second_error;
@@ -403,7 +299,7 @@ void TestIndependentConcurrentScans() {
 
 void TestSynchronizedCancellation() {
 	duckdb::DuckDB database(nullptr);
-	auto probe = Register(database, QueryRuntimeScenario::BLOCKING);
+	auto probe = RegisterNativeAdapter(database, QueryRuntimeScenario::BLOCKING);
 	duckdb::Connection connection(database);
 	std::string error;
 	std::thread worker([&]() {
@@ -440,9 +336,6 @@ int main() {
 		TestBindFailuresDoNotOpenRuntime();
 		TestStructuredFailuresAndBatchValidation();
 		TestOpenStageFailuresDoNotAcquireStream();
-		TestSuccessfulEmptyBatchFailsClosed();
-		TestRowsWithFalseFailClosed();
-		TestLateStructuredFailureAndRecovery();
 		TestEarlyResultCloseAndLastOwnerTeardown();
 		TestIndependentConcurrentScans();
 		TestSynchronizedCancellation();

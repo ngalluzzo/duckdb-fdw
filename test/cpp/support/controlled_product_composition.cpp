@@ -7,8 +7,9 @@
 namespace duckdb_api_test {
 
 duckdb_api::ProductComposition BuildControlledProductComposition(uint16_t port) {
+	auto connector = duckdb_api::BuildNativeGithubConnector();
 	auto runtime = BuildLoopbackCurlRuntime(port);
-	return {runtime->Connector(), runtime->Executor()};
+	return {std::move(connector), runtime->Executor()};
 }
 
 } // namespace duckdb_api_test

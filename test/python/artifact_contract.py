@@ -14,7 +14,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.4.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.5.0", True, False, "NOT_INSTALLED")
 EXPECTED_BEARER_TOKEN_BYTES = 8 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_BYTES = 16 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_ACCOUNTING = 'name + ": " + value + "\\r\\n"'
@@ -32,6 +32,13 @@ EXPECTED_SCHEMA = [
     ("id", "BIGINT"),
     ("login", "VARCHAR"),
     ("site_admin", "BOOLEAN"),
+]
+EXPECTED_REPOSITORY_SCHEMA = [
+    ("id", "BIGINT"),
+    ("full_name", "VARCHAR"),
+    ("private", "BOOLEAN"),
+    ("fork", "BOOLEAN"),
+    ("archived", "BOOLEAN"),
 ]
 FORBIDDEN_ARTIFACT_MARKERS = (
     b"127.0.0.1",
@@ -122,7 +129,7 @@ def main() -> int:
 
     repository_root = pathlib.Path(__file__).resolve().parents[2]
     expected_behavior = json.loads(
-        (repository_root / "release/0.4.0/public_contract.json").read_text()
+        (repository_root / "release/0.5.0/public_contract.json").read_text()
     )
     source_artifact = pathlib.Path(sys.argv[1]).resolve(strict=True)
     artifact_bytes = source_artifact.read_bytes()
@@ -333,6 +340,12 @@ def main() -> int:
         expect_bind_error(
             connection,
             "SELECT * FROM duckdb_api_scan(connector := 'github', "
+            "relation := 'authenticated_repositories')",
+            diagnostics["repository_secret_missing"],
+        )
+        expect_bind_error(
+            connection,
+            "SELECT * FROM duckdb_api_scan(connector := 'github', "
             "relation := 'duckdb_login_search_page', secret := 'unused')",
             diagnostics["anonymous_secret_rejected"],
         )
@@ -359,6 +372,30 @@ def main() -> int:
             raise AssertionError(
                 f"authenticated offline schema drifted: {authenticated_description!r}"
             )
+        repository_description = connection.execute(
+            """
+            DESCRIBE SELECT * FROM duckdb_api_scan(
+                connector := 'github', relation := 'authenticated_repositories',
+                secret := 'not_resolved_during_bind'
+            )
+            """
+        ).fetchall()
+        if [
+            (row[0], row[1]) for row in repository_description
+        ] != EXPECTED_REPOSITORY_SCHEMA:
+            raise AssertionError("repository offline schema drifted")
+        connection.execute(
+            """
+            PREPARE repository_bind AS
+            SELECT id, full_name, private, fork, archived
+            FROM duckdb_api_scan(
+                connector := 'github', relation := 'authenticated_repositories',
+                secret := 'not_resolved_during_bind'
+            )
+            ORDER BY id
+            """
+        )
+        connection.execute("DEALLOCATE repository_bind")
 
         connection.execute(
             """
@@ -384,7 +421,7 @@ def main() -> int:
             "authority_inputs": ["explicit_named_temporary_duckdb_secret"],
             "diagnostics": diagnostics,
             "duckdb": list(EXPECTED_DUCKDB[:2]),
-            "extension": ["duckdb_api", "0.4.0"],
+            "extension": ["duckdb_api", "0.5.0"],
             "function": {
                 "name": "duckdb_api_scan",
                 "named_parameters": {
@@ -418,6 +455,32 @@ def main() -> int:
                     "schema": [list(column) for column in EXPECTED_SCHEMA],
                     "secret": "required_explicit_name",
                 },
+                {
+                    "cardinality": {"maximum": 3200, "minimum": 0},
+                    "connector": "github",
+                    "consistency": "mutable_no_snapshot",
+                    "domain": (
+                        "bounded_duplicate_preserving_authenticated_repository_"
+                        "page_sequence"
+                    ),
+                    "duckdb_visible_not_null": False,
+                    "name": "authenticated_repositories",
+                    "pagination": {
+                        "caller_inputs": False,
+                        "maximum_pages": 32,
+                        "page_size": 100,
+                        "request_order": "sequential",
+                        "resume": False,
+                        "retries": 0,
+                        "strategy": "link_next",
+                        "total": "unknown",
+                    },
+                    "public_row_identity": "not_deduplicated",
+                    "public_row_order": "not_guaranteed",
+                    "required_values": True,
+                    "schema": [list(column) for column in EXPECTED_REPOSITORY_SCHEMA],
+                    "secret": "required_explicit_name",
+                },
             ],
             "relational_ownership": {
                 "filter": "duckdb",
@@ -426,6 +489,26 @@ def main() -> int:
                 "ordering": "duckdb",
             },
             "resource_limits": {
+                "authenticated_repositories": {
+                    "decoded_memory_bytes": 2 * 1024 * 1024,
+                    "decompressed_response_bytes_per_page": 8 * 1024 * 1024,
+                    "decompressed_response_bytes_per_scan": 64 * 1024 * 1024,
+                    "maximum_concurrency": 1,
+                    "maximum_decoded_records_per_page": 100,
+                    "maximum_decoded_records_per_scan": 3200,
+                    "maximum_execution_milliseconds": 30000,
+                    "maximum_json_nesting": 16,
+                    "maximum_output_batch_rows": 64,
+                    "maximum_pages": 32,
+                    "maximum_request_attempts": 32,
+                    "maximum_request_attempts_per_page": 1,
+                    "maximum_response_bytes_per_page": 8 * 1024 * 1024,
+                    "maximum_response_bytes_per_scan": 64 * 1024 * 1024,
+                    "maximum_response_header_bytes_per_page": 16 * 1024,
+                    "maximum_response_header_bytes_per_scan": 512 * 1024,
+                    "maximum_string_bytes": 512,
+                    "terminal_failure": "statement_error_no_successful_partial",
+                },
                 "outbound_project_headers": {
                     "accounting": EXPECTED_OUTBOUND_PROJECT_HEADER_ACCOUNTING,
                     "maximum_bytes": EXPECTED_OUTBOUND_PROJECT_HEADER_BYTES,
@@ -456,7 +539,7 @@ def main() -> int:
             },
         }
         if behavior != expected_behavior:
-            raise AssertionError("observed public inventory disagrees with the 0.4.0 contract")
+            raise AssertionError("observed public inventory disagrees with the 0.5.0 contract")
         print(
             json.dumps(
                 {

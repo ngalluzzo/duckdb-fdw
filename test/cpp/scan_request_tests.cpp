@@ -23,6 +23,7 @@ using duckdb_api_test::query_scan_request::ScopedEnvironment;
 
 const char ANONYMOUS_RELATION[] = "duckdb_login_search_page";
 const char AUTHENTICATED_RELATION[] = "authenticated_user";
+const char REPOSITORY_RELATION[] = "authenticated_repositories";
 
 void TestLogicalSecretReferenceContract() {
 	const duckdb_api::LogicalSecretReference absent;
@@ -106,6 +107,38 @@ void TestAcceptedAnonymousAndAuthenticatedRequests() {
 	        "authenticated request snapshot lost exact relation or escaped selector identity");
 }
 
+void TestAuthenticatedRepositoryRequest() {
+	const auto connector = duckdb_api::BuildNativeGithubConnector();
+	const auto request = duckdb_api::BuildConservativeScanRequest(
+	    connector, REPOSITORY_RELATION, duckdb_api::LogicalSecretReference::Named("github_default"));
+	const auto copy = request;
+	const auto *relation = connector.FindRelation(REPOSITORY_RELATION);
+
+	Require(relation, "native repository relation disappeared");
+	Require(request.connector_name == "github" && request.relation_name == REPOSITORY_RELATION,
+	        "repository request did not copy exact selected identity");
+	RequireFullSelectedSchema(request, *relation);
+	Require(request.projected_columns == std::vector<std::string>({"id", "full_name", "private", "fork", "archived"}) &&
+	            request.explicit_inputs.empty(),
+	        "repository request did not preserve its exact full-projection closure");
+	Require(request.predicate == "TRUE" && request.orderings.empty() && !request.has_limit && !request.has_offset &&
+	            request.capabilities.HasConservativeRelationalProfile() && request.capabilities.secret_manager,
+	        "repository request changed Query's conservative capability profile");
+	Require(request.secret_reference.Name() == "github_default",
+	        "repository request changed the exact logical secret reference");
+	const std::string expected =
+	    "connector=github;relation=authenticated_repositories;inputs=[];projection=id,full_name,private,fork,"
+	    "archived;predicate=TRUE;ordering=[];limit=unset;offset=unset;capabilities=projection:unavailable,filter:"
+	    "unavailable,ordering:unavailable,limit:unavailable,offset:unavailable,progress:unavailable,cancellation:"
+	    "verified,secret-manager:available;secret-reference=named-hex:6769746875625f64656661756c74";
+	Require(request.Snapshot() == expected && copy.Snapshot() == expected,
+	        "repository request copy or exact snapshot drifted");
+	for (const auto &forbidden : {"api.github.com", "/user/repos", "per_page", "page=", "Link", "Bearer "}) {
+		Require(request.Snapshot().find(forbidden) == std::string::npos,
+		        "repository request acquired provider pagination or credential state");
+	}
+}
+
 void TestProviderOwnedDistinctSchemaRequests() {
 	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
 	const auto anonymous = duckdb_api::BuildConservativeScanRequest(
@@ -147,7 +180,13 @@ void TestPresenceRulesAndExactSelection() {
 		                                                   duckdb_api::LogicalSecretReference());
 	    },
 	    "authenticated relation accepted an absent logical reference");
-	for (const auto &relation_name : {"Authenticated_User", "missing"}) {
+	RequireThrows<std::invalid_argument>(
+	    [&]() {
+		    (void)duckdb_api::BuildConservativeScanRequest(connector, REPOSITORY_RELATION,
+		                                                   duckdb_api::LogicalSecretReference());
+	    },
+	    "repository relation accepted an absent logical reference");
+	for (const auto &relation_name : {"Authenticated_User", "Authenticated_Repositories", "missing"}) {
 		RequireThrows<std::invalid_argument>(
 		    [&]() {
 			    (void)duckdb_api::BuildConservativeScanRequest(connector, relation_name,
@@ -237,6 +276,7 @@ int main() {
 	try {
 		TestLogicalSecretReferenceContract();
 		TestAcceptedAnonymousAndAuthenticatedRequests();
+		TestAuthenticatedRepositoryRequest();
 		TestProviderOwnedDistinctSchemaRequests();
 		TestPresenceRulesAndExactSelection();
 		TestCapabilityClassificationAndSemanticsMutation();

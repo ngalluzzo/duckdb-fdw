@@ -2,8 +2,7 @@
 
 #include "duckdb/main/secret/secret.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
-#include "duckdb_api/connector.hpp"
-#include "support/query_runtime_scenarios.hpp"
+#include "support/duckdb_adapter_test_support.hpp"
 
 #include <atomic>
 #include <memory>
@@ -17,8 +16,6 @@ class DuckDB;
 namespace duckdb_api_test {
 
 std::string RuntimeAdapterTokenCanary(char marker);
-std::string QueryError(duckdb::Connection &connection, const std::string &sql);
-std::shared_ptr<QueryLifecycleProbe> RegisterNativeAdapter(duckdb::DuckDB &database, QueryRuntimeScenario scenario);
 std::shared_ptr<QueryLifecycleProbe> RegisterFixtureAdapter(duckdb::DuckDB &database, QueryRuntimeScenario scenario);
 void CreateTemporarySecret(duckdb::Connection &connection, const std::string &name, const std::string &token);
 void RegisterStoredSecret(duckdb::Connection &connection, duckdb::unique_ptr<const duckdb::BaseSecret> secret,
