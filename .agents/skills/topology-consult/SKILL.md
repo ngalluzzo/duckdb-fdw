@@ -72,6 +72,14 @@ end-to-end test as proof of a low-coupling interface.
   constructing, retaining, or reinterpreting provider internals.
 - Confirm that provider responsibilities and their oracle families can be
   understood and exercised without unrelated consumer integration machinery.
+- Inspect the target's source inventory as well as its link names. A focused
+  consumer target that directly compiles provider production sources or uses a
+  provider-private test constructor has not reached X-as-a-Service; a provider
+  fixture target may hide its own construction machinery behind a bounded test
+  API.
+- Require durable ownership to be discoverable from adjacent source/test
+  organization and enforceable target dependencies. CMake source-list labels,
+  commit scopes, and archived workstream plans alone do not establish it.
 - Apply each selected charter's cognitive-load and code-documentation
   expectations, including ownership, lifecycle, errors, resource authority,
   and semantic rationale where relevant.

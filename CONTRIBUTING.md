@@ -64,6 +64,10 @@ fresh product cell. The tagged release and sanitizer procedure remains the
 - Mirror production responsibilities in tests. Keep reusable doubles and
   fixtures in explicit test-support modules and integration-only assertions in
   integration suites.
+- Keep ownership visible beside the code and in build-target dependencies. A
+  root source list or historical plan is an assembly record, not a package
+  boundary. Focused consumer tests link provider fixture services instead of
+  compiling provider implementations or importing their private constructors.
 - Treat a catch-all module or test suite as a design smell, not an automatic
   violation. Split when it combines different invariants, owners, consumers,
   or reasons to change; do not split merely to satisfy a line threshold.

@@ -76,10 +76,17 @@ source shape.
 4. Give each oracle family a home matching the production responsibility. Put
    reusable fixtures and probes in explicit test support and keep end-to-end
    behavior in integration tests.
-5. Apply the selected charters' code-documentation expectations to team APIs,
+5. Make the durable responsibility map discoverable from the checked-in source,
+   test, and build-target structure. CMake variable names, team-shaped commits,
+   and archived plans are supporting records, not ownership boundaries.
+6. Treat a focused consumer target that directly lists a provider's production
+   sources or private test constructors as an open interaction. Consume a
+   bounded provider target or fixture service instead; reserve whole-graph
+   composition for explicitly named integration targets.
+7. Apply the selected charters' code-documentation expectations to team APIs,
    lifecycle-sensitive state, non-obvious algorithms, policy ordering, and
    compatibility boundaries.
-6. Use `$topology-consult` when the design crosses team APIs or claims that an
+8. Use `$topology-consult` when the design crosses team APIs or claims that an
    interaction has reached its exit. Record any exit that remains open instead
    of inferring independence from a named type or passing integration test.
 
@@ -141,7 +148,9 @@ focused review after fixes.
    terminology, secrets, and unrelated changes.
 3. Compare the final source, include, build-target, and test dependencies with
    the responsibility map. Confirm each claimed topology exit against actual
-   consumer-provider separation and adjacent interface documentation.
+   consumer-provider separation and adjacent interface documentation. Do not
+   accept responsibility labels in a root build file as a substitute for an
+   independently understandable provider package and consumer dependency.
 4. Audit each acceptance requirement against authoritative evidence.
 5. Audit the governance record: accepted RFCs are propagated to every affected
    contract, or an emergency containment exception records every item required

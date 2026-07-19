@@ -159,6 +159,13 @@ interfaces as independently understandable responsibilities:
 - Organize tests along the same responsibility boundaries. Put shared fixtures
   and probes in explicit test support; reserve cross-layer suites for behavior
   that genuinely requires integration.
+- Make the durable ownership map discoverable from adjacent source and test
+  organization plus enforceable build-target dependencies. Root build source
+  lists, commit scopes, and archived delivery plans are not sufficient.
+- A focused consumer test target must consume a provider's bounded API or
+  fixture service. If it directly lists provider production sources or imports
+  provider-private test construction, the interaction remains open; whole-graph
+  composition belongs only in an explicitly named integration target.
 - Keep experiments under `experiments/` free to optimize for learning. Before
   production promotion, perform the responsibility pass above and remove any
   trial-only coupling that would obscure the intended design.
