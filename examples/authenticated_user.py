@@ -12,7 +12,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.5.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.6.0", True, False, "NOT_INSTALLED")
 EXPECTED_SCHEMA = [
     ("id", "BIGINT"),
     ("login", "VARCHAR"),
@@ -27,7 +27,7 @@ def sql_literal(value: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Query the duckdb_api 0.5.0 authenticated GitHub relation. "
+            "Query the duckdb_api 0.6.0 authenticated GitHub relation. "
             "The credential is read from a hidden interactive prompt."
         )
     )

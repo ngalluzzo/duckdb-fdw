@@ -6,6 +6,22 @@
 
 namespace duckdb_api {
 
+namespace {
+
+const char *RetainedPredicateScopeName(RetainedPredicateScope scope) {
+	switch (scope) {
+	case RetainedPredicateScope::UNRESTRICTED:
+		return "unrestricted";
+	case RetainedPredicateScope::REQUESTED_PREDICATE:
+		return "requested_predicate";
+	case RetainedPredicateScope::COMPLETE_DUCKDB_FILTER:
+		return "complete_duckdb_filter";
+	}
+	throw std::logic_error("scan request contains an unknown retained-predicate scope");
+}
+
+} // namespace
+
 LogicalSecretReference::LogicalSecretReference() : exact_duckdb_secret_name() {
 }
 
@@ -47,7 +63,8 @@ std::string LogicalSecretReference::Snapshot() const {
 }
 
 bool AdapterCapabilities::HasConservativeRelationalProfile() const {
-	return !projection && !filter && !ordering && !limit && !offset && !progress && cancellation;
+	return !projection && !filter && !selective_predicate && !retains_predicate && !ordering && !limit && !offset &&
+	       !progress && cancellation;
 }
 
 std::string ScanRequest::Snapshot() const {
@@ -60,10 +77,14 @@ std::string ScanRequest::Snapshot() const {
 		}
 		result << projected_columns[index];
 	}
-	result << ";predicate=" << predicate << ";ordering=" << (orderings.empty() ? "[]" : "unexpected")
-	       << ";limit=" << (has_limit ? "set" : "unset") << ";offset=" << (has_offset ? "set" : "unset")
+	result << ";requested-predicate=" << requested_predicate.Snapshot()
+	       << ";retained-predicate-scope=" << RetainedPredicateScopeName(retained_predicate_scope)
+	       << ";ordering=" << (orderings.empty() ? "[]" : "unexpected") << ";limit=" << (has_limit ? "set" : "unset")
+	       << ";offset=" << (has_offset ? "set" : "unset")
 	       << ";capabilities=projection:" << (capabilities.projection ? "available" : "unavailable")
 	       << ",filter:" << (capabilities.filter ? "available" : "unavailable")
+	       << ",selective-predicate:" << (capabilities.selective_predicate ? "available" : "unavailable")
+	       << ",retains-predicate:" << (capabilities.retains_predicate ? "verified" : "unavailable")
 	       << ",ordering:" << (capabilities.ordering ? "available" : "unavailable")
 	       << ",limit:" << (capabilities.limit ? "available" : "unavailable")
 	       << ",offset:" << (capabilities.offset ? "available" : "unavailable")
@@ -99,11 +120,12 @@ ScanRequest BuildConservativeScanRequest(const CompiledConnector &connector, con
 	for (const auto &column : relation->Columns()) {
 		result.projected_columns.push_back(column.name);
 	}
-	result.predicate = "TRUE";
+	result.requested_predicate = RequestedPredicate::Unrestricted();
+	result.retained_predicate_scope = RetainedPredicateScope::UNRESTRICTED;
 	result.orderings.clear();
 	result.has_limit = false;
 	result.has_offset = false;
-	result.capabilities = {false, false, false, false, false, false, true, true};
+	result.capabilities = {false, false, false, false, false, false, false, false, true, true};
 	result.secret_reference = std::move(secret_reference);
 	return result;
 }

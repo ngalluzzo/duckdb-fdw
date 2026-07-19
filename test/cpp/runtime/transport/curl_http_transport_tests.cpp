@@ -1,4 +1,5 @@
 #include "duckdb_api/authorization.hpp"
+#include "duckdb_api/internal/runtime/transport/curl_http_transport.hpp"
 #include "runtime/support/controlled_socket_service.hpp"
 #include "runtime/support/loopback_curl_runtime.hpp"
 #include "support/require.hpp"
@@ -19,6 +20,42 @@ using duckdb_api_test::ManualControl;
 using duckdb_api_test::Require;
 using duckdb_api_test::RequireExecutionError;
 
+duckdb_api::internal::HttpRequest InstalledRepositoryRequest(std::string target) {
+	duckdb_api::internal::HttpRequest request;
+	request.method = "GET";
+	request.scheme = "https";
+	request.host = "api.github.com";
+	request.port = 443;
+	request.target = std::move(target);
+	request.headers = {{"Accept", "application/vnd.github+json"},
+	                   {"User-Agent", "duckdb-api/0.6.0"},
+	                   {"X-GitHub-Api-Version", "2022-11-28"},
+	                   {"Authorization", "Bearer fixture-token"}};
+	return request;
+}
+
+void TestInstalledRepositoryRequestPolicy() {
+	using duckdb_api::internal::ClassifyInstalledHttpRequest;
+	using duckdb_api::internal::InstalledHttpRequestKind;
+	Require(ClassifyInstalledHttpRequest(InstalledRepositoryRequest("/user/repos?per_page=100&page=1")) ==
+	            InstalledHttpRequestKind::AUTHENTICATED_REPOSITORIES,
+	        "installed transport rejected the admitted unselective target");
+	Require(ClassifyInstalledHttpRequest(
+	            InstalledRepositoryRequest("/user/repos?per_page=100&page=1&visibility=private")) ==
+	            InstalledHttpRequestKind::AUTHENTICATED_REPOSITORIES,
+	        "installed transport rejected the admitted selective target");
+	const std::string denied[] = {"/user/repos?per_page=100&page=1&visibility=public",
+	                              "/user/repos?per_page=100&page=1&visibility=private&visibility=private",
+	                              "/user/repos?per_page=100&page=1&visibility=private&sort=id",
+	                              "/user/repos?per_page=100&page=1&sort=id",
+	                              "/user/repos?per_page=100&page=1&visibility=private2"};
+	for (const auto &target : denied) {
+		Require(ClassifyInstalledHttpRequest(InstalledRepositoryRequest(target)) ==
+		            InstalledHttpRequestKind::UNSUPPORTED,
+		        "installed transport accepted a target outside the admitted field set");
+	}
+}
+
 void TestExactAnonymousCurlRequest() {
 	ControlledSocketService service(ControlledSocketMode::SUCCESS);
 	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
@@ -38,7 +75,7 @@ void TestExactAnonymousCurlRequest() {
 	Require(wire.find("\r\nHost: 127.0.0.1:" + std::to_string(service.Port()) + "\r\n") != std::string::npos,
 	        "controlled curl authority drifted");
 	Require(wire.find("\r\nAccept: application/vnd.github+json\r\n") != std::string::npos &&
-	            wire.find("\r\nUser-Agent: duckdb-api/0.5.0\r\n") != std::string::npos &&
+	            wire.find("\r\nUser-Agent: duckdb-api/0.6.0\r\n") != std::string::npos &&
 	            wire.find("\r\nX-GitHub-Api-Version: 2022-11-28\r\n") != std::string::npos,
 	        "curl fixed request headers drifted");
 	Require(wire.find("Authorization:") == std::string::npos, "anonymous curl request emitted credential authority");
@@ -145,6 +182,7 @@ void TestAnonymousStatusRedirectAndTransportFailures() {
 int main() {
 	(void)std::signal(SIGPIPE, SIG_IGN);
 	try {
+		TestInstalledRepositoryRequestPolicy();
 		TestExactAnonymousCurlRequest();
 		TestAuthenticatedCurlRequestIsolationAndFailures();
 		TestAnonymousStatusRedirectAndTransportFailures();

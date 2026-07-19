@@ -9,5 +9,6 @@ set(QUERY_SECRET_TEST_SUPPORT_SOURCES
     test/cpp/query/support/duckdb_secret_test_support.cpp)
 set(QUERY_CONTROLLED_COMPOSITION_SOURCES
     test/cpp/runtime/support/loopback_curl_runtime.cpp
+    ${QUERY_DUCKDB_ADAPTER_SUPPORT_SOURCES}
     test/cpp/query/integration/support/controlled_product_composition.cpp
     test/cpp/query/integration/controlled_extension_entrypoint.cpp)

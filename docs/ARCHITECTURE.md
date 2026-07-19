@@ -4,10 +4,10 @@
 > semantic pushdown, bounded streaming execution, pagination, enrichment,
 > shared auth and transport infrastructure, and an escape hatch for custom code.
 
-**Status:** Design proposal, revision 0.5; the bounded repository-traversal
-native profile is accepted by RFC 0007, its authenticated capability base by
-RFC 0006, its live REST base by RFC 0005, and the distribution policy by RFC
-0004
+**Status:** Design proposal, revision 0.6; predicate-selective repository scans
+are accepted by RFC 0008, the bounded repository-traversal native profile by
+RFC 0007, its authenticated capability base by RFC 0006, its live REST base by
+RFC 0005, and the distribution policy by RFC 0004
 
 **Integration profiles:** A source-built native C++ preview, portable C
 Extension API table functions, and an optional deep DuckDB catalog/optimizer
@@ -48,10 +48,11 @@ The design deliberately separates:
 5. **Connector authoring** — declarative specifications for common APIs and
    trusted Rust or sandboxed WASM for exceptional cases.
 
-The accepted `0.5.0` preview uses a native C++ table function to query one
-anonymous fixed HTTPS relation, one fixed authenticated identity, and one
+The current unreleased `0.6.0` source uses a native C++ table function to query
+one anonymous fixed HTTPS relation, one fixed authenticated identity, and one
 bounded sequential authenticated repository relation on one exact DuckDB and
-platform-dependency cell.
+platform-dependency cell. It adds one safe predicate-selective path to the
+published `0.5.0` traversal while DuckDB remains the residual owner.
 The intended portable profile uses a Rust table-function extension. A custom
 attached catalog and logical-plan optimizer are an optional integration
 profile, not a requirement of the connector contract.
@@ -203,11 +204,12 @@ flowchart TB
     CORE -. stable FFI boundary .-> CPP
 ```
 
-### 5.0 Accepted native C++ preview
+### 5.0 Current native C++ preview
 
-RFCs 0005 through 0007 define the current deliberately narrow native profile.
-It is a source-built DuckDB C++ extension named `duckdb_api`, version `0.5.0`,
-with one project-defined SQL function and three compiled-in relations. The
+RFCs 0005 through 0008 define the current deliberately narrow native profile.
+It is a source-built DuckDB C++ extension named `duckdb_api`, on the unreleased
+`0.6.0` source line, with one project-defined SQL function and three compiled-in
+relations. The
 anonymous `github.duckdb_login_search_page` relation and capability-scoped
 `github.authenticated_user` relation retain their accepted `0.4.0` behavior.
 The anonymous query remains:
@@ -258,7 +260,7 @@ The repository relation reuses that execution-time capability without
 granting any caller-selected request authority:
 
 ```sql
-SELECT id, full_name, private, fork, archived
+SELECT id, full_name, private, fork, archived, visibility
 FROM duckdb_api_scan(
     connector := 'github',
     relation := 'authenticated_repositories',
@@ -270,18 +272,30 @@ ORDER BY id;
 The first request is exactly `GET /user/repos?per_page=100&page=1` at
 `https://api.github.com:443`. Each accepted response is a root JSON array of
 required `id BIGINT`, `full_name VARCHAR`, `private BOOLEAN`, `fork BOOLEAN`,
-and `archived BOOLEAN` values. The base relation is the duplicate-preserving
-bag across every accepted page of a mutable source. It promises neither remote
-ordering nor snapshot consistency; the example's local `ORDER BY` belongs to
-DuckDB.
+`archived BOOLEAN`, and trailing `visibility VARCHAR` values. The base relation
+is the duplicate-preserving bag across every accepted page of a mutable source.
+It promises neither remote ordering nor snapshot consistency; the example's
+local `ORDER BY` belongs to DuckDB.
+
+The one supported selective predicate is
+`authenticated_repositories.visibility = 'private'`. The pinned DuckDB
+complex-filter callback offers only that exact structured equality to
+Relational Semantics and leaves the expression in DuckDB. Connector's reviewed
+same-field mapping selects `visibility=private`; the immutable plan records
+`Superset` accuracy and DuckDB as the sole residual owner. Runtime appends the
+typed field to every reconstructed page request. Unsupported shapes, other
+values, `NULL`, missing capabilities, or missing mapping evidence use the
+complete traversal and DuckDB filtering. Query does not parse SQL text,
+Runtime does not interpret predicates, and ordinary planning remains offline.
 
 Pagination is pull-driven and sequential. Remote Runtime retains only bounded
 physical `Link` values from the terminal response header section, recognizes
 the registered `next` relation case-insensitively, and accepts exactly one
 next target. The target must remain at the exact operation origin and
-`/user/repos` path, contain only `per_page=100` and `page=current+1`, and never
-repeat a page. Runtime reconstructs each request from the immutable plan rather
-than replaying the received URL. Missing `next` means clean exhaustion. An
+`/user/repos` path, contain `per_page=100`, `page=current+1`, and exactly the
+selected immutable `visibility=private` field when present, and never repeat a
+page. Runtime reconstructs each request from the admitted immutable plan
+profile rather than replaying the received URL. Missing `next` means clean exhaustion. An
 empty page with a valid `next` is crossed inside the same pull, so a successful
 `BatchStream::Next` always returns a nonempty schema-aligned batch and only
 `false` reports clean exhaustion.
@@ -319,13 +333,19 @@ unsupported capability but does not rebuild the plan or reinterpret relational
 ownership. Query remains the only DuckDB-aware layer and translates batches
 and structured errors at the adapter edge.
 
-The native capability profile exposes no projection, filter, ordering, limit,
-offset, or progress delegation. Its adapter requests each relation's complete
-fixed schema, records `TRUE` as both remote and residual predicate relative to
-the declared base domain, leaves ordering and bounds undelegated, and assigns
-every filter, ordering, limit, and offset to DuckDB. Plans grant no remote or
-runtime limit. Ordinary bind, `DESCRIBE`, `EXPLAIN`, `PREPARE`, and planning
-read only immutable metadata and acquire no network or credential authority.
+The native capability profile exposes no projection, generic filter, ordering,
+limit, offset, or progress delegation. It exposes only the retained structured
+filter advisory described above. The adapter requests each relation's complete
+fixed schema, leaves ordering and bounds undelegated, and assigns every filter,
+ordering, limit, and offset to DuckDB. The baseline records `TRUE` remotely;
+the exact selective query records `visibility_equals_private` remotely and as
+the DuckDB-owned residual. Query carries the remote candidate separately from
+the complete retained-predicate scope: unsupported filters and selective
+conjunctions use the opaque `complete_duckdb_filter` residual marker while the
+original DuckDB expressions stay outside the plan. Plans grant no remote or
+runtime limit. Ordinary bind,
+`DESCRIBE`, `EXPLAIN`, `PREPARE`, and planning read only immutable metadata and
+acquire no network or credential authority.
 
 Execution opens one synchronous pull stream for the exact HTTPS authority
 `api.github.com:443`. Single-response relations permit one wire attempt; the
@@ -364,7 +384,7 @@ release evidence, not a fallback: a live failure returns a bounded diagnostic
 and never fixture rows.
 
 The supported compatibility cell is DuckDB 1.5.4 at commit `08e34c447b` with
-platform `osx_arm64`, macOS 26.5.1 on Apple Silicon arm64, Apple clang 17 in
+platform `osx_arm64`, macOS 26.5.2 on Apple Silicon arm64, Apple clang 17 in
 C++11 mode, CMake 4.1.2, and Ninja 1.13.0. Installation is a clean source build
 and unsigned direct local load. No public binary distribution or broader
 native ABI compatibility follows from this profile.
@@ -1745,7 +1765,7 @@ Reuse as a concrete source of API patterns:
 
 | Area                       | Decision                                                               |
 | -------------------------- | ---------------------------------------------------------------------- |
-| Native preview             | `duckdb_api` 0.5.0 fixed anonymous, authenticated identity, and bounded sequential authenticated repository relations on one exact source-built cell |
+| Native preview             | Unreleased `duckdb_api` 0.6.0 source: the three fixed GitHub relations plus one retained, superset `visibility = 'private'` repository restriction on one exact source-built cell |
 | Portable integration       | Pure-Rust C Extension API table functions                              |
 | Deep integration           | Optional thin C++ catalog/optimizer shell                              |
 | Core abstraction           | `ScanRequest` → explicit `ScanPlan` → `BatchStream`                    |

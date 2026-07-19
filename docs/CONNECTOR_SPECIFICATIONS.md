@@ -101,15 +101,16 @@ Connector
 
 ### 1.4 Native product metadata boundary
 
-The native 0.5 preview compiles one exact three-relation `github` catalog
-directly into the extension with the explicit `native_product_metadata`
+The current unreleased 0.6 source compiles one exact three-relation `github`
+catalog directly into the extension with the explicit `native_product_metadata`
 origin. Its stable order is `github.duckdb_login_search_page`,
 `github.authenticated_user`, then `github.authenticated_repositories`. The first
 two relations retain the accepted 0.4 anonymous search-page and authenticated
 root-object declarations. The third declares the required logical credential
 `token`, bearer authentication, exact `https://api.github.com:443` destination,
 `Authorization` placement, and a root-array `GET
-/user/repos?per_page=100&page=1` operation with five required columns.
+/user/repos?per_page=100&page=1` operation with required `id`, `full_name`,
+`private`, `fork`, `archived`, and trailing `visibility` columns.
 
 The repository declaration contains a closed, immutable Link-pagination
 profile: registered `next` relation, sequential dependency, mutable-source
@@ -122,8 +123,20 @@ the declarations contains a DuckDB secret name, credential bytes, or received
 Link state; binding, capability construction, and transition validation are
 later-stage responsibilities.
 
+The repository relation also publishes one closed native predicate declaration:
+required `VARCHAR visibility` equality to the required literal `private` maps
+to the existing repository operation's REST query field
+`visibility=private`, with `superset` accuracy and the reviewed GitHub REST
+2022-11-28 evidence identity. This immutable declaration is distinct from the
+operation's fixed query parameters. It contains no SQL text, DuckDB expression,
+secret, request, or pagination state. Relational Semantics—not Connector—proves
+that the mapping is usable and assigns the residual owner. Both other native
+relations expose an empty predicate-mapping collection.
+
 This repository-owned product catalog is not an implementation of this draft
-authoring specification: it does not parse or validate arbitrary YAML, load
+authoring specification. In particular, the native visibility declaration is
+not author-facing YAML syntax and creates no connector-package compatibility
+promise. The product does not parse or validate arbitrary YAML, load
 connector directories, resolve caller-selected paths, read environment
 variables, expose author tooling, or establish package compatibility. Existing
 package and YAML syntax therefore remains inactive and unchanged.

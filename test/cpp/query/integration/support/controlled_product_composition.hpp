@@ -11,6 +11,6 @@ namespace duckdb_api_test {
 // the catalog nor learns the transport or credential profile; real DuckDB
 // secret resolution and the production adapter perform the unchanged
 // request-planning, bind-copy, authorization-envelope, and scan path.
-duckdb_api::ProductComposition BuildControlledProductComposition(uint16_t port);
+duckdb_api::ProductComposition BuildControlledProductComposition(uint16_t port, bool predicate_mapping_available);
 
 } // namespace duckdb_api_test

@@ -151,8 +151,8 @@ void TestNativeRelationSchemas() {
 	duckdb::Connection connection(database);
 	const char *row_names[] = {"id", "login", "site_admin"};
 	const char *row_types[] = {"BIGINT", "VARCHAR", "BOOLEAN"};
-	const char *repository_names[] = {"id", "full_name", "private", "fork", "archived"};
-	const char *repository_types[] = {"BIGINT", "VARCHAR", "BOOLEAN", "BOOLEAN", "BOOLEAN"};
+	const char *repository_names[] = {"id", "full_name", "private", "fork", "archived", "visibility"};
+	const char *repository_types[] = {"BIGINT", "VARCHAR", "BOOLEAN", "BOOLEAN", "BOOLEAN", "VARCHAR"};
 
 	RequireSchema(connection,
 	              "SELECT * FROM duckdb_api_scan(connector := 'github', relation := 'duckdb_login_search_page')",
@@ -164,7 +164,7 @@ void TestNativeRelationSchemas() {
 	RequireSchema(connection,
 	              "SELECT * FROM duckdb_api_scan(connector := 'github', relation := 'authenticated_repositories', "
 	              "secret := 'not_created')",
-	              repository_names, repository_types, 5);
+	              repository_names, repository_types, 6);
 	RequireNoRuntimeEntry(*probe, "native relation schema binds");
 }
 

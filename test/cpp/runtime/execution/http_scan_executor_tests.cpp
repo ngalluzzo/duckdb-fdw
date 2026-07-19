@@ -54,7 +54,7 @@ void TestOneRequestAndSchemaAlignedBatches() {
 	Require(observation.headers.size() == 3 &&
 	            observation.headers[0] ==
 	                std::make_pair(std::string("Accept"), std::string("application/vnd.github+json")) &&
-	            observation.headers[1] == std::make_pair(std::string("User-Agent"), std::string("duckdb-api/0.5.0")) &&
+	            observation.headers[1] == std::make_pair(std::string("User-Agent"), std::string("duckdb-api/0.6.0")) &&
 	            observation.headers[2] ==
 	                std::make_pair(std::string("X-GitHub-Api-Version"), std::string("2022-11-28")),
 	        "fixed request headers drifted");

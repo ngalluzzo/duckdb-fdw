@@ -32,7 +32,7 @@ def _run_query(
 def _start_late_block(
     connection: duckdb.DuckDBPyConnection, server: RepositoryOracleServer
 ) -> tuple[threading.Thread, list[BaseException]]:
-    first = (1, "synthetic/first", False, False, False)
+    first = (1, "synthetic/first", False, False, False, "public")
     server.configure(
         [
             repository_response([first], next_page=2),
@@ -59,13 +59,15 @@ def run_lifecycle_contract(
     connection = load_repository_connection(extension_path, server)
     try:
         first_page = [
-            (30, "synthetic/third", False, False, False),
-            (10, "synthetic/first", False, False, False),
+            (30, "synthetic/third", False, False, False, "public"),
+            (10, "synthetic/first", False, False, False, "public"),
         ]
         server.configure(
             [
                 repository_response(first_page, next_page=2),
-                repository_response([(40, "synthetic/unrequested", False, False, False)]),
+                repository_response(
+                    [(40, "synthetic/unrequested", False, False, False, "public")]
+                ),
             ]
         )
         rows = connection.execute(

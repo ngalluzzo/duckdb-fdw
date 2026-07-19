@@ -7,7 +7,9 @@ catalog explanation changes.
 
 Connector construction is deterministic and network-free. The resulting
 `CompiledConnector` contains metadata only: no credentials, active requests,
-DuckDB callback state, or runtime objects.
+DuckDB callback state, or runtime objects. Conditional predicate declarations
+are immutable source facts; Semantics owns their relational interpretation and
+Runtime receives only the resulting plan.
 
 ## Start here
 
@@ -16,6 +18,7 @@ DuckDB callback state, or runtime objects.
 | Add or change an installed GitHub relation | `native_github_composition.cpp`, `duckdb_api/connector.hpp` | `connector_contract_tests.cpp` |
 | Change catalog values, validation, lookup, or snapshots | `catalog_model.cpp`, `duckdb_api/connector_catalog.hpp` | `connector_catalog_contract_tests.cpp` |
 | Change a pagination declaration | `pagination_declaration.cpp` and its internal header | `connector_pagination_contract_tests.cpp` |
+| Change a predicate declaration | `predicate_declaration.cpp` and its internal header | `connector_predicate_contract_tests.cpp`; `connector_contract_tests.cpp` for installed values |
 | Change resource ceilings | `resource_ceiling_declaration.cpp` and its internal header | `connector_pagination_contract_tests.cpp`; `connector_contract_tests.cpp` for installed values |
 | Add a deterministic catalog fixture | `test/cpp/connector/support/connector_catalog_test_fixtures.*` | `connector_catalog_test_fixtures_tests.cpp` |
 
@@ -36,8 +39,8 @@ invariants; that construction access must not become a consumer API.
 
 `make test` runs both focused Connector executables:
 
-- `duckdb_api_connector_tests` for catalog, schema, pagination, and resource
-  contracts;
+- `duckdb_api_connector_tests` for catalog, schema, predicate, pagination, and
+  resource contracts;
 - `duckdb_api_connector_catalog_fixture_tests` for the bounded fixture API.
 
 Run `make build` before invoking a focused binary from

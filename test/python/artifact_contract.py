@@ -14,7 +14,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.5.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.6.0", True, False, "NOT_INSTALLED")
 EXPECTED_BEARER_TOKEN_BYTES = 8 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_BYTES = 16 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_ACCOUNTING = 'name + ": " + value + "\\r\\n"'
@@ -39,6 +39,15 @@ EXPECTED_REPOSITORY_SCHEMA = [
     ("private", "BOOLEAN"),
     ("fork", "BOOLEAN"),
     ("archived", "BOOLEAN"),
+    ("visibility", "VARCHAR"),
+]
+EXPECTED_EXPLAIN_FIELDS = [
+    "relation",
+    "remote_predicate",
+    "remote_accuracy",
+    "residual_predicate",
+    "residual_owner",
+    "classification",
 ]
 FORBIDDEN_ARTIFACT_MARKERS = (
     b"127.0.0.1",
@@ -129,7 +138,7 @@ def main() -> int:
 
     repository_root = pathlib.Path(__file__).resolve().parents[2]
     expected_behavior = json.loads(
-        (repository_root / "release/0.5.0/public_contract.json").read_text()
+        (repository_root / "release/0.6.0/public_contract.json").read_text()
     )
     source_artifact = pathlib.Path(sys.argv[1]).resolve(strict=True)
     artifact_bytes = source_artifact.read_bytes()
@@ -387,7 +396,7 @@ def main() -> int:
         connection.execute(
             """
             PREPARE repository_bind AS
-            SELECT id, full_name, private, fork, archived
+            SELECT id, full_name, private, fork, archived, visibility
             FROM duckdb_api_scan(
                 connector := 'github', relation := 'authenticated_repositories',
                 secret := 'not_resolved_during_bind'
@@ -396,6 +405,37 @@ def main() -> int:
             """
         )
         connection.execute("DEALLOCATE repository_bind")
+
+        selective_explain = "\n".join(
+            str(value)
+            for row in connection.execute(
+                """
+                EXPLAIN SELECT id
+                FROM duckdb_api_scan(
+                    connector := 'github',
+                    relation := 'authenticated_repositories',
+                    secret := 'not_resolved_during_explain'
+                )
+                WHERE visibility = 'private'
+                """
+            ).fetchall()
+            for value in row
+        )
+        for marker in (
+            "Relation",
+            "Remote Predicate",
+            "visibility_equals_private",
+            "Remote Accuracy",
+            "superset",
+            "Residual Predicate",
+            "Residual Owner",
+            "duckdb",
+            "Classification",
+        ):
+            if marker not in selective_explain:
+                raise AssertionError(
+                    f"selective EXPLAIN omitted {marker!r}: {selective_explain!r}"
+                )
 
         connection.execute(
             """
@@ -421,7 +461,8 @@ def main() -> int:
             "authority_inputs": ["explicit_named_temporary_duckdb_secret"],
             "diagnostics": diagnostics,
             "duckdb": list(EXPECTED_DUCKDB[:2]),
-            "extension": ["duckdb_api", "0.5.0"],
+            "explain_fields": EXPECTED_EXPLAIN_FIELDS,
+            "extension": ["duckdb_api", "0.6.0"],
             "function": {
                 "name": "duckdb_api_scan",
                 "named_parameters": {
@@ -488,6 +529,27 @@ def main() -> int:
                 "offset": "duckdb",
                 "ordering": "duckdb",
             },
+            "remote_predicate_optimizations": [
+                {
+                    "accuracy": "superset",
+                    "predicate": {
+                        "column": "visibility",
+                        "literal": "private",
+                        "literal_type": "VARCHAR",
+                        "operator": "equals",
+                    },
+                    "relation": "authenticated_repositories",
+                    "remote_input": {
+                        "name": "visibility",
+                        "placement": "rest_query_parameter",
+                        "value": "private",
+                    },
+                    "residual_owner": "duckdb",
+                    "unsupported_behavior": (
+                        "complete_traversal_with_duckdb_filter"
+                    ),
+                }
+            ],
             "resource_limits": {
                 "authenticated_repositories": {
                     "decoded_memory_bytes": 2 * 1024 * 1024,
@@ -539,7 +601,7 @@ def main() -> int:
             },
         }
         if behavior != expected_behavior:
-            raise AssertionError("observed public inventory disagrees with the 0.5.0 contract")
+            raise AssertionError("observed public inventory disagrees with the 0.6.0 contract")
         print(
             json.dumps(
                 {

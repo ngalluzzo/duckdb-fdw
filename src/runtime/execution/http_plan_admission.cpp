@@ -3,6 +3,7 @@
 #include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 
 #include <string>
+#include <new>
 #include <vector>
 
 namespace duckdb_api {
@@ -18,13 +19,15 @@ bool HasUserColumns(const std::vector<PlannedColumn> &columns) {
 }
 
 bool HasRepositoryColumns(const std::vector<PlannedColumn> &columns) {
-	return columns.size() == 5 && columns[0].name == "id" && columns[0].logical_type == "BIGINT" &&
+	return columns.size() == 6 && columns[0].name == "id" && columns[0].logical_type == "BIGINT" &&
 	       !columns[0].nullable && columns[0].extractor == "$.id" && columns[1].name == "full_name" &&
 	       columns[1].logical_type == "VARCHAR" && !columns[1].nullable && columns[1].extractor == "$.full_name" &&
 	       columns[2].name == "private" && columns[2].logical_type == "BOOLEAN" && !columns[2].nullable &&
 	       columns[2].extractor == "$.private" && columns[3].name == "fork" && columns[3].logical_type == "BOOLEAN" &&
 	       !columns[3].nullable && columns[3].extractor == "$.fork" && columns[4].name == "archived" &&
-	       columns[4].logical_type == "BOOLEAN" && !columns[4].nullable && columns[4].extractor == "$.archived";
+	       columns[4].logical_type == "BOOLEAN" && !columns[4].nullable && columns[4].extractor == "$.archived" &&
+	       columns[5].name == "visibility" && columns[5].logical_type == "VARCHAR" && !columns[5].nullable &&
+	       columns[5].extractor == "$.visibility";
 }
 
 const char *SchemeName(PlannedUrlScheme scheme) {
@@ -39,7 +42,7 @@ const char *SchemeName(PlannedUrlScheme scheme) {
 
 bool HasFixedHeaders(const std::vector<PlannedHttpHeader> &headers) {
 	return headers.size() == 3 && headers[0].name == "Accept" && headers[0].value == "application/vnd.github+json" &&
-	       headers[1].name == "User-Agent" && headers[1].value == "duckdb-api/0.5.0" &&
+	       headers[1].name == "User-Agent" && headers[1].value == "duckdb-api/0.6.0" &&
 	       headers[2].name == "X-GitHub-Api-Version" && headers[2].value == "2022-11-28";
 }
 
@@ -111,7 +114,7 @@ bool HasExpectedRepositoryNetwork(const NetworkCapability &network, const HttpEx
 
 bool TryAdmitSingleResponsePlan(const ScanPlan &plan, const HttpExecutionProfile &profile,
                                 AdmittedHttpOperation &operation) {
-	if (plan.ConnectorName() != "github" || plan.ConnectorVersion() != "0.5.0" ||
+	if (plan.ConnectorName() != "github" || plan.ConnectorVersion() != "0.6.0" ||
 	    !HasUserColumns(plan.OutputColumns()) || plan.Pagination().Strategy() != PlannedPaginationStrategy::DISABLED ||
 	    plan.Providers() != FeatureState::DISABLED || plan.Retry() != FeatureState::DISABLED ||
 	    plan.Cache() != FeatureState::DISABLED || !HasExpectedNetwork(plan.Network(), profile) ||
@@ -162,14 +165,44 @@ bool HasExpectedPagination(const ScanPlan &plan) {
 	return target.origin.scheme == PlannedUrlScheme::HTTPS && target.origin.host == "api.github.com" &&
 	       target.origin.port == 443 && target.path == "/user/repos" && target.page_size_parameter == "per_page" &&
 	       target.page_size == 100 && target.page_number_parameter == "page" && target.first_page == 1 &&
-	       target.page_increment == 1 && scan.request_attempts == scan.pages &&
+	       target.page_increment == 1 && scan.pages == 32 && scan.request_attempts == scan.pages &&
 	       scan.response_bytes >= page.response_bytes && scan.header_bytes >= page.header_bytes &&
 	       scan.decompressed_bytes >= page.decompressed_bytes && scan.decoded_records >= page.decoded_records &&
 	       scan.decoded_memory_bytes >= page.decoded_memory_bytes;
 }
 
+bool HasDuckDbOwnedRelationalEnvelope(const ScanPlan &plan) {
+	const auto &ownership = plan.Ownership();
+	return plan.ResidualOwner() == RelationalOwner::DUCKDB && ownership.filter == RelationalOwner::DUCKDB &&
+	       ownership.ordering == RelationalOwner::DUCKDB && ownership.limit == RelationalOwner::DUCKDB &&
+	       ownership.offset == RelationalOwner::DUCKDB && plan.RemoteOrdering() == RelationalDelegation::NONE &&
+	       plan.RuntimeOrdering() == RelationalDelegation::NONE && plan.RemoteLimit() == RelationalDelegation::NONE &&
+	       plan.RemoteOffset() == RelationalDelegation::NONE && plan.RuntimeLimit() == RelationalDelegation::NONE &&
+	       plan.RuntimeOffset() == RelationalDelegation::NONE;
+}
+
+bool HasExpectedRepositoryRelationalProfile(const ScanPlan &plan) {
+	if (!HasDuckDbOwnedRelationalEnvelope(plan)) {
+		return false;
+	}
+	if (plan.ConditionalInput() == PlannedConditionalInput::NONE) {
+		return plan.RemotePredicate() == PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
+		       plan.RemoteAccuracy() == RemotePredicateAccuracy::UNSUPPORTED &&
+		       (plan.ResidualPredicate() == PlannedPredicate::TRUE_FOR_BASE_DOMAIN ||
+		        plan.ResidualPredicate() == PlannedPredicate::VISIBILITY_EQUALS_PRIVATE ||
+		        plan.ResidualPredicate() == PlannedPredicate::COMPLETE_DUCKDB_FILTER);
+	}
+	if (plan.ConditionalInput() == PlannedConditionalInput::VISIBILITY_PRIVATE) {
+		return plan.RemotePredicate() == PlannedPredicate::VISIBILITY_EQUALS_PRIVATE &&
+		       plan.RemoteAccuracy() == RemotePredicateAccuracy::SUPERSET &&
+		       (plan.ResidualPredicate() == PlannedPredicate::VISIBILITY_EQUALS_PRIVATE ||
+		        plan.ResidualPredicate() == PlannedPredicate::COMPLETE_DUCKDB_FILTER);
+	}
+	return false;
+}
+
 bool IsAuthenticatedRepositoriesPlan(const ScanPlan &plan, const HttpExecutionProfile &profile) {
-	return plan.ConnectorName() == "github" && plan.ConnectorVersion() == "0.5.0" &&
+	return plan.ConnectorName() == "github" && plan.ConnectorVersion() == "0.6.0" &&
 	       plan.RelationName() == "authenticated_repositories" &&
 	       plan.Domain() == BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS && HasRepositoryColumns(plan.OutputColumns()) &&
 	       HasExpectedRepositoryOperation(plan.Operation(), profile) && HasExpectedPagination(plan) &&
@@ -177,20 +210,110 @@ bool IsAuthenticatedRepositoriesPlan(const ScanPlan &plan, const HttpExecutionPr
 	       plan.Providers() == FeatureState::DISABLED && plan.Retry() == FeatureState::DISABLED &&
 	       plan.Cache() == FeatureState::DISABLED && plan.Authentication() == FeatureState::ENABLED &&
 	       plan.SecretReference().IsPresent() && HasAuthenticatedObligation(plan.AuthenticationObligation(), profile) &&
-	       HasExpectedRepositoryNetwork(plan.Network(), profile);
+	       HasExpectedRepositoryNetwork(plan.Network(), profile) && HasExpectedRepositoryRelationalProfile(plan);
 }
 
 } // namespace
 
-bool TryAdmitHttpPlan(const ScanPlan &plan, const HttpExecutionProfile &profile, AdmittedHttpOperation &operation) {
-	if (TryAdmitSingleResponsePlan(plan, profile, operation)) {
-		return true;
+AdmittedRepositoryRequestProfile::AdmittedRepositoryRequestProfile(
+    AdmittedRepositoryConditionalInput conditional_input_p)
+    : method("GET"), scheme("https"), host("api.github.com"), port(443), path("/user/repos"),
+      headers({{"Accept", "application/vnd.github+json"},
+               {"User-Agent", "duckdb-api/0.6.0"},
+               {"X-GitHub-Api-Version", "2022-11-28"}}),
+      columns({{"id", "id", ValueKind::BIGINT},
+               {"full_name", "full_name", ValueKind::VARCHAR},
+               {"private", "private", ValueKind::BOOLEAN},
+               {"fork", "fork", ValueKind::BOOLEAN},
+               {"archived", "archived", ValueKind::BOOLEAN},
+               {"visibility", "visibility", ValueKind::VARCHAR}}),
+      page_size_parameter("per_page"), page_size(100), page_number_parameter("page"), first_page(1), page_increment(1),
+      max_pages(32), conditional_input(conditional_input_p) {
+}
+
+const std::string &AdmittedRepositoryRequestProfile::Method() const {
+	return method;
+}
+const std::string &AdmittedRepositoryRequestProfile::Scheme() const {
+	return scheme;
+}
+const std::string &AdmittedRepositoryRequestProfile::Host() const {
+	return host;
+}
+uint16_t AdmittedRepositoryRequestProfile::Port() const {
+	return port;
+}
+const std::string &AdmittedRepositoryRequestProfile::Path() const {
+	return path;
+}
+const std::vector<HttpHeader> &AdmittedRepositoryRequestProfile::Headers() const {
+	return headers;
+}
+const std::vector<AdmittedRepositoryColumn> &AdmittedRepositoryRequestProfile::Columns() const {
+	return columns;
+}
+const std::string &AdmittedRepositoryRequestProfile::PageSizeParameter() const {
+	return page_size_parameter;
+}
+uint64_t AdmittedRepositoryRequestProfile::PageSize() const {
+	return page_size;
+}
+const std::string &AdmittedRepositoryRequestProfile::PageNumberParameter() const {
+	return page_number_parameter;
+}
+uint64_t AdmittedRepositoryRequestProfile::FirstPage() const {
+	return first_page;
+}
+uint64_t AdmittedRepositoryRequestProfile::PageIncrement() const {
+	return page_increment;
+}
+uint64_t AdmittedRepositoryRequestProfile::MaxPages() const {
+	return max_pages;
+}
+AdmittedRepositoryConditionalInput AdmittedRepositoryRequestProfile::ConditionalInput() const {
+	return conditional_input;
+}
+
+bool TryAdmitSingleResponseHttpPlan(const ScanPlan &plan, const HttpExecutionProfile &profile,
+                                    AdmittedHttpOperation &operation) {
+	return TryAdmitSingleResponsePlan(plan, profile, operation);
+}
+
+std::unique_ptr<const AdmittedRepositoryRequestProfile>
+TryAdmitRepositoryHttpPlan(const ScanPlan &plan, const HttpExecutionProfile &profile) {
+	if (!IsAuthenticatedRepositoriesPlan(plan, profile)) {
+		return std::unique_ptr<const AdmittedRepositoryRequestProfile>();
 	}
-	if (IsAuthenticatedRepositoriesPlan(plan, profile)) {
-		operation = AdmittedHttpOperation::AUTHENTICATED_REPOSITORIES;
-		return true;
+	const auto admitted_input = plan.ConditionalInput() == PlannedConditionalInput::VISIBILITY_PRIVATE
+	                                ? AdmittedRepositoryConditionalInput::VISIBILITY_PRIVATE
+	                                : AdmittedRepositoryConditionalInput::NONE;
+	try {
+		return std::unique_ptr<const AdmittedRepositoryRequestProfile>(
+		    new AdmittedRepositoryRequestProfile(admitted_input));
+	} catch (const std::bad_alloc &) {
+		throw ExecutionError(ErrorStage::RESOURCE, "request_profile",
+		                     "repository request profile could not be allocated within its memory budget");
 	}
-	return false;
+}
+
+HttpRequest BuildAdmittedRepositoryPageRequest(const AdmittedRepositoryRequestProfile &profile, uint64_t page) {
+	const auto last_page = profile.FirstPage() + (profile.MaxPages() - 1) * profile.PageIncrement();
+	if (page < profile.FirstPage() || page > last_page || (page - profile.FirstPage()) % profile.PageIncrement() != 0) {
+		throw ExecutionError(ErrorStage::POLICY, "pagination.page",
+		                     "repository page is outside the admitted request profile");
+	}
+	HttpRequest request;
+	request.method = profile.Method();
+	request.scheme = profile.Scheme();
+	request.host = profile.Host();
+	request.port = profile.Port();
+	request.target = profile.Path() + "?" + profile.PageSizeParameter() + "=" + std::to_string(profile.PageSize()) +
+	                 "&" + profile.PageNumberParameter() + "=" + std::to_string(page);
+	if (profile.ConditionalInput() == AdmittedRepositoryConditionalInput::VISIBILITY_PRIVATE) {
+		request.target += "&visibility=private";
+	}
+	request.headers = profile.Headers();
+	return request;
 }
 
 } // namespace internal

@@ -163,6 +163,12 @@ Release evidence includes DuckDB-equivalence and property tests, strict schema
 and value conversion, operation-selection oracles, residual ownership checks,
 safe ordering and limit behavior, and capability-profile fallbacks.
 
+Current unreleased evidence proves the first predicate-selective slice:
+`github.authenticated_repositories.visibility = 'private'` narrows every remote
+page while DuckDB retains the residual, and unsupported shapes fall back to the
+complete traversal. Projection, ordering, and limit evidence remain before the
+milestone can be released.
+
 ### `0.7.0` — protocol breadth
 
 The declarative connector model supports the retained product claim across

@@ -8,16 +8,24 @@ The planner decides what may run remotely and what DuckDB must still evaluate.
 Runtime consumes the finished plan; it must never need to repeat relational
 classification.
 
-The current native profile is intentionally conservative: it requests the full
-projection, accepts only `TRUE` as the remote predicate, carries no remote
-ordering, limit, or offset, and reports those DuckDB capabilities as
-unavailable. The architecture describes broader semantic contracts; support is
-not present until the planner, adapter, and property oracles prove it.
+The native RFC 0008 profile admits exactly one selective shape:
+`visibility = 'private'` over the authenticated-repositories response field.
+Semantics selects the Connector mapping only when the closed request,
+structured-callback capability, DuckDB residual-retention capability, required
+VARCHAR schema, operation, and reviewed mapping all agree. The plan records a
+remote `SUPERSET`, leaves the complete predicate owned by DuckDB, and carries
+the sole typed `VISIBILITY_PRIVATE` conditional input. Exact single-filter
+requests name the visibility residual; larger or unsupported retained filters
+use an opaque complete-filter marker rather than SQL text. Every absent or
+mismatched fact retains complete traversal. No other predicate, projection,
+ordering, limit, or offset is delegated.
 
 ## Start here
 
 | Change | Production code | Focused test |
 | --- | --- | --- |
+| Closed protocol-neutral request predicate | `relational_predicate.cpp`, `duckdb_api/relational_predicate.hpp` | `duckdb_api_scan_planner_tests` |
+| Visibility implication, mapping selection, and fallback | `predicate_classifier.cpp` | `duckdb_api_scan_planner_tests` |
 | Plan values, guarded payloads, or resource predicates | `scan_plan.cpp`, `duckdb_api/scan_plan.hpp` | `duckdb_api_scan_plan_contract_tests` |
 | Human-readable plan snapshots | `scan_plan_explain.cpp` | `duckdb_api_scan_plan_contract_tests`, `duckdb_api_scan_plan_fixture_tests` |
 | Capability narrowing or conservative classification | `scan_planner.cpp`, `duckdb_api/scan_planner.hpp` | `duckdb_api_scan_planner_tests` |
@@ -25,10 +33,15 @@ not present until the planner, adapter, and property oracles prove it.
 | Private normalization shared by construction and validation | `scan_planner_internal.hpp` | `duckdb_api_scan_planner_tests` |
 | Reusable plan fixtures for Runtime consumers | `test/cpp/semantics/support/` | `duckdb_api_scan_plan_fixture_tests` |
 
-`scan_plan.hpp` is the value-only consumer interface. It intentionally carries
-no Connector, Query, or planner-construction dependency. `scan_planner.hpp` is
-the separate planning entry point used by Query. Keep that split intact when
-adding plan fields or planner inputs.
+`relational_predicate.hpp` is the smaller service below Query request
+construction and Semantics classification. `scan_plan.hpp` is the value-only
+Runtime consumer interface and intentionally carries no Connector, Query, or
+planner-construction dependency. `scan_planner.hpp` is the separate planning
+entry point used by Query. Keep those dependency directions intact.
+
+Runtime must use only `ScanPlan::ConditionalInput()` for predicate-derived
+request selection. `Operation().query_parameters`, Connector provenance, and
+the safe snapshot do not duplicate or supersede that authority.
 
 ## Correctness checklist
 

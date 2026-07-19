@@ -30,6 +30,10 @@ duckdb_api::ScanPlan BuildAuthenticatedRepositoriesRuntimePlan() {
 	return BuildValidAuthenticatedRepositoriesPlanFixture("fixture_secret");
 }
 
+duckdb_api::ScanPlan BuildVisibilityPrivateRuntimePlan() {
+	return BuildVisibilityPrivatePlanFixture("fixture_secret");
+}
+
 std::string RuntimeCurlBearerToken(uint64_t suffix) {
 	return "curl_runtime_generated_" +
 	       std::to_string(static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())) + "_" +

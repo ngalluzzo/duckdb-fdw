@@ -85,9 +85,12 @@ void TestAcceptedAnonymousAndAuthenticatedRequests() {
 	RequireFullSelectedSchema(authenticated, *authenticated_relation);
 	Require(anonymous.explicit_inputs.empty() && authenticated.explicit_inputs.empty(),
 	        "logical selector entered explicit relation inputs");
-	Require(anonymous.predicate == "TRUE" && authenticated.predicate == "TRUE" && anonymous.orderings.empty() &&
-	            authenticated.orderings.empty() && !anonymous.has_limit && !authenticated.has_limit &&
-	            !anonymous.has_offset && !authenticated.has_offset,
+	Require(anonymous.requested_predicate == duckdb_api::RequestedPredicate::Unrestricted() &&
+	            authenticated.requested_predicate == duckdb_api::RequestedPredicate::Unrestricted() &&
+	            anonymous.retained_predicate_scope == duckdb_api::RetainedPredicateScope::UNRESTRICTED &&
+	            authenticated.retained_predicate_scope == duckdb_api::RetainedPredicateScope::UNRESTRICTED &&
+	            anonymous.orderings.empty() && authenticated.orderings.empty() && !anonymous.has_limit &&
+	            !authenticated.has_limit && !anonymous.has_offset && !authenticated.has_offset,
 	        "request builder left the conservative relational profile");
 	Require(anonymous.capabilities.HasConservativeRelationalProfile() &&
 	            authenticated.capabilities.HasConservativeRelationalProfile() &&
@@ -97,8 +100,10 @@ void TestAcceptedAnonymousAndAuthenticatedRequests() {
 	        "request builder changed logical-reference presence or identity");
 	Require(anonymous.Snapshot() ==
 	            "connector=github;relation=duckdb_login_search_page;inputs=[];projection=id,login,site_admin;"
-	            "predicate=TRUE;ordering=[];limit=unset;offset=unset;capabilities=projection:unavailable,filter:"
-	            "unavailable,ordering:unavailable,limit:unavailable,offset:unavailable,progress:unavailable,"
+	            "requested-predicate=unrestricted;retained-predicate-scope=unrestricted;ordering=[];limit=unset;"
+	            "offset=unset;capabilities=projection:"
+	            "unavailable,filter:unavailable,selective-predicate:unavailable,retains-predicate:unavailable,"
+	            "ordering:unavailable,limit:unavailable,offset:unavailable,progress:unavailable,"
 	            "cancellation:verified,secret-manager:available;secret-reference=none",
 	        "anonymous request snapshot changed");
 	Require(authenticated.Snapshot().find(";relation=authenticated_user;") != std::string::npos &&
@@ -118,18 +123,23 @@ void TestAuthenticatedRepositoryRequest() {
 	Require(request.connector_name == "github" && request.relation_name == REPOSITORY_RELATION,
 	        "repository request did not copy exact selected identity");
 	RequireFullSelectedSchema(request, *relation);
-	Require(request.projected_columns == std::vector<std::string>({"id", "full_name", "private", "fork", "archived"}) &&
+	Require(request.projected_columns ==
+	                std::vector<std::string>({"id", "full_name", "private", "fork", "archived", "visibility"}) &&
 	            request.explicit_inputs.empty(),
 	        "repository request did not preserve its exact full-projection closure");
-	Require(request.predicate == "TRUE" && request.orderings.empty() && !request.has_limit && !request.has_offset &&
+	Require(request.requested_predicate == duckdb_api::RequestedPredicate::Unrestricted() &&
+	            request.retained_predicate_scope == duckdb_api::RetainedPredicateScope::UNRESTRICTED &&
+	            request.orderings.empty() && !request.has_limit && !request.has_offset &&
 	            request.capabilities.HasConservativeRelationalProfile() && request.capabilities.secret_manager,
 	        "repository request changed Query's conservative capability profile");
 	Require(request.secret_reference.Name() == "github_default",
 	        "repository request changed the exact logical secret reference");
 	const std::string expected =
 	    "connector=github;relation=authenticated_repositories;inputs=[];projection=id,full_name,private,fork,"
-	    "archived;predicate=TRUE;ordering=[];limit=unset;offset=unset;capabilities=projection:unavailable,filter:"
-	    "unavailable,ordering:unavailable,limit:unavailable,offset:unavailable,progress:unavailable,cancellation:"
+	    "archived,visibility;requested-predicate=unrestricted;retained-predicate-scope=unrestricted;ordering=[];"
+	    "limit=unset;offset=unset;capabilities="
+	    "projection:unavailable,filter:unavailable,selective-predicate:unavailable,retains-predicate:unavailable,"
+	    "ordering:unavailable,limit:unavailable,offset:unavailable,progress:unavailable,cancellation:"
 	    "verified,secret-manager:available;secret-reference=named-hex:6769746875625f64656661756c74";
 	Require(request.Snapshot() == expected && copy.Snapshot() == expected,
 	        "repository request copy or exact snapshot drifted");
@@ -203,7 +213,8 @@ void TestPresenceRulesAndExactSelection() {
 }
 
 void RequireRelationalMutationsRejected(bool secret_manager) {
-	duckdb_api::AdapterCapabilities capabilities = {false, false, false, false, false, false, true, secret_manager};
+	duckdb_api::AdapterCapabilities capabilities = {false, false, false, false, false,
+	                                                false, false, false, true,  secret_manager};
 	Require(capabilities.HasConservativeRelationalProfile(), "baseline relational profile was not conservative");
 	capabilities.projection = true;
 	Require(!capabilities.HasConservativeRelationalProfile(), "available projection was classified as conservative");
@@ -212,6 +223,14 @@ void RequireRelationalMutationsRejected(bool secret_manager) {
 	Require(!capabilities.HasConservativeRelationalProfile(),
 	        "available filter metadata was classified as conservative");
 	capabilities.filter = false;
+	capabilities.selective_predicate = true;
+	Require(!capabilities.HasConservativeRelationalProfile(),
+	        "available selective predicate metadata was classified as baseline conservative");
+	capabilities.selective_predicate = false;
+	capabilities.retains_predicate = true;
+	Require(!capabilities.HasConservativeRelationalProfile(),
+	        "retained-predicate verification was classified as baseline conservative");
+	capabilities.retains_predicate = false;
 	capabilities.ordering = true;
 	Require(!capabilities.HasConservativeRelationalProfile(), "available ordering was classified as conservative");
 	capabilities.ordering = false;
@@ -226,6 +245,34 @@ void RequireRelationalMutationsRejected(bool secret_manager) {
 	capabilities.progress = false;
 	capabilities.cancellation = false;
 	Require(!capabilities.HasConservativeRelationalProfile(), "unverified cancellation was classified as conservative");
+}
+
+void TestProtocolNeutralSelectiveCandidateCopy() {
+	const auto connector = duckdb_api::BuildNativeGithubConnector();
+	const auto baseline = duckdb_api::BuildConservativeScanRequest(
+	    connector, REPOSITORY_RELATION, duckdb_api::LogicalSecretReference::Named("github_default"));
+	auto candidate = baseline;
+	candidate.requested_predicate = duckdb_api::RequestedPredicate::VisibilityEqualsPrivate();
+	candidate.retained_predicate_scope = duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE;
+	candidate.capabilities.selective_predicate = true;
+	candidate.capabilities.retains_predicate = true;
+
+	Require(baseline.requested_predicate == duckdb_api::RequestedPredicate::Unrestricted() &&
+	            baseline.capabilities.HasConservativeRelationalProfile(),
+	        "selective candidate mutation changed the retained baseline request");
+	Require(candidate.requested_predicate == duckdb_api::RequestedPredicate::VisibilityEqualsPrivate() &&
+	            candidate.capabilities.selective_predicate && candidate.capabilities.retains_predicate &&
+	            !candidate.capabilities.filter,
+	        "selective candidate did not distinguish advisory recognition from generic filter execution");
+	Require(candidate.Snapshot().find("requested-predicate=visibility_equals_private") != std::string::npos &&
+	            candidate.Snapshot().find("retained-predicate-scope=requested_predicate") != std::string::npos &&
+	            candidate.Snapshot().find("selective-predicate:available,retains-predicate:verified") !=
+	                std::string::npos,
+	        "selective candidate snapshot lost its closed capability facts");
+	for (const auto &forbidden : {"visibility=private", "/user/repos", "REST_QUERY_PARAMETER", "api.github.com"}) {
+		Require(candidate.Snapshot().find(forbidden) == std::string::npos,
+		        "Query candidate selected a provider request field, value encoding, or operation");
+	}
 }
 
 void TestCapabilityClassificationAndSemanticsMutation() {
@@ -281,6 +328,7 @@ int main() {
 		TestProviderOwnedDistinctSchemaRequests();
 		TestPresenceRulesAndExactSelection();
 		TestCapabilityClassificationAndSemanticsMutation();
+		TestProtocolNeutralSelectiveCandidateCopy();
 		TestEnvironmentIndependenceAndCredentialAbsence();
 		std::cout << "scan request tests passed" << std::endl;
 		return EXIT_SUCCESS;

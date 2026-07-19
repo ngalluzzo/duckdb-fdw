@@ -187,6 +187,39 @@ void TestPlannerCounterexampleCatalogFixtures() {
 	        "disabled root-array fixture resource envelope drifted");
 }
 
+void TestPredicateMappingDecoyCatalogFixtures() {
+	const auto absent = duckdb_api_test::BuildPredicateMappingAbsentCatalogFixture();
+	const auto schema = duckdb_api_test::BuildPredicateSchemaVariationCatalogFixture();
+	const auto operation = duckdb_api_test::BuildPredicateOperationVariationCatalogFixture();
+	const auto *absent_relation = absent.FindRelation("authenticated_repositories");
+	const auto *schema_relation = schema.FindRelation("authenticated_repositories");
+	const auto *operation_relation = operation.FindRelation("authenticated_repositories");
+	Require(absent_relation != nullptr && schema_relation != nullptr && operation_relation != nullptr,
+	        "predicate decoy fixture lost its stable relation lookup");
+	Require(absent_relation->PredicateMappings().empty() && schema_relation->PredicateMappings().empty() &&
+	            operation_relation->PredicateMappings().empty(),
+	        "predicate decoy fixture unexpectedly published a mapping");
+	Require(absent_relation->Columns().size() == 6 && absent_relation->Columns().back().name == "visibility" &&
+	            absent_relation->Columns().back().extractor == "$.visibility" &&
+	            absent_relation->Operation().name == "github_authenticated_repositories" &&
+	            absent_relation->Operation().request.path == "/user/repos",
+	        "mapping-absence decoy no longer preserves native inference bait");
+	Require(schema_relation->Columns().size() == 6 &&
+	            schema_relation->Columns().back().name == "repository_visibility" &&
+	            schema_relation->Columns().back().extractor == "$.visibility",
+	        "schema-variation decoy no longer varies the mapped column identity");
+	Require(operation_relation->Columns().size() == 6 && operation_relation->Columns().back().name == "visibility" &&
+	            operation_relation->Operation().name == "fixture_repository_operation" &&
+	            operation_relation->Operation().request.path == "/fixtures/repositories",
+	        "operation-variation decoy no longer varies the operation identity");
+	for (const auto *catalog : {&absent, &schema, &operation}) {
+		Require(catalog->Snapshot().find("predicate_mappings=[]") != std::string::npos,
+		        "predicate decoy explanation did not make mapping absence explicit");
+		Require(catalog->Snapshot().find("Authorization=") == std::string::npos,
+		        "predicate decoy explanation exposed credential material");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -194,6 +227,7 @@ int main() {
 		TestDistinctSchemaCatalogFixture();
 		TestExplicitPaginationCatalogFixture();
 		TestPlannerCounterexampleCatalogFixtures();
+		TestPredicateMappingDecoyCatalogFixtures();
 		std::cout << "connector catalog fixture tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

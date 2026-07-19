@@ -60,12 +60,24 @@ public:
 		    std::move(destinations));
 	}
 
-	static duckdb_api::CompiledRelation Relation(std::string name, std::vector<duckdb_api::CompiledColumn> columns,
-	                                             duckdb_api::CompiledOperation operation,
-	                                             duckdb_api::CompiledAuthenticationPolicy authentication,
-	                                             duckdb_api::CompiledResourceCeilings resource_ceilings) {
-		return duckdb_api::CompiledRelation(std::move(name), std::move(columns), std::move(operation),
-		                                    std::move(authentication), resource_ceilings);
+	static duckdb_api::CompiledPredicateMapping
+	PredicateMapping(std::string column_name, duckdb_api::CompiledPredicateOperator predicate_operator,
+	                 duckdb_api::CompiledPredicateLiteral literal, std::string operation_name,
+	                 duckdb_api::CompiledPredicateInputPlacement input_placement, std::string remote_input_name,
+	                 std::string encoded_remote_value, duckdb_api::CompiledPredicateAccuracy accuracy,
+	                 duckdb_api::CompiledPredicateEvidence evidence) {
+		return duckdb_api::CompiledPredicateMapping(
+		    std::move(column_name), predicate_operator, literal, std::move(operation_name), input_placement,
+		    std::move(remote_input_name), std::move(encoded_remote_value), accuracy, evidence);
+	}
+
+	static duckdb_api::CompiledRelation
+	Relation(std::string name, std::vector<duckdb_api::CompiledColumn> columns, duckdb_api::CompiledOperation operation,
+	         duckdb_api::CompiledAuthenticationPolicy authentication,
+	         duckdb_api::CompiledResourceCeilings resource_ceilings,
+	         std::vector<duckdb_api::CompiledPredicateMapping> predicate_mappings = {}) {
+		return duckdb_api::CompiledRelation(std::move(name), std::move(columns), std::move(predicate_mappings),
+		                                    std::move(operation), std::move(authentication), resource_ceilings);
 	}
 
 	static duckdb_api::CompiledConnector Catalog(duckdb_api::CompiledConnectorOrigin origin, std::string connector_name,
@@ -74,6 +86,16 @@ public:
 	                                             duckdb_api::CompiledNetworkPolicy network_policy) {
 		return duckdb_api::CompiledConnector(origin, std::move(connector_name), std::move(version),
 		                                     std::move(relations), std::move(network_policy));
+	}
+
+	// Produces the exact native catalog with predicate declarations removed.
+	// This private test-only composition proves capability absence without
+	// changing any other provider or Runtime authority.
+	static duckdb_api::CompiledConnector WithoutPredicateMappings(duckdb_api::CompiledConnector connector) {
+		for (auto &relation : connector.relations) {
+			relation.predicate_mappings.clear();
+		}
+		return connector;
 	}
 };
 

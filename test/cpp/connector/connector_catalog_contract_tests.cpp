@@ -86,10 +86,11 @@ static_assert(!std::is_move_assignable<duckdb_api::CompiledRelation>::value,
               "relation assignment would permit post-construction replacement");
 static_assert(!std::is_default_constructible<duckdb_api::CompiledRelation>::value,
               "relation must not admit partial construction");
-static_assert(!std::is_constructible<duckdb_api::CompiledRelation, std::string, std::vector<duckdb_api::CompiledColumn>,
-                                     duckdb_api::CompiledOperation, duckdb_api::CompiledAuthenticationPolicy,
-                                     duckdb_api::CompiledResourceCeilings>::value,
-              "production callers must not construct arbitrary relation authority");
+static_assert(
+    !std::is_constructible<duckdb_api::CompiledRelation, std::string, std::vector<duckdb_api::CompiledColumn>,
+                           std::vector<duckdb_api::CompiledPredicateMapping>, duckdb_api::CompiledOperation,
+                           duckdb_api::CompiledAuthenticationPolicy, duckdb_api::CompiledResourceCeilings>::value,
+    "production callers must not construct arbitrary relation authority");
 
 template <typename Callable>
 void RequireInvalid(const std::string &message, Callable callback) {

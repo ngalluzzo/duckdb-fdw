@@ -1,6 +1,7 @@
 #include "duckdb_api/connector.hpp"
 #include "connector/support/catalog_contract.hpp"
 #include "connector/support/pagination_contract.hpp"
+#include "connector/support/predicate_contract.hpp"
 #include "support/require.hpp"
 
 #include <cstdlib>
@@ -43,12 +44,13 @@ void RequireSharedSchema(const duckdb_api::CompiledRelation &relation) {
 
 void RequireRepositorySchema(const duckdb_api::CompiledRelation &relation) {
 	const auto &columns = relation.Columns();
-	Require(columns.size() == 5, "authenticated repository schema width drifted");
+	Require(columns.size() == 6, "authenticated repository schema width drifted");
 	RequireColumn(columns[0], "id", "BIGINT", "$.id");
 	RequireColumn(columns[1], "full_name", "VARCHAR", "$.full_name");
 	RequireColumn(columns[2], "private", "BOOLEAN", "$.private");
 	RequireColumn(columns[3], "fork", "BOOLEAN", "$.fork");
 	RequireColumn(columns[4], "archived", "BOOLEAN", "$.archived");
+	RequireColumn(columns[5], "visibility", "VARCHAR", "$.visibility");
 }
 
 void RequireQueryParameter(const duckdb_api::CompiledQueryParameter &parameter, const std::string &name,
@@ -65,7 +67,7 @@ void RequireHeader(const duckdb_api::CompiledHttpHeader &header, const std::stri
 void RequireFixedHeaders(const std::vector<duckdb_api::CompiledHttpHeader> &headers) {
 	Require(headers.size() == 3, "CompiledOperation fixed header width drifted");
 	RequireHeader(headers[0], "Accept", "application/vnd.github+json");
-	RequireHeader(headers[1], "User-Agent", "duckdb-api/0.5.0");
+	RequireHeader(headers[1], "User-Agent", "duckdb-api/0.6.0");
 	RequireHeader(headers[2], "X-GitHub-Api-Version", "2022-11-28");
 	for (const auto &header : headers) {
 		Require(header.name != "Authorization" && header.name != "authorization",
@@ -110,7 +112,7 @@ void TestCatalogAndLookup() {
 	Require(connector.Origin() == duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA,
 	        "CompiledConnector origin drifted");
 	Require(connector.ConnectorName() == "github", "CompiledConnector identifier drifted");
-	Require(connector.Version() == "0.5.0", "CompiledConnector metadata version drifted");
+	Require(connector.Version() == "0.6.0", "CompiledConnector metadata version drifted");
 	Require(connector.Relations().size() == 3, "CompiledConnector relation catalog width drifted");
 	Require(connector.Relations()[0].Name() == "duckdb_login_search_page",
 	        "CompiledConnector anonymous relation order drifted");
@@ -145,6 +147,7 @@ void TestAnonymousRelation() {
 	const auto *relation = connector.FindRelation("duckdb_login_search_page");
 	Require(relation != nullptr, "anonymous relation disappeared");
 	RequireSharedSchema(*relation);
+	Require(relation->PredicateMappings().empty(), "anonymous relation gained a predicate mapping");
 
 	const auto &operation = relation->Operation();
 	RequireBaseOperation(operation);
@@ -185,6 +188,7 @@ void TestAuthenticatedRelation() {
 	const auto *relation = connector.FindRelation("authenticated_user");
 	Require(relation != nullptr, "authenticated relation disappeared");
 	RequireSharedSchema(*relation);
+	Require(relation->PredicateMappings().empty(), "authenticated user relation gained a predicate mapping");
 
 	const auto &operation = relation->Operation();
 	RequireBaseOperation(operation);
@@ -215,6 +219,18 @@ void TestAuthenticatedRepositoriesRelation() {
 	const auto *relation = connector.FindRelation("authenticated_repositories");
 	Require(relation != nullptr, "authenticated repository relation disappeared");
 	RequireRepositorySchema(*relation);
+	Require(relation->PredicateMappings().size() == 1,
+	        "authenticated repository relation lost its single predicate mapping");
+	const auto &mapping = relation->PredicateMappings()[0];
+	Require(
+	    mapping.ColumnName() == "visibility" && mapping.Operator() == duckdb_api::CompiledPredicateOperator::EQUALS &&
+	        mapping.Literal() == duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE &&
+	        mapping.OperationName() == "github_authenticated_repositories" &&
+	        mapping.InputPlacement() == duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER &&
+	        mapping.RemoteInputName() == "visibility" && mapping.EncodedRemoteValue() == "private" &&
+	        mapping.Accuracy() == duckdb_api::CompiledPredicateAccuracy::SUPERSET &&
+	        mapping.Evidence() == duckdb_api::CompiledPredicateEvidence::GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY,
+	    "authenticated repository predicate mapping drifted");
 
 	const auto &operation = relation->Operation();
 	RequireBaseOperation(operation);
@@ -254,10 +270,11 @@ void TestAuthenticatedRepositoriesRelation() {
 
 const std::string ANONYMOUS_SNAPSHOT =
     "relation=duckdb_login_search_page;schema=id:BIGINT!:$.id,login:VARCHAR!:$.login,"
-    "site_admin:BOOLEAN!:$.site_admin;operation=github_search_duckdb_login_page:fallback:zero_to_many:REST:GET:"
+    "site_admin:BOOLEAN!:$.site_admin;predicate_mappings=[];"
+    "operation=github_search_duckdb_login_page:fallback:zero_to_many:REST:GET:"
     "replay_safe;request=origin:[scheme:https,host:api.github.com,port:443],path:/search/users,"
     "query:[q=duckdb+in%3Alogin,per_page=3],headers:[Accept=application/vnd.github+json,"
-    "User-Agent=duckdb-api/0.5.0,X-GitHub-Api-Version=2022-11-28];response=source:json_path_many,"
+    "User-Agent=duckdb-api/0.6.0,X-GitHub-Api-Version=2022-11-28];response=source:json_path_many,"
     "records:$.items[*];features=retry:disabled,pagination:disabled;authentication=requirement:none,"
     "logical_credential:none,authenticator:none,destination:none,placement:none;"
     "ceilings=response_bytes_per_page:65536,response_bytes_per_scan:65536,records_per_page:3,"
@@ -265,9 +282,10 @@ const std::string ANONYMOUS_SNAPSHOT =
 
 const std::string AUTHENTICATED_SNAPSHOT =
     "relation=authenticated_user;schema=id:BIGINT!:$.id,login:VARCHAR!:$.login,site_admin:BOOLEAN!:$.site_admin;"
+    "predicate_mappings=[];"
     "operation=github_authenticated_user:fallback:exactly_one_on_success:REST:GET:replay_safe;"
     "request=origin:[scheme:https,host:api.github.com,port:443],path:/user,query:[],"
-    "headers:[Accept=application/vnd.github+json,User-Agent=duckdb-api/0.5.0,"
+    "headers:[Accept=application/vnd.github+json,User-Agent=duckdb-api/0.6.0,"
     "X-GitHub-Api-Version=2022-11-28];response=source:root_object,records:$;"
     "features=retry:disabled,pagination:disabled;authentication=requirement:required,logical_credential:token,"
     "authenticator:bearer,destination:[scheme:https,host:api.github.com,port:443],placement:Authorization;"
@@ -276,10 +294,14 @@ const std::string AUTHENTICATED_SNAPSHOT =
 
 const std::string AUTHENTICATED_REPOSITORIES_SNAPSHOT =
     "relation=authenticated_repositories;schema=id:BIGINT!:$.id,full_name:VARCHAR!:$.full_name,"
-    "private:BOOLEAN!:$.private,fork:BOOLEAN!:$.fork,archived:BOOLEAN!:$.archived;"
+    "private:BOOLEAN!:$.private,fork:BOOLEAN!:$.fork,archived:BOOLEAN!:$.archived,"
+    "visibility:VARCHAR!:$.visibility;"
+    "predicate_mappings=[{column:visibility,operator:equals,literal:varchar:private,"
+    "operation:github_authenticated_repositories,input:rest_query:visibility=private,accuracy:superset,"
+    "evidence:github_rest_2022_11_28_repository_visibility}];"
     "operation=github_authenticated_repositories:fallback:zero_to_many:REST:GET:replay_safe;"
     "request=origin:[scheme:https,host:api.github.com,port:443],path:/user/repos,"
-    "query:[per_page=100,page=1],headers:[Accept=application/vnd.github+json,User-Agent=duckdb-api/0.5.0,"
+    "query:[per_page=100,page=1],headers:[Accept=application/vnd.github+json,User-Agent=duckdb-api/0.6.0,"
     "X-GitHub-Api-Version=2022-11-28];response=source:root_array,records:$;"
     "features=retry:disabled,pagination:link_header[relation:next,dependency:sequential,consistency:mutable,"
     "total:none,resume:none,page_size:per_page=100,page_number:page=1,increment:1,"
@@ -293,7 +315,7 @@ void TestCanonicalSnapshotsAndProvenance() {
 	const auto first = duckdb_api::BuildNativeGithubConnector();
 	const auto second = duckdb_api::BuildNativeGithubConnector();
 	const std::string expected =
-	    "origin=native_product_metadata;connector=github;version=0.5.0;network=schemes:[https],"
+	    "origin=native_product_metadata;connector=github;version=0.6.0;network=schemes:[https],"
 	    "hosts:[api.github.com],redirects:denied,private:denied,link_local:denied,loopback:denied,"
 	    "max_response_bytes:8388608;relations=[{" +
 	    ANONYMOUS_SNAPSHOT + "},{" + AUTHENTICATED_SNAPSHOT + "},{" + AUTHENTICATED_REPOSITORIES_SNAPSHOT + "}]";
@@ -339,6 +361,7 @@ int main() {
 	try {
 		duckdb_api_test::RunConnectorCatalogContractTests();
 		duckdb_api_test::RunConnectorPaginationContractTests();
+		duckdb_api_test::RunConnectorPredicateContractTests();
 		TestCatalogAndLookup();
 		TestAnonymousRelation();
 		TestAuthenticatedRelation();

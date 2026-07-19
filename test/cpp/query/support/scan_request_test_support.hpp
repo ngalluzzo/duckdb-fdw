@@ -80,7 +80,7 @@ inline void RequireFullSelectedSchema(const duckdb_api::ScanRequest &request,
 inline void RequireCanaryAbsent(const duckdb_api::ScanRequest &request, const std::string &canary) {
 	Require(request.connector_name.find(canary) == std::string::npos &&
 	            request.relation_name.find(canary) == std::string::npos &&
-	            request.predicate.find(canary) == std::string::npos,
+	            request.requested_predicate.Snapshot().find(canary) == std::string::npos,
 	        "credential canary entered scalar request identity or predicate");
 	for (const auto &value : request.explicit_inputs) {
 		Require(value.find(canary) == std::string::npos, "credential canary entered request explicit inputs");

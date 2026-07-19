@@ -6,4 +6,5 @@ add_library(
 configure_duckdb_api_cpp_target(duckdb_api_query_request_service)
 target_link_libraries(
   duckdb_api_query_request_service
-  PUBLIC duckdb_api_connector_metadata_service)
+  PUBLIC duckdb_api_connector_metadata_service
+         duckdb_api_relational_predicate_service)

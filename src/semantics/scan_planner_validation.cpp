@@ -187,10 +187,32 @@ void ValidateOperation(const CompiledRelation &relation, const CompiledNetworkPo
 void ValidateRequest(const CompiledConnector &connector, const CompiledRelation &relation, const ScanRequest &request) {
 	if (request.connector_name != connector.ConnectorName() || request.relation_name != relation.Name() ||
 	    !request.explicit_inputs.empty() || request.projected_columns != ProjectedColumnNames(relation.Columns()) ||
-	    request.predicate != "TRUE" || !request.orderings.empty() || request.has_limit || request.has_offset ||
-	    !request.capabilities.HasConservativeRelationalProfile()) {
+	    !request.orderings.empty() || request.has_limit || request.has_offset || request.capabilities.projection ||
+	    request.capabilities.filter || request.capabilities.ordering || request.capabilities.limit ||
+	    request.capabilities.offset || request.capabilities.progress || !request.capabilities.cancellation) {
 		throw std::logic_error("planner received a non-conservative scan request for the selected relation");
 	}
+	switch (request.retained_predicate_scope) {
+	case RetainedPredicateScope::UNRESTRICTED:
+	case RetainedPredicateScope::REQUESTED_PREDICATE:
+	case RetainedPredicateScope::COMPLETE_DUCKDB_FILTER:
+		break;
+	default:
+		throw std::logic_error("planner received an unknown retained-predicate scope");
+	}
+	const auto requested_kind = request.requested_predicate.Kind();
+	if ((requested_kind == RequestedPredicateKind::UNRESTRICTED &&
+	     request.retained_predicate_scope == RetainedPredicateScope::REQUESTED_PREDICATE) ||
+	    (requested_kind == RequestedPredicateKind::VISIBILITY_EQUALS_PRIVATE &&
+	     request.retained_predicate_scope == RetainedPredicateScope::UNRESTRICTED)) {
+		throw std::logic_error("planner received contradictory requested and retained predicate states");
+	}
+	switch (requested_kind) {
+	case RequestedPredicateKind::UNRESTRICTED:
+	case RequestedPredicateKind::VISIBILITY_EQUALS_PRIVATE:
+		return;
+	}
+	throw std::logic_error("planner received an unknown requested-predicate state");
 }
 
 void ValidateAuthentication(const CompiledRelation &relation, const ScanRequest &request) {

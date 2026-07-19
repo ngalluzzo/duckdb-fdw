@@ -19,7 +19,7 @@ EXPECTED_STATIC_SUMMARY = {
         "installed": False,
         "loaded": True,
         "name": "duckdb_api",
-        "version": "0.5.0",
+        "version": "0.6.0",
     },
     "relation": {
         "connector": "github",
@@ -35,7 +35,7 @@ EXPECTED_STATIC_SUMMARY = {
 EXPECTED_FAILURE = "Binder Error: [duckdb_api][bind] unknown connector identifier"
 EXPECTED_REPOSITORY_SQL = " ".join(
     (
-        "DESCRIBE SELECT id, full_name, private, fork, archived",
+        "DESCRIBE SELECT id, full_name, private, fork, archived, visibility",
         "FROM duckdb_api_scan(",
         "connector := 'github',",
         "relation := 'authenticated_repositories',",
@@ -47,6 +47,13 @@ EXPECTED_REPOSITORY_SQL = " ".join(
         "relation := 'authenticated_repositories',",
         "secret := 'github_default'",
         ");",
+        "SELECT count(*) AS private_repository_count",
+        "FROM duckdb_api_scan(",
+        "connector := 'github',",
+        "relation := 'authenticated_repositories',",
+        "secret := 'github_default'",
+        ")",
+        "WHERE visibility = 'private';",
     )
 )
 FAILURE_PROGRAM = r'''
@@ -125,12 +132,14 @@ def validate_repository_runner_policy(source: str) -> None:
         and isinstance(node.func.value, ast.Name)
         and node.func.value.id == "connection"
     ]
-    if len(execute_calls) != 6:
+    if len(execute_calls) != 7:
         raise AssertionError("repository runner SQL execution inventory drifted")
     execute_sources = [ast.get_source_segment(source, node) or "" for node in execute_calls]
-    if sum("statements[0]" in value for value in execute_sources) != 1 or sum(
-        "statements[1]" in value for value in execute_sources
-    ) != 1:
+    statement_calls = [
+        sum(f"statements[{index}]" in value for value in execute_sources)
+        for index in range(3)
+    ]
+    if statement_calls != [1, 1, 1]:
         raise AssertionError("repository runner no longer executes only accepted result SQL")
 
     prints = [
@@ -160,6 +169,7 @@ def validate_repository_runner_policy(source: str) -> None:
         "artifact",
         "extension",
         "relation",
+        "private_repository_count",
         "repository_count",
         "request_profile",
         "schema",
@@ -294,7 +304,8 @@ def main() -> int:
             )
         for fragment in (
             "getpass.getpass",
-            'EXPECTED_EXTENSION = ("duckdb_api", "0.5.0"',
+            'EXPECTED_EXTENSION = ("duckdb_api", "0.6.0"',
+            '"private_repository_count": private_repository_count',
             '"repository_count": repository_count',
             '"request_profile": {',
         ):
@@ -305,7 +316,7 @@ def main() -> int:
         repository_sql = repositories_sql.read_text(encoding="utf-8")
         if normalize_repository_sql(repository_sql) != EXPECTED_REPOSITORY_SQL:
             raise AssertionError(
-                "repository example must contain exactly DESCRIBE plus count-only SQL"
+                "repository example must contain exactly the privacy-safe schema and count SQL"
             )
 
         failure = run(

@@ -133,9 +133,6 @@ void TestUnavailableRelationalCounterexamples() {
 	request.projected_columns[0] = relation.Columns().back().name;
 	RequireRequestRejected(connector, request, "a mismatched selected schema");
 	request = valid;
-	request.predicate = "public_id > 1";
-	RequireRequestRejected(connector, request, "a predicate unavailable from the adapter");
-	request = valid;
 	request.orderings.push_back("public_id");
 	RequireRequestRejected(connector, request, "ordering unavailable from the adapter");
 	request = valid;
@@ -311,8 +308,13 @@ void TestPaginationRequiresExplicitSupportedProfile() {
 
 } // namespace
 
+void RunPredicatePlannerTests();
+void RunRelationalPredicateTests();
+
 int main() {
 	try {
+		RunRelationalPredicateTests();
+		RunPredicatePlannerTests();
 		TestExactSelectionHasNoFallback();
 		TestReferenceRequirementMatrix();
 		TestSecretManagerCapabilityIsRequirementScoped();

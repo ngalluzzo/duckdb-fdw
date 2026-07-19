@@ -8,12 +8,14 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <string>
 #include <utility>
 
 namespace duckdb {
 namespace {
 
 static const char CONTROLLED_PORT_ENV[] = "DUCKDB_API_CONTROLLED_PORT";
+static const char CONTROLLED_PREDICATE_MAPPING_ENV[] = "DUCKDB_API_CONTROLLED_PREDICATE_MAPPING";
 
 uint16_t RequiredControlledPort() {
 	const auto *value = std::getenv(CONTROLLED_PORT_ENV);
@@ -35,6 +37,17 @@ uint16_t RequiredControlledPort() {
 		throw InvalidInputException("[duckdb_api][controlled] private service port is invalid");
 	}
 	return static_cast<uint16_t>(port);
+}
+
+bool PredicateMappingAvailable() {
+	const auto *value = std::getenv(CONTROLLED_PREDICATE_MAPPING_ENV);
+	if (!value || std::string(value) == "present") {
+		return true;
+	}
+	if (std::string(value) == "absent") {
+		return false;
+	}
+	throw InvalidInputException("[duckdb_api][controlled] private predicate-mapping profile is invalid");
 }
 
 const char *InitializationStageName(duckdb_api::ErrorStage stage) {
@@ -64,7 +77,7 @@ const char *InitializationStageName(duckdb_api::ErrorStage stage) {
 void LoadControlledProduct(ExtensionLoader &loader) {
 	const auto port = RequiredControlledPort();
 	try {
-		auto product = duckdb_api_test::BuildControlledProductComposition(port);
+		auto product = duckdb_api_test::BuildControlledProductComposition(port, PredicateMappingAvailable());
 		RegisterDuckdbApi(loader, std::move(product.connector), std::move(product.executor));
 	} catch (const duckdb_api::ExecutionError &error) {
 		if (error.Stage() == duckdb_api::ErrorStage::INTERNAL) {

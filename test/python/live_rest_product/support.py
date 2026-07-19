@@ -367,7 +367,7 @@ def assert_exact_request(server: OracleServer) -> None:
     required = {
         "host": [f"127.0.0.1:{server.server_port}"],
         "accept": ["application/vnd.github+json"],
-        "user-agent": ["duckdb-api/0.5.0"],
+        "user-agent": ["duckdb-api/0.6.0"],
         "x-github-api-version": ["2022-11-28"],
     }
     for name, expected in required.items():

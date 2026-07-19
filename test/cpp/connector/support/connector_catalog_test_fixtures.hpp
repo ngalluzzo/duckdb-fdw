@@ -42,4 +42,14 @@ BuildPaginationPlannerCandidate(std::uint64_t max_pages, std::uint64_t response_
 // carries no credential value or execution authority.
 duckdb_api::CompiledConnector BuildDisabledRootArrayRepositoryCandidate();
 
+// Valid mapping decoys for consumer tests. Each factory exposes only public
+// immutable catalog access and deliberately publishes no predicate mapping:
+// the first preserves every native catalog fact except mapping availability,
+// the second varies the schema, and the third varies the operation. Consumers
+// must not infer capability from relation, column, extractor, operation, or
+// request names.
+duckdb_api::CompiledConnector BuildPredicateMappingAbsentCatalogFixture();
+duckdb_api::CompiledConnector BuildPredicateSchemaVariationCatalogFixture();
+duckdb_api::CompiledConnector BuildPredicateOperationVariationCatalogFixture();
+
 } // namespace duckdb_api_test

@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <type_traits>
 
 namespace {
 
@@ -18,6 +19,11 @@ using duckdb_api_test::GeneratedHttpBearerToken;
 using duckdb_api_test::ManualHttpExecutionControl;
 using duckdb_api_test::Require;
 using duckdb_api_test::RequireHttpExecutionError;
+
+static_assert(std::is_copy_constructible<duckdb_api::internal::AdmittedRepositoryRequestProfile>::value,
+              "admitted repository profiles must support stream ownership copies");
+static_assert(!std::is_copy_assignable<duckdb_api::internal::AdmittedRepositoryRequestProfile>::value,
+              "admitted repository profiles must remain immutable after admission");
 
 void RequirePlanDeniedBeforeTransport(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
                                       const duckdb_api::ScanPlan &plan, bool authenticated, uint64_t suffix,
@@ -186,6 +192,27 @@ void TestProviderOwnedPlanDenialMatrix() {
 		RequirePlanDeniedBeforeTransport(runtime, BuildResourcePlanCounterexample("fixture_secret", resources[index]),
 		                                 true, suffix++, "resource " + std::to_string(index));
 	}
+
+	const RepositoryPlanCounterexample repositories[] = {
+	    RepositoryPlanCounterexample::MISSING_VISIBILITY_COLUMN,
+	    RepositoryPlanCounterexample::VISIBILITY_NOT_TRAILING,
+	    RepositoryPlanCounterexample::VISIBILITY_NULLABLE,
+	    RepositoryPlanCounterexample::VISIBILITY_WRONG_TYPE,
+	    RepositoryPlanCounterexample::VISIBILITY_WRONG_EXTRACTOR,
+	    RepositoryPlanCounterexample::SELECTIVE_REMOTE_TRUE,
+	    RepositoryPlanCounterexample::SELECTIVE_ACCURACY_UNSUPPORTED,
+	    RepositoryPlanCounterexample::SELECTIVE_RESIDUAL_TRUE,
+	    RepositoryPlanCounterexample::SELECTIVE_RESIDUAL_OWNER_UNKNOWN,
+	    RepositoryPlanCounterexample::SELECTIVE_FILTER_OWNER_UNKNOWN,
+	    RepositoryPlanCounterexample::SELECTIVE_REMOTE_ORDERING_UNKNOWN,
+	    RepositoryPlanCounterexample::UNKNOWN_CONDITIONAL_INPUT,
+	    RepositoryPlanCounterexample::BASELINE_REMOTE_VISIBILITY};
+	for (std::size_t index = 0; index < sizeof(repositories) / sizeof(repositories[0]); index++) {
+		const auto runtime = BuildControlledHttpRuntime();
+		RequirePlanDeniedBeforeTransport(runtime,
+		                                 BuildRepositoryPlanCounterexample("fixture_secret", repositories[index]), true,
+		                                 suffix++, "repository " + std::to_string(index));
+	}
 }
 
 void TestAuthorizationAlternativeMismatches() {
@@ -217,7 +244,7 @@ duckdb_api::internal::HttpRequest FixedAuthenticatedRequest() {
 	request.port = 443;
 	request.target = "/user";
 	request.headers = {{"Accept", "application/vnd.github+json"},
-	                   {"User-Agent", "duckdb-api/0.5.0"},
+	                   {"User-Agent", "duckdb-api/0.6.0"},
 	                   {"X-GitHub-Api-Version", "2022-11-28"}};
 	return request;
 }
@@ -275,6 +302,50 @@ void TestExecutionProfileNeverWidensRecordAuthority() {
 	    duckdb_api::ErrorStage::INTERNAL);
 }
 
+void TestRepositoryAdmissionProducesOneClosedRequestProfile() {
+	const duckdb_api::internal::HttpExecutionProfile execution_profile {duckdb_api::PlannedUrlScheme::HTTPS,
+	                                                                    "api.github.com",
+	                                                                    443,
+	                                                                    false,
+	                                                                    false,
+	                                                                    false,
+	                                                                    duckdb_api::MAX_EXECUTION_MILLISECONDS,
+	                                                                    100};
+	auto base = duckdb_api::internal::TryAdmitRepositoryHttpPlan(
+	    duckdb_api_test::BuildValidAuthenticatedRepositoriesPlanFixture("fixture_secret"), execution_profile);
+	auto selective = duckdb_api::internal::TryAdmitRepositoryHttpPlan(
+	    duckdb_api_test::BuildVisibilityPrivatePlanFixture("fixture_secret"), execution_profile);
+	auto selective_complete = duckdb_api::internal::TryAdmitRepositoryHttpPlan(
+	    duckdb_api_test::BuildVisibilityPrivateCompleteResidualPlanFixture("fixture_secret"), execution_profile);
+	auto fallback_complete = duckdb_api::internal::TryAdmitRepositoryHttpPlan(
+	    duckdb_api_test::BuildCompleteResidualFallbackPlanFixture("fixture_secret"), execution_profile);
+	Require(base && selective && selective_complete && fallback_complete && base->Columns().size() == 6 &&
+	            base->Columns()[5].name == "visibility" && base->Columns()[5].kind == duckdb_api::ValueKind::VARCHAR &&
+	            base->Method() == "GET" && base->Scheme() == "https" && base->Host() == "api.github.com" &&
+	            base->Port() == 443 && base->Path() == "/user/repos" && base->Headers().size() == 3 &&
+	            base->PageSizeParameter() == "per_page" && base->PageSize() == 100 &&
+	            base->PageNumberParameter() == "page" && base->FirstPage() == 1 && base->PageIncrement() == 1 &&
+	            base->MaxPages() == 32 &&
+	            base->ConditionalInput() == duckdb_api::internal::AdmittedRepositoryConditionalInput::NONE &&
+	            selective->ConditionalInput() ==
+	                duckdb_api::internal::AdmittedRepositoryConditionalInput::VISIBILITY_PRIVATE &&
+	            selective_complete->ConditionalInput() ==
+	                duckdb_api::internal::AdmittedRepositoryConditionalInput::VISIBILITY_PRIVATE &&
+	            fallback_complete->ConditionalInput() == duckdb_api::internal::AdmittedRepositoryConditionalInput::NONE,
+	        "repository admission did not produce the complete closed immutable profile");
+	Require(duckdb_api::internal::BuildAdmittedRepositoryPageRequest(*base, 2).target ==
+	                "/user/repos?per_page=100&page=2" &&
+	            duckdb_api::internal::BuildAdmittedRepositoryPageRequest(*fallback_complete, 2).target ==
+	                "/user/repos?per_page=100&page=2" &&
+	            duckdb_api::internal::BuildAdmittedRepositoryPageRequest(*selective, 2).target ==
+	                "/user/repos?per_page=100&page=2&visibility=private" &&
+	            duckdb_api::internal::BuildAdmittedRepositoryPageRequest(*selective_complete, 2).target ==
+	                "/user/repos?per_page=100&page=2&visibility=private",
+	        "admitted request builder did not distinguish absent and selected conditional input");
+	RequireHttpExecutionError([&]() { (void)duckdb_api::internal::BuildAdmittedRepositoryPageRequest(*selective, 0); },
+	                          duckdb_api::ErrorStage::POLICY);
+}
+
 void TestNullTransportRejected() {
 	RequireHttpExecutionError(
 	    [&]() { duckdb_api::internal::BuildHttpScanExecutor(std::unique_ptr<duckdb_api::internal::HttpTransport>()); },
@@ -289,6 +360,7 @@ int main() {
 		TestAuthorizationAlternativeMismatches();
 		TestFixedAuthenticatorRevalidatesFinalRequest();
 		TestExecutionProfileNeverWidensRecordAuthority();
+		TestRepositoryAdmissionProducesOneClosedRequestProfile();
 		TestNullTransportRejected();
 		std::cout << "HTTP scan executor policy tests passed" << std::endl;
 		return EXIT_SUCCESS;

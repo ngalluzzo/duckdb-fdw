@@ -15,7 +15,7 @@ int main() {
 	try {
 		duckdb_api_test::ControlledSocketService service(duckdb_api_test::ControlledSocketMode::PAGINATED_REPOSITORIES);
 		const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
-		const auto plan = duckdb_api_test::BuildAuthenticatedRepositoriesRuntimePlan();
+		const auto plan = duckdb_api_test::BuildVisibilityPrivateRuntimePlan();
 		duckdb_api_test::ManualControl control;
 		auto token = duckdb_api_test::RuntimeCurlBearerToken(801);
 		const auto authorization_header = "Authorization: Bearer " + token + "\r\n";
@@ -38,7 +38,7 @@ int main() {
 		for (std::size_t index = 0; index < requests.size(); index++) {
 			const auto target =
 			    "GET /user/repos?per_page=100&page=" + std::to_string(static_cast<uint64_t>(index + 1)) +
-			    " HTTP/1.1\r\n";
+			    "&visibility=private HTTP/1.1\r\n";
 			duckdb_api_test::Require(requests[index].find(target) == 0 &&
 			                             requests[index].find(authorization_header) != std::string::npos,
 			                         "real curl did not emit the canonical increasing target with one bearer header");

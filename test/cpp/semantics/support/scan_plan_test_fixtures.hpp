@@ -116,10 +116,34 @@ enum class ResourcePlanCounterexample {
 	CONCURRENCY_WIDENED
 };
 
+// Closed repository-plan mutations used to prove that Runtime admits only the
+// two remote candidates, each with a legal DuckDB-owned residual scope. These
+// values expose no general construction API.
+enum class RepositoryPlanCounterexample {
+	MISSING_VISIBILITY_COLUMN,
+	VISIBILITY_NOT_TRAILING,
+	VISIBILITY_NULLABLE,
+	VISIBILITY_WRONG_TYPE,
+	VISIBILITY_WRONG_EXTRACTOR,
+	SELECTIVE_REMOTE_TRUE,
+	SELECTIVE_ACCURACY_UNSUPPORTED,
+	SELECTIVE_RESIDUAL_TRUE,
+	SELECTIVE_RESIDUAL_OWNER_UNKNOWN,
+	SELECTIVE_FILTER_OWNER_UNKNOWN,
+	SELECTIVE_REMOTE_ORDERING_UNKNOWN,
+	UNKNOWN_CONDITIONAL_INPUT,
+	BASELINE_REMOTE_VISIBILITY
+};
+
 duckdb_api::ScanPlan BuildValidAnonymousPlanFixture();
 duckdb_api::ScanPlan BuildValidAuthenticatedPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidPaginatedPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::string &exact_logical_secret_name);
+// Closed RFC 0008 plan-only fixture. Runtime consumers receive the typed
+// conditional input and classification without Connector or Query dependencies.
+duckdb_api::ScanPlan BuildVisibilityPrivatePlanFixture(const std::string &exact_logical_secret_name);
+duckdb_api::ScanPlan BuildVisibilityPrivateCompleteResidualPlanFixture(const std::string &exact_logical_secret_name);
+duckdb_api::ScanPlan BuildCompleteResidualFallbackPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildPaginationPlanCounterexample(const std::string &exact_logical_secret_name,
                                                        PaginationPlanCounterexample counterexample);
 
@@ -137,5 +161,7 @@ duckdb_api::ScanPlan BuildFeaturePlanCounterexample(const std::string &exact_log
                                                     FeaturePlanCounterexample counterexample);
 duckdb_api::ScanPlan BuildResourcePlanCounterexample(const std::string &exact_logical_secret_name,
                                                      ResourcePlanCounterexample counterexample);
+duckdb_api::ScanPlan BuildRepositoryPlanCounterexample(const std::string &exact_logical_secret_name,
+                                                       RepositoryPlanCounterexample counterexample);
 
 } // namespace duckdb_api_test

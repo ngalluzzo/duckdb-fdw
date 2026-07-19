@@ -278,8 +278,12 @@ public:
 
 	std::unique_ptr<BatchStream> Open(const ScanPlan &plan, ExecutionControl &control) const override {
 		CheckCancellation(control);
+		if (TryAdmitRepositoryHttpPlan(plan, profile)) {
+			throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
+			                     "authenticated execution requires a bearer authorization capability");
+		}
 		AdmittedHttpOperation installed = AdmittedHttpOperation::ANONYMOUS_SEARCH;
-		if (!TryAdmitHttpPlan(plan, profile, installed)) {
+		if (!TryAdmitSingleResponseHttpPlan(plan, profile, installed)) {
 			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
 		}
 		if (installed != AdmittedHttpOperation::ANONYMOUS_SEARCH) {
@@ -292,17 +296,18 @@ public:
 protected:
 	std::unique_ptr<BatchStream> OpenAuthorizationEnvelope(const ScanPlan &plan, ScanAuthorization authorization,
 	                                                       ExecutionControl &control) const override {
-		AdmittedHttpOperation installed = AdmittedHttpOperation::ANONYMOUS_SEARCH;
-		if (!TryAdmitHttpPlan(plan, profile, installed)) {
-			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
-		}
-		if (installed == AdmittedHttpOperation::AUTHENTICATED_REPOSITORIES) {
+		auto repository_profile = TryAdmitRepositoryHttpPlan(plan, profile);
+		if (repository_profile) {
 			if (AlternativeOf(authorization) != AuthorizationAlternative::GITHUB_USER_BEARER) {
 				throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
 				                     "authorization capability does not match the scan plan");
 			}
-			return OpenAuthenticatedRepositoriesScan(plan, std::move(authorization), transport,
-			                                         profile.max_wall_milliseconds, control);
+			return OpenAuthenticatedRepositoriesScan(plan, std::move(repository_profile), std::move(authorization),
+			                                         transport, profile.max_wall_milliseconds, control);
+		}
+		AdmittedHttpOperation installed = AdmittedHttpOperation::ANONYMOUS_SEARCH;
+		if (!TryAdmitSingleResponseHttpPlan(plan, profile, installed)) {
+			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
 		}
 		const auto alternative = AlternativeOf(authorization);
 		const bool matches = (installed == AdmittedHttpOperation::ANONYMOUS_SEARCH &&

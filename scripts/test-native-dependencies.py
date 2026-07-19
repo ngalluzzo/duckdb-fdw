@@ -48,7 +48,7 @@ def fake_sdk(root: pathlib.Path) -> pathlib.Path:
 
 
 def fake_pins(sdk: pathlib.Path) -> dict:
-    pins = json.loads((ROOT / "release/0.5.0/pins.json").read_text())
+    pins = json.loads((ROOT / "release/0.6.0/pins.json").read_text())
     sdk_pins = pins["system_dependencies"]["macos_sdk"]
     sdk_pins["curl_headers_sha256"] = VERIFIER.tree_digest(
         sdk / sdk_pins["curl_header_root"]
@@ -59,7 +59,7 @@ def fake_pins(sdk: pathlib.Path) -> dict:
 
 def verify_inputs(pins: dict, sdk: pathlib.Path) -> dict:
     return VERIFIER.verify_inputs(
-        pins, sdk, "26.5.1", "25F80", "arm64", "15.5", "24F74"
+        pins, sdk, "26.5.2", "25F84", "arm64", "15.5", "24F74"
     )
 
 
@@ -75,8 +75,8 @@ class NativeDependencyTests(unittest.TestCase):
 
     def assert_rejected(self, pins: dict, message: str, **observed: str) -> None:
         values = {
-            "host_version": "26.5.1",
-            "host_build": "25F80",
+            "host_version": "26.5.2",
+            "host_build": "25F84",
             "architecture": "arm64",
             "sdk_version": "15.5",
             "sdk_build": "24F74",
@@ -100,8 +100,8 @@ class NativeDependencyTests(unittest.TestCase):
                 "inputs",
                 str(pins_path),
                 str(self.sdk),
-                "26.5.1",
-                "25F80",
+                "26.5.2",
+                "25F84",
                 "arm64",
                 "15.5",
                 "24F74",
@@ -114,8 +114,8 @@ class NativeDependencyTests(unittest.TestCase):
 
     def test_host_and_sdk_identity_drift_fail_closed(self) -> None:
         for key, value, message in (
-            ("host_version", "26.5.2", "host_version drifted"),
-            ("host_build", "25F81", "host_build drifted"),
+            ("host_version", "26.5.1", "host_version drifted"),
+            ("host_build", "25F80", "host_build drifted"),
             ("architecture", "x86_64", "architecture drifted"),
             ("sdk_version", "15.6", "sdk_version drifted"),
             ("sdk_build", "24F75", "sdk_build drifted"),

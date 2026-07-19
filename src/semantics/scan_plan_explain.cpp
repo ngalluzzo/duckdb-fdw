@@ -91,8 +91,33 @@ const char *PredicateName(PlannedPredicate predicate, BaseDomain domain) {
 		case BaseDomain::SUCCESSFUL_ROOT_OBJECT:
 			return "TRUE@successful_root_object";
 		}
+		throw std::logic_error("scan plan contains an unknown base domain for its unrestricted predicate");
+	case PlannedPredicate::VISIBILITY_EQUALS_PRIVATE:
+		return "visibility_equals_private";
+	case PlannedPredicate::COMPLETE_DUCKDB_FILTER:
+		return "complete_duckdb_filter";
 	}
 	throw std::logic_error("scan plan contains an unknown predicate classification");
+}
+
+const char *AccuracyName(RemotePredicateAccuracy accuracy) {
+	switch (accuracy) {
+	case RemotePredicateAccuracy::UNSUPPORTED:
+		return "unsupported";
+	case RemotePredicateAccuracy::SUPERSET:
+		return "superset";
+	}
+	throw std::logic_error("scan plan contains an unknown remote-predicate accuracy");
+}
+
+const char *ConditionalInputName(PlannedConditionalInput input) {
+	switch (input) {
+	case PlannedConditionalInput::NONE:
+		return "none";
+	case PlannedConditionalInput::VISIBILITY_PRIVATE:
+		return "visibility_private";
+	}
+	throw std::logic_error("scan plan contains an unknown conditional input");
 }
 
 const char *PaginationStrategyName(PlannedPaginationStrategy strategy) {
@@ -286,10 +311,12 @@ std::string ScanPlan::Snapshot() const {
 	       << ",records:" << operation.records_extractor << ";projection=";
 	AppendColumns(result, output_columns);
 	result << ";remote_predicate=" << PredicateName(remote_predicate, domain)
+	       << ";remote_accuracy=" << AccuracyName(remote_accuracy)
 	       << ";residual_predicate=" << PredicateName(residual_predicate, domain)
-	       << ";residual_owner=" << OwnerName(residual_owner) << ";owners=filter:" << OwnerName(ownership.filter)
-	       << ",ordering:" << OwnerName(ownership.ordering) << ",limit:" << OwnerName(ownership.limit)
-	       << ",offset:" << OwnerName(ownership.offset)
+	       << ";residual_owner=" << OwnerName(residual_owner)
+	       << ";conditional_input=" << ConditionalInputName(conditional_input)
+	       << ";owners=filter:" << OwnerName(ownership.filter) << ",ordering:" << OwnerName(ownership.ordering)
+	       << ",limit:" << OwnerName(ownership.limit) << ",offset:" << OwnerName(ownership.offset)
 	       << ";delegation=remote_ordering:" << DelegationName(remote_ordering)
 	       << ",runtime_ordering:" << DelegationName(runtime_ordering)
 	       << ",remote_limit:" << DelegationName(remote_limit) << ",remote_offset:" << DelegationName(remote_offset)

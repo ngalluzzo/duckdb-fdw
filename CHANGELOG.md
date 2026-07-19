@@ -7,6 +7,27 @@ This file records user-visible changes to duckdb-fdw.
 ### Added
 
 - The project is now distributed under the MIT License.
+- `visibility VARCHAR` as a required trailing column on
+  `github.authenticated_repositories`.
+- Predicate-selective repository traversal for the exact structured predicate
+  `visibility = 'private'`. Every page carries `visibility=private`, while
+  DuckDB retains and evaluates the original predicate.
+- `EXPLAIN` fields for the selected remote predicate, its accuracy, the
+  residual predicate and owner, and the safe classification reason.
+
+### Changed
+
+- The working extension identity advances to the unreleased `0.6.0` line. The
+  published `0.5.0` source, contract, and release records remain immutable.
+- Unsupported, ambiguous, `NULL`, and differently valued predicates continue
+  to traverse the complete repository relation and are evaluated by DuckDB.
+
+### Limitations
+
+- The only remote predicate optimization is
+  `github.authenticated_repositories.visibility = 'private'`. Projection,
+  ordering, limit, offset, and every other predicate remain local; this slice
+  does not complete the full `0.6.0` relational-trust milestone.
 
 ## 0.5.0 — 2026-07-18
 

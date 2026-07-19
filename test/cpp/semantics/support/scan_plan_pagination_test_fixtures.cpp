@@ -1,8 +1,5 @@
 #include "semantics/support/scan_plan_test_fixtures.hpp"
 
-#include "connector/support/connector_catalog_test_fixtures.hpp"
-#include "duckdb_api/scan_planner.hpp"
-#include "query/support/live_scan_request.hpp"
 #include "semantics/support/scan_plan_test_access.hpp"
 
 #include <stdexcept>
@@ -52,26 +49,6 @@ duckdb_api::ScanPlan ScanPlanTestAccess::Pagination(duckdb_api::ScanPlan plan,
 		throw std::invalid_argument("unknown closed pagination plan counterexample");
 	}
 	return plan;
-}
-
-duckdb_api::ScanPlan BuildValidPaginatedPlanFixture(const std::string &exact_logical_secret_name) {
-	const auto connector = BuildPaginationConnectorCatalogFixture();
-	const auto *relation = connector.FindRelation(PAGINATION_LINK_RELATION);
-	if (relation == nullptr) {
-		throw std::logic_error("pagination fixture omitted its exact Link relation");
-	}
-	return duckdb_api::BuildConservativeScanPlan(
-	    connector, BuildAuthenticatedScanRequest(connector, relation->Name(), exact_logical_secret_name));
-}
-
-duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::string &exact_logical_secret_name) {
-	const auto connector = duckdb_api::BuildNativeGithubConnector();
-	const auto *relation = connector.FindRelation("authenticated_repositories");
-	if (relation == nullptr) {
-		throw std::logic_error("authenticated repositories fixture omitted its exact relation");
-	}
-	return duckdb_api::BuildConservativeScanPlan(
-	    connector, BuildAuthenticatedScanRequest(connector, relation->Name(), exact_logical_secret_name));
 }
 
 duckdb_api::ScanPlan BuildPaginationPlanCounterexample(const std::string &exact_logical_secret_name,

@@ -40,7 +40,7 @@ reconstruct connector or relational meaning.
 | Installed connector metadata, relation schemas, pagination declarations, or resource ceilings | [`connector/`](connector/) | `src/include/duckdb_api/connector*.hpp` | `test/cpp/connector/` |
 | Planning, conservative fallback, plan validation, or plan explanation | [`semantics/`](semantics/) | `scan_plan.hpp`, `scan_planner.hpp` | `test/cpp/semantics/` |
 | Authentication execution, HTTP, decoding, pagination, policy, resources, cancellation, or streams | [`runtime/`](runtime/) | `authorization.hpp`, `execution.hpp`, `http_runtime.hpp` | `test/cpp/runtime/` |
-| DuckDB registration, bind/init/scan callbacks, secrets, request construction, or installed composition | [`query/`](query/) | `scan_request.hpp`, `duckdb_secret.hpp`, `product_composition.hpp`, `duckdb_api_extension.hpp` | `test/cpp/query/` |
+| DuckDB registration, bind/init/scan callbacks, secrets, protocol-neutral `ScanRequest` construction, or installed composition | [`query/`](query/) | `scan_request.hpp`, `duckdb_secret.hpp`, `product_composition.hpp`, `duckdb_api_extension.hpp` | `test/cpp/query/` |
 
 Stable consumer headers live directly under `src/include/duckdb_api/`; the
 DuckDB extension entry facade is the root-level

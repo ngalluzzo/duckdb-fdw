@@ -21,6 +21,7 @@ private:
 duckdb_api::ScanPlan BuildRuntimePlan();
 duckdb_api::ScanPlan BuildAuthenticatedRuntimePlan();
 duckdb_api::ScanPlan BuildAuthenticatedRepositoriesRuntimePlan();
+duckdb_api::ScanPlan BuildVisibilityPrivateRuntimePlan();
 std::string RuntimeCurlBearerToken(uint64_t suffix);
 
 void RequireExecutionError(const std::function<void()> &action, duckdb_api::ErrorStage stage,

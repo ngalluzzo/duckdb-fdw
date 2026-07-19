@@ -12,6 +12,49 @@ const char DISTINCT_SCHEMA_AUTHENTICATED_RELATION[] = "fixture_private_profile";
 const char PAGINATION_DECOY_RELATION[] = "fixture_page_shaped_unpaginated";
 const char PAGINATION_LINK_RELATION[] = "fixture_explicit_link_records";
 
+namespace {
+
+duckdb_api::CompiledConnector BuildPredicateDecoyCatalog(std::string connector_name,
+                                                         std::vector<duckdb_api::CompiledColumn> columns,
+                                                         std::string operation_name, std::string path) {
+	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledRestHost("api.github.com"), 443};
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    "authenticated_repositories", std::move(columns),
+	    duckdb_api::CompiledOperation {std::move(operation_name),
+	                                   true,
+	                                   duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	                                   duckdb_api::CompiledProtocol::REST,
+	                                   duckdb_api::CompiledHttpMethod::GET,
+	                                   duckdb_api::CompiledReplaySafety::SAFE,
+	                                   false,
+	                                   ConnectorCatalogTestAccess::SequentialLink("per_page", 100, "page", 1, 1, 2),
+	                                   {origin,
+	                                    std::move(path),
+	                                    {{"per_page", "100"}, {"page", "1"}},
+	                                    {{"X-Connector-Fixture", "predicate-decoy"}}},
+	                                   duckdb_api::CompiledResponseSource::ROOT_ARRAY,
+	                                   "$"},
+	    ConnectorCatalogTestAccess::RequiredBearer(),
+	    ConnectorCatalogTestAccess::PaginatedResources(4096, 8192, 100, 200, 512)));
+	return ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, std::move(connector_name), "test-1",
+	    std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"api.github.com"}, false, false, false, false, 4096});
+}
+
+std::vector<duckdb_api::CompiledColumn> PredicateRepositorySchema() {
+	return {{"id", "BIGINT", false, "$.id"},
+	        {"full_name", "VARCHAR", false, "$.full_name"},
+	        {"private", "BOOLEAN", false, "$.private"},
+	        {"fork", "BOOLEAN", false, "$.fork"},
+	        {"archived", "BOOLEAN", false, "$.archived"},
+	        {"visibility", "VARCHAR", false, "$.visibility"}};
+}
+
+} // namespace
+
 duckdb_api::CompiledConnector BuildDistinctSchemaConnectorCatalogFixture() {
 	const duckdb_api::CompiledRestOrigin github_origin = {duckdb_api::CompiledUrlScheme::HTTPS,
 	                                                      duckdb_api::CompiledRestHost("api.github.com"), 443};
@@ -163,6 +206,22 @@ duckdb_api::CompiledConnector BuildDisabledRootArrayRepositoryCandidate() {
 	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "github", "test-disabled-root-array",
 	    std::move(relations),
 	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"api.github.com"}, false, false, false, false, 8 * 1024 * 1024});
+}
+
+duckdb_api::CompiledConnector BuildPredicateMappingAbsentCatalogFixture() {
+	return ConnectorCatalogTestAccess::WithoutPredicateMappings(duckdb_api::BuildNativeGithubConnector());
+}
+
+duckdb_api::CompiledConnector BuildPredicateSchemaVariationCatalogFixture() {
+	auto columns = PredicateRepositorySchema();
+	columns.back() = {"repository_visibility", "VARCHAR", false, "$.visibility"};
+	return BuildPredicateDecoyCatalog("fixture_predicate_schema", std::move(columns),
+	                                  "github_authenticated_repositories", "/user/repos");
+}
+
+duckdb_api::CompiledConnector BuildPredicateOperationVariationCatalogFixture() {
+	return BuildPredicateDecoyCatalog("fixture_predicate_operation", PredicateRepositorySchema(),
+	                                  "fixture_repository_operation", "/fixtures/repositories");
 }
 
 } // namespace duckdb_api_test

@@ -1,8 +1,13 @@
 #include "duckdb_api_extension.hpp"
 
+#include "complex_filter_adapter.hpp"
+#include "table_function_bind_data.hpp"
+#include "table_function_plan_state.hpp"
+
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb_api/duckdb_secret.hpp"
 #include "duckdb_api/scan_planner.hpp"
 #include "duckdb_api/scan_request.hpp"
@@ -14,6 +19,8 @@
 
 namespace duckdb {
 namespace {
+
+using duckdb_api_query_internal::DuckdbApiBindData;
 
 // Call-scoped DuckDB coupling. Runtime receives only this non-owning control
 // interface and cannot retain ClientContext or throw a DuckDB exception.
@@ -46,21 +53,100 @@ struct DuckdbApiFunctionInfo : public TableFunctionInfo {
 	const std::shared_ptr<const duckdb_api::ScanExecutor> executor;
 };
 
-// Bind state retains one authoritative immutable plan and executor. The plan
-// owns the copied logical secret name; Query does not retain a second request
-// or resolve catalog state until each execution's global initialization.
-struct DuckdbApiBindData : public TableFunctionData {
-	DuckdbApiBindData(duckdb_api::ScanPlan plan_p, std::shared_ptr<const duckdb_api::ScanExecutor> executor_p)
-	    : plan(std::move(plan_p)), executor(std::move(executor_p)) {
+const char *PredicateName(duckdb_api::PlannedPredicate predicate) {
+	switch (predicate) {
+	case duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN:
+		return "unrestricted";
+	case duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE:
+		return "visibility_equals_private";
+	case duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER:
+		return "complete_duckdb_filter";
+	}
+	throw InternalException("duckdb_api scan plan contains an unknown predicate state");
+}
+
+const char *AccuracyName(duckdb_api::RemotePredicateAccuracy accuracy) {
+	switch (accuracy) {
+	case duckdb_api::RemotePredicateAccuracy::UNSUPPORTED:
+		return "unsupported";
+	case duckdb_api::RemotePredicateAccuracy::SUPERSET:
+		return "superset";
+	}
+	throw InternalException("duckdb_api scan plan contains an unknown remote accuracy");
+}
+
+const char *ResidualOwnerName(duckdb_api::RelationalOwner owner) {
+	switch (owner) {
+	case duckdb_api::RelationalOwner::DUCKDB:
+		return "duckdb";
+	}
+	throw InternalException("duckdb_api scan plan contains an unknown residual owner");
+}
+
+InsertionOrderPreservingMap<string> DuckdbApiToString(TableFunctionToStringInput &input) {
+	if (!input.bind_data) {
+		throw InternalException("duckdb_api explanation is missing bind data");
+	}
+	const auto &bind_data = input.bind_data->Cast<DuckdbApiBindData>();
+	const auto &plan = bind_data.plan_state.SelectedPlan();
+	InsertionOrderPreservingMap<string> result;
+	// These closed plan facts are safe explanation only. Query neither parses
+	// this rendering nor exposes request, credential, row, or received-URL data.
+	result["Relation"] = plan.RelationName();
+	result["Remote Predicate"] = PredicateName(plan.RemotePredicate());
+	result["Remote Accuracy"] = AccuracyName(plan.RemoteAccuracy());
+	result["Residual Predicate"] = PredicateName(plan.ResidualPredicate());
+	result["Residual Owner"] = ResidualOwnerName(plan.ResidualOwner());
+	result["Classification"] = plan.ClassificationReason();
+	return result;
+}
+
+void DuckdbApiPushdownComplexFilter(ClientContext &, LogicalGet &get, FunctionData *function_data,
+                                    vector<unique_ptr<Expression>> &filters) {
+	if (!function_data || !get.function.function_info) {
+		throw InternalException("duckdb_api complex-filter callback is missing immutable bind information");
+	}
+	auto &bind_data = function_data->Cast<DuckdbApiBindData>();
+	// DuckDB may re-optimize an execution-specific copy after replacing a
+	// prepared parameter with a typed constant. Rebuild from the retained
+	// baseline on every callback so each execution selects or falls back from
+	// its own structured expression without inheriting a prior value's plan.
+	auto candidate = bind_data.plan_state.BaselineRequest();
+	candidate.capabilities.selective_predicate = true;
+	candidate.capabilities.retains_predicate = true;
+	std::size_t recognized = 0;
+	std::size_t present = 0;
+	for (const auto &filter : filters) {
+		if (!filter) {
+			continue;
+		}
+		present++;
+		if (duckdb_api_query_internal::IsVisibilityEqualsPrivate(get, *filter)) {
+			recognized++;
+		}
+	}
+	if (recognized > 0) {
+		candidate.requested_predicate = duckdb_api::RequestedPredicate::VisibilityEqualsPrivate();
+		candidate.retained_predicate_scope = recognized == 1 && present == 1
+		                                         ? duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE
+		                                         : duckdb_api::RetainedPredicateScope::COMPLETE_DUCKDB_FILTER;
+	} else if (present > 0) {
+		candidate.retained_predicate_scope = duckdb_api::RetainedPredicateScope::COMPLETE_DUCKDB_FILTER;
 	}
 
-	unique_ptr<FunctionData> Copy() const override {
-		return make_uniq<DuckdbApiBindData>(plan, executor);
+	// The filter vector is intentionally untouched. DuckDB regenerates every
+	// expression as its own LogicalFilter because generic filter pushdown stays
+	// disabled. Build the complete replacement before changing selected state.
+	try {
+		auto &function_info = get.function.function_info->Cast<DuckdbApiFunctionInfo>();
+		auto selected_plan = duckdb_api::BuildConservativeScanPlan(function_info.connector, candidate);
+		bind_data.plan_state.ReplaceSelectedPlan(std::move(selected_plan));
+	} catch (const std::exception &) {
+		throw InvalidInputException("[duckdb_api][planning] selective predicate planning failed safely");
+	} catch (...) {
+		throw InvalidInputException("[duckdb_api][planning] selective predicate planning failed safely");
 	}
-
-	const duckdb_api::ScanPlan plan;
-	const std::shared_ptr<const duckdb_api::ScanExecutor> executor;
-};
+}
 
 // One DuckDB source task exclusively owns one mutable stream. Destruction is a
 // non-throwing finalizer for success, failure, early close, and connection
@@ -252,7 +338,7 @@ unique_ptr<FunctionData> DuckdbApiBind(ClientContext &, TableFunctionBindInput &
 		names.push_back(column.name);
 		return_types.push_back(PlannedLogicalType(column));
 	}
-	return make_uniq<DuckdbApiBindData>(std::move(plan), function_info.executor);
+	return make_uniq<DuckdbApiBindData>(std::move(request), std::move(plan), function_info.executor);
 }
 
 std::unique_ptr<duckdb_api::BatchStream> OpenAuthorizedStream(const DuckdbApiBindData &bind_data,
@@ -263,19 +349,19 @@ std::unique_ptr<duckdb_api::BatchStream> OpenAuthorizedStream(const DuckdbApiBin
 	if (control.IsCancellationRequested()) {
 		throw duckdb_api::ExecutionCancelled();
 	}
-	if (bind_data.plan.Authentication() == duckdb_api::FeatureState::ENABLED) {
-		const auto &reference = bind_data.plan.SecretReference();
+	const auto &plan = bind_data.plan_state.SelectedPlan();
+	if (plan.Authentication() == duckdb_api::FeatureState::ENABLED) {
+		const auto &reference = plan.SecretReference();
 		if (!reference.IsPresent()) {
 			throw std::logic_error("authenticated scan plan has no logical secret reference");
 		}
 		auto authorization = ResolveDuckdbApiSecret(context, reference.Name());
-		return bind_data.executor->OpenWithAuthorization(bind_data.plan, std::move(authorization), control);
+		return bind_data.executor->OpenWithAuthorization(plan, std::move(authorization), control);
 	}
-	if (bind_data.plan.Authentication() != duckdb_api::FeatureState::DISABLED) {
+	if (plan.Authentication() != duckdb_api::FeatureState::DISABLED) {
 		throw std::logic_error("scan plan has an unknown authentication state");
 	}
-	return bind_data.executor->OpenWithAuthorization(bind_data.plan, duckdb_api::ScanAuthorization::Anonymous(),
-	                                                 control);
+	return bind_data.executor->OpenWithAuthorization(plan, duckdb_api::ScanAuthorization::Anonymous(), control);
 }
 
 unique_ptr<GlobalTableFunctionState> DuckdbApiInit(ClientContext &context, TableFunctionInitInput &input) {
@@ -283,22 +369,25 @@ unique_ptr<GlobalTableFunctionState> DuckdbApiInit(ClientContext &context, Table
 	try {
 		DuckdbExecutionControl control(context);
 		auto stream = OpenAuthorizedStream(bind_data, context, control);
+		const auto &plan = bind_data.plan_state.SelectedPlan();
 		if (!stream) {
 			throw std::logic_error("scan executor returned no stream");
 		}
-		return make_uniq<DuckdbApiGlobalState>(std::move(stream), PlannedValueKinds(bind_data.plan),
-		                                       bind_data.plan.Budgets().batch_rows, bind_data.plan.ConnectorName(),
-		                                       bind_data.plan.RelationName());
+		return make_uniq<DuckdbApiGlobalState>(std::move(stream), PlannedValueKinds(plan), plan.Budgets().batch_rows,
+		                                       plan.ConnectorName(), plan.RelationName());
 	} catch (const duckdb_api::ExecutionCancelled &) {
 		ThrowCancellation(nullptr);
 	} catch (const duckdb_api::ExecutionError &error) {
-		ThrowExecutionError(error, bind_data.plan.ConnectorName(), bind_data.plan.RelationName());
+		const auto &plan = bind_data.plan_state.SelectedPlan();
+		ThrowExecutionError(error, plan.ConnectorName(), plan.RelationName());
 	} catch (const std::exception &) {
+		const auto &plan = bind_data.plan_state.SelectedPlan();
 		throw InvalidInputException("[duckdb_api][internal] connector=%s relation=%s: unexpected execution failure",
-		                            bind_data.plan.ConnectorName(), bind_data.plan.RelationName());
+		                            plan.ConnectorName(), plan.RelationName());
 	} catch (...) {
+		const auto &plan = bind_data.plan_state.SelectedPlan();
 		throw InvalidInputException("[duckdb_api][internal] connector=%s relation=%s: unexpected execution failure",
-		                            bind_data.plan.ConnectorName(), bind_data.plan.RelationName());
+		                            plan.ConnectorName(), plan.RelationName());
 	}
 }
 
@@ -380,6 +469,8 @@ void RegisterDuckdbApi(ExtensionLoader &loader, duckdb_api::CompiledConnector co
 	scan.projection_pushdown = false;
 	scan.filter_pushdown = false;
 	scan.filter_prune = false;
+	scan.pushdown_complex_filter = DuckdbApiPushdownComplexFilter;
+	scan.to_string = DuckdbApiToString;
 	scan.function_info = make_shared_ptr<DuckdbApiFunctionInfo>(std::move(connector), std::move(executor));
 	loader.RegisterFunction(std::move(scan));
 }

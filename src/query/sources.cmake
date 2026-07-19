@@ -7,6 +7,10 @@ set(QUERY_PRODUCT_COMPOSITION_SOURCES
     src/query/product_composition.cpp)
 set(QUERY_DUCKDB_SECRET_SOURCES
     src/query/duckdb/secret_integration.cpp)
+set(QUERY_DUCKDB_ADAPTER_SUPPORT_SOURCES
+    src/query/duckdb/complex_filter_adapter.cpp
+    src/query/duckdb/table_function_plan_state.cpp)
 set(QUERY_DUCKDB_ADAPTER_SOURCES
+    ${QUERY_DUCKDB_ADAPTER_SUPPORT_SOURCES}
     src/query/duckdb/table_function_adapter.cpp
     src/query/duckdb/extension_entrypoint.cpp)

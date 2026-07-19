@@ -13,7 +13,7 @@ namespace duckdb_api {
 class CompiledConnector;
 CompiledConnector BuildNativeGithubConnector();
 
-// Identifies how immutable metadata entered the product. The 0.5.0 native
+// Identifies how immutable metadata entered the product. The 0.6.0 native
 // catalog is repository-owned product metadata, not compiled package syntax,
 // package provenance, or a public connector-authoring/native ABI commitment.
 enum class CompiledConnectorOrigin { NATIVE_PRODUCT_METADATA };
@@ -172,6 +172,62 @@ struct CompiledOperation {
 	std::string records_extractor;
 };
 
+// Closed native predicate vocabulary. This first private pre-1.0 service is
+// deliberately narrower than connector-package predicate syntax: it can state
+// only equality to the required VARCHAR literal `private`, applied as one REST
+// query input. Relational Semantics owns implication, classification use, and
+// residual ownership; Connector only supplies validated immutable source facts.
+enum class CompiledPredicateOperator { EQUALS };
+enum class CompiledPredicateLiteral { VARCHAR_PRIVATE };
+enum class CompiledPredicateInputPlacement { REST_QUERY_PARAMETER };
+enum class CompiledPredicateAccuracy { EXACT, SUPERSET };
+
+// Proof identity accepted by RFC 0008. Keeping it closed prevents a native
+// declaration or test decoy from claiming an unreviewed upstream contract.
+enum class CompiledPredicateEvidence { GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY };
+
+// Immutable Connector Experience handoff for one conditional request input.
+// It carries no SQL text, DuckDB object, credential, mutable request, received
+// URL, pagination state, or runtime authority. Construction is restricted to
+// the native catalog and Connector-owned non-installable tests.
+class CompiledPredicateMapping {
+public:
+	CompiledPredicateMapping(const CompiledPredicateMapping &) = default;
+	CompiledPredicateMapping(CompiledPredicateMapping &&) = default;
+	CompiledPredicateMapping &operator=(const CompiledPredicateMapping &) = delete;
+	CompiledPredicateMapping &operator=(CompiledPredicateMapping &&) = delete;
+
+	const std::string &ColumnName() const;
+	CompiledPredicateOperator Operator() const;
+	CompiledPredicateLiteral Literal() const;
+	const std::string &OperationName() const;
+	CompiledPredicateInputPlacement InputPlacement() const;
+	const std::string &RemoteInputName() const;
+	const std::string &EncodedRemoteValue() const;
+	CompiledPredicateAccuracy Accuracy() const;
+	CompiledPredicateEvidence Evidence() const;
+
+private:
+	friend CompiledConnector BuildNativeGithubConnector();
+	friend class duckdb_api_test::ConnectorCatalogTestAccess;
+
+	CompiledPredicateMapping(std::string column_name, CompiledPredicateOperator predicate_operator,
+	                         CompiledPredicateLiteral literal, std::string operation_name,
+	                         CompiledPredicateInputPlacement input_placement, std::string remote_input_name,
+	                         std::string encoded_remote_value, CompiledPredicateAccuracy accuracy,
+	                         CompiledPredicateEvidence evidence);
+
+	std::string column_name;
+	CompiledPredicateOperator predicate_operator;
+	CompiledPredicateLiteral literal;
+	std::string operation_name;
+	CompiledPredicateInputPlacement input_placement;
+	std::string remote_input_name;
+	std::string encoded_remote_value;
+	CompiledPredicateAccuracy accuracy;
+	CompiledPredicateEvidence evidence;
+};
+
 // Connector policy only narrows host authority. Runtime intersects these facts
 // with host policy; the catalog does not grant network access.
 struct CompiledNetworkPolicy {
@@ -210,7 +266,7 @@ private:
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 
 	// An unpaginated declaration may inherit the connector response ceiling and
-	// always has identical page/scan record scopes. The native 0.5.0 relations
+	// always has identical page/scan record scopes. The native 0.6.0 relations
 	// instead use explicit response narrowings.
 	CompiledResourceCeilings(std::uint64_t max_records, std::uint64_t max_extracted_string_bytes);
 	CompiledResourceCeilings(std::uint64_t max_response_bytes_per_page, std::uint64_t max_response_bytes_per_scan,
@@ -275,6 +331,7 @@ public:
 
 	const std::string &Name() const;
 	const std::vector<CompiledColumn> &Columns() const;
+	const std::vector<CompiledPredicateMapping> &PredicateMappings() const;
 	const CompiledOperation &Operation() const;
 	const CompiledAuthenticationPolicy &Authentication() const;
 	const CompiledResourceCeilings &ResourceCeilings() const;
@@ -288,17 +345,19 @@ private:
 	friend CompiledConnector BuildNativeGithubConnector();
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 
-	CompiledRelation(std::string name, std::vector<CompiledColumn> columns, CompiledOperation operation,
+	CompiledRelation(std::string name, std::vector<CompiledColumn> columns,
+	                 std::vector<CompiledPredicateMapping> predicate_mappings, CompiledOperation operation,
 	                 CompiledAuthenticationPolicy authentication, CompiledResourceCeilings resource_ceilings);
 
 	std::string name;
 	std::vector<CompiledColumn> columns;
+	std::vector<CompiledPredicateMapping> predicate_mappings;
 	CompiledOperation operation;
 	CompiledAuthenticationPolicy authentication;
 	CompiledResourceCeilings resource_ceilings;
 };
 
-// Immutable Connector Experience service for the native 0.5.0 relation
+// Immutable Connector Experience service for the native 0.6.0 relation
 // catalog. Query and Semantics consume exact lookup and const accessors without
 // constructing policy internals. Copy construction supports immutable bind and
 // composition lifetimes; assignment and partial aggregate mutation are

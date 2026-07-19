@@ -1,5 +1,6 @@
 #include "duckdb_api/scan_planner.hpp"
 
+#include "predicate_classifier.hpp"
 #include "scan_planner_internal.hpp"
 
 #include <algorithm>
@@ -16,6 +17,7 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	using namespace scan_planner_internal;
 
 	const auto &relation = ValidateAndSelectRelation(connector, request);
+	const auto predicate_decision = predicate_classifier::Classify(relation, request);
 
 	ScanPlan result;
 	result.connector_name = connector.ConnectorName();
@@ -45,9 +47,11 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	for (const auto &column : relation.Columns()) {
 		result.output_columns.push_back({column.name, column.logical_type, column.nullable, column.extractor});
 	}
-	result.remote_predicate = PlannedPredicate::TRUE_FOR_BASE_DOMAIN;
-	result.residual_predicate = PlannedPredicate::TRUE_FOR_BASE_DOMAIN;
-	result.residual_owner = RelationalOwner::DUCKDB;
+	result.remote_predicate = predicate_decision.remote_predicate;
+	result.remote_accuracy = predicate_decision.remote_accuracy;
+	result.residual_predicate = predicate_decision.residual_predicate;
+	result.residual_owner = predicate_decision.residual_owner;
+	result.conditional_input = predicate_decision.conditional_input;
 	result.ownership = {RelationalOwner::DUCKDB, RelationalOwner::DUCKDB, RelationalOwner::DUCKDB,
 	                    RelationalOwner::DUCKDB};
 	result.remote_ordering = RelationalDelegation::NONE;
@@ -169,16 +173,19 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	if (result.domain == BaseDomain::PAGINATED_JSON_PATH_RECORDS ||
 	    result.domain == BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS) {
 		result.classification_reason =
-		    "accepted sequential page records define one duplicate-preserving mutable base-domain bag; traversal "
+		    predicate_decision.reason +
+		    "; accepted sequential page records define one duplicate-preserving mutable base-domain bag; traversal "
 		    "order is not DuckDB ordering; page and scan ceilings are not limits; DuckDB retains all relational "
 		    "operators";
 	} else if (result.domain == BaseDomain::SUCCESSFUL_ROOT_OBJECT) {
 		result.classification_reason =
-		    "successful root object defines exactly one base row; source cardinality is not a limit; DuckDB retains "
+		    predicate_decision.reason +
+		    "; successful root object defines exactly one base row; source cardinality is not a limit; DuckDB retains "
 		    "all relational operators";
 	} else {
 		result.classification_reason =
-		    "selected JSON-path records define the complete base domain; DuckDB retains all relational operators";
+		    predicate_decision.reason +
+		    "; selected JSON-path records define the complete base domain; DuckDB retains all relational operators";
 	}
 	return result;
 }

@@ -14,7 +14,7 @@ still under development.
 | --- | --- | --- |
 | `github.duckdb_login_search_page` | None | Up to three public GitHub users with `id`, `login`, and `site_admin` |
 | `github.authenticated_user` | Explicit temporary DuckDB secret | The current GitHub identity with `id`, `login`, and `site_admin` |
-| `github.authenticated_repositories` | Explicit temporary DuckDB secret | A bounded page chain of repositories with `id`, `full_name`, `private`, `fork`, and `archived` |
+| `github.authenticated_repositories` | Explicit temporary DuckDB secret | A bounded page chain of repositories with `id`, `full_name`, `private`, `fork`, `archived`, and `visibility` |
 
 The anonymous relation uses the current public SQL surface:
 
@@ -27,19 +27,23 @@ FROM duckdb_api_scan(
 ```
 
 These relations use fixed HTTPS operations and strict schemas. Bind,
-`DESCRIBE`, `EXPLAIN`, and `PREPARE` do not perform network I/O. Filtering,
-ordering, limits, and offsets are applied by DuckDB after the remote rows are
-read. Execution is bounded and fails the statement on malformed data, an
-invalid page transition, cancellation, or resource exhaustion; it does not
-return a complete-looking partial result.
+`DESCRIBE`, `EXPLAIN`, and `PREPARE` do not perform network I/O. DuckDB owns all
+filters, ordering, limits, and offsets. On the repository relation, the one
+supported predicate `visibility = 'private'` also narrows every remote request
+with `visibility=private`; DuckDB retains and evaluates the predicate. Other
+predicate shapes use the complete traversal and local filtering. `EXPLAIN`
+reports which path was selected.
 
-See the [0.5.0 release notes](docs/releases/0.5.0-notes.md) for the precise
-behavior and execution limits.
+Execution is bounded and fails the statement on malformed data, an invalid
+page transition, cancellation, or resource exhaustion; it does not return a
+complete-looking partial result. The [changelog](CHANGELOG.md) describes the
+current unreleased source. The [0.5.0 release notes](docs/releases/0.5.0-notes.md)
+remain the contract for the last published version.
 
 ## Quick start
 
 The supported source-build environment is deliberately narrow: Apple Silicon
-arm64, macOS 26.5.1 build `25F80`, and the pinned DuckDB 1.5.4 toolchain. The
+arm64, macOS 26.5.2 build `25F84`, and the pinned DuckDB 1.5.4 toolchain. The
 bootstrap rejects other hosts rather than implying compatibility that has not
 been tested. The first run downloads pinned, checksummed build dependencies.
 Before running it, install Python 3.14 and the Xcode Command Line Tools that
@@ -88,6 +92,19 @@ envelope, but never private repository rows or names.
 The underlying SQL is in
 [`examples/authenticated-user.sql`](examples/authenticated-user.sql) and
 [`examples/authenticated-repositories.sql`](examples/authenticated-repositories.sql).
+
+After creating the temporary secret, the selective repository query is:
+
+```sql
+SELECT id, full_name, visibility
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_repositories',
+    secret := 'github_default'
+)
+WHERE visibility = 'private'
+ORDER BY id;
+```
 
 ## Development
 

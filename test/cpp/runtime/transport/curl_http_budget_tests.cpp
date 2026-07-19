@@ -32,7 +32,7 @@ uint64_t CompleteRequestHeaderBlockBytes(const std::string &request) {
 uint64_t FixedProjectHeaderBytesWithoutToken() {
 	static const uint64_t line_framing = 4;
 	return (sizeof("Accept") - 1) + (sizeof("application/vnd.github+json") - 1) + line_framing +
-	       (sizeof("User-Agent") - 1) + (sizeof("duckdb-api/0.5.0") - 1) + line_framing +
+	       (sizeof("User-Agent") - 1) + (sizeof("duckdb-api/0.6.0") - 1) + line_framing +
 	       (sizeof("X-GitHub-Api-Version") - 1) + (sizeof("2022-11-28") - 1) + line_framing +
 	       (sizeof("Authorization") - 1) + (sizeof("Bearer ") - 1) + line_framing;
 }

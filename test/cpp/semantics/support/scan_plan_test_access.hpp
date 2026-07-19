@@ -21,6 +21,7 @@ public:
 	static duckdb_api::ScanPlan Feature(duckdb_api::ScanPlan plan, FeaturePlanCounterexample counterexample);
 	static duckdb_api::ScanPlan Pagination(duckdb_api::ScanPlan plan, PaginationPlanCounterexample counterexample);
 	static duckdb_api::ScanPlan Resource(duckdb_api::ScanPlan plan, ResourcePlanCounterexample counterexample);
+	static duckdb_api::ScanPlan Repository(duckdb_api::ScanPlan plan, RepositoryPlanCounterexample counterexample);
 };
 
 } // namespace duckdb_api_test

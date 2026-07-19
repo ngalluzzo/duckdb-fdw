@@ -1,0 +1,30 @@
+#include "table_function_plan_state.hpp"
+
+#include <utility>
+
+namespace duckdb_api {
+namespace query_internal {
+
+TableFunctionPlanState::TableFunctionPlanState(ScanRequest baseline_request_p, ScanPlan baseline_plan)
+    : baseline_request(std::move(baseline_request_p)), selected_plan(new ScanPlan(std::move(baseline_plan))) {
+}
+
+TableFunctionPlanState::TableFunctionPlanState(const TableFunctionPlanState &other)
+    : baseline_request(other.baseline_request), selected_plan(new ScanPlan(*other.selected_plan)) {
+}
+
+const ScanRequest &TableFunctionPlanState::BaselineRequest() const noexcept {
+	return baseline_request;
+}
+
+const ScanPlan &TableFunctionPlanState::SelectedPlan() const noexcept {
+	return *selected_plan;
+}
+
+void TableFunctionPlanState::ReplaceSelectedPlan(ScanPlan selected_plan_p) {
+	std::unique_ptr<const ScanPlan> replacement(new ScanPlan(std::move(selected_plan_p)));
+	selected_plan = std::move(replacement);
+}
+
+} // namespace query_internal
+} // namespace duckdb_api

@@ -255,12 +255,13 @@ std::string ControlledSocketService::Response(ControlledSocketMode response_mode
 }
 
 std::string ControlledSocketService::PaginatedResponse(uint64_t page_index) const {
-	const std::string body =
-	    page_index == 1   ? "[{\"id\":1,\"full_name\":\"first\",\"private\":false,\"fork\":false,\"archived\":false}]"
-	    : page_index == 2 ? "[]"
-	                      : "[{\"id\":3,\"full_name\":\"third\",\"private\":false,\"fork\":false,\"archived\":false}]";
+	const std::string body = page_index == 1   ? "[{\"id\":1,\"full_name\":\"first\",\"private\":true,\"fork\":false,"
+	                                             "\"archived\":false,\"visibility\":\"private\"}]"
+	                         : page_index == 2 ? "[]"
+	                                           : "[{\"id\":3,\"full_name\":\"third\",\"private\":true,\"fork\":false,"
+	                                             "\"archived\":false,\"visibility\":\"private\"}]";
 	const std::string link = page_index < 3 ? "Link: <https://api.github.com/user/repos?per_page=100&page=" +
-	                                              std::to_string(page_index + 1) + ">; rel=next\r\n"
+	                                              std::to_string(page_index + 1) + "&visibility=private>; rel=next\r\n"
 	                                        : "";
 	return "HTTP/1.1 200 OK\r\n" + link +
 	       "Content-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +

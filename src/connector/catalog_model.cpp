@@ -1,5 +1,6 @@
 #include "duckdb_api/connector_catalog.hpp"
 #include "duckdb_api/internal/connector/pagination_declaration.hpp"
+#include "duckdb_api/internal/connector/predicate_declaration.hpp"
 #include "duckdb_api/internal/connector/resource_ceiling_declaration.hpp"
 
 #include <limits>
@@ -456,10 +457,12 @@ const CompiledRestOrigin *CompiledAuthenticationPolicy::Destination() const {
 }
 
 CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColumn> columns_p,
+                                   std::vector<CompiledPredicateMapping> predicate_mappings_p,
                                    CompiledOperation operation_p, CompiledAuthenticationPolicy authentication_p,
                                    CompiledResourceCeilings resource_ceilings_p)
-    : name(std::move(name_p)), columns(std::move(columns_p)), operation(std::move(operation_p)),
-      authentication(std::move(authentication_p)), resource_ceilings(std::move(resource_ceilings_p)) {
+    : name(std::move(name_p)), columns(std::move(columns_p)), predicate_mappings(std::move(predicate_mappings_p)),
+      operation(std::move(operation_p)), authentication(std::move(authentication_p)),
+      resource_ceilings(std::move(resource_ceilings_p)) {
 	if (!IsIdentifier(name) || columns.empty()) {
 		throw std::invalid_argument("compiled relation contains incomplete identity or schema");
 	}
@@ -472,6 +475,7 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
 		}
 	}
 	ValidateOperation(operation);
+	internal::ValidatePredicateMappings(name, columns, operation, authentication, predicate_mappings);
 	ValidateResourceCeilings(operation, resource_ceilings);
 	if (operation.cardinality == CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS &&
 	    (resource_ceilings.MaxRecordsPerPage() != 1 || resource_ceilings.MaxRecordsPerScan() != 1)) {
@@ -500,6 +504,10 @@ const std::vector<CompiledColumn> &CompiledRelation::Columns() const {
 	return columns;
 }
 
+const std::vector<CompiledPredicateMapping> &CompiledRelation::PredicateMappings() const {
+	return predicate_mappings;
+}
+
 const CompiledOperation &CompiledRelation::Operation() const {
 	return operation;
 }
@@ -517,7 +525,9 @@ std::string CompiledRelation::Snapshot() const {
 	result.imbue(std::locale::classic());
 	result << "relation=" << name << ";schema=";
 	AppendSchema(result, columns);
-	result << ";operation=" << operation.name << ':' << (operation.fallback ? "fallback" : "selected") << ':'
+	result << ";predicate_mappings=[";
+	internal::AppendPredicateMappings(result, predicate_mappings);
+	result << "];operation=" << operation.name << ':' << (operation.fallback ? "fallback" : "selected") << ':'
 	       << CardinalityName(operation.cardinality) << ':' << ProtocolName(operation.protocol) << ':'
 	       << MethodName(operation.method) << ':' << ReplaySafetyName(operation.replay_safety) << ";request=origin:";
 	AppendOrigin(result, operation.request.origin);

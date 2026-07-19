@@ -8,6 +8,13 @@ Runtime accepts a complete plan and explicit authorization capability. It does
 not construct connector metadata, classify relational operations, or depend on
 DuckDB callback state.
 
+Repository admission converts the complete Semantics handoff into one immutable
+`AdmittedRepositoryRequestProfile`. That profile owns the canonical operation,
+six-column schema, pagination target, and the optional closed
+`visibility=private` input. Request construction, bearer placement, decoding,
+and Link validation consume only that profile or an exact derived request;
+they do not inspect relational predicates or Connector declarations.
+
 ## Directory guide
 
 | Directory | Change it for |
@@ -38,6 +45,8 @@ in the package `sources.cmake` and `targets.cmake` files.
   isolated stream and call-scoped `ExecutionControl`.
 - Keep pagination sequential. A received Link target is validated and converted
   back into typed plan state; it never becomes a request directly.
+- A selective repository Link must preserve `visibility=private` exactly on
+  every page; omission, change, duplication, or extra query fields fail closed.
 - Preserve explicit page and scan resource ownership and release ordering.
 - Curl initialization has process lifetime. Dynamic unload/reload is not a
   supported cleanup boundary.

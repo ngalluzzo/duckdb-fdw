@@ -68,7 +68,7 @@ duckdb_api::internal::HttpRequest BuildRequest(const PrivateCurlProbeOptions &op
 	request.port = options.request_port;
 	request.target = "/search/users?q=duckdb+in%3Alogin&per_page=3";
 	request.headers = {{"Accept", "application/vnd.github+json"},
-	                   {"User-Agent", "duckdb-api/0.5.0"},
+	                   {"User-Agent", "duckdb-api/0.6.0"},
 	                   {"X-GitHub-Api-Version", "2022-11-28"}};
 	return request;
 }

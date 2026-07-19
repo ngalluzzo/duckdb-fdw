@@ -6,9 +6,10 @@ namespace duckdb_api_test {
 // unit deliberately includes only the safe fixture header.
 std::string ConsumeSafeScanPlanFixtureHeader(const std::string &exact_logical_secret_name) {
 	const auto valid = BuildValidAuthenticatedPlanFixture(exact_logical_secret_name);
+	const auto selective = BuildVisibilityPrivatePlanFixture(exact_logical_secret_name);
 	const auto invalid =
 	    BuildNetworkPlanCounterexample(exact_logical_secret_name, NetworkPlanCounterexample::REDIRECTS_ENABLED);
-	return valid.RelationName() + ":" + invalid.RelationName();
+	return valid.RelationName() + ":" + selective.RelationName() + ":" + invalid.RelationName();
 }
 
 } // namespace duckdb_api_test

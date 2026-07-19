@@ -11,17 +11,18 @@ target_include_directories(
   PUBLIC test/cpp)
 target_link_libraries(
   duckdb_api_semantics_fixture_service
-  PUBLIC duckdb_api_connector_fixture_service
-         duckdb_api_relational_planning_service)
+  PUBLIC duckdb_api_scan_plan_service)
 
 add_executable(
   duckdb_api_scan_planner_tests
-  test/cpp/semantics/scan_planner_tests.cpp)
+  test/cpp/semantics/scan_planner_tests.cpp
+  ${RELATIONAL_PREDICATE_PLANNER_TEST_SOURCES})
 configure_duckdb_api_cpp_target(duckdb_api_scan_planner_tests)
 target_include_directories(duckdb_api_scan_planner_tests PRIVATE test/cpp)
 target_link_libraries(
   duckdb_api_scan_planner_tests
-  PRIVATE duckdb_api_connector_fixture_service
+  PRIVATE duckdb_api_semantics_fixture_service
+          duckdb_api_connector_fixture_service
           duckdb_api_relational_planning_service)
 
 add_executable(
@@ -43,7 +44,9 @@ target_include_directories(
   PRIVATE test/cpp)
 target_link_libraries(
   duckdb_api_scan_plan_pagination_contract_tests
-  PRIVATE duckdb_api_semantics_fixture_service)
+  PRIVATE duckdb_api_semantics_fixture_service
+          duckdb_api_connector_fixture_service
+          duckdb_api_relational_planning_service)
 
 add_executable(
   duckdb_api_scan_plan_fixture_tests
@@ -56,4 +59,6 @@ target_compile_definitions(
   PRIVATE DUCKDB_API_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(
   duckdb_api_scan_plan_fixture_tests
-  PRIVATE duckdb_api_semantics_fixture_service)
+  PRIVATE duckdb_api_semantics_fixture_service
+          duckdb_api_connector_fixture_service
+          duckdb_api_relational_planning_service)

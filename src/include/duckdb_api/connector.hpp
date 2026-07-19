@@ -4,7 +4,7 @@
 
 namespace duckdb_api {
 
-// Constructs the exact RFC 0007 native 0.5.0 catalog deterministically without I/O,
+// Constructs the exact RFC 0005 through RFC 0008 native 0.6.0 catalog deterministically without I/O,
 // environment access, package parsing, runtime construction, DuckDB types,
 // secret names, credential values, or received Link state. Generic
 // representation and validation live behind connector_catalog.hpp so native

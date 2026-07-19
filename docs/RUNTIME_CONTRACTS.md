@@ -72,19 +72,21 @@ The runtime contracts do not require:
 - Deep optimizer integration through DuckDB internal C++ APIs.
 - Columnar remote-source batches.
 
-### 1.2 Accepted native `0.5.0` mapping
+### 1.2 Current native `0.6.0` mapping
 
-RFCs 0005 through 0007 define the bounded live REST, authenticated capability,
-and sequential repository-traversal subset mapped into private native C++
-types. Those types are neither a public ABI nor a replacement for the intended
-portable Rust runtime.
+RFCs 0005 through 0008 define the bounded live REST, authenticated capability,
+sequential repository-traversal, and one predicate-selective subset mapped into
+private native C++ types. Those types are neither a public ABI nor a
+replacement for the intended portable Rust runtime. The `0.6.0` identity names
+the current unreleased source; it does not claim that every roadmap gate for
+the eventual release is complete.
 
 | Semantic artifact | Native preview mapping |
 |---|---|
-| `CompiledConnector` | Immutable `github` version `0.5.0` snapshot with the bounded anonymous page, exactly-one authenticated user, and bounded sequential authenticated repository relations; fixed structural REST operations, logical credential policy, typed HTTPS origin, response source, extraction paths, pagination declaration, and connector-owned page/scan ceilings |
-| `ScanRequest` | Selected relation and optional logical secret reference; full projection closure; `TRUE` predicate; empty ordering; unset limit and offset; no credential bytes, SQL text, or I/O capability |
-| `ScanPlan` | One fixed anonymous search, authenticated root object, or authenticated paginated root-array operation; typed destination and bearer obligation where required; explicit disabled-or-Link `PaginationPlan`; `TRUE` remote/residual predicates; DuckDB relational ownership; disabled retry/cache/providers; and explicit page/scan budgets; no credential bytes or received Link values |
-| `BatchStream` | Synchronous pull stream owning either the anonymous or opaque GitHub-user authorization alternative; one attempt for a single-response relation or one attempt per accepted sequential repository page; bounded JSON decode and retained page memory; nonempty schema-aligned batches; one retained scan deadline; cancellation checks; and idempotent close |
+| `CompiledConnector` | Immutable `github` version `0.6.0` snapshot with the bounded anonymous page, exactly-one authenticated user, and bounded sequential authenticated repository relations; six-column repository schema; one closed visibility predicate mapping; fixed structural REST operations, logical credential policy, typed HTTPS origin, response source, extraction paths, pagination declaration, and connector-owned page/scan ceilings |
+| `ScanRequest` | Selected relation and optional logical secret reference; full projection closure; a closed remote candidate state and a separate retained-predicate scope (`unrestricted`, exact requested predicate, or opaque complete DuckDB filter); explicit adapter capability and residual-retention facts; empty ordering; unset limit and offset; no credential bytes, SQL text, DuckDB object, or I/O capability |
+| `ScanPlan` | One fixed anonymous search, authenticated root object, or authenticated paginated root-array operation; typed destination and bearer obligation where required; explicit disabled-or-Link `PaginationPlan`; baseline or `visibility_equals_private` remote predicate; exact, unrestricted, or opaque complete-DuckDB-filter residual; explicit accuracy, residual owner, and optional typed `VISIBILITY_PRIVATE` input; disabled retry/cache/providers; and explicit page/scan budgets; no credential bytes or received Link values |
+| `BatchStream` | Synchronous pull stream owning either the anonymous or opaque GitHub-user authorization alternative; complete-plan admission before authorization; one attempt for a single-response relation or one attempt per accepted sequential repository page; bounded strict JSON decode and retained page memory; nonempty schema-aligned batches; one retained scan deadline; cancellation checks; and idempotent close |
 
 The native adapter receives an immutable `ScanExecutor` from product
 composition and asks it to open each `BatchStream`. The production executor
@@ -104,7 +106,10 @@ provider pipeline, retry, rate-limit wait, cache, async runtime, or
 cross-language FFI exists in this profile. The repository relation implements
 only RFC 0007's fixed sequential Link traversal; it does not establish a
 general pagination framework, parallel-page authority, resume, total count, or
-remote limit. The snapshot is built from repository metadata at
+remote limit. RFC 0008 adds only one retained DuckDB complex-filter advisory:
+the exact structured `visibility = 'private'` shape may select the typed
+`visibility=private` request input with `Superset` accuracy. Every other shape
+uses the complete traversal. The snapshot is built from repository metadata at
 extension construction; arbitrary connector syntax is not accepted.
 
 ### 1.3 Native sequential pagination lifecycle
@@ -130,8 +135,9 @@ An empty nonterminal page advances internally; `Next` never returns `true`
 with an empty batch.
 
 The only accepted next transition is an RFC 8288 registered `next` relation to
-`https://api.github.com[:443]/user/repos` with exactly one `per_page=100` field
-and one `page=current+1` field. The parser structurally validates every target,
+`https://api.github.com[:443]/user/repos` with exactly one `per_page=100` field,
+one `page=current+1` field, and exactly one `visibility=private` field when the
+admitted plan selected it. The parser structurally validates every target,
 anchor, and extension relation against RFC 3986 before relation selection. It
 ignores a bounded number of RFC list empty elements, uses only the first `rel`
 parameter on each link-value, and requires relation lists to use exact SP
@@ -155,6 +161,37 @@ close, destruction, malformed metadata, HTTP failure, decode/schema failure,
 and late-page failure release the capability and retained page state; a query
 that already consumed earlier batches still fails rather than claiming a
 complete partial relation.
+
+### 1.4 Native selective request admission
+
+Runtime admits a repository plan into one immutable
+`AdmittedRepositoryRequestProfile` before it opens authorization or permits
+transport I/O. Admission validates the complete six-column schema and
+extractors, fixed operation, pagination profile, network and authentication
+capabilities, resource budgets, disabled features, relational owner and
+delegation envelope, and one of exactly two coherent remote alternatives:
+
+- baseline: `TRUE` remotely, `Unsupported` accuracy, no conditional input, and
+  either unrestricted, exact visibility, or opaque complete-filter residual;
+  or
+- selective: `visibility_equals_private` remotely, `Superset` accuracy,
+  DuckDB ownership, the typed `VISIBILITY_PRIVATE` input, and either the exact
+  visibility residual or an opaque complete-filter residual for a larger
+  retained conjunction.
+
+The opaque residual is ownership evidence only. Runtime never parses it or
+receives DuckDB expressions; unknown residual or conditional-input enum values
+fail policy admission before authorization or transport.
+
+No raw plan field remains a second request authority after admission. The
+first-page builder, later-page builder, bearer authenticator, Link validator,
+and installed curl allowlist all consume the same admitted profile or its
+canonical request. The accepted targets are therefore exactly
+`/user/repos?per_page=100&page=N` and that target followed by
+`&visibility=private`; omission, change, duplication, extra fields, or an
+incoherent relational plan fails closed before a widened request can be sent.
+The decoder requires `visibility` exactly once as a non-null string within the
+same 512-byte extracted-string limit as other repository strings.
 
 ---
 
@@ -859,10 +896,13 @@ Every supported DuckDB version and adapter profile has a compatibility test
 that records these capabilities. A capability is enabled only after its full
 lifecycle behavior, including teardown and error paths, is verified.
 
-The accepted native profile records projection, filters, ordering, limit,
-offset, and progress as unavailable. Its secret-manager coupling is restricted
-to exact-name temporary-memory resolution during global initialization and is
-never exposed to planning or Runtime. Cancellation is verified. It uses one DuckDB source task, requests the full projection closure,
+The accepted native profile records projection, generic filter execution,
+ordering, limit, offset, and progress as unavailable. Its complex-filter
+callback supplies one advisory structured predicate only when DuckDB retains
+the complete expression above the scan. Its secret-manager coupling is
+restricted to exact-name temporary-memory resolution during global
+initialization and is never exposed to planning or Runtime. Cancellation is
+verified. It uses one DuckDB source task, requests the full projection closure,
 and leaves every row-removing, ordering, and bounding operation in DuckDB.
 
 An adapter cannot delegate limit, offset, or ordering past an unavailable or
@@ -885,7 +925,7 @@ individual scan. Extension shutdown cancels scans, closes transports, drains
 bounded queues, and joins worker threads. Panics are caught at every FFI
 callback and converted to internal errors; unwinding never crosses the C ABI.
 
-The native `0.5.0` profile has no async worker. Before any version inspection,
+The native `0.6.0` profile has no async worker. Before any version inspection,
 its process owner calls `curl_global_init(CURL_GLOBAL_DEFAULT)`, then verifies
 the exact supported libcurl version, TLS-backend identity, and
 `CURL_VERSION_THREADSAFE` capability. A rejected, unpublished initialization
@@ -1980,7 +2020,7 @@ pub struct AuthorizedSecrets {
 A `SecretHandle` is resolved only by an authorized authenticator or request
 builder. It should avoid exposing a cloneable plaintext string broadly.
 
-In the native `0.5.0` profile, Query resolves only an exact logical name in
+In the native `0.6.0` profile, Query resolves only an exact logical name in
 DuckDB's temporary `memory` storage. Persistent-only and alternate-storage
 entries are not candidates, and a same-name persistent entry cannot make the
 selection ambiguous. Query destroys DuckDB secret objects before moving one
@@ -2021,7 +2061,7 @@ The network layer validates:
 Connector network and resource policies are intersected with host policy. They
 can remove capabilities or lower limits but cannot widen either.
 
-The native `0.5.0` transport applies the plan's header-byte ceiling separately
+The native `0.6.0` transport applies the plan's header-byte ceiling separately
 to inbound response headers and outbound project-supplied request fields. The
 outbound aggregate counts each field as the bytes in
 `name + ": " + value + "\r\n"` and rejects more than 16,384 bytes before

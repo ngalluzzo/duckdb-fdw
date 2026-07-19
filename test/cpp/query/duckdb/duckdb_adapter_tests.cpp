@@ -14,6 +14,11 @@
 #include <string>
 #include <thread>
 
+namespace duckdb_api_test {
+void RunComplexFilterAdapterTests();
+void RunTableFunctionPlanStateTests();
+} // namespace duckdb_api_test
+
 namespace {
 
 using duckdb_api_test::ACCEPTED_LIVE_SQL;
@@ -339,6 +344,8 @@ int main() {
 		TestEarlyResultCloseAndLastOwnerTeardown();
 		TestIndependentConcurrentScans();
 		TestSynchronizedCancellation();
+		duckdb_api_test::RunComplexFilterAdapterTests();
+		duckdb_api_test::RunTableFunctionPlanStateTests();
 		duckdb_api_test::RunDuckdbAdapterAuthBindTests();
 		duckdb_api_test::RunDuckdbAdapterAuthLifecycleTests();
 		std::cout << "DuckDB adapter tests passed" << std::endl;

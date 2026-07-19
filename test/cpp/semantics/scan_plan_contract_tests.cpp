@@ -243,7 +243,7 @@ void TestNativeGoldenPlans() {
 
 	RequireAnonymousPlan(anonymous_plan, connector, anonymous);
 	RequireAuthenticatedPlan(authenticated_plan, connector, authenticated, "github_default");
-	Require(anonymous_plan.ConnectorName() == "github" && anonymous_plan.ConnectorVersion() == "0.5.0" &&
+	Require(anonymous_plan.ConnectorName() == "github" && anonymous_plan.ConnectorVersion() == "0.6.0" &&
 	            anonymous_plan.RelationName() == "duckdb_login_search_page" &&
 	            anonymous_plan.Operation().operation_name == "github_search_duckdb_login_page" &&
 	            anonymous_plan.Operation().path == "/search/users" &&
@@ -257,9 +257,9 @@ void TestNativeGoldenPlans() {
 	            authenticated_plan.Operation().path == "/user" &&
 	            authenticated_plan.Operation().query_parameters.empty() &&
 	            anonymous_plan.Operation().headers.size() == 3 &&
-	            anonymous_plan.Operation().headers[1].value == "duckdb-api/0.5.0" &&
+	            anonymous_plan.Operation().headers[1].value == "duckdb-api/0.6.0" &&
 	            authenticated_plan.Operation().headers.size() == 3 &&
-	            authenticated_plan.Operation().headers[1].value == "duckdb-api/0.5.0",
+	            authenticated_plan.Operation().headers[1].value == "duckdb-api/0.6.0",
 	        "existing native plan identity or fixed request changed during pagination planning work");
 	Require(anonymous_plan.OutputColumns().size() == 3 && anonymous_plan.OutputColumns()[0].name == "id" &&
 	            anonymous_plan.OutputColumns()[0].logical_type == "BIGINT" &&

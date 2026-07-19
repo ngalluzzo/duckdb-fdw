@@ -33,12 +33,13 @@ target_include_directories(duckdb_api_uri_reference_tests PRIVATE test/cpp)
 
 add_executable(
   duckdb_api_link_pagination_tests
-  test/cpp/runtime/pagination/link_pagination_tests.cpp
-  src/runtime/pagination/uri_reference.cpp
-  src/runtime/pagination/link_header.cpp
-  src/runtime/pagination/link_pagination.cpp)
+  test/cpp/runtime/pagination/link_pagination_tests.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_link_pagination_tests)
 target_include_directories(duckdb_api_link_pagination_tests PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_link_pagination_tests
+  PRIVATE duckdb_api_runtime_executor_service
+          duckdb_api_semantics_fixture_service)
 
 add_executable(
   duckdb_api_scan_resource_accounting_tests

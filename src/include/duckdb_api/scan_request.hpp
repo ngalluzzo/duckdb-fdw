@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb_api/connector.hpp"
+#include "duckdb_api/relational_predicate.hpp"
 
 #include <string>
 #include <vector>
@@ -37,6 +38,12 @@ private:
 struct AdapterCapabilities {
 	bool projection;
 	bool filter;
+	// The pinned complex-filter callback can offer the one closed structured
+	// predicate without claiming generic DuckDB table-filter execution.
+	bool selective_predicate;
+	// Query leaves every offered expression in DuckDB's filter vector. This
+	// flag is required before Semantics may plan a selective remote restriction.
+	bool retains_predicate;
 	bool ordering;
 	bool limit;
 	bool offset;
@@ -61,7 +68,8 @@ struct ScanRequest {
 	std::string relation_name;
 	std::vector<std::string> explicit_inputs;
 	std::vector<std::string> projected_columns;
-	std::string predicate;
+	RequestedPredicate requested_predicate;
+	RetainedPredicateScope retained_predicate_scope;
 	std::vector<std::string> orderings;
 	bool has_limit;
 	bool has_offset;

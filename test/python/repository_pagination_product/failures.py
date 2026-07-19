@@ -24,8 +24,8 @@ from .support import (
 )
 
 
-FIRST = (1, "synthetic/first", False, False, False)
-SECOND = (2, "synthetic/second", False, False, False)
+FIRST = (1, "synthetic/first", False, False, False, "public")
+SECOND = (2, "synthetic/second", False, False, False, "public")
 
 
 def _require_failure(
@@ -82,14 +82,14 @@ def run_failure_contract(
                 repository_response([FIRST], next_page=2),
                 ResponseSpec(
                     200,
-                    repository_body([(SECOND[0], SECOND[1], SECOND[2], SECOND[3], SECOND[4])]).replace(
-                        b',"archived":false', b""
+                    repository_body([SECOND]).replace(
+                        b',"visibility":"public"', b""
                     ),
                 ),
             ],
             page_paths([1, 2]),
             "[duckdb_api][schema]",
-            "archived",
+            "visibility",
         )
         _require_failure(
             connection,

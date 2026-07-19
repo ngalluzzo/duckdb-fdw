@@ -1,5 +1,7 @@
 #pragma once
 
+#include "duckdb_api/internal/runtime/execution/http_plan_admission.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -38,17 +40,18 @@ struct LinkPageTransition {
 	uint64_t next_page;
 };
 
-// Sequential state for RFC 0007's fixed GitHub repository profile. The first
-// page is always 1; resume and caller-selected starting state are unsupported.
-// Advance parses physical Link field-values in receipt order, accepts zero or
-// one rel=next target, requires the exact fixed HTTPS target with page equal to
-// CurrentPage()+1, and records only accepted typed page identities. Any error
-// makes the state terminal so a caller cannot continue after rejected remote
-// metadata. This object is scan-owned and is not thread-safe; the owning stream
-// supplies synchronization and resource/cancellation authority.
+// Sequential state for an admitted repository request profile. Resume and
+// caller-selected starting state are unsupported. Advance parses physical Link
+// field-values in receipt order, accepts zero or one rel=next target, and
+// requires the profile's exact origin, path, page progression, field set, and
+// conditional visibility input. Omission, change, duplication, or extra query
+// fields fail closed. Any error makes the state terminal so a caller cannot
+// continue after rejected remote metadata. This object owns a copy of the
+// immutable admitted profile, is scan-owned, and is not thread-safe; the owning
+// stream supplies synchronization and resource/cancellation authority.
 class LinkPaginationState {
 public:
-	LinkPaginationState();
+	explicit LinkPaginationState(const AdmittedRepositoryRequestProfile &profile);
 
 	LinkPageTransition Advance(const std::vector<std::string> &link_field_values);
 
@@ -58,6 +61,7 @@ public:
 	std::size_t SeenPageCount() const noexcept;
 
 private:
+	const AdmittedRepositoryRequestProfile profile;
 	uint64_t current_page;
 	std::vector<uint64_t> seen_pages;
 	bool exhausted;

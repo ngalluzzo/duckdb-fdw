@@ -25,19 +25,23 @@ REPOSITORY_SCHEMA = [
     ("private", "BOOLEAN"),
     ("fork", "BOOLEAN"),
     ("archived", "BOOLEAN"),
+    ("visibility", "VARCHAR"),
 ]
 REPOSITORY_SCAN = (
     "FROM duckdb_api_scan(connector := 'github', "
     "relation := 'authenticated_repositories', secret := 'github_default')"
 )
 ORDERED_SQL = (
-    "SELECT id, full_name, private, fork, archived "
+    "SELECT id, full_name, private, fork, archived, visibility "
     f"{REPOSITORY_SCAN} ORDER BY id"
 )
 
 
-def configure_controlled_environment(server: RepositoryOracleServer) -> None:
+def configure_controlled_environment(
+    server: RepositoryOracleServer, *, predicate_mapping: str = "present"
+) -> None:
     os.environ["DUCKDB_API_CONTROLLED_PORT"] = str(server.server_port)
+    os.environ["DUCKDB_API_CONTROLLED_PREDICATE_MAPPING"] = predicate_mapping
     for name in (
         "HTTP_PROXY",
         "HTTPS_PROXY",
@@ -66,16 +70,22 @@ def create_temporary_secret(
 
 
 def load_repository_connection(
-    extension_path: pathlib.Path, server: RepositoryOracleServer
+    extension_path: pathlib.Path,
+    server: RepositoryOracleServer,
+    *,
+    predicate_mapping: str = "present",
 ) -> duckdb.DuckDBPyConnection:
-    configure_controlled_environment(server)
+    configure_controlled_environment(server, predicate_mapping=predicate_mapping)
     connection = load_controlled_extension(extension_path)
     create_temporary_secret(connection)
     return connection
 
 
-def page_paths(pages: Iterable[int]) -> list[str]:
-    return [f"/user/repos?per_page=100&page={page}" for page in pages]
+def page_paths(pages: Iterable[int], *, selective: bool = False) -> list[str]:
+    visibility = "&visibility=private" if selective else ""
+    return [
+        f"/user/repos?per_page=100&page={page}{visibility}" for page in pages
+    ]
 
 
 def assert_exact_requests(
@@ -85,21 +95,37 @@ def assert_exact_requests(
     if len(requests) != len(expected_paths):
         raise AssertionError("repository request count drifted")
     for request, expected_path in zip(requests, expected_paths, strict=True):
-        if request["method"] != "GET" or request["path"] != expected_path:
-            raise AssertionError("repository request sequence drifted")
-        headers = request["headers"]
-        required = {
-            "host": [f"127.0.0.1:{server.server_port}"],
-            "accept": ["application/vnd.github+json"],
-            "authorization": [f"Bearer {TOKEN}"],
-            "user-agent": ["duckdb-api/0.5.0"],
-            "x-github-api-version": ["2022-11-28"],
-        }
-        for name, expected in required.items():
-            if headers.get(name) != expected:
-                raise AssertionError(f"repository request header {name!r} drifted")
-        if "proxy-authorization" in headers or "cookie" in headers:
-            raise AssertionError("repository request carried ambient credentials")
+        assert_request(request, expected_path, server)
+
+
+def assert_request_paths_unordered(
+    server: RepositoryOracleServer, expected_paths: list[str]
+) -> None:
+    requests = server.requests()
+    if sorted(request["path"] for request in requests) != sorted(expected_paths):
+        raise AssertionError("repository concurrent request set drifted")
+    for request in requests:
+        assert_request(request, request["path"], server)
+
+
+def assert_request(
+    request: dict[str, object], expected_path: str, server: RepositoryOracleServer
+) -> None:
+    if request["method"] != "GET" or request["path"] != expected_path:
+        raise AssertionError("repository request sequence drifted")
+    headers = request["headers"]
+    required = {
+        "host": [f"127.0.0.1:{server.server_port}"],
+        "accept": ["application/vnd.github+json"],
+        "authorization": [f"Bearer {TOKEN}"],
+        "user-agent": ["duckdb-api/0.6.0"],
+        "x-github-api-version": ["2022-11-28"],
+    }
+    for name, expected in required.items():
+        if headers.get(name) != expected:
+            raise AssertionError(f"repository request header {name!r} drifted")
+    if "proxy-authorization" in headers or "cookie" in headers:
+        raise AssertionError("repository request carried ambient credentials")
 
 
 def assert_safe_failure(
@@ -140,7 +166,7 @@ def assert_redacted(
 def assert_recovery(
     connection: duckdb.DuckDBPyConnection, server: RepositoryOracleServer
 ) -> None:
-    recovered_row = (909, "synthetic/recovered", False, False, False)
+    recovered_row = (909, "synthetic/recovered", False, False, False, "public")
     server.configure([repository_response([recovered_row])])
     rows = connection.execute(ORDERED_SQL).fetchall()
     if rows != [recovered_row]:

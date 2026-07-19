@@ -1,4 +1,6 @@
 #include "duckdb_api/internal/runtime/pagination/link_pagination.hpp"
+#include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
+#include "semantics/support/scan_plan_test_fixtures.hpp"
 #include "support/require.hpp"
 
 #include <cstdlib>
@@ -10,6 +12,7 @@
 
 namespace {
 
+using duckdb_api::internal::AdmittedRepositoryRequestProfile;
 using duckdb_api::internal::LinkPaginationError;
 using duckdb_api::internal::LinkPaginationErrorKind;
 using duckdb_api::internal::LinkPaginationState;
@@ -17,9 +20,36 @@ using duckdb_api_test::Require;
 
 const std::string CANARY = "private-repository-canary";
 
+AdmittedRepositoryRequestProfile AdmitRepositoryProfile(bool selective) {
+	const duckdb_api::internal::HttpExecutionProfile execution_profile {duckdb_api::PlannedUrlScheme::HTTPS,
+	                                                                    "api.github.com",
+	                                                                    443,
+	                                                                    false,
+	                                                                    false,
+	                                                                    false,
+	                                                                    duckdb_api::MAX_EXECUTION_MILLISECONDS,
+	                                                                    100};
+	auto admitted = duckdb_api::internal::TryAdmitRepositoryHttpPlan(
+	    selective ? duckdb_api_test::BuildVisibilityPrivatePlanFixture("fixture_secret")
+	              : duckdb_api_test::BuildValidAuthenticatedRepositoriesPlanFixture("fixture_secret"),
+	    execution_profile);
+	Require(admitted != nullptr, "Link pagination fixture did not pass repository admission");
+	return *admitted;
+}
+
+const AdmittedRepositoryRequestProfile &BaseProfile() {
+	static const auto profile = AdmitRepositoryProfile(false);
+	return profile;
+}
+
+const AdmittedRepositoryRequestProfile &SelectiveProfile() {
+	static const auto profile = AdmitRepositoryProfile(true);
+	return profile;
+}
+
 void RequireRejected(const std::vector<std::string> &fields, LinkPaginationErrorKind expected_kind,
                      const std::string &label) {
-	LinkPaginationState state;
+	LinkPaginationState state(BaseProfile());
 	bool rejected = false;
 	try {
 		state.Advance(fields);
@@ -48,28 +78,28 @@ void RequireRejected(const std::vector<std::string> &fields, LinkPaginationError
 }
 
 void TestExhaustionWithoutNext() {
-	LinkPaginationState absent;
+	LinkPaginationState absent(BaseProfile());
 	const auto absent_transition = absent.Advance({});
 	Require(!absent_transition.has_next && absent_transition.next_page == 0,
 	        "an absent Link field did not exhaust the source");
 	Require(absent.Exhausted() && !absent.Failed(), "clean exhaustion used a failure state");
 
-	LinkPaginationState non_next;
+	LinkPaginationState non_next(BaseProfile());
 	const auto non_next_transition = non_next.Advance({"<https://example.test/page/1>; rel=last"});
 	Require(!non_next_transition.has_next && non_next.Exhausted(),
 	        "Link metadata without rel=next did not exhaust the source");
 
-	LinkPaginationState empty_list;
+	LinkPaginationState empty_list(BaseProfile());
 	const auto empty_list_transition = empty_list.Advance({" , , \t", ""});
 	Require(!empty_list_transition.has_next && empty_list.Exhausted(),
 	        "RFC list empty elements did not produce clean exhaustion");
 
-	LinkPaginationState empty_target;
+	LinkPaginationState empty_target(BaseProfile());
 	const auto empty_target_transition = empty_target.Advance({"<>; rel=last"});
 	Require(!empty_target_transition.has_next && empty_target.Exhausted(),
 	        "an empty relative URI-reference was rejected");
 
-	LinkPaginationState ip_literal;
+	LinkPaginationState ip_literal(BaseProfile());
 	const auto ip_literal_transition = ip_literal.Advance({"<https://[2001:db8::1]/page>; rel=last"});
 	Require(!ip_literal_transition.has_next && ip_literal.Exhausted(), "a valid IPv6 URI-reference was rejected");
 
@@ -83,70 +113,70 @@ void TestExhaustionWithoutNext() {
 }
 
 void TestAcceptedTransitions() {
-	LinkPaginationState case_insensitive;
+	LinkPaginationState case_insensitive(BaseProfile());
 	const auto uppercase =
 	    case_insensitive.Advance({"<https://api.github.com/user/repos?per_page=100&page=2>; rel=NEXT"});
 	Require(uppercase.has_next && uppercase.next_page == 2,
 	        "case-insensitive registered next relation silently truncated pagination");
 
-	LinkPaginationState extensions;
+	LinkPaginationState extensions(BaseProfile());
 	const auto extension_transition =
 	    extensions.Advance({"<https://api.github.com/user/repos?per_page=100&page=2>; foo; "
 	                        "rel=\"https://example.test/relations/archive next\""});
 	Require(extension_transition.has_next && extension_transition.next_page == 2,
 	        "valid valueless or URI relation extensions suppressed registered next");
 
-	LinkPaginationState anchored;
+	LinkPaginationState anchored(BaseProfile());
 	const auto anchored_transition =
 	    anchored.Advance({"<https://api.github.com/user/repos?per_page=100&page=2>; rel=next; "
 	                      "anchor=\"https://credential-canary.invalid/context\""});
 	Require(!anchored_transition.has_next && anchored.Exhausted(),
 	        "an alternate anchor granted response-relative continuation authority");
 
-	LinkPaginationState duplicate_rel_exhaustion;
+	LinkPaginationState duplicate_rel_exhaustion(BaseProfile());
 	const auto duplicate_rel_exhaustion_transition = duplicate_rel_exhaustion.Advance(
 	    {"<https://api.github.com/user/repos?per_page=100&page=2>; rel=prev; REL=next"});
 	Require(!duplicate_rel_exhaustion_transition.has_next && duplicate_rel_exhaustion.Exhausted(),
 	        "a later duplicate rel parameter overrode the first non-next relation");
 
-	LinkPaginationState duplicate_rel_next;
+	LinkPaginationState duplicate_rel_next(BaseProfile());
 	const auto duplicate_rel_next_transition =
 	    duplicate_rel_next.Advance({"<https://api.github.com/user/repos?per_page=100&page=2>; rel=next; REL=prev"});
 	Require(duplicate_rel_next_transition.has_next && duplicate_rel_next_transition.next_page == 2,
 	        "a later duplicate rel parameter overrode the first next relation");
 
-	LinkPaginationState bare_duplicate_rel_exhaustion;
+	LinkPaginationState bare_duplicate_rel_exhaustion(BaseProfile());
 	const auto bare_duplicate_rel_exhaustion_transition = bare_duplicate_rel_exhaustion.Advance(
 	    {"<https://api.github.com/user/repos?per_page=100&page=2>; rel=prev; REL"});
 	Require(!bare_duplicate_rel_exhaustion_transition.has_next && bare_duplicate_rel_exhaustion.Exhausted(),
 	        "a valueless later rel changed first-rel exhaustion");
 
-	LinkPaginationState bare_duplicate_rel_next;
+	LinkPaginationState bare_duplicate_rel_next(BaseProfile());
 	const auto bare_duplicate_rel_next_transition =
 	    bare_duplicate_rel_next.Advance({"<https://api.github.com/user/repos?per_page=100&page=2>; rel=next; REL"});
 	Require(bare_duplicate_rel_next_transition.has_next && bare_duplicate_rel_next_transition.next_page == 2,
 	        "a valueless later rel suppressed the first next relation");
 
-	LinkPaginationState leading_empty_elements;
+	LinkPaginationState leading_empty_elements(BaseProfile());
 	const auto leading_empty_transition =
 	    leading_empty_elements.Advance({", , <https://api.github.com/user/repos?per_page=100&page=2>; rel=next"});
 	Require(leading_empty_transition.has_next && leading_empty_transition.next_page == 2,
 	        "leading empty list elements suppressed a valid next relation");
 
-	LinkPaginationState trailing_empty_elements;
+	LinkPaginationState trailing_empty_elements(BaseProfile());
 	const auto trailing_empty_transition =
 	    trailing_empty_elements.Advance({"<https://api.github.com/user/repos?per_page=100&page=2>; rel=next, ,"});
 	Require(trailing_empty_transition.has_next && trailing_empty_transition.next_page == 2,
 	        "trailing empty list elements rejected a valid next relation");
 
-	LinkPaginationState middle_empty_elements;
+	LinkPaginationState middle_empty_elements(BaseProfile());
 	const auto middle_empty_transition =
 	    middle_empty_elements.Advance({"<https://example.test/previous>; rel=prev,, ,"
 	                                   "<https://api.github.com/user/repos?per_page=100&page=2>; rel=next"});
 	Require(middle_empty_transition.has_next && middle_empty_transition.next_page == 2,
 	        "middle empty list elements suppressed a valid next relation");
 
-	LinkPaginationState state;
+	LinkPaginationState state(BaseProfile());
 	const auto second = state.Advance({"<https://api.github.com/user/repos?per_page=100&page=2>; rel=next"});
 	Require(second.has_next && second.next_page == 2, "the fixed page-two target was rejected");
 	Require(state.CurrentPage() == 2 && state.SeenPageCount() == 2,
@@ -239,7 +269,7 @@ void TestDeniedNextTargets() {
 }
 
 void TestRepeatedTypedPageIsRejected() {
-	LinkPaginationState state;
+	LinkPaginationState state(BaseProfile());
 	state.Advance({"<https://api.github.com/user/repos?per_page=100&page=2>; rel=next"});
 	bool rejected = false;
 	try {
@@ -252,6 +282,31 @@ void TestRepeatedTypedPageIsRejected() {
 	        "repeated pagination metadata mutated accepted state");
 }
 
+void TestSelectiveTargetFieldSet() {
+	LinkPaginationState accepted(SelectiveProfile());
+	const auto transition =
+	    accepted.Advance({"<https://api.github.com/user/repos?visibility=private&page=2&per_page=100>; rel=next"});
+	Require(transition.has_next && transition.next_page == 2,
+	        "selective Link did not preserve the exact admitted field set");
+
+	const std::vector<std::pair<std::string, std::string>> cases = {
+	    {"https://api.github.com/user/repos?per_page=100&page=2", "missing visibility"},
+	    {"https://api.github.com/user/repos?per_page=100&page=2&visibility=public", "changed visibility"},
+	    {"https://api.github.com/user/repos?per_page=100&page=2&visibility=private&visibility=private",
+	     "duplicate visibility"},
+	    {"https://api.github.com/user/repos?per_page=100&page=2&visibility=private&sort=id", "extra field"}};
+	for (const auto &test_case : cases) {
+		LinkPaginationState state(SelectiveProfile());
+		bool rejected = false;
+		try {
+			state.Advance({"<" + test_case.first + ">; rel=next"});
+		} catch (const LinkPaginationError &error) {
+			rejected = error.Kind() == LinkPaginationErrorKind::POLICY;
+		}
+		Require(rejected && state.Failed(), test_case.second + " selective Link was accepted");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -262,6 +317,7 @@ int main() {
 		TestMultipleNextTargets();
 		TestDeniedNextTargets();
 		TestRepeatedTypedPageIsRejected();
+		TestSelectiveTargetFieldSet();
 		std::cout << "Link pagination tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

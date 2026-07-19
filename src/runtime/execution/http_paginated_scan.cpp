@@ -22,54 +22,22 @@ namespace duckdb_api {
 namespace internal {
 namespace {
 
-ValueKind PlannedValueKind(const PlannedColumn &column) {
-	if (column.logical_type == "BIGINT") {
-		return ValueKind::BIGINT;
-	}
-	if (column.logical_type == "VARCHAR") {
-		return ValueKind::VARCHAR;
-	}
-	if (column.logical_type == "BOOLEAN") {
-		return ValueKind::BOOLEAN;
-	}
-	throw ExecutionError(ErrorStage::POLICY, "", "scan plan contains an unsupported output type");
-}
-
-std::vector<ValueKind> BuildColumnKinds(const ScanPlan &plan) {
+std::vector<ValueKind> BuildColumnKinds(const AdmittedRepositoryRequestProfile &profile) {
 	std::vector<ValueKind> result;
-	result.reserve(plan.OutputColumns().size());
-	for (const auto &column : plan.OutputColumns()) {
-		result.push_back(PlannedValueKind(column));
+	result.reserve(profile.Columns().size());
+	for (const auto &column : profile.Columns()) {
+		result.push_back(column.kind);
 	}
 	return result;
 }
 
-HttpRequest BuildPageRequest(const ScanPlan &plan, uint64_t page) {
-	// `page` is the only mutable request fact and comes from LinkPaginationState.
-	// Authority, path, field names, page size, and headers are reconstructed from
-	// the already validated immutable plan; no received target string is sent.
-	HttpRequest request;
-	const auto &operation = plan.Operation();
-	const auto &target = plan.Pagination().Target();
-	request.method = "GET";
-	request.scheme = "https";
-	request.host = operation.origin.host;
-	request.port = operation.origin.port;
-	request.target = target.path + "?" + target.page_size_parameter + "=" + std::to_string(target.page_size) + "&" +
-	                 target.page_number_parameter + "=" + std::to_string(page);
-	for (const auto &header : operation.headers) {
-		request.headers.push_back({header.name, header.value});
-	}
-	return request;
-}
-
-JsonDecodePlan BuildRepositoryDecodePlan(const ScanPlan &plan, const ResourceBudgets &budgets,
-                                         uint64_t decoded_memory_bytes,
+JsonDecodePlan BuildRepositoryDecodePlan(const AdmittedRepositoryRequestProfile &profile,
+                                         const ResourceBudgets &budgets, uint64_t decoded_memory_bytes,
                                          std::chrono::steady_clock::time_point deadline) {
 	JsonDecodePlan result;
 	result.response_source = JsonResponseSource::ROOT_ARRAY;
-	for (const auto &column : plan.OutputColumns()) {
-		result.columns.push_back({column.name, column.extractor.substr(2), PlannedValueKind(column)});
+	for (const auto &column : profile.Columns()) {
+		result.columns.push_back({column.name, column.source_field, column.kind});
 	}
 	result.max_records = budgets.decoded_records;
 	result.max_string_bytes = budgets.extracted_string_bytes;
@@ -132,12 +100,15 @@ private:
 // inside the same pull, preserving BatchStream's nonempty-success contract.
 class PaginatedBatchStream final : public BatchStream {
 public:
-	PaginatedBatchStream(const ScanPlan &plan_p, ScanAuthorization authorization_p,
-	                     std::shared_ptr<const HttpTransport> transport_p, uint64_t max_wall_milliseconds_p)
-	    : plan(plan_p), transport(std::move(transport_p)),
-	      authorization(new ScanAuthorization(std::move(authorization_p))), column_kinds(BuildColumnKinds(plan)),
-	      accounting(BuildResourceProfile(plan, max_wall_milliseconds_p)), cancelled(false), closed(false),
-	      exhausted(false), page_loaded(false), page_has_next(false), offset(0) {
+	PaginatedBatchStream(const ScanPlan &plan_p,
+	                     std::unique_ptr<const AdmittedRepositoryRequestProfile> admitted_profile_p,
+	                     ScanAuthorization authorization_p, std::shared_ptr<const HttpTransport> transport_p,
+	                     uint64_t max_wall_milliseconds_p)
+	    : plan(plan_p), admitted_profile(std::move(admitted_profile_p)), transport(std::move(transport_p)),
+	      authorization(new ScanAuthorization(std::move(authorization_p))),
+	      column_kinds(BuildColumnKinds(*admitted_profile)),
+	      accounting(BuildResourceProfile(plan, max_wall_milliseconds_p)), pagination(*admitted_profile),
+	      cancelled(false), closed(false), exhausted(false), page_loaded(false), page_has_next(false), offset(0) {
 	}
 
 	~PaginatedBatchStream() noexcept override {
@@ -256,8 +227,9 @@ private:
 	void FetchPage(ExecutionControl &control) {
 		const auto allowance = accounting.BeginPage(std::chrono::steady_clock::now());
 		CheckState(control, allowance.deadline);
-		auto request = BuildPageRequest(plan, pagination.CurrentPage());
-		request = FixedGithubUserBearerAuthenticator::Authorize(plan, std::move(request), *authorization);
+		auto request = BuildAdmittedRepositoryPageRequest(*admitted_profile, pagination.CurrentPage());
+		request = FixedGithubUserBearerAuthenticator::AuthorizeRepository(
+		    *admitted_profile, plan.Pagination().PageBudgets().header_bytes, std::move(request), *authorization);
 		const HttpLimits limits {allowance.header_bytes, allowance.wire_response_bytes,
 		                         allowance.decompressed_response_bytes,
 		                         std::min(allowance.header_bytes, allowance.decoded_memory_bytes), allowance.deadline};
@@ -276,10 +248,10 @@ private:
 			                     "HTTP response metadata exhausted the decoded-page memory budget");
 		}
 		const auto decoder_memory = allowance.decoded_memory_bytes - response.metadata.retained_bytes;
-		auto page = DecodeJsonPage(
-		    response.body,
-		    BuildRepositoryDecodePlan(plan, plan.Pagination().PageBudgets(), decoder_memory, allowance.deadline),
-		    control);
+		auto page = DecodeJsonPage(response.body,
+		                           BuildRepositoryDecodePlan(*admitted_profile, plan.Pagination().PageBudgets(),
+		                                                     decoder_memory, allowance.deadline),
+		                           control);
 		CheckState(control, allowance.deadline);
 		const auto transition = pagination.Advance(response.metadata.link_field_values);
 		const auto retained_memory = page.retained_memory_bytes + response.metadata.retained_bytes;
@@ -320,6 +292,7 @@ private:
 	}
 
 	const ScanPlan plan;
+	const std::unique_ptr<const AdmittedRepositoryRequestProfile> admitted_profile;
 	const std::shared_ptr<const HttpTransport> transport;
 	std::unique_ptr<ScanAuthorization> authorization;
 	const std::vector<ValueKind> column_kinds;
@@ -338,16 +311,20 @@ private:
 
 } // namespace
 
-std::unique_ptr<BatchStream> OpenAuthenticatedRepositoriesScan(const ScanPlan &plan, ScanAuthorization authorization,
-                                                               std::shared_ptr<const HttpTransport> transport,
-                                                               uint64_t max_wall_milliseconds,
-                                                               ExecutionControl &control) {
+std::unique_ptr<BatchStream>
+OpenAuthenticatedRepositoriesScan(const ScanPlan &plan,
+                                  std::unique_ptr<const AdmittedRepositoryRequestProfile> admitted_profile,
+                                  ScanAuthorization authorization, std::shared_ptr<const HttpTransport> transport,
+                                  uint64_t max_wall_milliseconds, ExecutionControl &control) {
 	if (control.IsCancellationRequested()) {
 		throw ExecutionCancelled();
 	}
+	if (!admitted_profile) {
+		throw ExecutionError(ErrorStage::POLICY, "", "repository request profile was not admitted");
+	}
 	try {
-		return std::unique_ptr<BatchStream>(
-		    new PaginatedBatchStream(plan, std::move(authorization), std::move(transport), max_wall_milliseconds));
+		return std::unique_ptr<BatchStream>(new PaginatedBatchStream(
+		    plan, std::move(admitted_profile), std::move(authorization), std::move(transport), max_wall_milliseconds));
 	} catch (const ExecutionError &) {
 		throw;
 	} catch (const ScanResourceError &error) {

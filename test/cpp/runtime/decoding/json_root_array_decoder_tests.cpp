@@ -28,7 +28,8 @@ duckdb_api::internal::JsonDecodePlan Plan(uint64_t max_records = 100) {
 	                {"full_name", "full_name", duckdb_api::ValueKind::VARCHAR},
 	                {"private", "private", duckdb_api::ValueKind::BOOLEAN},
 	                {"fork", "fork", duckdb_api::ValueKind::BOOLEAN},
-	                {"archived", "archived", duckdb_api::ValueKind::BOOLEAN}};
+	                {"archived", "archived", duckdb_api::ValueKind::BOOLEAN},
+	                {"visibility", "visibility", duckdb_api::ValueKind::VARCHAR}};
 	plan.max_records = max_records;
 	plan.max_string_bytes = 512;
 	plan.max_json_nesting = 16;
@@ -39,7 +40,12 @@ duckdb_api::internal::JsonDecodePlan Plan(uint64_t max_records = 100) {
 
 std::string Repository(uint64_t id, const std::string &full_name = "owner/repository") {
 	return std::string("{\"id\":") + std::to_string(id) + ",\"full_name\":\"" + full_name +
-	       "\",\"private\":false,\"fork\":true,\"archived\":false}";
+	       "\",\"private\":false,\"fork\":true,\"archived\":false,\"visibility\":\"public\"}";
+}
+
+std::string RepositoryWithVisibility(const std::string &visibility_json) {
+	return std::string("{\"id\":1,\"full_name\":\"owner/repository\",\"private\":false,") +
+	       "\"fork\":true,\"archived\":false,\"visibility\":" + visibility_json + "}";
 }
 
 void RequireError(const std::function<void()> &action, duckdb_api::ErrorStage stage, const std::string &field) {
@@ -54,14 +60,15 @@ void RequireError(const std::function<void()> &action, duckdb_api::ErrorStage st
 	Require(rejected, "root-array counterexample was accepted");
 }
 
-void TestFiveColumnRootArrayAndMemoryEvidence() {
+void TestSixColumnRootArrayAndMemoryEvidence() {
 	Control control;
 	auto decoded = duckdb_api::internal::DecodeJsonPage("[" + Repository(11) + "]", Plan(), control);
-	Require(decoded.rows.size() == 1 && decoded.rows[0].values.size() == 5 &&
+	Require(decoded.rows.size() == 1 && decoded.rows[0].values.size() == 6 &&
 	            decoded.rows[0].values[0].bigint_value == 11 &&
 	            decoded.rows[0].values[1].varchar_value == "owner/repository" &&
 	            !decoded.rows[0].values[2].boolean_value && decoded.rows[0].values[3].boolean_value &&
-	            !decoded.rows[0].values[4].boolean_value && decoded.retained_memory_bytes > 0,
+	            !decoded.rows[0].values[4].boolean_value && decoded.rows[0].values[5].varchar_value == "public" &&
+	            decoded.retained_memory_bytes > 0,
 	        "repository root array did not produce the exact typed row and retained-memory evidence");
 	Require(duckdb_api::internal::DecodeJsonRows("[]", Plan(), control).empty(),
 	        "empty root array was not a valid empty page");
@@ -91,6 +98,14 @@ void TestRecordAndStringBoundaries() {
 		                                               control);
 	    },
 	    duckdb_api::ErrorStage::RESOURCE, "full_name");
+
+	const auto exact_visibility = RepositoryWithVisibility("\"" + std::string(512, 'v') + "\"");
+	Require(duckdb_api::internal::DecodeJsonRows("[" + exact_visibility + "]", string_plan, control).size() == 1,
+	        "exact 512-byte visibility was rejected");
+	const auto oversized_visibility = RepositoryWithVisibility("\"" + std::string(513, 'v') + "\"");
+	RequireError(
+	    [&]() { (void)duckdb_api::internal::DecodeJsonRows("[" + oversized_visibility + "]", string_plan, control); },
+	    duckdb_api::ErrorStage::RESOURCE, "visibility");
 }
 
 void TestSchemaAndLifecycleCounterexamples() {
@@ -98,11 +113,17 @@ void TestSchemaAndLifecycleCounterexamples() {
 	const std::string cases[] = {
 	    "{}",
 	    "[null]",
-	    "[{\"full_name\":\"r\",\"private\":false,\"fork\":false,\"archived\":false}]",
-	    "[{\"id\":1,\"full_name\":null,\"private\":false,\"fork\":false,\"archived\":false}]",
-	    "[{\"id\":1,\"id\":2,\"full_name\":\"r\",\"private\":false,\"fork\":false,\"archived\":false}]",
-	    "[{\"id\":1,\"full_name\":\"r\",\"private\":0,\"fork\":false,\"archived\":false}]"};
-	const std::string fields[] = {"", "", "id", "full_name", "id", "private"};
+	    "[{\"full_name\":\"r\",\"private\":false,\"fork\":false,\"archived\":false,\"visibility\":\"public\"}]",
+	    "[{\"id\":1,\"full_name\":null,\"private\":false,\"fork\":false,\"archived\":false,\"visibility\":\"public\"}]",
+	    "[{\"id\":1,\"id\":2,\"full_name\":\"r\",\"private\":false,\"fork\":false,\"archived\":false,\"visibility\":"
+	    "\"public\"}]",
+	    "[{\"id\":1,\"full_name\":\"r\",\"private\":0,\"fork\":false,\"archived\":false,\"visibility\":\"public\"}]",
+	    "[{\"id\":1,\"full_name\":\"r\",\"private\":false,\"fork\":false,\"archived\":false}]",
+	    "[" + RepositoryWithVisibility("null") + "]",
+	    "[" + RepositoryWithVisibility("1") + "]",
+	    "[" + RepositoryWithVisibility("true") + "]"};
+	const std::string fields[] = {"",        "",           "id",         "full_name",  "id",
+	                              "private", "visibility", "visibility", "visibility", "visibility"};
 	for (std::size_t index = 0; index < sizeof(cases) / sizeof(cases[0]); index++) {
 		RequireError([&]() { (void)duckdb_api::internal::DecodeJsonRows(cases[index], Plan(), control); },
 		             duckdb_api::ErrorStage::SCHEMA, fields[index]);
@@ -123,7 +144,7 @@ void TestSchemaAndLifecycleCounterexamples() {
 
 int main() {
 	try {
-		TestFiveColumnRootArrayAndMemoryEvidence();
+		TestSixColumnRootArrayAndMemoryEvidence();
 		TestRecordAndStringBoundaries();
 		TestSchemaAndLifecycleCounterexamples();
 		std::cout << "JSON root-array decoder tests passed" << std::endl;

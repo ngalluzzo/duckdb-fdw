@@ -11,7 +11,7 @@ readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "${REPOSITORY_ROOT}/scripts/lib/release-common.sh"
 readonly BUILD_ROOT="$(release_resolve_path "$1")"
 readonly BUILD_PROFILE="${2:-debug}"
-readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.5.0/pins.json"
+readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.6.0/pins.json"
 current_pin() {
     python3 -I "${REPOSITORY_ROOT}/scripts/read-release-pin.py" "${PINS_FILE}" "$@"
 }

@@ -106,8 +106,16 @@ void TestExplicitMetadataDefinesOneBag() {
 	const auto linked_plan = duckdb_api::BuildConservativeScanPlan(
 	    connector, BuildAuthenticatedScanRequest(connector, linked.Name(), "pagination_secret"));
 	const auto service_plan = duckdb_api_test::BuildValidPaginatedPlanFixture("pagination_secret");
-	Require(service_plan.Snapshot() == linked_plan.Snapshot(),
-	        "safe pagination service did not return the exact planner-produced plan");
+	Require(service_plan.ConnectorName() == linked_plan.ConnectorName() &&
+	            service_plan.ConnectorVersion() == linked_plan.ConnectorVersion() &&
+	            service_plan.RelationName() == linked_plan.RelationName() &&
+	            service_plan.Domain() == linked_plan.Domain() &&
+	            service_plan.Operation().path == linked_plan.Operation().path &&
+	            service_plan.OutputColumns().size() == linked_plan.OutputColumns().size() &&
+	            SameTarget(service_plan.Pagination().Target(), linked_plan.Pagination().Target()) &&
+	            SamePageBudgets(service_plan.Pagination().PageBudgets(), linked_plan.Pagination().PageBudgets()) &&
+	            SameScanBudgets(service_plan.Pagination().ScanBudgets(), linked_plan.Pagination().ScanBudgets()),
+	        "closed pagination fixture drifted from the planner-produced executable plan");
 	Require(
 	    decoy.Operation().request.query_parameters.size() == 2 &&
 	        linked.Operation().request.query_parameters.size() == 2 &&
@@ -146,7 +154,7 @@ void TestAuthenticatedRepositoriesProfile() {
 	const auto &operation = plan.Operation();
 	const auto &pagination = plan.Pagination();
 	const auto &target = pagination.Target();
-	Require(plan.ConnectorName() == "github" && plan.ConnectorVersion() == "0.5.0" &&
+	Require(plan.ConnectorName() == "github" && plan.ConnectorVersion() == "0.6.0" &&
 	            plan.RelationName() == "authenticated_repositories" &&
 	            operation.operation_name == "github_authenticated_repositories" &&
 	            operation.cardinality == duckdb_api::PlannedCardinality::ZERO_TO_MANY &&
@@ -160,11 +168,11 @@ void TestAuthenticatedRepositoriesProfile() {
 	            operation.query_parameters[0].encoded_value == "100" && operation.query_parameters[1].name == "page" &&
 	            operation.query_parameters[1].encoded_value == "1" && operation.headers.size() == 3 &&
 	            operation.headers[0].value == "application/vnd.github+json" &&
-	            operation.headers[1].value == "duckdb-api/0.5.0" && operation.headers[2].value == "2022-11-28",
+	            operation.headers[1].value == "duckdb-api/0.6.0" && operation.headers[2].value == "2022-11-28",
 	        "authenticated repositories fixture drifted from its exact identity, source, or request");
-	const std::vector<std::string> names = {"id", "full_name", "private", "fork", "archived"};
-	const std::vector<std::string> types = {"BIGINT", "VARCHAR", "BOOLEAN", "BOOLEAN", "BOOLEAN"};
-	Require(plan.OutputColumns().size() == names.size(), "repository fixture lost its five-column schema");
+	const std::vector<std::string> names = {"id", "full_name", "private", "fork", "archived", "visibility"};
+	const std::vector<std::string> types = {"BIGINT", "VARCHAR", "BOOLEAN", "BOOLEAN", "BOOLEAN", "VARCHAR"};
+	Require(plan.OutputColumns().size() == names.size(), "repository fixture lost its six-column schema");
 	for (std::size_t index = 0; index < names.size(); index++) {
 		Require(plan.OutputColumns()[index].name == names[index] &&
 		            plan.OutputColumns()[index].logical_type == types[index] && !plan.OutputColumns()[index].nullable &&

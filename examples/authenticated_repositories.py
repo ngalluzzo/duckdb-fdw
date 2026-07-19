@@ -13,13 +13,14 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.5.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.6.0", True, False, "NOT_INSTALLED")
 EXPECTED_SCHEMA = [
     ("id", "BIGINT"),
     ("full_name", "VARCHAR"),
     ("private", "BOOLEAN"),
     ("fork", "BOOLEAN"),
     ("archived", "BOOLEAN"),
+    ("visibility", "VARCHAR"),
 ]
 
 
@@ -60,7 +61,7 @@ def main() -> int:
             """
         ).fetchone()
         if extension != EXPECTED_EXTENSION:
-            raise SystemExit("extension identity is outside the 0.5.0 product cell")
+            raise SystemExit("extension identity is outside the 0.6.0 product cell")
         connection.execute(
             "CREATE TEMPORARY SECRET github_default "
             "(TYPE duckdb_api, PROVIDER config, TOKEN "
@@ -71,7 +72,7 @@ def main() -> int:
         statements = connection.extract_statements(
             sql_path.read_text(encoding="utf-8")
         )
-        if len(statements) != 2:
+        if len(statements) != 3:
             raise SystemExit("authenticated repository example statement count drifted")
         described = connection.execute(statements[0]).fetchall()
         schema = [(row[0], row[1]) for row in described]
@@ -80,6 +81,9 @@ def main() -> int:
         repository_count = connection.execute(statements[1]).fetchone()[0]
         if not isinstance(repository_count, int) or repository_count < 0:
             raise SystemExit("authenticated repository count drifted")
+        private_repository_count = connection.execute(statements[2]).fetchone()[0]
+        if not isinstance(private_repository_count, int) or private_repository_count < 0:
+            raise SystemExit("private repository count drifted")
     finally:
         token = ""
         connection.close()
@@ -96,6 +100,7 @@ def main() -> int:
                     "version": extension[1],
                 },
                 "relation": "github.authenticated_repositories",
+                "private_repository_count": private_repository_count,
                 "repository_count": repository_count,
                 "request_profile": {
                     "maximum_concurrency": 1,

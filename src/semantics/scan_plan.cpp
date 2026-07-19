@@ -201,12 +201,20 @@ PlannedPredicate ScanPlan::RemotePredicate() const {
 	return remote_predicate;
 }
 
+RemotePredicateAccuracy ScanPlan::RemoteAccuracy() const {
+	return remote_accuracy;
+}
+
 PlannedPredicate ScanPlan::ResidualPredicate() const {
 	return residual_predicate;
 }
 
 RelationalOwner ScanPlan::ResidualOwner() const {
 	return residual_owner;
+}
+
+PlannedConditionalInput ScanPlan::ConditionalInput() const {
+	return conditional_input;
 }
 
 const RelationalOwnership &ScanPlan::Ownership() const {

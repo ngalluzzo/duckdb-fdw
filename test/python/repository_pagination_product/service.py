@@ -11,7 +11,7 @@ import socket
 import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 
 RESPONSE_SECRET = "REPOSITORY_RESPONSE_CANARY_27d4"
@@ -28,7 +28,9 @@ class ResponseSpec:
     block: bool = False
 
 
-def repository_body(rows: Iterable[tuple[int, str, bool, bool, bool]]) -> bytes:
+def repository_body(
+    rows: Iterable[tuple[int, str, bool, bool, bool, str]],
+) -> bytes:
     return json.dumps(
         [
             {
@@ -37,6 +39,7 @@ def repository_body(rows: Iterable[tuple[int, str, bool, bool, bool]]) -> bytes:
                 "private": row[2],
                 "fork": row[3],
                 "archived": row[4],
+                "visibility": row[5],
             }
             for row in rows
         ],
@@ -45,20 +48,23 @@ def repository_body(rows: Iterable[tuple[int, str, bool, bool, bool]]) -> bytes:
     ).encode("utf-8")
 
 
-def accepted_next(page: int) -> str:
+def accepted_next(page: int, *, selective: bool = False) -> str:
     """Create accepted response input without implementing its parser."""
 
+    visibility = "&visibility=private" if selective else ""
     return (
-        f"<https://api.github.com/user/repos?per_page=100&page={page}>; rel=next"
+        f"<https://api.github.com/user/repos?per_page=100&page={page}"
+        f"{visibility}>; rel=next"
     )
 
 
 def repository_response(
-    rows: Iterable[tuple[int, str, bool, bool, bool]],
+    rows: Iterable[tuple[int, str, bool, bool, bool, str]],
     *,
     next_page: int | None = None,
+    selective: bool = False,
 ) -> ResponseSpec:
-    links = () if next_page is None else (accepted_next(next_page),)
+    links = () if next_page is None else (accepted_next(next_page, selective=selective),)
     return ResponseSpec(200, repository_body(rows), links)
 
 
@@ -70,7 +76,11 @@ class RepositoryOracleServer(ThreadingHTTPServer):
     def __init__(self) -> None:
         super().__init__(("127.0.0.1", 0), RepositoryOracleHandler)
         self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
         self._responses: list[ResponseSpec] = []
+        self._routes: dict[str, ResponseSpec] | None = None
+        self._synchronized_paths: set[str] = set()
+        self._synchronized_seen: set[str] = set()
         self._requests: list[dict[str, Any]] = []
         self._lifetime_requests = 0
         self.request_started = threading.Event()
@@ -85,6 +95,31 @@ class RepositoryOracleServer(ThreadingHTTPServer):
             raise AssertionError("repository oracle scenario has no responses")
         with self._lock:
             self._responses = configured
+            self._routes = None
+            self._synchronized_paths.clear()
+            self._synchronized_seen.clear()
+            self._requests = []
+        self.request_started.clear()
+        self.blocked_started.clear()
+        self.blocked_exited.clear()
+        self.release_blocked.clear()
+        self.peer_disconnected.clear()
+
+    def configure_routes(
+        self,
+        responses: Mapping[str, ResponseSpec],
+        *,
+        synchronized_paths: Iterable[str] = (),
+    ) -> None:
+        configured = dict(responses)
+        synchronized = set(synchronized_paths)
+        if not configured or not synchronized.issubset(configured):
+            raise AssertionError("repository route scenario is incomplete")
+        with self._lock:
+            self._responses = []
+            self._routes = configured
+            self._synchronized_paths = synchronized
+            self._synchronized_seen.clear()
             self._requests = []
         self.request_started.clear()
         self.blocked_started.clear()
@@ -101,15 +136,30 @@ class RepositoryOracleServer(ThreadingHTTPServer):
                 for name in handler.headers.keys()
             },
         }
-        with self._lock:
+        with self._condition:
             index = len(self._requests)
             self._requests.append(request)
             self._lifetime_requests += 1
-            response = (
-                self._responses[index]
-                if index < len(self._responses)
-                else ResponseSpec(500, b'{"message":"unexpected request"}')
-            )
+            if self._routes is None:
+                response = (
+                    self._responses[index]
+                    if index < len(self._responses)
+                    else ResponseSpec(500, b'{"message":"unexpected request"}')
+                )
+            else:
+                response = self._routes.get(
+                    handler.path,
+                    ResponseSpec(500, b'{"message":"unexpected request"}'),
+                )
+            if handler.path in self._synchronized_paths:
+                self._synchronized_seen.add(handler.path)
+                self._condition.notify_all()
+                ready = self._condition.wait_for(
+                    lambda: self._synchronized_seen == self._synchronized_paths,
+                    timeout=5,
+                )
+                if not ready:
+                    response = ResponseSpec(500, b'{"message":"concurrency timeout"}')
         self.request_started.set()
         return response
 

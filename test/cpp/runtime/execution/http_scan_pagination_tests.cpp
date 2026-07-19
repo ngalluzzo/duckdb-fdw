@@ -15,6 +15,7 @@
 namespace {
 
 using duckdb_api_test::BuildValidAuthenticatedRepositoriesPlanFixture;
+using duckdb_api_test::BuildVisibilityPrivatePlanFixture;
 using duckdb_api_test::ControlledHttpResponse;
 using duckdb_api_test::ControlledResponse;
 using duckdb_api_test::ControlledTransportFailure;
@@ -24,7 +25,7 @@ using duckdb_api_test::Require;
 
 std::string Repository(uint64_t id, const std::string &name) {
 	return std::string("[{\"id\":") + std::to_string(id) + ",\"full_name\":\"" + name +
-	       "\",\"private\":false,\"fork\":false,\"archived\":false}]";
+	       "\",\"private\":false,\"fork\":false,\"archived\":false,\"visibility\":\"public\"}]";
 }
 
 std::string RepositoryPage(uint64_t first_id, uint64_t count) {
@@ -41,9 +42,19 @@ std::string RepositoryPage(uint64_t first_id, uint64_t count) {
 	return result;
 }
 
+std::string PrivateRepository(uint64_t id, const std::string &name) {
+	return std::string("[{\"id\":") + std::to_string(id) + ",\"full_name\":\"" + name +
+	       "\",\"private\":true,\"fork\":false,\"archived\":false,\"visibility\":\"private\"}]";
+}
+
 std::string NextLink(uint64_t page) {
 	return std::string("<https://api.github.com/user/repos?per_page=100&page=") + std::to_string(page) +
 	       ">; rel=\"next\"";
+}
+
+std::string SelectiveNextLink(uint64_t page, const std::string &visibility = "private") {
+	return std::string("<https://api.github.com/user/repos?per_page=100&page=") + std::to_string(page) +
+	       "&visibility=" + visibility + ">; rel=\"next\"";
 }
 
 std::unique_ptr<duckdb_api::BatchStream> Open(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
@@ -51,6 +62,16 @@ std::unique_ptr<duckdb_api::BatchStream> Open(const std::shared_ptr<duckdb_api_t
 	auto token = GeneratedHttpBearerToken(token_suffix);
 	runtime->ExpectBearer("Bearer " + token);
 	return runtime->Executor()->OpenWithAuthorization(BuildValidAuthenticatedRepositoriesPlanFixture("github_default"),
+	                                                  duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)),
+	                                                  control);
+}
+
+std::unique_ptr<duckdb_api::BatchStream>
+OpenSelective(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
+              ManualHttpExecutionControl &control, uint64_t token_suffix) {
+	auto token = GeneratedHttpBearerToken(token_suffix);
+	runtime->ExpectBearer("Bearer " + token);
+	return runtime->Executor()->OpenWithAuthorization(BuildVisibilityPrivatePlanFixture("github_default"),
 	                                                  duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)),
 	                                                  control);
 }
@@ -80,10 +101,10 @@ void TestSequentialBackpressureAndEmptyMiddlePage() {
 	Require(runtime->Observations().empty(), "paginated Open performed transport I/O");
 	duckdb_api::TypedBatch batch;
 	Require(stream->Next(control, batch) && batch.rows.size() == 1 && batch.IsSchemaAligned() &&
-	            batch.column_kinds ==
-	                std::vector<duckdb_api::ValueKind>({duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR,
-	                                                    duckdb_api::ValueKind::BOOLEAN, duckdb_api::ValueKind::BOOLEAN,
-	                                                    duckdb_api::ValueKind::BOOLEAN}) &&
+	            batch.column_kinds == std::vector<duckdb_api::ValueKind>(
+	                                      {duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR,
+	                                       duckdb_api::ValueKind::BOOLEAN, duckdb_api::ValueKind::BOOLEAN,
+	                                       duckdb_api::ValueKind::BOOLEAN, duckdb_api::ValueKind::VARCHAR}) &&
 	            batch.rows[0].values[1].varchar_value == "first",
 	        "first repository page did not produce one typed nonempty batch");
 	Require(runtime->Observations().size() == 1, "Runtime prefetched another page before the first page was consumed");
@@ -150,6 +171,71 @@ void TestTerminalEmptyPageAndAuthorityDenial() {
 	RequireFailure([&]() { (void)malformed->Next(control, batch); }, duckdb_api::ErrorStage::POLICY, "pagination.next");
 	Require(malformed_runtime->Observations().size() == 1 && malformed_runtime->ConsumeBearerExpectation(1),
 	        "invalid relation type became partial success or requested another page");
+}
+
+void TestSelectiveInputPersistsAcrossRequestsAndLinks() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({ControlledResponse(200, PrivateRepository(1, "first"), {SelectiveNextLink(2)}),
+	                          ControlledResponse(200, PrivateRepository(2, "second"))});
+	ManualHttpExecutionControl control;
+	auto stream = OpenSelective(runtime, control, 720);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows[0].values.size() == 6 &&
+	            batch.rows[0].values[5].varchar_value == "private",
+	        "selective repository page lost the required visibility field");
+	Require(stream->Next(control, batch) && batch.rows[0].values[0].bigint_value == 2,
+	        "selective repository scan did not advance to its second page");
+	Require(!stream->Next(control, batch), "selective repository scan did not exhaust cleanly");
+	const auto observations = runtime->Observations();
+	Require(observations.size() == 2, "selective repository scan used the wrong request count");
+	for (std::size_t index = 0; index < observations.size(); index++) {
+		Require(observations[index].target ==
+		            "/user/repos?per_page=100&page=" + std::to_string(static_cast<uint64_t>(index + 1)) +
+		                "&visibility=private",
+		        "selective repository request did not preserve its admitted conditional input");
+	}
+	Require(runtime->ConsumeBearerExpectation(2), "selective pages did not retain one authorization capability");
+}
+
+void RequireSelectiveLinkDenied(const std::string &link, uint64_t token_suffix) {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({ControlledResponse(200, PrivateRepository(1, "private"), {link})});
+	ManualHttpExecutionControl control;
+	auto stream = OpenSelective(runtime, control, token_suffix);
+	duckdb_api::TypedBatch batch;
+	RequireFailure([&]() { (void)stream->Next(control, batch); }, duckdb_api::ErrorStage::POLICY, "pagination.next");
+	Require(runtime->Observations().size() == 1 && runtime->ConsumeBearerExpectation(1),
+	        "rejected selective Link caused another credential-bearing request");
+}
+
+void TestSelectiveLinkMustPreserveConditionalInput() {
+	RequireSelectiveLinkDenied(NextLink(2), 721);
+	RequireSelectiveLinkDenied(SelectiveNextLink(2, "public"), 722);
+	RequireSelectiveLinkDenied(
+	    "<https://api.github.com/user/repos?per_page=100&page=2&visibility=private&visibility=private>; rel=next", 723);
+	RequireSelectiveLinkDenied(
+	    "<https://api.github.com/user/repos?per_page=100&page=2&visibility=private&sort=id>; rel=next", 724);
+}
+
+void TestSelectiveProfileDoesNotLeakAcrossStreamLifecycles() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	ManualHttpExecutionControl control;
+	duckdb_api::TypedBatch batch;
+
+	runtime->Respond(200, PrivateRepository(1, "private"));
+	auto selective = OpenSelective(runtime, control, 725);
+	Require(selective->Next(control, batch) && !selective->Next(control, batch) && runtime->ConsumeBearerExpectation(1),
+	        "selective stream did not release its first admitted profile cleanly");
+
+	runtime->Respond(200, Repository(2, "public"));
+	auto base = Open(runtime, control, 726);
+	Require(base->Next(control, batch) && !base->Next(control, batch) && runtime->ConsumeBearerExpectation(1),
+	        "following unselective stream did not complete independently");
+	const auto observations = runtime->Observations();
+	Require(observations.size() == 2 &&
+	            observations[0].target == "/user/repos?per_page=100&page=1&visibility=private" &&
+	            observations[1].target == "/user/repos?per_page=100&page=1",
+	        "a completed selective profile leaked conditional authority into a later stream");
 }
 
 void TestLateFailuresAreTerminalAndRedacted() {
@@ -244,6 +330,9 @@ int main() {
 		TestSequentialBackpressureAndEmptyMiddlePage();
 		TestFullPageDrainsBeforeNextRequest();
 		TestTerminalEmptyPageAndAuthorityDenial();
+		TestSelectiveInputPersistsAcrossRequestsAndLinks();
+		TestSelectiveLinkMustPreserveConditionalInput();
+		TestSelectiveProfileDoesNotLeakAcrossStreamLifecycles();
 		TestLateFailuresAreTerminalAndRedacted();
 		TestCancellationCloseAndAggregatePageCeiling();
 		std::cout << "HTTP scan pagination tests passed" << std::endl;

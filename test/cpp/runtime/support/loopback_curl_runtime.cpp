@@ -28,7 +28,7 @@ namespace {
 
 bool HasFixedHeaders(const std::vector<duckdb_api::internal::HttpHeader> &headers) {
 	return headers.size() >= 3 && headers[0].name == "Accept" && headers[0].value == "application/vnd.github+json" &&
-	       headers[1].name == "User-Agent" && headers[1].value == "duckdb-api/0.5.0" &&
+	       headers[1].name == "User-Agent" && headers[1].value == "duckdb-api/0.6.0" &&
 	       headers[2].name == "X-GitHub-Api-Version" && headers[2].value == "2022-11-28";
 }
 
@@ -42,12 +42,18 @@ bool IsRepositoryTarget(const std::string &target) {
 	    target[prefix.size()] == '0') {
 		return false;
 	}
-	for (std::size_t index = prefix.size(); index < target.size(); index++) {
+	const std::string selective_suffix = "&visibility=private";
+	const auto end =
+	    target.size() >= selective_suffix.size() &&
+	            target.compare(target.size() - selective_suffix.size(), selective_suffix.size(), selective_suffix) == 0
+	        ? target.size() - selective_suffix.size()
+	        : target.size();
+	for (std::size_t index = prefix.size(); index < end; index++) {
 		if (target[index] < '0' || target[index] > '9') {
 			return false;
 		}
 	}
-	return true;
+	return end > prefix.size();
 }
 
 bool HasExpectedRequest(const duckdb_api::internal::HttpRequest &request) {

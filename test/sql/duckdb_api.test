@@ -1,5 +1,5 @@
 # name: test/sql/duckdb_api.test
-# description: static public SQL and secret contract for 0.5.0
+# description: static public SQL and secret contract for 0.6.0
 # group: [duckdb_api]
 
 statement error
@@ -14,7 +14,7 @@ SELECT extension_version
 FROM duckdb_extensions()
 WHERE extension_name = 'duckdb_api';
 ----
-0.5.0
+0.6.0
 
 query TT
 SELECT type, default_provider
@@ -97,19 +97,32 @@ full_name	VARCHAR	YES	NULL	NULL	NULL
 private	BOOLEAN	YES	NULL	NULL	NULL
 fork	BOOLEAN	YES	NULL	NULL	NULL
 archived	BOOLEAN	YES	NULL	NULL	NULL
+visibility	VARCHAR	YES	NULL	NULL	NULL
 
 statement ok
-EXPLAIN SELECT id, full_name, private, fork, archived
+EXPLAIN SELECT id, full_name, private, fork, archived, visibility
 FROM duckdb_api_scan(
     connector := 'github',
     relation := 'authenticated_repositories',
     secret := 'offline_secret'
 )
 ORDER BY id;
+
+# The pinned structured callback recognizes only this exact equality, keeps the
+# ordinary DuckDB filter visible, and explains the selected plan without secret
+# resolution or network work.
+statement ok
+EXPLAIN SELECT id, full_name, private, visibility
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_repositories',
+    secret := 'offline_secret'
+)
+WHERE visibility = 'private';
 
 statement ok
 PREPARE authenticated_repositories_scan AS
-SELECT id, full_name, private, fork, archived
+SELECT id, full_name, private, fork, archived, visibility
 FROM duckdb_api_scan(
     connector := 'github',
     relation := 'authenticated_repositories',
@@ -118,7 +131,46 @@ FROM duckdb_api_scan(
 ORDER BY id;
 
 statement ok
+PREPARE selective_repositories_scan AS
+SELECT id, full_name, private, visibility
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_repositories',
+    secret := 'offline_secret'
+)
+WHERE visibility = 'private';
+
+# DuckDB substitutes each bound VARCHAR before the structured callback. The
+# same prepared statement must therefore select, fall back, and select again
+# without resolving the logical secret or inheriting the preceding execution's
+# plan choice.
+statement ok
+PREPARE parameterized_repositories_scan AS
+SELECT id, full_name, private, visibility
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'authenticated_repositories',
+    secret := 'offline_secret'
+)
+WHERE visibility = $1;
+
+statement ok
+EXPLAIN EXECUTE parameterized_repositories_scan('private');
+
+statement ok
+EXPLAIN EXECUTE parameterized_repositories_scan('public');
+
+statement ok
+EXPLAIN EXECUTE parameterized_repositories_scan('private');
+
+statement ok
 DEALLOCATE authenticated_repositories_scan;
+
+statement ok
+DEALLOCATE selective_repositories_scan;
+
+statement ok
+DEALLOCATE parameterized_repositories_scan;
 
 statement ok
 CREATE TEMPORARY SECRET sql_contract (

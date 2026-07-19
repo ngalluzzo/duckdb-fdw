@@ -80,6 +80,17 @@ HISTORICAL_RELEASES = {
             "02e6eb66801e665ed6be5db70706505842ee726090ecc39025d592cad95023b5"
         ),
     },
+    "0.5.0": {
+        "identities_canonical_json_sha256": (
+            "ac6a5534afd0e239b94069fa8df20e4a4f935eba9c5a7e324f1bca606c173ba7"
+        ),
+        "pins_canonical_json_sha256": (
+            "44d0c4c1c2ebc8ff771425471e8681032c65173f650a7767902c2970f4008155"
+        ),
+        "public_contract_sha256": (
+            "c0d7b2ff6160874390a4f06d1b9954ba74604769efcfcf70420fa2702c26fae6"
+        ),
+    },
 }
 GIT_ID = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -94,6 +105,9 @@ EXTENSION_CONFIG = re.compile(
 MAX_IDENTITY_FILE_BYTES = 16 * 1024 * 1024
 PATH_BOUND_SHA256 = "sha256-length-prefixed-path-and-bytes-v1"
 CONTROLLED_PRODUCT_SOURCE_PATHS = (
+    "test/cpp/connector/support/catalog_test_access.hpp",
+    "test/cpp/connector/support/connector_catalog_test_fixtures.cpp",
+    "test/cpp/connector/support/connector_catalog_test_fixtures.hpp",
     "test/cpp/query/integration/controlled_extension_entrypoint.cpp",
     "test/cpp/query/integration/support/controlled_product_composition.cpp",
     "test/cpp/query/integration/support/controlled_product_composition.hpp",
@@ -356,7 +370,9 @@ def validate_translation_units(value: object, label: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def validate_current_identities(pins: dict, reader: RepositoryReader) -> dict:
+def validate_current_identities(
+    pins: dict, reader: RepositoryReader, version: str
+) -> dict:
     identities = pins.get("identities")
     if not isinstance(identities, dict) or set(identities) != {
         "build_graph",
@@ -364,7 +380,7 @@ def validate_current_identities(pins: dict, reader: RepositoryReader) -> dict:
         "native_product_sources",
         "public_contract",
     }:
-        raise AssertionError("current 0.5 source identity pins are incomplete")
+        raise AssertionError("current source identity pins are incomplete")
 
     native_paths = validate_source_set_identity(
         identities["native_product_sources"], "native product source"
@@ -410,7 +426,7 @@ def validate_current_identities(pins: dict, reader: RepositoryReader) -> dict:
         "path",
     }:
         raise AssertionError("current public contract identity is malformed")
-    if public_contract["path"] != "release/0.5.0/public_contract.json":
+    if public_contract["path"] != f"release/{version}/public_contract.json":
         raise AssertionError("current public contract identity names the wrong source")
     if (
         not isinstance(public_contract["canonical_json_sha256"], str)
@@ -463,9 +479,9 @@ def verify(root: pathlib.Path = ROOT) -> dict[str, str]:
 
     validate_historical_releases(reader)
 
-    if version != "0.5.0":
-        raise AssertionError("current source identity verifier supports only 0.5.0")
-    identities = validate_current_identities(pins, reader)
+    if version != "0.6.0":
+        raise AssertionError("current source identity verifier supports only 0.6.0")
+    identities = validate_current_identities(pins, reader, version)
     native_identity = identities["native_product_sources"]
     native_digest = path_bound_digest(reader, tuple(native_identity["paths"]))
     if native_digest != native_identity["sha256"]:
