@@ -77,6 +77,25 @@ public:
 
 		batch.column_kinds = {duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR,
 		                      duckdb_api::ValueKind::BOOLEAN};
+		if (scenario == QueryRuntimeScenario::EMPTY_BATCH) {
+			probe->batches.fetch_add(1, std::memory_order_relaxed);
+			return true;
+		}
+		if (scenario == QueryRuntimeScenario::ROWS_WITH_FALSE) {
+			batch.rows.push_back(Row(8, "dropped", false));
+			return false;
+		}
+		if (scenario == QueryRuntimeScenario::LATE_RESOURCE_ERROR_ONCE) {
+			if (probe->late_failure_enabled.load(std::memory_order_acquire)) {
+				throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "response_bytes",
+				                                 "response exceeds its byte budget");
+			}
+			batch.rows.push_back(Row(static_cast<int64_t>(offset + 7), "before-error", false));
+			offset++;
+			probe->batches.fetch_add(1, std::memory_order_relaxed);
+			probe->rows.fetch_add(1, std::memory_order_relaxed);
+			return true;
+		}
 		if (authenticated) {
 			if (offset != 0) {
 				return false;
@@ -202,8 +221,11 @@ protected:
 		if (scenario == QueryRuntimeScenario::NULL_STREAM) {
 			return std::unique_ptr<duckdb_api::BatchStream>();
 		}
-		probe->streams_opened.fetch_add(1, std::memory_order_relaxed);
-		return std::unique_ptr<duckdb_api::BatchStream>(new QueryScenarioStream(scenario, authenticated, probe));
+		const auto prior_streams = probe->streams_opened.fetch_add(1, std::memory_order_relaxed);
+		const auto stream_scenario = scenario == QueryRuntimeScenario::LATE_RESOURCE_ERROR_ONCE && prior_streams > 0
+		                                 ? QueryRuntimeScenario::SUCCESS
+		                                 : scenario;
+		return std::unique_ptr<duckdb_api::BatchStream>(new QueryScenarioStream(stream_scenario, authenticated, probe));
 	}
 
 private:
@@ -215,7 +237,8 @@ private:
 
 QueryLifecycleProbe::QueryLifecycleProbe()
     : legacy_open_calls(0), authorization_open_calls(0), anonymous_authorizations(0), github_bearer_authorizations(0),
-      streams_opened(0), next_calls(0), batches(0), rows(0), cancellations(0), streams_closed(0), active_waiters(0) {
+      streams_opened(0), next_calls(0), batches(0), rows(0), cancellations(0), streams_closed(0), active_waiters(0),
+      late_failure_enabled(false) {
 }
 
 std::shared_ptr<const duckdb_api::ScanExecutor> BuildQueryScenarioExecutor(QueryRuntimeScenario scenario,

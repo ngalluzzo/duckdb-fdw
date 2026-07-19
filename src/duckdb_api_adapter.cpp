@@ -318,11 +318,19 @@ void DuckdbApiScan(ClientContext &context, TableFunctionInput &input, DataChunk 
 	duckdb_api::TypedBatch batch;
 	try {
 		DuckdbExecutionControl control(context);
-		if (!state.stream->Next(control, batch)) {
+		const auto produced = state.stream->Next(control, batch);
+		if (!produced) {
+			if (!batch.rows.empty()) {
+				throw std::logic_error("batch stream returned rows with clean exhaustion");
+			}
 			state.finished = true;
 			return;
 		}
-		if (!batch.IsSchemaAligned() || batch.column_kinds != state.expected_kinds ||
+		// DuckDB treats a zero-cardinality table-function output as source
+		// exhaustion and will not pull again. Runtime therefore owns crossing an
+		// empty nonterminal source page inside the active Next call; a successful
+		// empty batch is a provider-contract violation, not clean exhaustion.
+		if (batch.rows.empty() || !batch.IsSchemaAligned() || batch.column_kinds != state.expected_kinds ||
 		    batch.rows.size() > state.max_batch_rows || batch.rows.size() > STANDARD_VECTOR_SIZE) {
 			throw std::logic_error("batch stream violated its bound schema or row ceiling");
 		}

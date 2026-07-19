@@ -33,6 +33,9 @@ enum class QueryRuntimeScenario {
 	INTERNAL_ERROR,
 	UNKNOWN_ERROR,
 	NULL_STREAM,
+	EMPTY_BATCH,
+	ROWS_WITH_FALSE,
+	LATE_RESOURCE_ERROR_ONCE,
 	MISALIGNED_BATCH,
 	OVERSIZED_BATCH
 };
@@ -49,6 +52,7 @@ struct QueryLifecycleProbe {
 	std::atomic<uint64_t> cancellations;
 	std::atomic<uint64_t> streams_closed;
 	std::atomic<uint64_t> active_waiters;
+	std::atomic<bool> late_failure_enabled;
 	std::mutex mutex;
 	std::condition_variable condition;
 
