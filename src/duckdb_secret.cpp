@@ -25,6 +25,11 @@ static const char DUCKDB_API_TOKEN_KEY[] = "token";
 	throw InvalidInputException("[duckdb_api][authentication] %s", message);
 }
 
+[[noreturn]] void ThrowCreationHeaderBudgetError() {
+	throw InvalidInputException(
+	    "[duckdb_api][resource] field=header_bytes: TOKEN exceeds the 8192-byte bearer-token limit");
+}
+
 [[noreturn]] void ThrowResolutionError(const char *message) {
 	throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::AUTHENTICATION, "secret", message);
 }
@@ -43,9 +48,17 @@ unique_ptr<BaseSecret> CreateDuckdbApiSecret(ClientContext &, CreateSecretInput 
 	}
 
 	const auto token = input.options.find(DUCKDB_API_TOKEN_KEY);
-	if (token == input.options.end() || token->second.IsNull() || token->second.type().id() != LogicalTypeId::VARCHAR ||
-	    StringValue::Get(token->second).empty()) {
+	if (token == input.options.end() || token->second.IsNull() || token->second.type().id() != LogicalTypeId::VARCHAR) {
 		ThrowCreationError("TOKEN must be a non-empty VARCHAR");
+	}
+	// DuckDB owns this value. Inspect it by reference so an oversized secret is
+	// rejected before Query allocates any additional credential-sized buffer.
+	const auto &token_text = StringValue::Get(token->second);
+	if (token_text.empty()) {
+		ThrowCreationError("TOKEN must be a non-empty VARCHAR");
+	}
+	if (token_text.size() > duckdb_api::ScanAuthorization::GithubUserBearerTokenByteLimit()) {
+		ThrowCreationHeaderBudgetError();
 	}
 
 	auto secret =
@@ -110,9 +123,15 @@ std::string ResolveToken(ClientContext &context, const std::string &logical_name
 	    token.type().id() != LogicalTypeId::VARCHAR) {
 		ThrowResolutionError("named duckdb_api secret has no usable token");
 	}
-	auto token_snapshot = StringValue::Get(token);
+	// Validate DuckDB's shared value in place. Returning the string below takes
+	// the single bounded plaintext snapshot that crosses into Runtime.
+	const auto &token_snapshot = StringValue::Get(token);
 	if (token_snapshot.empty()) {
 		ThrowResolutionError("named duckdb_api secret has no usable token");
+	}
+	if (token_snapshot.size() > duckdb_api::ScanAuthorization::GithubUserBearerTokenByteLimit()) {
+		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "header_bytes",
+		                                 "bearer token exceeds the 8192-byte request-header limit");
 	}
 	return token_snapshot;
 }

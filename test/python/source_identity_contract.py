@@ -78,7 +78,7 @@ class SourceIdentityContractTests(unittest.TestCase):
         self.assertEqual(result["duckdb_version"], "1.5.4")
         self.assertEqual(
             result["public_contract_sha256"],
-            "958c028ac6b296d09ae079d3a2a55da257f6d4ee92f39ae9d7f663b57a112afa",
+            "02e6eb66801e665ed6be5db70706505842ee726090ecc39025d592cad95023b5",
         )
         self.assertEqual(
             result["native_product_sources_sha256"],

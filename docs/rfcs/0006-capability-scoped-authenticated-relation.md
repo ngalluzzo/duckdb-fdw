@@ -115,7 +115,7 @@ The native product registers a DuckDB secret type named `duckdb_api` and one
 provider named `config`. The provider accepts exactly one sensitive `TOKEN`
 value, marks it redacted in DuckDB's `KeyValueSecret` representation, rejects a
 missing, `NULL`, or empty value after DuckDB evaluates the declared `VARCHAR`
-option, and rejects persistent creation.
+option, rejects a value over 8,192 bytes, and rejects persistent creation.
 It registers no `env` or credential-chain provider and performs no lookup
 outside the supplied `CREATE SECRET` options.
 
@@ -264,6 +264,13 @@ native ABI.
   header. The final authority is exactly HTTPS `api.github.com:443` and the
   credential placement is exactly `Authorization`. Redirects remain disabled;
   a `3xx` fails and no second destination receives the header.
+- The fixed bearer token is limited to 8,192 bytes. Runtime also limits the
+  aggregate project-supplied request fields to 16,384 bytes, counting each
+  field exactly as `name + ": " + value + "\r\n"`. The smaller token ceiling
+  reserves half the envelope for fixed and libcurl-generated fields; the
+  supported-cell real-curl oracle requires the complete emitted header block,
+  including dependency-generated fields and final framing, to remain at or
+  below 16,384 bytes.
 - Proxy, netrc, cookies, caller headers, environment lookup, and filesystem
   credential lookup remain disabled. TLS peer and hostname verification and
   post-DNS address policy remain unchanged.
@@ -311,10 +318,14 @@ when final source and test dependencies preserve those directions.
   and arbitrary destinations remain denied.
 - **Resource budgets, backpressure, and cancellation:** Existing hard request,
   response, header, decompression, record, string, JSON, memory, batch, wall
-  time, and concurrency ceilings remain. The one-row response passes through
-  the existing pull stream. Cancellation covers authorization preparation,
-  transfer, decoding, and delivery; capability/header cleanup follows every
-  exit.
+  time, and concurrency ceilings remain. Secret creation, resolution, Runtime
+  capability construction, bearer decoration, and transport each fail closed
+  before I/O when the 8,192-byte token ceiling or 16,384-byte project-header
+  aggregate is exceeded. The stable diagnostic is `resource` with field
+  `header_bytes` and contains no token bytes. The one-row response passes
+  through the existing pull stream. Cancellation covers authorization
+  preparation, transfer, decoding, and delivery; capability/header cleanup
+  follows every exit.
 - **Replay units, retries, caching, and duplicate prevention:** There is one
   request and no retry or cache. The single successful response object is
   emitted once. A credential replacement never causes the active request to be

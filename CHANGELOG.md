@@ -32,6 +32,10 @@ This file records user-visible changes to duckdb-fdw.
 - Each authenticated execution resolves the named secret from DuckDB's
   temporary `memory` storage. Persistent-only entries are not found and
   same-name persistent entries are ignored.
+- Bearer tokens are limited to 8 KiB, and project-supplied outbound request
+  fields have a 16 KiB aggregate ceiling. Over-limit secret creation,
+  resolution, capability construction, or request decoration fails before
+  network I/O with a redacted `resource/header_bytes` diagnostic.
 
 ### Limitations
 

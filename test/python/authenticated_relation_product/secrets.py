@@ -13,6 +13,7 @@ from .support import (
     AUTHENTICATED_SCAN,
     AUTHENTICATED_SCHEMA,
     AUTHENTICATED_SQL,
+    GITHUB_BEARER_TOKEN_BYTE_LIMIT,
     TOKEN_A,
     TOKEN_B,
     assert_authenticated_request,
@@ -211,6 +212,19 @@ def run_secret_contract(extension_path: pathlib.Path, server: OracleServer) -> i
             "CREATE TEMPORARY SECRET empty_token "
             "(TYPE duckdb_api, PROVIDER config, TOKEN '')",
             "TOKEN must be a non-empty VARCHAR",
+        )
+        boundary_token = "e" * GITHUB_BEARER_TOKEN_BYTE_LIMIT
+        create_temporary_secret(connection, boundary_token)
+        connection.execute("DROP SECRET github_default")
+        oversized_token = "o" * (GITHUB_BEARER_TOKEN_BYTE_LIMIT + 1)
+        _expect_error(
+            connection,
+            "CREATE TEMPORARY SECRET oversized_token "
+            "(TYPE duckdb_api, PROVIDER config, TOKEN '"
+            + oversized_token
+            + "')",
+            "[duckdb_api][resource] field=header_bytes",
+            (oversized_token,),
         )
         _expect_error(
             connection,

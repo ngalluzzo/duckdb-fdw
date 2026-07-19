@@ -65,7 +65,19 @@ ScanAuthorization ScanAuthorization::Anonymous() {
 	return ScanAuthorization(Kind::ANONYMOUS, StateOwner(nullptr, &ScanAuthorization::DestroyState));
 }
 
+uint64_t ScanAuthorization::GithubUserBearerTokenByteLimit() noexcept {
+	// Reserve half of the native header envelope for libcurl-generated Host,
+	// Accept-Encoding, connection fields, and framing. The focused real-curl
+	// boundary oracle verifies the complete emitted block remains within the
+	// envelope on the supported product cell.
+	return HOST_MAX_HEADER_BYTES / 2;
+}
+
 ScanAuthorization ScanAuthorization::GithubUserBearer(std::string &&token) {
+	if (token.size() > GithubUserBearerTokenByteLimit()) {
+		throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
+		                     "bearer token exceeds the 8192-byte request-header limit");
+	}
 	if (!IsSafeBearerToken(token)) {
 		throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
 		                     "bearer authorization requires a non-empty visible-ASCII token");

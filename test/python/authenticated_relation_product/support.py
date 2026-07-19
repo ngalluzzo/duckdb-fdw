@@ -7,6 +7,7 @@ from live_rest_product.support import AUTHENTICATED_PATH, OracleServer
 
 TOKEN_A = "query-product-token-a"
 TOKEN_B = "query-product-token-b"
+GITHUB_BEARER_TOKEN_BYTE_LIMIT = 8 * 1024
 AUTHENTICATED_SCHEMA = [
     ("id", "BIGINT"),
     ("login", "VARCHAR"),

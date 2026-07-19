@@ -250,6 +250,17 @@ not found, and a same-named persistent entry is ignored. Each execution sees
 the current value, so replacement or drop affects the next execution of an
 already prepared statement without changing a running scan.
 
+The `TOKEN` value is limited to 8,192 bytes at both DuckDB secret creation and
+resolution. Remote Runtime independently applies the same capability limit and
+a 16,384-byte aggregate ceiling to project-supplied request fields, counting
+each field as `name + ": " + value + "\r\n"` before concatenation. The 8 KiB
+token limit reserves the other half of the native header envelope for fixed
+and libcurl-generated fields. On the supported cell, the controlled real-curl
+oracle additionally requires the complete emitted header block, including
+dependency-generated fields and final framing, to fit within 16 KiB. A token
+or aggregate overflow fails before network I/O as a redacted `resource` error
+with field `header_bytes`.
+
 The implementation is native C++ end to end and introduces neither Rust nor a
 cross-language FFI. Connector Experience supplies immutable compiled native
 metadata with a typed `{scheme, host, port}` origin and structural request
@@ -281,8 +292,9 @@ plan-declared bearer authenticator, `Authorization` placement, and final
 destination before request decoration. Remote Runtime enforces
 post-DNS destination policy, TLS verification, strict JSON extraction, one
 five-second wall-time budget across execution, response/header/decompressed
-byte ceilings, three decoded records, 256 bytes per extracted string, bounded
-decode memory and nesting, two rows per output batch, and one concurrent
+byte ceilings, the outbound header ceilings above, three decoded records,
+256 bytes per extracted string, bounded decode memory and nesting, two rows per
+output batch, and one concurrent
 transfer. DuckDB interruption reaches transfer and decoding. Stream cancel,
 close, and destruction are idempotent and non-throwing; connection close is
 bounded by the hard execution deadline but is not promised to cancel promptly.

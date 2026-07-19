@@ -85,6 +85,17 @@ void TestCreationRejectsImplicitPersistenceAndMalformedOptions() {
 	RequireQueryFailure(connection,
 	                    "CREATE TEMPORARY SECRET unknown_option (TYPE duckdb_api, PROVIDER config, OTHER 'x')",
 	                    "Unknown parameter 'other'");
+	const auto token_limit = duckdb_api::ScanAuthorization::GithubUserBearerTokenByteLimit();
+	const auto exact_token = std::string(static_cast<std::size_t>(token_limit), 'e');
+	const auto exact = connection.Query("CREATE TEMPORARY SECRET exact_limit "
+	                                    "(TYPE duckdb_api, PROVIDER config, TOKEN '" +
+	                                    exact_token + "')");
+	Require(!exact->HasError(), "exact-limit temporary bearer secret was rejected");
+	const auto oversized_token = std::string(static_cast<std::size_t>(token_limit + 1), 'o');
+	RequireQueryFailure(connection,
+	                    "CREATE TEMPORARY SECRET over_limit (TYPE duckdb_api, PROVIDER config, TOKEN '" +
+	                        oversized_token + "')",
+	                    "[duckdb_api][resource] field=header_bytes", oversized_token);
 
 	auto explicit_memory = connection.Query("CREATE TEMPORARY SECRET explicit_memory IN memory "
 	                                        "(TYPE duckdb_api, PROVIDER config, TOKEN '" +

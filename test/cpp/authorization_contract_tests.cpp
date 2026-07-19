@@ -82,6 +82,22 @@ void RequireRejected(const std::function<void()> &action, duckdb_api::ErrorStage
 	Require(rejected, "authorization operation did not fail closed");
 }
 
+void RequireHeaderBudgetRejected(const std::function<void()> &action, const std::string &forbidden) {
+	bool rejected = false;
+	try {
+		action();
+	} catch (const duckdb_api::ExecutionError &error) {
+		rejected = true;
+		Require(error.Stage() == duckdb_api::ErrorStage::RESOURCE, "oversized bearer token used the wrong error stage");
+		Require(error.Field() == "header_bytes", "oversized bearer token used an unstable resource field");
+		Require(error.SafeMessage() == "bearer token exceeds the 8192-byte request-header limit",
+		        "oversized bearer token used an unstable safe diagnostic");
+		Require(error.SafeMessage().find(forbidden) == std::string::npos,
+		        "oversized bearer token escaped through its diagnostic");
+	}
+	Require(rejected, "oversized bearer token did not fail closed");
+}
+
 void TestLegacyAnonymousCompatibilityAndEnvelopeFailClosed() {
 	AnonymousExecutor executor;
 	ManualControl control;
@@ -133,6 +149,19 @@ void TestUnsafeBearerTokensAreRejectedWithoutDisclosure() {
 	}
 }
 
+void TestBearerTokenByteBoundary() {
+	const auto limit = duckdb_api::ScanAuthorization::GithubUserBearerTokenByteLimit();
+	Require(limit == 8 * 1024, "fixed GitHub bearer-token byte limit drifted");
+	auto exact = std::string(static_cast<std::size_t>(limit), 'e');
+	auto authorization = duckdb_api::ScanAuthorization::GithubUserBearer(std::move(exact));
+	(void)authorization;
+
+	auto over = std::string(static_cast<std::size_t>(limit + 1), 'o');
+	const auto canary = over;
+	RequireHeaderBudgetRejected([&]() { (void)duckdb_api::ScanAuthorization::GithubUserBearer(std::move(over)); },
+	                            canary);
+}
+
 void TestCancellationPrecedesCapabilityUse() {
 	AnonymousExecutor executor;
 	ManualControl control;
@@ -163,6 +192,7 @@ int main() {
 		TestLegacyAnonymousCompatibilityAndEnvelopeFailClosed();
 		TestAuthorizedCapabilityFailsClosedUntilImplemented();
 		TestUnsafeBearerTokensAreRejectedWithoutDisclosure();
+		TestBearerTokenByteBoundary();
 		TestCancellationPrecedesCapabilityUse();
 		std::cout << "authorization contract tests passed" << std::endl;
 		return EXIT_SUCCESS;

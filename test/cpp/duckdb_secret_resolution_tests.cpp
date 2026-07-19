@@ -135,6 +135,16 @@ void TestResolutionValidatesTypeProviderShapeAndToken() {
 	duckdb::Value integer_token = duckdb::Value::BIGINT(42);
 	RegisterStoredSecret(connection, StoredSecret("duckdb_api", "config", "integer_stored_token", &integer_token));
 	RequireAuthenticationFailure([&]() { (void)Resolve(connection, "integer_stored_token"); });
+
+	const auto token_limit = duckdb_api::ScanAuthorization::GithubUserBearerTokenByteLimit();
+	duckdb::Value exact_token(std::string(static_cast<std::size_t>(token_limit), 'e'));
+	RegisterStoredSecret(connection, StoredSecret("duckdb_api", "config", "exact_limit_token", &exact_token));
+	Require(Resolve(connection, "exact_limit_token") != nullptr,
+	        "exact-limit stored token did not resolve to a Runtime capability");
+	const auto oversized_text = std::string(static_cast<std::size_t>(token_limit + 1), 'o');
+	duckdb::Value oversized_token(oversized_text);
+	RegisterStoredSecret(connection, StoredSecret("duckdb_api", "config", "oversized_stored_token", &oversized_token));
+	RequireHeaderBudgetFailure([&]() { (void)Resolve(connection, "oversized_stored_token"); }, oversized_text);
 }
 
 void TestResolutionObservesReplacementDropAndMemoryIsolation() {

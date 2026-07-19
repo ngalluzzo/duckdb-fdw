@@ -15,6 +15,19 @@ import duckdb
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
 EXPECTED_EXTENSION = ("duckdb_api", "0.4.0", True, False, "NOT_INSTALLED")
+EXPECTED_BEARER_TOKEN_BYTES = 8 * 1024
+EXPECTED_OUTBOUND_PROJECT_HEADER_BYTES = 16 * 1024
+EXPECTED_OUTBOUND_PROJECT_HEADER_ACCOUNTING = 'name + ": " + value + "\\r\\n"'
+EXPECTED_OVERSIZED_TOKEN_DIAGNOSTIC = (
+    "[duckdb_api][resource] field=header_bytes: "
+    "TOKEN exceeds the 8192-byte bearer-token limit"
+)
+EXPECTED_HEADER_BUDGET_REJECTION = {
+    "category": "resource",
+    "field": "header_bytes",
+    "network_io": "none",
+    "redacted": True,
+}
 EXPECTED_SCHEMA = [
     ("id", "BIGINT"),
     ("login", "VARCHAR"),
@@ -79,6 +92,28 @@ def validate_rows(rows: list[tuple[object, ...]]) -> None:
             or not isinstance(row[2], bool)
         ):
             raise AssertionError(f"public relation returned an incompatible scalar: {row!r}")
+
+
+def expect_oversized_token_error(
+    connection: duckdb.DuckDBPyConnection,
+    token: str,
+    expected_diagnostic: str,
+    canary: str,
+) -> None:
+    try:
+        connection.execute(
+            "CREATE TEMPORARY SECRET artifact_contract_over_limit "
+            f"(TYPE duckdb_api, PROVIDER config, TOKEN '{token}')"
+        )
+    except duckdb.InvalidInputException as error:
+        diagnostic = str(error)
+        first_line = diagnostic.partition("\n")[0]
+        if first_line != f"Invalid Input Error: {expected_diagnostic}":
+            raise AssertionError("oversized TOKEN diagnostic drifted") from error
+        if canary in diagnostic or token in diagnostic:
+            raise AssertionError("oversized TOKEN escaped through its diagnostic") from None
+    else:
+        raise AssertionError("one-byte-over TOKEN was accepted")
 
 
 def main() -> int:
@@ -233,6 +268,47 @@ def main() -> int:
         connection.execute("DROP SECRET artifact_contract")
 
         diagnostics = expected_behavior["diagnostics"]
+        if diagnostics.get("oversized_token") != EXPECTED_OVERSIZED_TOKEN_DIAGNOSTIC:
+            raise AssertionError("public oversized TOKEN contract drifted")
+        boundary_prefix = "artifact_boundary_"
+        boundary_token = boundary_prefix + "e" * (
+            EXPECTED_BEARER_TOKEN_BYTES - len(boundary_prefix)
+        )
+        if len(boundary_token.encode()) != EXPECTED_BEARER_TOKEN_BYTES:
+            raise AssertionError("artifact TOKEN boundary fixture drifted")
+        connection.execute(
+            "CREATE TEMPORARY SECRET artifact_contract_boundary "
+            f"(TYPE duckdb_api, PROVIDER config, TOKEN '{boundary_token}')"
+        )
+        boundary_inventory = connection.execute(
+            "SELECT secret_string FROM duckdb_secrets() "
+            "WHERE name = 'artifact_contract_boundary'"
+        ).fetchone()
+        if boundary_inventory != (
+            "name=artifact_contract_boundary;type=duckdb_api;provider=config;"
+            "serializable=true;scope;token=redacted",
+        ) or boundary_token in repr(boundary_inventory):
+            raise AssertionError("exact-limit TOKEN was rejected or not redacted")
+        connection.execute("DROP SECRET artifact_contract_boundary")
+
+        over_limit_canary = "ARTIFACT_TOKEN_OVER_LIMIT_CANARY"
+        oversized_token = over_limit_canary + "o" * (
+            EXPECTED_BEARER_TOKEN_BYTES + 1 - len(over_limit_canary)
+        )
+        if len(oversized_token.encode()) != EXPECTED_BEARER_TOKEN_BYTES + 1:
+            raise AssertionError("artifact oversized TOKEN fixture drifted")
+        expect_oversized_token_error(
+            connection,
+            oversized_token,
+            EXPECTED_OVERSIZED_TOKEN_DIAGNOSTIC,
+            over_limit_canary,
+        )
+        if connection.execute(
+            "SELECT count(*) FROM duckdb_secrets() "
+            "WHERE name = 'artifact_contract_over_limit'"
+        ).fetchone() != (0,):
+            raise AssertionError("rejected oversized TOKEN created secret state")
+
         expect_bind_error(
             connection,
             "SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'items')",
@@ -349,10 +425,29 @@ def main() -> int:
                 "offset": "duckdb",
                 "ordering": "duckdb",
             },
+            "resource_limits": {
+                "outbound_project_headers": {
+                    "accounting": EXPECTED_OUTBOUND_PROJECT_HEADER_ACCOUNTING,
+                    "maximum_bytes": EXPECTED_OUTBOUND_PROJECT_HEADER_BYTES,
+                },
+                "over_limit_rejection": EXPECTED_HEADER_BUDGET_REJECTION,
+            },
             "removed_relations": [{"connector": "example", "relation": "items"}],
             "secret_type": {
                 "environment_provider": False,
-                "fields": {"TOKEN": "redacted_nonempty_VARCHAR"},
+                "fields": {
+                    "TOKEN": {
+                        "duckdb_type": "VARCHAR",
+                        "enforced_at": [
+                            "secret_creation",
+                            "secret_resolution",
+                            "runtime_capability",
+                        ],
+                        "maximum_bytes": EXPECTED_BEARER_TOKEN_BYTES,
+                        "nonempty": True,
+                        "redacted": True,
+                    }
+                },
                 "implicit_selection": False,
                 "persistent": False,
                 "provider": "config",

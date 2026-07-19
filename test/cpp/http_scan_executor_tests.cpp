@@ -87,6 +87,32 @@ void TestExactBearerRequestAndRootObject() {
 	        "fixed authenticator did not append exactly one canonical bearer header");
 }
 
+void TestBearerTokenBoundaryPrecedesTransport() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->Respond(200, OneAuthenticatedHttpRow());
+	ManualHttpExecutionControl control;
+	const auto limit = duckdb_api::ScanAuthorization::GithubUserBearerTokenByteLimit();
+	auto exact = std::string(static_cast<std::size_t>(limit), 'e');
+	auto stream = runtime->Executor()->OpenWithAuthorization(
+	    BuildAuthenticatedHttpPlan(), duckdb_api::ScanAuthorization::GithubUserBearer(std::move(exact)), control);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch), "exact-limit bearer token did not reach the controlled Runtime service");
+	Require(runtime->Observation().request_count == 1, "exact-limit bearer token did not perform one request");
+
+	auto over = std::string(static_cast<std::size_t>(limit + 1), 'o');
+	bool rejected = false;
+	try {
+		(void)runtime->Executor()->OpenWithAuthorization(
+		    BuildAuthenticatedHttpPlan(), duckdb_api::ScanAuthorization::GithubUserBearer(std::move(over)), control);
+	} catch (const duckdb_api::ExecutionError &error) {
+		rejected = true;
+		Require(error.Stage() == duckdb_api::ErrorStage::RESOURCE && error.Field() == "header_bytes",
+		        "one-byte-over bearer token used the wrong safe resource diagnostic");
+	}
+	Require(rejected, "one-byte-over bearer token was accepted");
+	Require(runtime->Observation().request_count == 1, "one-byte-over bearer token reached the controlled transport");
+}
+
 void TestAuthenticatedStatusFailures() {
 	ManualHttpExecutionControl control;
 	duckdb_api::TypedBatch batch;
@@ -357,6 +383,7 @@ int main() {
 	try {
 		TestOneRequestAndSchemaAlignedBatches();
 		TestExactBearerRequestAndRootObject();
+		TestBearerTokenBoundaryPrecedesTransport();
 		TestAuthenticatedStatusFailures();
 		TestSimultaneousAuthorizationSnapshots();
 		TestAuthenticatedLifecycleAndRecovery();

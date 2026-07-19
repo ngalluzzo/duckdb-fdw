@@ -1,4 +1,5 @@
 #include "duckdb_api/internal/curl_transfer.hpp"
+#include "duckdb_api/internal/request_header_budget.hpp"
 
 #include <curl/curl.h>
 
@@ -265,6 +266,14 @@ void ValidateInputs(const CurlTransferProfile &profile, const HttpRequest &reque
 	    limits.max_decompressed_bytes > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max()) ||
 	    limits.max_response_bytes > static_cast<uint64_t>(std::numeric_limits<curl_off_t>::max())) {
 		throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP transport received an invalid resource budget");
+	}
+	uint64_t request_header_bytes = 0;
+	for (const auto &header : request.headers) {
+		if (!TryAccumulateRequestHeaderBytes(limits.max_header_bytes, header.name.size(), header.value.size(),
+		                                     request_header_bytes)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
+			                     "HTTP request headers exceed the 16384-byte aggregate limit");
+		}
 	}
 }
 

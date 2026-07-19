@@ -1,6 +1,7 @@
 #include "duckdb_api/internal/fixed_github_user_bearer_authenticator.hpp"
 
 #include "duckdb_api/execution.hpp"
+#include "duckdb_api/internal/request_header_budget.hpp"
 
 #include <cstddef>
 #include <utility>
@@ -88,6 +89,20 @@ HttpRequest FixedGithubUserBearerAuthenticator::Authorize(const ScanPlan &plan, 
 	}
 
 	auto bearer_value = Consume(authorization);
+	uint64_t header_bytes = 0;
+	for (const auto &header : request.headers) {
+		if (!TryAccumulateRequestHeaderBytes(plan.Budgets().header_bytes, header.name.size(), header.value.size(),
+		                                     header_bytes)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
+			                     "HTTP request headers exceed the 16384-byte aggregate limit");
+		}
+	}
+	if (bearer_value.size() > ScanAuthorization::GithubUserBearerTokenByteLimit() ||
+	    !TryAccumulateRequestHeaderBytes(plan.Budgets().header_bytes, sizeof("Authorization") - 1,
+	                                     (sizeof("Bearer ") - 1) + bearer_value.size(), header_bytes)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
+		                     "HTTP request headers exceed the 16384-byte aggregate limit");
+	}
 	try {
 		bearer_value.insert(0, "Bearer ");
 		HttpHeader authorization_header;

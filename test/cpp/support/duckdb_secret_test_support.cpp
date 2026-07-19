@@ -79,6 +79,23 @@ void RequireAuthenticationFailure(const std::function<void()> &action, const std
 	Require(rejected, "secret resolution did not fail closed");
 }
 
+void RequireHeaderBudgetFailure(const std::function<void()> &action, const std::string &forbidden) {
+	bool rejected = false;
+	try {
+		action();
+	} catch (const duckdb_api::ExecutionError &error) {
+		rejected = true;
+		Require(error.Stage() == duckdb_api::ErrorStage::RESOURCE,
+		        "oversized secret resolution used the wrong error stage");
+		Require(error.Field() == "header_bytes", "oversized secret resolution used an unstable resource field");
+		Require(error.SafeMessage() == "bearer token exceeds the 8192-byte request-header limit",
+		        "oversized secret resolution used an unstable safe diagnostic");
+		Require(forbidden.empty() || error.SafeMessage().find(forbidden) == std::string::npos,
+		        "oversized secret resolution exposed credential bytes");
+	}
+	Require(rejected, "oversized secret resolution did not fail closed");
+}
+
 void RequireInternalFailure(const std::function<void()> &action, const std::string &forbidden) {
 	bool rejected = false;
 	try {

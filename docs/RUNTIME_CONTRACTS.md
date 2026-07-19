@@ -1932,7 +1932,11 @@ DuckDB's temporary `memory` storage. Persistent-only and alternate-storage
 entries are not candidates, and a same-name persistent entry cannot make the
 selection ambiguous. Query destroys DuckDB secret objects before moving one
 opaque token snapshot into Runtime's fixed GitHub bearer capability. Runtime
-cannot use it for another authenticator, placement, host, or operation.
+cannot use it for another authenticator, placement, host, or operation. Query
+rejects a token snapshot over 8,192 bytes at creation and resolution; Runtime
+repeats that exact byte check at capability construction and bearer decoration.
+Every such rejection is a redacted `resource` failure with field
+`header_bytes` and occurs before network I/O.
 
 Persistence, at-rest encryption, and filesystem permissions belong to the host
 secret provider. Runtime diagnostics report the storage provider without
@@ -1963,6 +1967,18 @@ The network layer validates:
 
 Connector network and resource policies are intersected with host policy. They
 can remove capabilities or lower limits but cannot widen either.
+
+The native `0.4.0` transport applies the plan's header-byte ceiling separately
+to inbound response headers and outbound project-supplied request fields. The
+outbound aggregate counts each field as the bytes in
+`name + ": " + value + "\r\n"` and rejects more than 16,384 bytes before
+concatenation, curl header-list construction, DNS, or socket acquisition. Its
+8,192-byte bearer-token ceiling reserves half the envelope for fixed and
+dependency-generated fields. A supported-cell real-curl oracle captures the
+complete emitted header block, including `Host`, encoding/connection fields,
+and final framing, and requires that block to remain at or below 16,384 bytes.
+Dependency drift that violates this envelope is therefore rejected by release
+evidence even though dependency-generated fields are not caller authority.
 
 ### 23.4 Resource budget
 

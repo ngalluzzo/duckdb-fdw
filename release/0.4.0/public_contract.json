@@ -8,6 +8,7 @@
     "anonymous_secret_rejected": "[duckdb_api][bind] connector=github relation=duckdb_login_search_page: named argument secret is not accepted",
     "authenticated_secret_missing": "[duckdb_api][bind] connector=github relation=authenticated_user: required named argument secret is missing",
     "missing_relation": "[duckdb_api][bind] required named argument relation is missing",
+    "oversized_token": "[duckdb_api][resource] field=header_bytes: TOKEN exceeds the 8192-byte bearer-token limit",
     "unknown_connector": "[duckdb_api][bind] unknown connector identifier",
     "unknown_relation": "[duckdb_api][bind] connector=github: unknown relation identifier"
   },
@@ -32,6 +33,18 @@
     "limit": "duckdb",
     "offset": "duckdb",
     "ordering": "duckdb"
+  },
+  "resource_limits": {
+    "outbound_project_headers": {
+      "accounting": "name + \": \" + value + \"\\r\\n\"",
+      "maximum_bytes": 16384
+    },
+    "over_limit_rejection": {
+      "category": "resource",
+      "field": "header_bytes",
+      "network_io": "none",
+      "redacted": true
+    }
   },
   "relations": [
     {
@@ -100,7 +113,17 @@
   "secret_type": {
     "environment_provider": false,
     "fields": {
-      "TOKEN": "redacted_nonempty_VARCHAR"
+      "TOKEN": {
+        "duckdb_type": "VARCHAR",
+        "enforced_at": [
+          "secret_creation",
+          "secret_resolution",
+          "runtime_capability"
+        ],
+        "maximum_bytes": 8192,
+        "nonempty": true,
+        "redacted": true
+      }
     },
     "implicit_selection": false,
     "persistent": false,

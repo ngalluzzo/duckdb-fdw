@@ -26,6 +26,7 @@ void RegisterProduct(duckdb::ExtensionLoader &loader);
 void RequireQueryFailure(duckdb::Connection &connection, const std::string &sql, const std::string &expected,
                          const std::string &forbidden = "");
 void RequireAuthenticationFailure(const std::function<void()> &action, const std::string &forbidden = "");
+void RequireHeaderBudgetFailure(const std::function<void()> &action, const std::string &forbidden = "");
 void RequireInternalFailure(const std::function<void()> &action, const std::string &forbidden = "");
 void RequireCanaryAbsentFromInventory(duckdb::Connection &connection, const std::string &canary);
 std::unique_ptr<duckdb_api::ScanAuthorization> Resolve(duckdb::Connection &connection, const std::string &logical_name);

@@ -29,6 +29,12 @@ class FixedGithubUserBearerAuthenticator;
 class ScanAuthorization {
 public:
 	static ScanAuthorization Anonymous();
+	// The fixed GitHub bearer profile accepts at most 8 KiB of token bytes.
+	// This is half the native 16 KiB header envelope, reserving the remainder
+	// for fixed project fields and dependency-generated HTTP framing. Query
+	// uses this Runtime-owned limit to reject oversized DuckDB secrets before
+	// creating or resolving a capability.
+	static uint64_t GithubUserBearerTokenByteLimit() noexcept;
 	static ScanAuthorization GithubUserBearer(std::string &&token);
 
 	ScanAuthorization(ScanAuthorization &&other) noexcept;

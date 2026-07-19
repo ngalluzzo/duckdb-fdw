@@ -98,6 +98,7 @@
         "src/include/duckdb_api/internal/http_transport.hpp",
         "src/include/duckdb_api/internal/json_decoder.hpp",
         "src/include/duckdb_api/internal/network_policy.hpp",
+        "src/include/duckdb_api/internal/request_header_budget.hpp",
         "src/include/duckdb_api/product_composition.hpp",
         "src/include/duckdb_api/scan_plan.hpp",
         "src/include/duckdb_api/scan_request.hpp",
@@ -109,10 +110,10 @@
         "src/scan_planner.cpp",
         "src/scan_request.cpp"
       ],
-      "sha256": "69a83ba8d3286bb9cb102ec3889bf4d9f78c3800fe69844b8054b6058d6af5ca"
+      "sha256": "89e32b32074aba6046959ad6a47d872cdbcbcce6c9f4acb77c9c986e7df690d0"
     },
     "public_contract": {
-      "canonical_json_sha256": "958c028ac6b296d09ae079d3a2a55da257f6d4ee92f39ae9d7f663b57a112afa",
+      "canonical_json_sha256": "02e6eb66801e665ed6be5db70706505842ee726090ecc39025d592cad95023b5",
       "path": "release/0.4.0/public_contract.json"
     }
   },
