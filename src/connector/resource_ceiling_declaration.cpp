@@ -1,5 +1,5 @@
 #include "duckdb_api/connector_catalog.hpp"
-#include "duckdb_api/internal/connector_resource_ceilings.hpp"
+#include "duckdb_api/internal/connector/resource_ceiling_declaration.hpp"
 
 #include <ostream>
 #include <stdexcept>

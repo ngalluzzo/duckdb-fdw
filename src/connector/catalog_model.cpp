@@ -1,6 +1,6 @@
 #include "duckdb_api/connector_catalog.hpp"
-#include "duckdb_api/internal/connector_pagination.hpp"
-#include "duckdb_api/internal/connector_resource_ceilings.hpp"
+#include "duckdb_api/internal/connector/pagination_declaration.hpp"
+#include "duckdb_api/internal/connector/resource_ceiling_declaration.hpp"
 
 #include <limits>
 #include <locale>

@@ -107,7 +107,7 @@ class SourceIdentityContractTests(unittest.TestCase):
         for label, relative, expected in (
             (
                 "native",
-                "src/connector.cpp",
+                "src/connector/native_github_composition.cpp",
                 "native product source digest",
             ),
             (
@@ -125,7 +125,7 @@ class SourceIdentityContractTests(unittest.TestCase):
                 path.write_bytes(original)
 
     def test_rejects_removed_added_and_renamed_native_inputs(self) -> None:
-        removed = self.root / "src/connector.cpp"
+        removed = self.root / "src/connector/native_github_composition.cpp"
         removed_bytes = removed.read_bytes()
         removed.unlink()
         with self.assertRaisesRegex(
@@ -415,7 +415,7 @@ duckdb_api_defer_product_source_record(
             VERIFIER.verify(self.root)
 
     def test_rejects_source_symlinks_hard_links_and_special_files(self) -> None:
-        source = self.root / "src/connector.cpp"
+        source = self.root / "src/connector/native_github_composition.cpp"
         source_bytes = source.read_bytes()
         source.unlink()
         source.symlink_to("authorization.cpp")

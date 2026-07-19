@@ -1,6 +1,6 @@
-#include "support/connector_catalog_test_fixtures.hpp"
+#include "connector/support/connector_catalog_test_fixtures.hpp"
 
-#include "support/connector_catalog_test_access.hpp"
+#include "connector/support/catalog_test_access.hpp"
 
 #include <utility>
 #include <vector>
@@ -101,6 +101,69 @@ duckdb_api::CompiledConnector BuildPaginationConnectorCatalogFixture() {
 	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "fixture_pagination_catalog", "test-1",
 	    std::move(relations),
 	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"api.github.com"}, false, false, false, false, 2048});
+}
+
+duckdb_api::CompiledConnector
+BuildPaginationPlannerCandidate(std::uint64_t max_pages, std::uint64_t response_bytes_per_page,
+                                std::uint64_t response_bytes_per_scan, std::uint64_t records_per_page,
+                                std::uint64_t records_per_scan, std::uint64_t extracted_string_bytes) {
+	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledRestHost("api.github.com"), 443};
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    "planner_pagination_candidate",
+	    {{"record_id", "BIGINT", false, "$.record_id"}, {"label", "VARCHAR", false, "$.label"}},
+	    duckdb_api::CompiledOperation {"planner_pagination_candidate",
+	                                   true,
+	                                   duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	                                   duckdb_api::CompiledProtocol::REST,
+	                                   duckdb_api::CompiledHttpMethod::GET,
+	                                   duckdb_api::CompiledReplaySafety::SAFE,
+	                                   false,
+	                                   ConnectorCatalogTestAccess::SequentialLink("batch_size", 3, "cursor_page", 1,
+	                                                                                  1, max_pages),
+	                                   {origin,
+	                                    "/fixtures/planner-pagination",
+	                                    {{"batch_size", "3"}, {"cursor_page", "1"}},
+	                                    {{"X-Connector-Fixture", "planner-pagination"}}},
+	                                   duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
+	                                   "$.records[*]"},
+	    ConnectorCatalogTestAccess::RequiredBearer(),
+	    ConnectorCatalogTestAccess::PaginatedResources(response_bytes_per_page, response_bytes_per_scan,
+	                                                    records_per_page, records_per_scan, extracted_string_bytes)));
+	return ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "planner_pagination_catalog", "test-1",
+	    std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {
+	        {"https"}, {"api.github.com"}, false, false, false, false, response_bytes_per_page});
+}
+
+duckdb_api::CompiledConnector BuildDisabledRootArrayRepositoryCandidate() {
+	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledRestHost("api.github.com"), 443};
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    "authenticated_repositories", {{"id", "BIGINT", false, "$.id"}, {"full_name", "VARCHAR", false, "$.full_name"}},
+	    duckdb_api::CompiledOperation {"github_authenticated_repositories",
+	                                   true,
+	                                   duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	                                   duckdb_api::CompiledProtocol::REST,
+	                                   duckdb_api::CompiledHttpMethod::GET,
+	                                   duckdb_api::CompiledReplaySafety::SAFE,
+	                                   false,
+	                                   ConnectorCatalogTestAccess::DisabledPagination(),
+	                                   {origin,
+	                                    "/user/repos",
+	                                    {{"per_page", "100"}, {"page", "1"}},
+	                                    {{"X-Connector-Fixture", "disabled-root-array"}}},
+	                                   duckdb_api::CompiledResponseSource::ROOT_ARRAY,
+	                                   "$"},
+	    ConnectorCatalogTestAccess::RequiredBearer(), ConnectorCatalogTestAccess::UnpaginatedResources(100, 512)));
+	return ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "github", "test-disabled-root-array",
+	    std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {
+	        {"https"}, {"api.github.com"}, false, false, false, false, 8 * 1024 * 1024});
 }
 
 } // namespace duckdb_api_test

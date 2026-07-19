@@ -1,4 +1,4 @@
-#include "support/connector_catalog_test_fixtures.hpp"
+#include "connector/support/connector_catalog_test_fixtures.hpp"
 #include "support/require.hpp"
 
 #include <cstdlib>
@@ -138,12 +138,62 @@ void TestExplicitPaginationCatalogFixture() {
 	}
 }
 
+void TestPlannerCounterexampleCatalogFixtures() {
+	const auto paginated = duckdb_api_test::BuildPaginationPlannerCandidate(5, 1024, 5120, 3, 15, 96);
+	Require(paginated.ConnectorName() == "planner_pagination_catalog" && paginated.Version() == "test-1" &&
+	            paginated.Relations().size() == 1,
+	        "planner pagination fixture catalog identity drifted");
+	const auto &candidate = paginated.Relations()[0];
+	const auto &pagination = candidate.Operation().pagination;
+	const auto &ceilings = candidate.ResourceCeilings();
+	Require(candidate.Name() == "planner_pagination_candidate" &&
+	            candidate.Operation().response_source == duckdb_api::CompiledResponseSource::JSON_PATH_MANY &&
+	            candidate.Operation().records_extractor == "$.records[*]",
+	        "planner pagination fixture relation shape drifted");
+	Require(pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::LINK_HEADER &&
+	            pagination.PageSizeParameter() == "batch_size" && pagination.PageSize() == 3 &&
+	            pagination.PageNumberParameter() == "cursor_page" && pagination.FirstPage() == 1 &&
+	            pagination.PageIncrement() == 1 && pagination.MaxPagesPerScan() == 5,
+	        "planner pagination fixture declaration drifted");
+	Require(ceilings.HasResponseByteNarrowing() && ceilings.MaxResponseBytesPerPage() == 1024 &&
+	            ceilings.MaxResponseBytesPerScan() == 5120 && ceilings.MaxRecordsPerPage() == 3 &&
+	            ceilings.MaxRecordsPerScan() == 15 && ceilings.MaxExtractedStringBytes() == 96 &&
+	            paginated.NetworkPolicy().max_response_bytes == 1024,
+	        "planner pagination fixture resource envelope drifted");
+
+	const auto disabled = duckdb_api_test::BuildDisabledRootArrayRepositoryCandidate();
+	Require(disabled.ConnectorName() == "github" && disabled.Version() == "test-disabled-root-array" &&
+	            disabled.Relations().size() == 1,
+	        "disabled root-array fixture catalog identity drifted");
+	const auto &repository = disabled.Relations()[0];
+	const auto &operation = repository.Operation();
+	const auto &repository_ceilings = repository.ResourceCeilings();
+	Require(repository.Name() == "authenticated_repositories" &&
+	            operation.name == "github_authenticated_repositories" &&
+	            operation.response_source == duckdb_api::CompiledResponseSource::ROOT_ARRAY &&
+	            operation.records_extractor == "$" &&
+	            operation.pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::DISABLED,
+	        "disabled root-array fixture relation shape drifted");
+	Require(operation.request.path == "/user/repos" && operation.request.query_parameters.size() == 2 &&
+	            operation.request.query_parameters[0].name == "per_page" &&
+	            operation.request.query_parameters[0].encoded_value == "100" &&
+	            operation.request.query_parameters[1].name == "page" &&
+	            operation.request.query_parameters[1].encoded_value == "1",
+	        "disabled root-array fixture request shape drifted");
+	Require(!repository_ceilings.HasResponseByteNarrowing() && repository_ceilings.MaxRecordsPerPage() == 100 &&
+	            repository_ceilings.MaxRecordsPerScan() == 100 &&
+	            repository_ceilings.MaxExtractedStringBytes() == 512 &&
+	            disabled.NetworkPolicy().max_response_bytes == 8 * 1024 * 1024,
+	        "disabled root-array fixture resource envelope drifted");
+}
+
 } // namespace
 
 int main() {
 	try {
 		TestDistinctSchemaCatalogFixture();
 		TestExplicitPaginationCatalogFixture();
+		TestPlannerCounterexampleCatalogFixtures();
 		std::cout << "connector catalog fixture tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

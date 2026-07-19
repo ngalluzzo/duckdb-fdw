@@ -78,15 +78,15 @@ find_package(Threads REQUIRED)
 include_directories(src/include)
 
 set(CONNECTOR_CATALOG_SOURCES
-    src/connector_catalog.cpp
-    src/connector_pagination.cpp
-    src/connector_resource_ceilings.cpp)
-set(CONNECTOR_NATIVE_PROFILE_SOURCES src/connector.cpp)
+    src/connector/catalog_model.cpp
+    src/connector/pagination_declaration.cpp
+    src/connector/resource_ceiling_declaration.cpp)
+set(CONNECTOR_NATIVE_PROFILE_SOURCES src/connector/native_github_composition.cpp)
 set(CONNECTOR_METADATA_SOURCES
     ${CONNECTOR_CATALOG_SOURCES}
     ${CONNECTOR_NATIVE_PROFILE_SOURCES})
 set(CONNECTOR_TEST_SERVICE_SOURCES
-    test/cpp/support/connector_catalog_test_fixtures.cpp)
+    test/cpp/connector/support/connector_catalog_test_fixtures.cpp)
 set(QUERY_REQUEST_SOURCES src/scan_request.cpp)
 set(RELATIONAL_PLANNING_SOURCES
     src/scan_plan.cpp
@@ -218,9 +218,9 @@ target_link_libraries(
 
 add_executable(
   duckdb_api_connector_tests
-  test/cpp/connector_contract_tests.cpp
-  test/cpp/connector_catalog_contract_tests.cpp
-  test/cpp/connector_pagination_contract_tests.cpp
+  test/cpp/connector/connector_contract_tests.cpp
+  test/cpp/connector/connector_catalog_contract_tests.cpp
+  test/cpp/connector/connector_pagination_contract_tests.cpp
   ${CONNECTOR_METADATA_SOURCES})
 configure_duckdb_api_cpp_target(duckdb_api_connector_tests)
 target_include_directories(duckdb_api_connector_tests PRIVATE test/cpp)
@@ -230,7 +230,7 @@ target_compile_definitions(
 
 add_executable(
   duckdb_api_connector_catalog_fixture_tests
-  test/cpp/connector_catalog_test_fixtures_tests.cpp
+  test/cpp/connector/connector_catalog_test_fixtures_tests.cpp
   ${CONNECTOR_CATALOG_SOURCES}
   ${CONNECTOR_TEST_SERVICE_SOURCES})
 configure_duckdb_api_cpp_target(duckdb_api_connector_catalog_fixture_tests)

@@ -2,7 +2,7 @@
 
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
-#include "support/connector_catalog_test_fixtures.hpp"
+#include "connector/support/connector_catalog_test_fixtures.hpp"
 #include "support/require.hpp"
 
 #include <stdexcept>

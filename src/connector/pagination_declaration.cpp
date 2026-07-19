@@ -1,5 +1,5 @@
 #include "duckdb_api/connector_catalog.hpp"
-#include "duckdb_api/internal/connector_pagination.hpp"
+#include "duckdb_api/internal/connector/pagination_declaration.hpp"
 
 #include <ostream>
 #include <stdexcept>

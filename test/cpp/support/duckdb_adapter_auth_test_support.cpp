@@ -7,7 +7,7 @@
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/secret/secret_storage.hpp"
-#include "support/connector_catalog_test_fixtures.hpp"
+#include "connector/support/connector_catalog_test_fixtures.hpp"
 
 #include <stdexcept>
 #include <vector>

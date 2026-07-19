@@ -1,6 +1,6 @@
 #include "duckdb_api/connector.hpp"
-#include "support/connector_catalog_contract.hpp"
-#include "support/connector_pagination_contract.hpp"
+#include "connector/support/catalog_contract.hpp"
+#include "connector/support/pagination_contract.hpp"
 #include "support/require.hpp"
 
 #include <cstdlib>

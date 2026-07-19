@@ -1,6 +1,6 @@
 #include "duckdb_api/connector.hpp"
 #include "duckdb_api/scan_request.hpp"
-#include "support/connector_catalog_test_fixtures.hpp"
+#include "connector/support/connector_catalog_test_fixtures.hpp"
 #include "support/require.hpp"
 #include "support/scan_request_test_support.hpp"
 

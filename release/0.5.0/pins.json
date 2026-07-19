@@ -18,10 +18,10 @@
   "identities": {
     "build_graph": {
       "controlled_translation_units": [
-        "src/connector_catalog.cpp",
-        "src/connector_pagination.cpp",
-        "src/connector_resource_ceilings.cpp",
-        "src/connector.cpp",
+        "src/connector/catalog_model.cpp",
+        "src/connector/pagination_declaration.cpp",
+        "src/connector/resource_ceiling_declaration.cpp",
+        "src/connector/native_github_composition.cpp",
         "src/scan_request.cpp",
         "src/scan_plan.cpp",
         "src/scan_planner.cpp",
@@ -46,10 +46,10 @@
         "test/cpp/controlled_duckdb_api_extension.cpp"
       ],
       "public_translation_units": [
-        "src/connector_catalog.cpp",
-        "src/connector_pagination.cpp",
-        "src/connector_resource_ceilings.cpp",
-        "src/connector.cpp",
+        "src/connector/catalog_model.cpp",
+        "src/connector/pagination_declaration.cpp",
+        "src/connector/resource_ceiling_declaration.cpp",
+        "src/connector/native_github_composition.cpp",
         "src/scan_request.cpp",
         "src/scan_plan.cpp",
         "src/scan_planner.cpp",
@@ -88,10 +88,11 @@
       "algorithm": "sha256-length-prefixed-path-and-bytes-v1",
       "paths": [
         "src/authorization.cpp",
-        "src/connector.cpp",
-        "src/connector_catalog.cpp",
-        "src/connector_pagination.cpp",
-        "src/connector_resource_ceilings.cpp",
+        "src/connector/README.md",
+        "src/connector/catalog_model.cpp",
+        "src/connector/native_github_composition.cpp",
+        "src/connector/pagination_declaration.cpp",
+        "src/connector/resource_ceiling_declaration.cpp",
         "src/curl_http_transport.cpp",
         "src/curl_transfer.cpp",
         "src/duckdb_api_adapter.cpp",
@@ -109,8 +110,8 @@
         "src/include/duckdb_api/duckdb_secret.hpp",
         "src/include/duckdb_api/execution.hpp",
         "src/include/duckdb_api/http_runtime.hpp",
-        "src/include/duckdb_api/internal/connector_pagination.hpp",
-        "src/include/duckdb_api/internal/connector_resource_ceilings.hpp",
+        "src/include/duckdb_api/internal/connector/pagination_declaration.hpp",
+        "src/include/duckdb_api/internal/connector/resource_ceiling_declaration.hpp",
         "src/include/duckdb_api/internal/curl_http_transport.hpp",
         "src/include/duckdb_api/internal/curl_transfer.hpp",
         "src/include/duckdb_api/internal/decoded_page_buffer.hpp",
@@ -139,7 +140,7 @@
         "src/scan_resource_accounting.cpp",
         "src/uri_reference.cpp"
       ],
-      "sha256": "2d093e9b7e25a7487a669089253058aaf24f46ff5d7cc09c4f05bb3bbfef649a"
+      "sha256": "6d7d0966042940de700ae3ea6f78eb15624282434936750cf301604a297089d1"
     },
     "public_contract": {
       "canonical_json_sha256": "c0d7b2ff6160874390a4f06d1b9954ba74604769efcfcf70420fa2702c26fae6",

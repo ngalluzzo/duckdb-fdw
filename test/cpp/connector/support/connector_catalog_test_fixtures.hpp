@@ -2,6 +2,8 @@
 
 #include "duckdb_api/connector_catalog.hpp"
 
+#include <cstdint>
+
 namespace duckdb_api_test {
 
 // Stable test-service identifiers for consumers that must prove relation
@@ -25,5 +27,19 @@ duckdb_api::CompiledConnector BuildDistinctSchemaConnectorCatalogFixture();
 // Consumers must select the exact service identifier and read CompiledPagination
 // rather than infer from query fields, credential requirements, or native names.
 duckdb_api::CompiledConnector BuildPaginationConnectorCatalogFixture();
+
+// Returns a one-relation catalog whose pagination and resource envelopes are
+// controlled independently. Relational Semantics consumes this Connector-owned
+// factory for conservative-planning counterexamples without constructing the
+// private catalog model directly.
+duckdb_api::CompiledConnector
+BuildPaginationPlannerCandidate(std::uint64_t max_pages, std::uint64_t response_bytes_per_page,
+                                std::uint64_t response_bytes_per_scan, std::uint64_t records_per_page,
+                                std::uint64_t records_per_scan, std::uint64_t extracted_string_bytes);
+
+// Returns the repository-shaped root-array counterexample with pagination
+// explicitly disabled. Its GitHub-shaped identity remains fixture-only and
+// carries no credential value or execution authority.
+duckdb_api::CompiledConnector BuildDisabledRootArrayRepositoryCandidate();
 
 } // namespace duckdb_api_test
