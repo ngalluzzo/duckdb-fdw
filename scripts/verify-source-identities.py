@@ -69,6 +69,17 @@ HISTORICAL_RELEASES = {
             "f5d9a5c14ef603fef34bf7154ad2272e86742fec0af994aacfbfec4afe84c8e9"
         ),
     },
+    "0.4.0": {
+        "identities_canonical_json_sha256": (
+            "69661f15cbb91c5ff57040c6c4c895fdf60f2467ce35081e95f0fda4ed08589c"
+        ),
+        "pins_canonical_json_sha256": (
+            "ad13deb86638aa2e10f760d6ee724ba99a625d0a12c46b24cea3fc57db66d510"
+        ),
+        "public_contract_sha256": (
+            "02e6eb66801e665ed6be5db70706505842ee726090ecc39025d592cad95023b5"
+        ),
+    },
 }
 GIT_ID = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -353,7 +364,7 @@ def validate_current_identities(pins: dict, reader: RepositoryReader) -> dict:
         "native_product_sources",
         "public_contract",
     }:
-        raise AssertionError("current 0.4 source identity pins are incomplete")
+        raise AssertionError("current 0.5 source identity pins are incomplete")
 
     native_paths = validate_source_set_identity(
         identities["native_product_sources"], "native product source"
@@ -396,7 +407,7 @@ def validate_current_identities(pins: dict, reader: RepositoryReader) -> dict:
         "path",
     }:
         raise AssertionError("current public contract identity is malformed")
-    if public_contract["path"] != "release/0.4.0/public_contract.json":
+    if public_contract["path"] != "release/0.5.0/public_contract.json":
         raise AssertionError("current public contract identity names the wrong source")
     if (
         not isinstance(public_contract["canonical_json_sha256"], str)
@@ -414,7 +425,14 @@ def validate_historical_releases(reader: RepositoryReader) -> dict[str, dict]:
             raise AssertionError(f"historical {version} pins record drifted")
         validate_project(pins, version)
         validate_duckdb(pins, contract)
-        if pins.get("identities") != expected_release["identities"]:
+        expected_identities = expected_release.get("identities")
+        if expected_identities is not None:
+            identities_match = pins.get("identities") == expected_identities
+        else:
+            identities_match = canonical_digest(pins.get("identities")) == expected_release[
+                "identities_canonical_json_sha256"
+            ]
+        if not identities_match:
             raise AssertionError(f"historical {version} source identities drifted")
         if canonical_digest(contract) != expected_release["public_contract_sha256"]:
             raise AssertionError(f"historical {version} public contract drifted")
@@ -442,8 +460,8 @@ def verify(root: pathlib.Path = ROOT) -> dict[str, str]:
 
     validate_historical_releases(reader)
 
-    if version != "0.4.0":
-        raise AssertionError("current source identity verifier supports only 0.4.0")
+    if version != "0.5.0":
+        raise AssertionError("current source identity verifier supports only 0.5.0")
     identities = validate_current_identities(pins, reader)
     native_identity = identities["native_product_sources"]
     native_digest = path_bound_digest(reader, tuple(native_identity["paths"]))

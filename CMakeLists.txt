@@ -8,7 +8,7 @@ project(${TARGET_NAME})
 include(cmake/DuckDBApiProductSources.cmake)
 
 if(NOT APPLE)
-  message(FATAL_ERROR "duckdb_api 0.4.0 supports only the pinned macOS arm64 cell")
+  message(FATAL_ERROR "duckdb_api 0.5.0 supports only the pinned macOS arm64 cell")
 endif()
 
 find_program(DUCKDB_API_XCRUN xcrun REQUIRED)
@@ -31,7 +31,7 @@ if(DEFINED DUCKDB_API_VERIFIED_SDK_ROOT)
   endif()
 endif()
 
-# The 0.4.0 cell consumes only the verified SDK headers and text stub. Disabling
+# The 0.5.0 cell consumes only the verified SDK headers and text stub. Disabling
 # curl's config-package mode prevents an ambient Homebrew or package-manager
 # installation from replacing those inputs before FindCURL creates its target.
 set(CURL_NO_CURL_CMAKE ON CACHE BOOL "Disable ambient curl config packages" FORCE)
@@ -77,7 +77,10 @@ find_package(Threads REQUIRED)
 
 include_directories(src/include)
 
-set(CONNECTOR_CATALOG_SOURCES src/connector_catalog.cpp)
+set(CONNECTOR_CATALOG_SOURCES
+    src/connector_catalog.cpp
+    src/connector_pagination.cpp
+    src/connector_resource_ceilings.cpp)
 set(CONNECTOR_NATIVE_PROFILE_SOURCES src/connector.cpp)
 set(CONNECTOR_METADATA_SOURCES
     ${CONNECTOR_CATALOG_SOURCES}
@@ -97,6 +100,8 @@ set(RELATIONAL_PLAN_TEST_SERVICE_SOURCES
     test/cpp/support/scan_plan_feature_test_fixtures.cpp
     test/cpp/support/scan_plan_resource_test_fixtures.cpp
     test/cpp/support/scan_plan_fixture_consumer_probe.cpp)
+set(RELATIONAL_PLAN_PAGINATION_TEST_SERVICE_SOURCES
+    test/cpp/support/scan_plan_pagination_test_fixtures.cpp)
 set(RELATIONAL_PLAN_TEST_CONTRACT_SOURCES
     test/cpp/support/scan_plan_test_fixture_test_support.cpp
     test/cpp/scan_plan_operation_test_fixture_tests.cpp
@@ -109,11 +114,20 @@ set(RELATIONAL_PLAN_TEST_CONTRACT_SOURCES
 set(REMOTE_RUNTIME_INTERFACE_SOURCES
     src/authorization.cpp
     src/execution_error.cpp)
-set(REMOTE_RUNTIME_SOURCES
+set(REMOTE_RUNTIME_PAGINATION_SOURCES
+    src/uri_reference.cpp
+    src/link_pagination.cpp
+    src/scan_resource_accounting.cpp)
+set(REMOTE_RUNTIME_EXECUTOR_SOURCES
+    ${REMOTE_RUNTIME_PAGINATION_SOURCES}
     src/fixed_github_user_bearer_authenticator.cpp
     src/json_decoder.cpp
-    src/http_scan_executor.cpp
+    src/http_paginated_scan.cpp
+    src/http_scan_executor.cpp)
+set(REMOTE_RUNTIME_SOURCES
+    ${REMOTE_RUNTIME_EXECUTOR_SOURCES}
     src/network_policy.cpp
+    src/http_chunk_decoder.cpp
     src/curl_transfer.cpp
     src/curl_http_transport.cpp
     src/http_runtime.cpp)
@@ -127,8 +141,10 @@ set(QUERY_DUCKDB_SECRET_SOURCES src/duckdb_secret.cpp)
 set(QUERY_DUCKDB_ADAPTER_SOURCES
     src/duckdb_api_adapter.cpp
     src/duckdb_api_extension.cpp)
-set(QUERY_TEST_SUPPORT_SOURCES
+set(QUERY_ADAPTER_TEST_SUPPORT_SOURCES
     test/cpp/support/query_runtime_scenarios.cpp
+    test/cpp/support/duckdb_adapter_test_support.cpp)
+set(QUERY_AUTH_ADAPTER_TEST_SUPPORT_SOURCES
     test/cpp/support/duckdb_adapter_auth_test_support.cpp)
 set(QUERY_SECRET_TEST_SUPPORT_SOURCES
     test/cpp/support/duckdb_secret_test_support.cpp)
@@ -163,7 +179,7 @@ build_loadable_extension(${TARGET_NAME} " " ${PRODUCTION_SOURCES})
 # This private artifact is a deterministic product oracle, not an installable
 # extension. Its entry/composition replace the installed entry/composition and
 # are intentionally omitted from every install rule.
-set(DUCKDB_EXTENSION_DUCKDB_API_CONTROLLED_EXT_VERSION "0.4.0")
+set(DUCKDB_EXTENSION_DUCKDB_API_CONTROLLED_EXT_VERSION "0.5.0")
 build_loadable_extension(duckdb_api_controlled " " ${CONTROLLED_PRODUCT_SOURCES})
 
 function(configure_duckdb_api_cpp_target target)
@@ -204,6 +220,7 @@ add_executable(
   duckdb_api_connector_tests
   test/cpp/connector_contract_tests.cpp
   test/cpp/connector_catalog_contract_tests.cpp
+  test/cpp/connector_pagination_contract_tests.cpp
   ${CONNECTOR_METADATA_SOURCES})
 configure_duckdb_api_cpp_target(duckdb_api_connector_tests)
 target_include_directories(duckdb_api_connector_tests PRIVATE test/cpp)
@@ -249,6 +266,17 @@ configure_duckdb_api_cpp_target(duckdb_api_scan_plan_contract_tests)
 target_include_directories(duckdb_api_scan_plan_contract_tests PRIVATE test/cpp)
 
 add_executable(
+  duckdb_api_scan_plan_pagination_contract_tests
+  test/cpp/scan_plan_pagination_contract_tests.cpp
+  ${CONNECTOR_METADATA_SOURCES}
+  ${CONNECTOR_TEST_SERVICE_SOURCES}
+  ${QUERY_REQUEST_SOURCES}
+  ${RELATIONAL_PLANNING_SOURCES}
+  ${RELATIONAL_PLAN_PAGINATION_TEST_SERVICE_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_scan_plan_pagination_contract_tests)
+target_include_directories(duckdb_api_scan_plan_pagination_contract_tests PRIVATE test/cpp)
+
+add_executable(
   duckdb_api_scan_plan_fixture_tests
   test/cpp/scan_plan_test_fixtures_tests.cpp
   ${CONNECTOR_METADATA_SOURCES}
@@ -287,12 +315,48 @@ configure_duckdb_api_cpp_target(duckdb_api_network_policy_tests)
 target_include_directories(duckdb_api_network_policy_tests PRIVATE test/cpp)
 
 add_executable(
+  duckdb_api_uri_reference_tests
+  test/cpp/uri_reference_tests.cpp
+  src/uri_reference.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_uri_reference_tests)
+target_include_directories(duckdb_api_uri_reference_tests PRIVATE test/cpp)
+
+add_executable(
+  duckdb_api_link_pagination_tests
+  test/cpp/link_pagination_tests.cpp
+  src/uri_reference.cpp
+  src/link_pagination.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_link_pagination_tests)
+target_include_directories(duckdb_api_link_pagination_tests PRIVATE test/cpp)
+
+add_executable(
+  duckdb_api_scan_resource_accounting_tests
+  test/cpp/scan_resource_accounting_tests.cpp
+  src/scan_resource_accounting.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_scan_resource_accounting_tests)
+target_include_directories(duckdb_api_scan_resource_accounting_tests PRIVATE test/cpp)
+
+add_executable(
+  duckdb_api_decoded_page_buffer_tests
+  test/cpp/decoded_page_buffer_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_decoded_page_buffer_tests)
+target_include_directories(duckdb_api_decoded_page_buffer_tests PRIVATE test/cpp)
+
+add_executable(
   duckdb_api_json_decoder_tests
   test/cpp/json_decoder_tests.cpp
   ${REMOTE_RUNTIME_INTERFACE_SOURCES}
   src/json_decoder.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_json_decoder_tests)
 target_include_directories(duckdb_api_json_decoder_tests PRIVATE test/cpp)
+
+add_executable(
+  duckdb_api_json_root_array_decoder_tests
+  test/cpp/json_root_array_decoder_tests.cpp
+  ${REMOTE_RUNTIME_INTERFACE_SOURCES}
+  src/json_decoder.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_json_root_array_decoder_tests)
+target_include_directories(duckdb_api_json_root_array_decoder_tests PRIVATE test/cpp)
 
 add_executable(
   duckdb_api_http_scan_executor_tests
@@ -303,25 +367,39 @@ add_executable(
   ${RELATIONAL_PLANNING_SOURCES}
   test/cpp/support/scan_plan_test_fixtures.cpp
   ${REMOTE_RUNTIME_INTERFACE_SOURCES}
-  src/fixed_github_user_bearer_authenticator.cpp
-  src/json_decoder.cpp
-  src/http_scan_executor.cpp)
+  ${REMOTE_RUNTIME_EXECUTOR_SOURCES})
 configure_duckdb_api_cpp_target(duckdb_api_http_scan_executor_tests)
 target_include_directories(duckdb_api_http_scan_executor_tests PRIVATE test/cpp)
 target_link_libraries(duckdb_api_http_scan_executor_tests Threads::Threads)
+
+add_executable(
+  duckdb_api_http_scan_pagination_tests
+  test/cpp/http_scan_pagination_tests.cpp
+  ${REMOTE_RUNTIME_EXECUTOR_TEST_SUPPORT_SOURCES}
+  ${CONNECTOR_METADATA_SOURCES}
+  ${CONNECTOR_TEST_SERVICE_SOURCES}
+  ${QUERY_REQUEST_SOURCES}
+  ${RELATIONAL_PLANNING_SOURCES}
+  test/cpp/support/scan_plan_test_fixtures.cpp
+  ${RELATIONAL_PLAN_PAGINATION_TEST_SERVICE_SOURCES}
+  ${REMOTE_RUNTIME_INTERFACE_SOURCES}
+  ${REMOTE_RUNTIME_EXECUTOR_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_http_scan_pagination_tests)
+target_include_directories(duckdb_api_http_scan_pagination_tests PRIVATE test/cpp)
+target_link_libraries(duckdb_api_http_scan_pagination_tests Threads::Threads)
 
 add_executable(
   duckdb_api_http_scan_executor_policy_tests
   test/cpp/http_scan_executor_policy_tests.cpp
   ${REMOTE_RUNTIME_EXECUTOR_TEST_SUPPORT_SOURCES}
   ${CONNECTOR_METADATA_SOURCES}
+  ${CONNECTOR_TEST_SERVICE_SOURCES}
   ${QUERY_REQUEST_SOURCES}
   ${RELATIONAL_PLANNING_SOURCES}
   ${RELATIONAL_PLAN_TEST_SERVICE_SOURCES}
+  ${RELATIONAL_PLAN_PAGINATION_TEST_SERVICE_SOURCES}
   ${REMOTE_RUNTIME_INTERFACE_SOURCES}
-  src/fixed_github_user_bearer_authenticator.cpp
-  src/json_decoder.cpp
-  src/http_scan_executor.cpp)
+  ${REMOTE_RUNTIME_EXECUTOR_SOURCES})
 configure_duckdb_api_cpp_target(duckdb_api_http_scan_executor_policy_tests)
 target_include_directories(duckdb_api_http_scan_executor_policy_tests PRIVATE test/cpp)
 target_link_libraries(duckdb_api_http_scan_executor_policy_tests Threads::Threads)
@@ -354,6 +432,12 @@ add_duckdb_api_private_curl_test(
 add_duckdb_api_private_curl_test(
   duckdb_api_curl_transfer_policy_tests
   test/cpp/curl_transfer_policy_tests.cpp)
+add_duckdb_api_private_curl_test(
+  duckdb_api_curl_link_metadata_tests
+  test/cpp/curl_link_metadata_tests.cpp)
+add_duckdb_api_private_curl_test(
+  duckdb_api_curl_http_pagination_tests
+  test/cpp/curl_http_pagination_tests.cpp)
 
 add_executable(
   duckdb_api_curl_tls_security_tests
@@ -404,7 +488,8 @@ add_executable(
   ${REMOTE_RUNTIME_INTERFACE_SOURCES}
   ${QUERY_DUCKDB_SECRET_SOURCES}
   src/duckdb_api_adapter.cpp
-  ${QUERY_TEST_SUPPORT_SOURCES})
+  ${QUERY_ADAPTER_TEST_SUPPORT_SOURCES}
+  ${QUERY_AUTH_ADAPTER_TEST_SUPPORT_SOURCES})
 target_link_libraries(
   duckdb_api_adapter_tests
   dummy_static_extension_loader
@@ -412,6 +497,24 @@ target_link_libraries(
   Threads::Threads)
 target_include_directories(duckdb_api_adapter_tests PRIVATE test/cpp)
 configure_duckdb_api_cpp_target(duckdb_api_adapter_tests)
+
+add_executable(
+  duckdb_api_adapter_stream_contract_tests
+  test/cpp/duckdb_adapter_stream_contract_tests.cpp
+  ${CONNECTOR_METADATA_SOURCES}
+  ${QUERY_REQUEST_SOURCES}
+  ${RELATIONAL_PLANNING_SOURCES}
+  ${REMOTE_RUNTIME_INTERFACE_SOURCES}
+  ${QUERY_DUCKDB_SECRET_SOURCES}
+  src/duckdb_api_adapter.cpp
+  ${QUERY_ADAPTER_TEST_SUPPORT_SOURCES})
+target_link_libraries(
+  duckdb_api_adapter_stream_contract_tests
+  dummy_static_extension_loader
+  duckdb_static
+  Threads::Threads)
+target_include_directories(duckdb_api_adapter_stream_contract_tests PRIVATE test/cpp)
+configure_duckdb_api_cpp_target(duckdb_api_adapter_stream_contract_tests)
 
 install(
   TARGETS ${EXTENSION_NAME}

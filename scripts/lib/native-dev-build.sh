@@ -149,15 +149,23 @@ run_build() {
         duckdb_api_scan_request_tests \
         duckdb_api_scan_planner_tests \
         duckdb_api_scan_plan_contract_tests \
+        duckdb_api_scan_plan_pagination_contract_tests \
         duckdb_api_scan_plan_fixture_tests \
         duckdb_api_execution_contract_tests \
         duckdb_api_authorization_contract_tests \
         duckdb_api_network_policy_tests \
+        duckdb_api_uri_reference_tests \
+        duckdb_api_link_pagination_tests \
+        duckdb_api_scan_resource_accounting_tests \
+        duckdb_api_decoded_page_buffer_tests \
         duckdb_api_json_decoder_tests \
+        duckdb_api_json_root_array_decoder_tests \
         duckdb_api_http_scan_executor_tests \
+        duckdb_api_http_scan_pagination_tests \
         duckdb_api_http_scan_executor_policy_tests \
         duckdb_api_duckdb_secret_tests \
-        duckdb_api_adapter_tests; do
+        duckdb_api_adapter_tests \
+        duckdb_api_adapter_stream_contract_tests; do
         python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
             linkage "${PINS_FILE}" curl-free "${NATIVE_TEST_ROOT}/${target}" >/dev/null
     done
@@ -166,6 +174,8 @@ run_build() {
         duckdb_api_curl_http_budget_tests \
         duckdb_api_curl_http_lifecycle_tests \
         duckdb_api_curl_transfer_policy_tests \
+        duckdb_api_curl_link_metadata_tests \
+        duckdb_api_curl_http_pagination_tests \
         duckdb_api_curl_tls_security_tests; do
         python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
             linkage "${PINS_FILE}" transport "${NATIVE_TEST_ROOT}/${target}" >/dev/null
@@ -204,21 +214,31 @@ run_tests() {
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_contract_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_pagination_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_fixture_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_execution_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_authorization_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_network_policy_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_uri_reference_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_link_pagination_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_scan_resource_accounting_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_decoded_page_buffer_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_json_decoder_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_json_root_array_decoder_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_pagination_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_policy_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_transport_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_budget_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_lifecycle_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_transfer_policy_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_curl_link_metadata_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_pagination_tests"
     "${PINNED_PYTHON}" -I -B \
         "${REPOSITORY_ROOT}/test/python/runtime_curl_tls_tests.py" \
         "${NATIVE_TEST_ROOT}/duckdb_api_curl_tls_security_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_adapter_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_adapter_stream_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_duckdb_secret_tests"
     (
         cd "${TEMPLATE_ROOT}"
@@ -231,6 +251,9 @@ run_tests() {
         "${CONTROLLED_ARTIFACT}"
     "${PINNED_PYTHON}" -I -B \
         "${REPOSITORY_ROOT}/test/python/authenticated_relation_product_contract.py" \
+        "${CONTROLLED_ARTIFACT}"
+    "${PINNED_PYTHON}" -I -B \
+        "${REPOSITORY_ROOT}/test/python/repository_pagination_product_contract.py" \
         "${CONTROLLED_ARTIFACT}"
     if [[ ! -f "${contract}" ]]; then
         echo "required Query Experience demo contract is missing: ${contract}" >&2

@@ -102,10 +102,10 @@ def validate_pins(pins: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any],
     project = required_object(pins, "project", "pins")
     if project != {
         "extension": "duckdb_api",
-        "tag": "v0.4.0",
-        "version": "0.4.0",
+        "tag": "v0.5.0",
+        "version": "0.5.0",
     }:
-        raise fail("native dependency pins do not name the 0.4.0 product")
+        raise fail("native dependency pins do not name the 0.5.0 product")
     cell = required_object(pins, "product_cell", "pins")
     system = required_object(pins, "system_dependencies", "pins")
     sdk = required_object(system, "macos_sdk", "pins.system_dependencies")

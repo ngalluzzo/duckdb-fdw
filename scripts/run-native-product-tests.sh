@@ -11,7 +11,7 @@ readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "${REPOSITORY_ROOT}/scripts/lib/release-common.sh"
 readonly BUILD_ROOT="$(release_resolve_path "$1")"
 readonly BUILD_PROFILE="${2:-debug}"
-readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.4.0/pins.json"
+readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.5.0/pins.json"
 current_pin() {
     python3 -I "${REPOSITORY_ROOT}/scripts/read-release-pin.py" "${PINS_FILE}" "$@"
 }
@@ -192,15 +192,23 @@ for target in \
     duckdb_api_scan_request_tests \
     duckdb_api_scan_planner_tests \
     duckdb_api_scan_plan_contract_tests \
+    duckdb_api_scan_plan_pagination_contract_tests \
     duckdb_api_scan_plan_fixture_tests \
     duckdb_api_execution_contract_tests \
     duckdb_api_authorization_contract_tests \
     duckdb_api_network_policy_tests \
+    duckdb_api_uri_reference_tests \
+    duckdb_api_link_pagination_tests \
+    duckdb_api_scan_resource_accounting_tests \
+    duckdb_api_decoded_page_buffer_tests \
     duckdb_api_json_decoder_tests \
+    duckdb_api_json_root_array_decoder_tests \
     duckdb_api_http_scan_executor_tests \
+    duckdb_api_http_scan_pagination_tests \
     duckdb_api_http_scan_executor_policy_tests \
     duckdb_api_duckdb_secret_tests \
-    duckdb_api_adapter_tests; do
+    duckdb_api_adapter_tests \
+    duckdb_api_adapter_stream_contract_tests; do
     python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
         linkage "${PINS_FILE}" curl-free "${NATIVE_TEST_ROOT}/${target}" >/dev/null
 done
@@ -209,6 +217,8 @@ for target in \
     duckdb_api_curl_http_budget_tests \
     duckdb_api_curl_http_lifecycle_tests \
     duckdb_api_curl_transfer_policy_tests \
+    duckdb_api_curl_link_metadata_tests \
+    duckdb_api_curl_http_pagination_tests \
     duckdb_api_curl_tls_security_tests; do
     python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
         linkage "${PINS_FILE}" transport "${NATIVE_TEST_ROOT}/${target}" >/dev/null
@@ -232,27 +242,37 @@ python3 -I -B "${PROJECT_SOURCE}/scripts/test-native-dependencies.py"
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_contract_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_pagination_contract_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_fixture_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_execution_contract_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_authorization_contract_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_network_policy_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_uri_reference_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_link_pagination_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_scan_resource_accounting_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_decoded_page_buffer_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_json_decoder_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_json_root_array_decoder_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_http_scan_pagination_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_policy_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_transport_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_budget_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_lifecycle_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_curl_transfer_policy_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_curl_link_metadata_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_curl_http_pagination_tests"
 python3 -I -B "${PROJECT_SOURCE}/test/python/runtime_curl_tls_tests.py" \
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_tls_security_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_adapter_tests"
+"${NATIVE_TEST_ROOT}/duckdb_api_adapter_stream_contract_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_duckdb_secret_tests"
 (
     cd "${TEMPLATE_ROOT}"
     "./build/${BUILD_PROFILE}/test/unittest" --require duckdb_api 'test/*'
 )
 "${PROJECT_SOURCE}/scripts/verify-loadable-inventory.sh" \
-    "${ARTIFACT}" "${PROJECT_SOURCE}/release/0.4.0/pins.json" transport
+    "${ARTIFACT}" "${PINS_FILE}" transport
 
 env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}" \
     PATH="${PYTHON_DIR}:/usr/bin:/bin:/usr/sbin:/sbin" \
@@ -272,6 +292,11 @@ env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}
     PATH="${PYTHON_ENV}/bin:${PYTHON_DIR}:/usr/bin:/bin:/usr/sbin:/sbin" \
     "${PYTHON_ENV}/bin/python3" -I -B \
     "${PROJECT_SOURCE}/test/python/authenticated_relation_product_contract.py" \
+    "${CONTROLLED_ARTIFACT}"
+env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}" \
+    PATH="${PYTHON_ENV}/bin:${PYTHON_DIR}:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "${PYTHON_ENV}/bin/python3" -I -B \
+    "${PROJECT_SOURCE}/test/python/repository_pagination_product_contract.py" \
     "${CONTROLLED_ARTIFACT}"
 env -i HOME="${CLEAN_HOME}" TMPDIR="${CLEAN_TMP}" XDG_CACHE_HOME="${CLEAN_CACHE}" \
     PATH="${PYTHON_ENV}/bin:${PYTHON_DIR}:/usr/bin:/bin:/usr/sbin:/sbin" \

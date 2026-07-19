@@ -79,7 +79,9 @@ acceptance result deterministic without implying remote ordering.
 
 - Demonstration: a controlled three-page SQL query, including an empty middle
   page case, returns the exact five-column row bag; a privacy-safe live query
-  records only schema, aggregate row/page/request counts, and version identity.
+  records only schema, aggregate row count, fixed request envelope, and version
+  identity. Actual page and request counts remain controlled-oracle evidence;
+  they do not require a new public telemetry surface.
 - Automated oracle: immutable catalog and plan snapshots; Link grammar and
   authority counterexamples; page request sequences; nonempty-success stream
   behavior; per-page and aggregate budget exhaustion; cancellation during and
@@ -147,6 +149,15 @@ acceptance result deterministic without implying remote ordering.
 3. Activate the fixed relation through Query, prove the controlled and live
    SQL narratives, propagate contracts and `0.5.0` identity, review the final
    dependency graph, and pass cached and fresh gates.
+
+### Recorded delivery evidence
+
+On 2026-07-18, the controlled DuckDB product oracle passed 59 exact requests:
+seven relational, 45 failure/recovery, and seven lifecycle interactions. The
+privacy-safe live compatibility check loaded the `0.5.0` artifact and recorded
+the fixed five-column schema, an aggregate count of 432 repositories, and the
+accepted one-at-a-time, 32-page, 30-second, zero-retry request envelope. It
+recorded no credential, repository identity, row value, or Link value.
 
 ## Responsibility and dependency map
 

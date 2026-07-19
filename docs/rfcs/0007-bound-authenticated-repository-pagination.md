@@ -108,6 +108,10 @@ delivery evidence.
   unrecognized or repeated query field, an invalid page number, a non-increasing
   page, a cycle, budget exhaustion, schema failure, cancellation, or a late
   non-success response cannot become clean source exhaustion.
+- **Must interoperate:** bounded empty Link-list elements are ignored, only the
+  first `rel` parameter is interpreted, and every target, anchor, and extension
+  relation is structurally validated as its RFC 3986 production before it can
+  influence exhaustion or continuation.
 - **Must not introduce:** retries; rate-limit sleeps; parallel page fetching;
   saved resume state; automatic replay; redirects; caller URLs, headers, page
   sizes, or filters; connector YAML loading; cache; provider execution;
@@ -393,10 +397,10 @@ absent. There is no persisted pagination state or stored-data migration.
 | GitHub exposes the required collection and token permission | Current primary-source endpoint contract | Official GitHub REST documentation linked above | Confirmed; live compatibility can still drift and therefore remains a release check |
 | GitHub communicates continuation through Link metadata | Current primary-source pagination contract | Official GitHub pagination documentation linked above | Confirmed; the product accepts only the fixed page-number shape for this relation |
 | Existing transport can observe bounded response headers | Source-level seam | Current curl header callback and deterministic transport boundary | Confirmed; it currently counts and discards values, so implementation must add a narrow normalized handoff |
-| Link data cannot widen credential authority | Negative request-sequence oracle | Controlled responses covering alternate scheme, host, port, path, query, user info, fragment, duplicates, and encoding tricks | Pending delivery evidence; required before goal completion, not before this decision |
-| Multi-page traversal preserves pull, cancellation, and aggregate bounds | Deterministic state-machine and DuckDB end-to-end oracle | Controlled three-page source plus early close, cancellation, deadline, overflow, and late-failure variants | Pending delivery evidence; required before goal completion |
-| An empty nonterminal page cannot truncate the DuckDB relation | Nonempty-success `BatchStream` contract and SQL result oracle | Controlled sequence with an empty middle page carrying a valid next link | Pending delivery evidence; required before goal completion |
-| Live endpoint remains compatible | Minimal privacy-safe compatibility check | Fresh artifact with the PM-provided short-lived fine-grained token; record schema, count, page/request count, and no row values | Pending delivery evidence; not the correctness oracle |
+| Link data cannot widen credential authority | Negative request-sequence oracle | Controlled responses covering alternate scheme, host, port, path, query, user info, fragment, duplicates, and encoding tricks | Delivered by the independent Link, Runtime request-sequence, real-curl, and 59-request product oracles |
+| Multi-page traversal preserves pull, cancellation, and aggregate bounds | Deterministic state-machine and DuckDB end-to-end oracle | Controlled three-page source plus early close, cancellation, deadline, overflow, and late-failure variants | Delivered by focused Runtime lifecycle/resource targets and the controlled DuckDB product oracle |
+| An empty nonterminal page cannot truncate the DuckDB relation | Nonempty-success `BatchStream` contract and SQL result oracle | Controlled sequence with an empty middle page carrying a valid next link | Delivered by the Runtime stream contract and controlled three-page SQL result oracle |
+| Live endpoint remains compatible | Minimal privacy-safe compatibility check | Fresh artifact with the PM-provided token; record extension identity, schema, aggregate count, fixed request envelope, and no row values | Passed on 2026-07-18 with extension `0.5.0`, the exact five-column schema, aggregate count 432, and no credential, repository identity, row value, or Link value; actual request counts remain controlled-oracle evidence rather than a new public telemetry surface |
 
 No disposable implementation trial is needed. The current callback and stream
 seams establish feasibility; the first executable work is the permanent
@@ -463,6 +467,9 @@ unproven and forces users to handle pagination outside DuckDB.
 - Capturing Link metadata increases transport and parser surface. Remote
   Runtime owns narrow header capture, grammar coverage, safe errors, and
   lifecycle cleanup.
+- HTTP/1.1 chunk framing counts against the wire envelope. Runtime validates
+  chunk-extension and trailer grammar, discards both as product metadata, and
+  never accepts a trailer `Link` as continuation authority.
 - The fixed relation and page-number Link profile are not a generic connector
   authoring implementation. Connector Experience must keep native acceptance
   metadata distinct from future package compatibility.
@@ -503,13 +510,13 @@ unproven and forces users to handle pagination outside DuckDB.
 
 | Source of truth or artifact | Impact | Required update | Completion evidence |
 | --- | --- | --- | --- |
-| `docs/ARCHITECTURE.md` | Affected | Replace the `0.4.0` one-request native profile with the accepted `0.5.0` bounded repository traversal and its mutable-source and authority limits | Pending implementation |
-| `docs/CONNECTOR_SPECIFICATIONS.md` | Affected only in implementation status | Keep `duckdb_api/draft` syntax non-public; record the fixed native Link subset and its stricter accepted target contract without claiming general package compilation | Pending implementation |
-| `docs/RUNTIME_CONTRACTS.md` | Affected | Map native `CompiledPagination`, `PaginationPlan`, normalized Link metadata, per-page/aggregate budgets, and the sequential `BatchStream` state machine | Pending implementation |
+| `docs/ARCHITECTURE.md` | Affected | Replace the `0.4.0` one-request native profile with the accepted `0.5.0` bounded repository traversal and its mutable-source and authority limits | Propagated in revision 0.5 |
+| `docs/CONNECTOR_SPECIFICATIONS.md` | Affected only in implementation status | Keep `duckdb_api/draft` syntax non-public; record the fixed native Link subset and its stricter accepted target contract without claiming general package compilation | Propagated in the native product metadata boundary |
+| `docs/RUNTIME_CONTRACTS.md` | Affected | Map native `CompiledPagination`, `PaginationPlan`, normalized Link metadata, per-page/aggregate budgets, and the sequential `BatchStream` state machine | Propagated in sections 1.2 and 1.3 |
 | `docs/TEAM_TOPOLOGY.md` and active charters | Not affected | Existing accountability and team APIs already assign these responsibilities | This RFC's topology and final interaction-exit audit |
 | `docs/PRODUCT_DELIVERY.md`, `AGENTS.md`, and skills | Not affected | Existing goal, RFC, topology, contract-change, review, and pagination invariants govern the work | Agent-asset validation |
-| `ROADMAP.md` | Affected | Narrow `0.5.0` to bounded traversal and remove retry/rate-limit waiting from its acceptance promise | Pending implementation |
-| Examples, diagnostics, fixtures, tests, and release notes | Affected | Add the SQL narrative, safe pagination/resource diagnostics, deterministic sequences, privacy-safe live evidence, public changelog, and version identity | Pending implementation |
+| `ROADMAP.md` | Affected | Narrow `0.5.0` to bounded traversal and remove retry/rate-limit waiting from its acceptance promise | Propagated in the `0.5.0` release outcome |
+| Examples, diagnostics, fixtures, tests, and release notes | Affected | Add the SQL narrative, safe pagination/resource diagnostics, deterministic sequences, privacy-safe live evidence, public changelog, and version identity | Propagated in the `0.5.0` examples, product oracles, public contract, changelog, and release notes; live evidence remains a goal-closing gate |
 
 The RFC records rationale. The updated contracts and executable evidence define
 the delivered behavior.

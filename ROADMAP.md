@@ -137,14 +137,19 @@ pagination, retry, and caching remain outside this contract.
 
 ### `0.5.0` — bounded real-world traversal
 
-A user can query multi-page remote relations under ordinary latency and rate
-limits without unbounded buffering or runaway work. Pagination is sequential
-unless independence is proven. Retries occur only when replay is declared safe
-and no part of the replay unit has been committed.
+A DuckDB user can query the fixed `github.authenticated_repositories` relation
+through an explicitly named temporary secret and receive the
+duplicate-preserving bag of repository rows from every accepted page. Runtime
+follows only sequential `rel="next"` transitions for the exact fixed GitHub
+operation, reconstructs each request from typed plan state, and keeps one page
+and one bounded output batch live at a time.
 
-Release evidence covers multi-page fixtures, backpressure, cancellation,
-deadlines, rate limiting, resource accounting, replay-safe retry, partial
-failure, and scan closure.
+Release evidence covers controlled multi-page and empty-middle-page traversal,
+strict continuation authority, per-page and aggregate resource accounting,
+nonempty stream pulls, cancellation, deadlines, early close, late failure,
+redaction, recovery, and a privacy-safe live compatibility check. Retries,
+rate-limit waiting, parallel page requests, resume state, caller-selected page
+inputs, and cache remain outside this release.
 
 ### `0.6.0` — relational trust
 

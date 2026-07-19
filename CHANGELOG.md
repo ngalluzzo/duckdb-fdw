@@ -8,6 +8,50 @@ This file records user-visible changes to duckdb-fdw.
 
 - The project is now distributed under the MIT License.
 
+## 0.5.0 — 2026-07-18
+
+### Added
+
+- The fixed `github.authenticated_repositories` relation, returning required
+  `id BIGINT`, `full_name VARCHAR`, `private BOOLEAN`, `fork BOOLEAN`, and
+  `archived BOOLEAN` values across one bounded authenticated GitHub repository
+  page chain.
+- Deterministic controlled-product evidence for three-page traversal, an empty
+  middle page, single-page exhaustion, duplicate preservation, DuckDB-local
+  relational operators, exact request reconstruction, late status/decode/schema
+  failures, hostile Link metadata, aggregate exhaustion, cancellation, early
+  close, redaction, and recovery.
+- A privacy-safe live example that reports schema and aggregate repository count
+  without recording repository rows, Link values, or credential material.
+
+### Changed
+
+- The native connector snapshot and installed extension identity advance to
+  `0.5.0`; both `0.4.0` relations retain their accepted behavior and resource
+  narrowings.
+- Remote execution now supports one closed sequential Link-pagination profile.
+  It accepts only the next page of the fixed GitHub operation, reconstructs the
+  request from typed plan state, reuses one scan-scoped bearer capability, and
+  returns nonempty typed batches until clean exhaustion.
+- Permanent source and tests are split by Connector, Relational Semantics,
+  Remote Runtime, and Query responsibilities, with focused build targets for
+  pagination declarations, plans, Link parsing, aggregate accounting,
+  root-array decoding, retained page buffers, transport metadata, execution,
+  and stream consumption.
+
+### Limitations
+
+- Repository rows form a duplicate-preserving bag from a mutable source. Remote
+  order and snapshot consistency are not guaranteed; a local `ORDER BY` is
+  required for deterministic presentation.
+- Traversal is limited to 32 sequential pages and requests, 3,200 records, 64
+  MiB wire/decompressed bytes, 512 KiB response headers, 2 MiB retained decoded
+  page memory, one active request, and 30 seconds. A declared next page beyond a
+  ceiling fails the statement rather than returning a successful partial result.
+- There are no retries, rate-limit waits, parallel pages, resume state,
+  caller-selected page inputs, caching, provider expansion, or declarative
+  connector loading.
+
 ## 0.4.0 — 2026-07-18
 
 ### Added
