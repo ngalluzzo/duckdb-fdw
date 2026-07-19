@@ -9,11 +9,9 @@ registration, relation-specific SQL argument behavior, offline bind and copy,
 execution-time exact-name lookup, adapter lifecycle and diagnostics, product
 composition, and the user-visible controlled and public acceptance oracles.
 
-Status: **Implementation delivered; provider interactions satisfied**. The
-permanent source, controlled evidence, contract propagation, independent
-review, cached/fresh gates, and live mechanism proof are complete. Product
-acceptance remains pending only on the RFC's exact short-lived fine-grained
-credential pedigree or an approved evidence deviation.
+Status: **Delivered; provider interactions satisfied**. The permanent source,
+controlled evidence, contract propagation, independent review, cached/fresh
+gates, and the exact short-lived fine-grained live proof are complete.
 
 ## Ownership boundary
 
@@ -205,15 +203,15 @@ file overlap is treated as boundary evidence, not solved by joint editing.
   public stream/batch/control/error APIs. Focused Runtime and Query lifecycle
   oracles pass independently. Re-enter Collaboration if these conditions cease
   to hold.
-- **Query Experience outcome — Acceptance pending.** The permanent public
+- **Query Experience outcome — Satisfied.** The permanent public
   artifact exposes the accepted secret and SQL surfaces, the complete
   controlled and opt-in public narratives pass, contract propagation and
   independent review are complete, and cached/fresh gates support every
-  acceptance signal without provider-boundary violations. Only the live
-  credential-pedigree decision remains open.
+  acceptance signal without provider-boundary violations. The final public
+  execution used the RFC-required short-lived fine-grained credential and
+  retained no sensitive evidence.
 
 The final audit inspected includes, construction points, state ownership,
 tests, adjacent code documentation, and artifact inventory on committed tree
-`861b14b`. Provider interactions are satisfied. The Query outcome remains open
-only for product management's decision on the live credential-pedigree evidence
-recorded in the parent goal.
+`861b14b`. Provider interactions and the Query outcome are satisfied; the
+parent goal records the exact public compatibility evidence.
