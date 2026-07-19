@@ -68,17 +68,10 @@ private:
 	std::vector<Entry> entries;
 };
 
-inline const duckdb_api::CompiledRelation &
-FindRelationByRequirement(const duckdb_api::CompiledConnector &connector,
-                          duckdb_api::CompiledCredentialRequirement requirement) {
-	const duckdb_api::CompiledRelation *selected = nullptr;
-	for (const auto &relation : connector.Relations()) {
-		if (relation.Authentication().Requirement() == requirement) {
-			Require(selected == nullptr, "fixture contains ambiguous credential requirements");
-			selected = &relation;
-		}
-	}
-	Require(selected != nullptr, "fixture is missing the required credential profile");
+inline const duckdb_api::CompiledRelation &FindRelation(const duckdb_api::CompiledConnector &connector,
+                                                        const std::string &exact_relation_name) {
+	const auto *selected = connector.FindRelation(exact_relation_name);
+	Require(selected != nullptr, "fixture is missing the exact relation identifier");
 	return *selected;
 }
 

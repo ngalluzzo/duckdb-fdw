@@ -10,11 +10,11 @@ scan. Mutable traversal order is not DuckDB ordering, per-response cardinality
 is not a limit, and pagination grants no filter, ordering, limit, or offset
 authority outside DuckDB.
 
-Status: **Planned; Collaboration open**. RFC 0007 is Accepted and the parent
-goal is Active. Query Experience remains accountable for the product outcome.
-Relational Semantics owns only the offline semantic handoff and its proof; it
-does not own Connector declarations, pagination mechanics, or the DuckDB
-adapter.
+Status: **Implemented; provider interactions exited; final product gates open**.
+RFC 0007 is Accepted and the parent goal is Active. Query Experience remains
+accountable for the product outcome. Relational Semantics owns only the
+offline semantic handoff and its proof; it does not own Connector declarations,
+pagination mechanics, or the DuckDB adapter.
 
 The semantic delta is:
 
@@ -310,28 +310,30 @@ and keep explanation separate from runtime authority.
 
 ## Observable interaction exits
 
-- **Connector Experience — Open; Collaboration, then X-as-a-Service.** Exit
-  when exact disabled and paginated declarations compile through public const
+- **Connector Experience — Exited to X-as-a-Service.** Exact disabled and
+  paginated declarations compile through public const
   accessors into independently runnable golden plans; all contradiction and
   page-one-fallback counterexamples fail offline; Semantics does not construct
   Connector values, import test access, infer from query/auth/relation names,
   or require coordinated knowledge beyond the documented declaration.
-- **Query Experience — Open; Collaboration, then X-as-a-Service.** Exit when
-  Query constructs only the unchanged conservative `ScanRequest`, retains the
-  complete immutable plan, does not inspect pagination to make adapter
+- **Query Experience — Exited to X-as-a-Service.** Query constructs only the
+  unchanged conservative `ScanRequest`, retains the complete immutable plan,
+  does not inspect pagination to make adapter
   decisions, and controlled DuckDB evidence proves local filtering, explicit
   `ORDER BY`, limit, and offset over the duplicate-preserving bag with no
   planning-time I/O or page-one fallback.
-- **Remote Runtime — Open; Collaboration, then X-as-a-Service.** Exit when
-  Runtime production and test sources include only the public plan and safe
-  fixture service, never Connector metadata or `ScanPlanTestAccess`; executor
+- **Remote Runtime — Exited to X-as-a-Service.** Runtime production and test
+  sources include only the public plan and safe fixture service, never
+  Connector metadata or `ScanPlanTestAccess`; executor
   open validates the exact profile before I/O; independent runtime oracles
   execute sequentially without reclassifying base domain, consistency,
   ordering, limit, or budgets; and routine execution changes no longer require
   planner-internal knowledge.
-- **Relational Semantics workstream — Open.** Exit when focused plan, planner,
-  and fixture targets prove all positive/negative properties; final source,
+- **Relational Semantics workstream — Implemented; cached exit evidence
+  satisfied.** Focused plan, planner, and fixture targets prove all
+  positive/negative properties; final source,
   includes, construction points, consumer call sites, build graph, adjacent
-  documentation, contract propagation, preserved-relation regressions, cached
-  and fresh gates, and independent review support the three provider exits with
-  no unresolved semantic or dependency finding.
+  documentation, contract propagation, preserved-relation regressions, and
+  cached gates support the three provider exits with no unresolved semantic or
+  dependency finding. The lead retains the fresh product cell, final review,
+  Git integration, and goal closure.

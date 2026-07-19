@@ -19,6 +19,7 @@ public:
 	static duckdb_api::ScanPlan Response(duckdb_api::ScanPlan plan, ResponsePlanCounterexample counterexample);
 	static duckdb_api::ScanPlan Network(duckdb_api::ScanPlan plan, NetworkPlanCounterexample counterexample);
 	static duckdb_api::ScanPlan Feature(duckdb_api::ScanPlan plan, FeaturePlanCounterexample counterexample);
+	static duckdb_api::ScanPlan Pagination(duckdb_api::ScanPlan plan, PaginationPlanCounterexample counterexample);
 	static duckdb_api::ScanPlan Resource(duckdb_api::ScanPlan plan, ResourcePlanCounterexample counterexample);
 };
 

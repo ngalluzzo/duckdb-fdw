@@ -1,6 +1,7 @@
 #include "duckdb_api/scan_plan.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -66,20 +67,70 @@ PlannedResponseSource PlanResponseSource(CompiledResponseSource source) {
 	switch (source) {
 	case CompiledResponseSource::JSON_PATH_MANY:
 		return PlannedResponseSource::JSON_PATH_MANY;
+	case CompiledResponseSource::ROOT_ARRAY:
+		return PlannedResponseSource::ROOT_ARRAY;
 	case CompiledResponseSource::ROOT_OBJECT:
 		return PlannedResponseSource::ROOT_OBJECT;
 	}
 	throw std::logic_error("compiled relation contains an unsupported response source");
 }
 
-BaseDomain PlanBaseDomain(CompiledResponseSource source) {
+BaseDomain PlanBaseDomain(CompiledResponseSource source, CompiledPaginationStrategy pagination) {
+	if (pagination == CompiledPaginationStrategy::LINK_HEADER) {
+		switch (source) {
+		case CompiledResponseSource::JSON_PATH_MANY:
+			return BaseDomain::PAGINATED_JSON_PATH_RECORDS;
+		case CompiledResponseSource::ROOT_ARRAY:
+			return BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS;
+		case CompiledResponseSource::ROOT_OBJECT:
+			break;
+		}
+		throw std::logic_error("paginated operation does not expose a many-row response source");
+	}
+	if (pagination != CompiledPaginationStrategy::DISABLED) {
+		throw std::logic_error("compiled relation contains an unsupported pagination strategy");
+	}
 	switch (source) {
 	case CompiledResponseSource::JSON_PATH_MANY:
 		return BaseDomain::JSON_PATH_RECORDS;
+	case CompiledResponseSource::ROOT_ARRAY:
+		throw std::logic_error("root-array response requires an explicit supported pagination declaration");
 	case CompiledResponseSource::ROOT_OBJECT:
 		return BaseDomain::SUCCESSFUL_ROOT_OBJECT;
 	}
 	throw std::logic_error("compiled relation contains an unsupported response source");
+}
+
+PlannedPageDependency PlanPageDependency(CompiledPageDependency dependency) {
+	switch (dependency) {
+	case CompiledPageDependency::SEQUENTIAL:
+		return PlannedPageDependency::SEQUENTIAL;
+	}
+	throw std::logic_error("compiled relation contains an unsupported pagination dependency");
+}
+
+PlannedPageConsistency PlanPageConsistency(CompiledPageConsistency consistency) {
+	switch (consistency) {
+	case CompiledPageConsistency::MUTABLE:
+		return PlannedPageConsistency::MUTABLE;
+	}
+	throw std::logic_error("compiled relation contains an unsupported pagination consistency");
+}
+
+PlannedLinkRelation PlanLinkRelation(CompiledLinkRelation relation) {
+	switch (relation) {
+	case CompiledLinkRelation::NEXT:
+		return PlannedLinkRelation::NEXT;
+	}
+	throw std::logic_error("compiled relation contains an unsupported Link relation");
+}
+
+PlannedContinuationTargetScope PlanTargetScope(CompiledContinuationTargetScope scope) {
+	switch (scope) {
+	case CompiledContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH:
+		return PlannedContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH;
+	}
+	throw std::logic_error("compiled relation contains an unsupported pagination target scope");
 }
 
 bool IsSupportedLogicalType(const std::string &logical_type) {
@@ -129,14 +180,91 @@ void ValidateSourceShape(const CompiledOperation &operation, const CompiledResou
 		}
 		return;
 	}
+	if (operation.response_source == CompiledResponseSource::ROOT_ARRAY) {
+		if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY || operation.records_extractor != "$") {
+			throw std::logic_error("root-array response contains contradictory cardinality or extraction");
+		}
+		return;
+	}
 	if (operation.response_source == CompiledResponseSource::ROOT_OBJECT) {
 		if (operation.cardinality != CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS ||
-		    operation.records_extractor != "$" || ceilings.max_records != 1) {
+		    operation.records_extractor != "$" || ceilings.MaxRecordsPerPage() != 1 ||
+		    ceilings.MaxRecordsPerScan() != 1) {
 			throw std::logic_error("root-object response contains contradictory cardinality, extraction, or budget");
 		}
 		return;
 	}
 	throw std::logic_error("selected relation contains an unsupported response source");
+}
+
+uint64_t BoundedProduct(uint64_t left, uint64_t right, uint64_t ceiling, const char *field) {
+	if (left == 0 || right == 0 || left > std::numeric_limits<uint64_t>::max() / right) {
+		throw std::logic_error(std::string("selected pagination overflows ") + field);
+	}
+	return std::min(left * right, ceiling);
+}
+
+void ValidatePagination(const CompiledOperation &operation, const CompiledResourceCeilings &ceilings,
+                        const CompiledNetworkPolicy &network_policy) {
+	const auto &pagination = operation.pagination;
+	if (pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
+		if (ceilings.MaxRecordsPerPage() != ceilings.MaxRecordsPerScan() ||
+		    (ceilings.HasResponseByteNarrowing() &&
+		     ceilings.MaxResponseBytesPerPage() != ceilings.MaxResponseBytesPerScan())) {
+			throw std::logic_error("unpaginated relation contains contradictory page and scan resource scopes");
+		}
+		return;
+	}
+	if (pagination.Strategy() != CompiledPaginationStrategy::LINK_HEADER ||
+	    PlanPageDependency(pagination.Dependency()) != PlannedPageDependency::SEQUENTIAL ||
+	    PlanPageConsistency(pagination.Consistency()) != PlannedPageConsistency::MUTABLE ||
+	    PlanLinkRelation(pagination.LinkRelation()) != PlannedLinkRelation::NEXT ||
+	    PlanTargetScope(pagination.TargetScope()) != PlannedContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH ||
+	    pagination.SupportsTotal() || pagination.SupportsResume() || operation.retry_enabled ||
+	    operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY ||
+	    (operation.response_source != CompiledResponseSource::JSON_PATH_MANY &&
+	     operation.response_source != CompiledResponseSource::ROOT_ARRAY)) {
+		throw std::logic_error("selected relation contains an unsupported pagination capability profile");
+	}
+	if (pagination.PageSizeParameter().empty() || pagination.PageNumberParameter().empty() ||
+	    pagination.PageSizeParameter() == pagination.PageNumberParameter() || pagination.PageSize() == 0 ||
+	    pagination.FirstPage() == 0 || pagination.PageIncrement() != 1 || pagination.MaxPagesPerScan() == 0 ||
+	    pagination.MaxPagesPerScan() > PAGINATION_MAX_PAGES_PER_SCAN) {
+		throw std::logic_error("selected pagination contains an unsupported typed page transition");
+	}
+
+	// Connector supplies typed bindings. Comparing them to the structural request
+	// proves consistency; this planner never discovers pagination by parsing query
+	// text or parameter names.
+	const auto &query = operation.request.query_parameters;
+	if (query.size() != 2 || query[0].name != pagination.PageSizeParameter() ||
+	    query[0].encoded_value != std::to_string(pagination.PageSize()) ||
+	    query[1].name != pagination.PageNumberParameter() ||
+	    query[1].encoded_value != std::to_string(pagination.FirstPage())) {
+		throw std::logic_error("selected pagination disagrees with its structural initial request");
+	}
+	if (!ceilings.HasResponseByteNarrowing() || ceilings.MaxResponseBytesPerPage() == 0 ||
+	    ceilings.MaxResponseBytesPerScan() < ceilings.MaxResponseBytesPerPage() ||
+	    ceilings.MaxResponseBytesPerPage() > network_policy.max_response_bytes ||
+	    ceilings.MaxResponseBytesPerPage() > PAGINATION_MAX_RESPONSE_BYTES_PER_PAGE ||
+	    ceilings.MaxResponseBytesPerScan() > PAGINATION_MAX_RESPONSE_BYTES_PER_SCAN ||
+	    ceilings.MaxRecordsPerPage() == 0 || ceilings.MaxRecordsPerScan() < ceilings.MaxRecordsPerPage() ||
+	    pagination.PageSize() > ceilings.MaxRecordsPerPage() ||
+	    ceilings.MaxRecordsPerPage() > PAGINATION_MAX_DECODED_RECORDS_PER_PAGE ||
+	    ceilings.MaxRecordsPerScan() > PAGINATION_MAX_DECODED_RECORDS_PER_SCAN ||
+	    ceilings.MaxExtractedStringBytes() == 0 ||
+	    ceilings.MaxExtractedStringBytes() > PAGINATION_MAX_EXTRACTED_STRING_BYTES) {
+		throw std::logic_error("selected pagination contains an invalid page or scan resource envelope");
+	}
+	const auto max_pages = pagination.MaxPagesPerScan();
+	if (ceilings.MaxResponseBytesPerScan() > BoundedProduct(ceilings.MaxResponseBytesPerPage(), max_pages,
+	                                                        PAGINATION_MAX_RESPONSE_BYTES_PER_SCAN,
+	                                                        "response-byte scope") ||
+	    ceilings.MaxRecordsPerScan() > BoundedProduct(ceilings.MaxRecordsPerPage(), max_pages,
+	                                                  PAGINATION_MAX_DECODED_RECORDS_PER_SCAN,
+	                                                  "decoded-record scope")) {
+		throw std::logic_error("selected pagination scan resource scope exceeds its bounded page sequence");
+	}
 }
 
 void ValidateExecutableOrigin(const CompiledRestOrigin &origin, const CompiledNetworkPolicy &policy) {
@@ -163,9 +291,9 @@ void ValidateExecutableOrigin(const CompiledRestOrigin &origin, const CompiledNe
 void ValidateOperation(const CompiledRelation &relation, const CompiledNetworkPolicy &network_policy) {
 	const auto &operation = relation.Operation();
 	const auto &ceilings = relation.ResourceCeilings();
-	if (operation.name.empty() || !operation.fallback || operation.retry_enabled || operation.pagination_enabled ||
-	    operation.request.path.empty() || operation.request.path.front() != '/' || ceilings.max_records == 0 ||
-	    ceilings.max_extracted_string_bytes == 0) {
+	if (operation.name.empty() || !operation.fallback || operation.retry_enabled || operation.request.path.empty() ||
+	    operation.request.path.front() != '/' || ceilings.MaxRecordsPerPage() == 0 ||
+	    ceilings.MaxRecordsPerScan() == 0 || ceilings.MaxExtractedStringBytes() == 0) {
 		throw std::logic_error("selected relation contains an unsupported base operation or resource declaration");
 	}
 	(void)PlanProtocol(operation.protocol);
@@ -175,6 +303,7 @@ void ValidateOperation(const CompiledRelation &relation, const CompiledNetworkPo
 	(void)PlanResponseSource(operation.response_source);
 	ValidateSourceShape(operation, ceilings);
 	ValidateExecutableOrigin(operation.request.origin, network_policy);
+	ValidatePagination(operation, ceilings, network_policy);
 }
 
 void ValidateRequest(const CompiledConnector &connector, const CompiledRelation &relation, const ScanRequest &request) {
@@ -244,7 +373,7 @@ ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const Sca
 	result.connector_version = connector.Version();
 	result.relation_name = relation->Name();
 	result.source_snapshot = relation->Snapshot();
-	result.domain = PlanBaseDomain(relation->Operation().response_source);
+	result.domain = PlanBaseDomain(relation->Operation().response_source, relation->Operation().pagination.Strategy());
 
 	const auto &operation = relation->Operation();
 	result.operation.operation_name = operation.name;
@@ -278,7 +407,6 @@ ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const Sca
 	result.remote_offset = RelationalDelegation::NONE;
 	result.runtime_limit = RelationalDelegation::NONE;
 	result.runtime_offset = RelationalDelegation::NONE;
-	result.pagination = FeatureState::DISABLED;
 	result.providers = FeatureState::DISABLED;
 	result.retry = FeatureState::DISABLED;
 	result.cache = FeatureState::DISABLED;
@@ -307,22 +435,93 @@ ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const Sca
 	                  false,
 	                  connector.NetworkPolicy().loopback_addresses_enabled};
 	const auto &ceilings = relation->ResourceCeilings();
-	result.budgets = {HOST_MAX_REQUEST_ATTEMPTS,
-	                  std::min(connector.NetworkPolicy().max_response_bytes, HOST_MAX_RESPONSE_BYTES),
-	                  HOST_MAX_HEADER_BYTES,
-	                  HOST_MAX_DECOMPRESSED_BYTES,
-	                  std::min(ceilings.max_records, HOST_MAX_DECODED_RECORDS),
-	                  std::min(ceilings.max_extracted_string_bytes, HOST_MAX_EXTRACTED_STRING_BYTES),
-	                  HOST_MAX_JSON_NESTING,
-	                  HOST_MAX_DECODED_MEMORY_BYTES,
-	                  OUTPUT_BATCH_ROWS,
-	                  MAX_EXECUTION_MILLISECONDS,
-	                  HOST_MAX_CONCURRENCY};
-	if (!result.budgets.IsWithinLiveRestBounds()) {
-		throw std::logic_error("selected relation produced an invalid effective resource envelope");
+	if (operation.pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
+		const auto response_bytes =
+		    ceilings.HasResponseByteNarrowing()
+		        ? std::min(ceilings.MaxResponseBytesPerPage(), connector.NetworkPolicy().max_response_bytes)
+		        : connector.NetworkPolicy().max_response_bytes;
+		result.budgets = {HOST_MAX_REQUEST_ATTEMPTS,
+		                  std::min(response_bytes, HOST_MAX_RESPONSE_BYTES),
+		                  HOST_MAX_HEADER_BYTES,
+		                  HOST_MAX_DECOMPRESSED_BYTES,
+		                  std::min(ceilings.MaxRecordsPerPage(), HOST_MAX_DECODED_RECORDS),
+		                  std::min(ceilings.MaxExtractedStringBytes(), HOST_MAX_EXTRACTED_STRING_BYTES),
+		                  HOST_MAX_JSON_NESTING,
+		                  HOST_MAX_DECODED_MEMORY_BYTES,
+		                  OUTPUT_BATCH_ROWS,
+		                  MAX_EXECUTION_MILLISECONDS,
+		                  HOST_MAX_CONCURRENCY};
+		if (!result.budgets.IsWithinLiveRestBounds()) {
+			throw std::logic_error("selected relation produced an invalid single-response resource envelope");
+		}
+	} else {
+		const auto &compiled_pagination = operation.pagination;
+		result.pagination.strategy = PlannedPaginationStrategy::LINK_HEADER;
+		result.pagination.dependency = PlanPageDependency(compiled_pagination.Dependency());
+		result.pagination.consistency = PlanPageConsistency(compiled_pagination.Consistency());
+		result.pagination.link_relation = PlanLinkRelation(compiled_pagination.LinkRelation());
+		result.pagination.target_scope = PlanTargetScope(compiled_pagination.TargetScope());
+		result.pagination.supports_total = compiled_pagination.SupportsTotal();
+		result.pagination.supports_resume = compiled_pagination.SupportsResume();
+		result.pagination.target = {{PlanUrlScheme(operation.request.origin.scheme),
+		                             operation.request.origin.host.Value(), operation.request.origin.port},
+		                            operation.request.path,
+		                            compiled_pagination.PageSizeParameter(),
+		                            compiled_pagination.PageSize(),
+		                            compiled_pagination.PageNumberParameter(),
+		                            compiled_pagination.FirstPage(),
+		                            compiled_pagination.PageIncrement()};
+
+		const auto page_response_bytes =
+		    std::min(std::min(ceilings.MaxResponseBytesPerPage(), connector.NetworkPolicy().max_response_bytes),
+		             PAGINATION_MAX_RESPONSE_BYTES_PER_PAGE);
+		result.pagination.page_budgets = {
+		    PAGINATION_MAX_REQUEST_ATTEMPTS_PER_PAGE,
+		    page_response_bytes,
+		    PAGINATION_MAX_HEADER_BYTES_PER_PAGE,
+		    PAGINATION_MAX_DECOMPRESSED_BYTES_PER_PAGE,
+		    std::min(ceilings.MaxRecordsPerPage(), PAGINATION_MAX_DECODED_RECORDS_PER_PAGE),
+		    std::min(ceilings.MaxExtractedStringBytes(), PAGINATION_MAX_EXTRACTED_STRING_BYTES),
+		    PAGINATION_MAX_JSON_NESTING,
+		    PAGINATION_MAX_DECODED_MEMORY_BYTES,
+		    PAGINATION_OUTPUT_BATCH_ROWS,
+		    PAGINATION_MAX_EXECUTION_MILLISECONDS,
+		    PAGINATION_MAX_CONCURRENCY};
+
+		const auto max_pages = compiled_pagination.MaxPagesPerScan();
+		result.pagination.scan_budgets = {
+		    max_pages,
+		    max_pages,
+		    std::min(ceilings.MaxResponseBytesPerScan(), PAGINATION_MAX_RESPONSE_BYTES_PER_SCAN),
+		    BoundedProduct(PAGINATION_MAX_HEADER_BYTES_PER_PAGE, max_pages, PAGINATION_MAX_HEADER_BYTES_PER_SCAN,
+		                   "aggregate header-byte scope"),
+		    BoundedProduct(PAGINATION_MAX_DECOMPRESSED_BYTES_PER_PAGE, max_pages,
+		                   PAGINATION_MAX_DECOMPRESSED_BYTES_PER_SCAN, "aggregate decompressed-byte scope"),
+		    std::min(ceilings.MaxRecordsPerScan(), PAGINATION_MAX_DECODED_RECORDS_PER_SCAN),
+		    std::min(ceilings.MaxExtractedStringBytes(), PAGINATION_MAX_EXTRACTED_STRING_BYTES),
+		    PAGINATION_MAX_JSON_NESTING,
+		    PAGINATION_MAX_DECODED_MEMORY_BYTES,
+		    PAGINATION_OUTPUT_BATCH_ROWS,
+		    PAGINATION_MAX_EXECUTION_MILLISECONDS,
+		    PAGINATION_MAX_CONCURRENCY};
+		result.budgets = result.pagination.page_budgets;
+		if (!result.pagination.PageBudgets().IsWithinPaginatedPageBounds() ||
+		    !result.pagination.ScanBudgets().IsWithinPaginatedScanBounds() ||
+		    result.pagination.ScanBudgets().response_bytes < result.pagination.PageBudgets().response_bytes ||
+		    result.pagination.ScanBudgets().header_bytes < result.pagination.PageBudgets().header_bytes ||
+		    result.pagination.ScanBudgets().decompressed_bytes < result.pagination.PageBudgets().decompressed_bytes ||
+		    result.pagination.ScanBudgets().decoded_records < result.pagination.PageBudgets().decoded_records) {
+			throw std::logic_error("selected relation produced an invalid paginated page or scan resource envelope");
+		}
 	}
 
-	if (result.domain == BaseDomain::SUCCESSFUL_ROOT_OBJECT) {
+	if (result.domain == BaseDomain::PAGINATED_JSON_PATH_RECORDS ||
+	    result.domain == BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS) {
+		result.classification_reason =
+		    "accepted sequential page records define one duplicate-preserving mutable base-domain bag; traversal "
+		    "order is not DuckDB ordering; page and scan ceilings are not limits; DuckDB retains all relational "
+		    "operators";
+	} else if (result.domain == BaseDomain::SUCCESSFUL_ROOT_OBJECT) {
 		result.classification_reason =
 		    "successful root object defines exactly one base row; source cardinality is not a limit; DuckDB retains "
 		    "all relational operators";

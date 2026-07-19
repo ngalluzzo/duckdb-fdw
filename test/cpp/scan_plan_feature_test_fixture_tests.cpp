@@ -11,16 +11,12 @@ namespace duckdb_api_test {
 namespace scan_plan_fixture_contract {
 
 void TestFeatureCounterexamples(const std::string &canary) {
-	const std::vector<FeaturePlanCounterexample> variants = {
-	    FeaturePlanCounterexample::PAGINATION_ENABLED, FeaturePlanCounterexample::PROVIDERS_ENABLED,
-	    FeaturePlanCounterexample::RETRY_ENABLED, FeaturePlanCounterexample::CACHE_ENABLED};
+	const std::vector<FeaturePlanCounterexample> variants = {FeaturePlanCounterexample::PROVIDERS_ENABLED,
+	                                                         FeaturePlanCounterexample::RETRY_ENABLED,
+	                                                         FeaturePlanCounterexample::CACHE_ENABLED};
 	for (const auto variant : variants) {
 		const auto plan = BuildFeaturePlanCounterexample("fixture_secret_name", variant);
 		switch (variant) {
-		case FeaturePlanCounterexample::PAGINATION_ENABLED:
-			Require(plan.Pagination() == duckdb_api::FeatureState::ENABLED,
-			        "pagination counterexample remained disabled");
-			break;
 		case FeaturePlanCounterexample::PROVIDERS_ENABLED:
 			Require(plan.Providers() == duckdb_api::FeatureState::ENABLED,
 			        "providers counterexample remained disabled");

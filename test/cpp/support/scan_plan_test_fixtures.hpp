@@ -74,7 +74,22 @@ enum class NetworkPlanCounterexample {
 	LOOPBACK_ADDRESSES_ENABLED
 };
 
-enum class FeaturePlanCounterexample { PAGINATION_ENABLED, PROVIDERS_ENABLED, RETRY_ENABLED, CACHE_ENABLED };
+enum class FeaturePlanCounterexample { PROVIDERS_ENABLED, RETRY_ENABLED, CACHE_ENABLED };
+
+enum class PaginationPlanCounterexample {
+	STRATEGY_DISABLED,
+	UNKNOWN_DEPENDENCY,
+	UNKNOWN_CONSISTENCY,
+	UNKNOWN_LINK_RELATION,
+	UNKNOWN_TARGET_SCOPE,
+	SUPPORTS_TOTAL,
+	SUPPORTS_RESUME,
+	EMPTY_TARGET_PATH,
+	PAGE_REQUEST_ATTEMPTS_WIDENED,
+	SCAN_REQUEST_ATTEMPTS_MISMATCH,
+	SCAN_RESPONSE_BYTES_BELOW_PAGE,
+	SCAN_DECODED_RECORDS_BELOW_PAGE
+};
 
 enum class ResourcePlanCounterexample {
 	REQUEST_ATTEMPTS_ZERO,
@@ -103,6 +118,10 @@ enum class ResourcePlanCounterexample {
 
 duckdb_api::ScanPlan BuildValidAnonymousPlanFixture();
 duckdb_api::ScanPlan BuildValidAuthenticatedPlanFixture(const std::string &exact_logical_secret_name);
+duckdb_api::ScanPlan BuildValidPaginatedPlanFixture(const std::string &exact_logical_secret_name);
+duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::string &exact_logical_secret_name);
+duckdb_api::ScanPlan BuildPaginationPlanCounterexample(const std::string &exact_logical_secret_name,
+                                                       PaginationPlanCounterexample counterexample);
 
 duckdb_api::ScanPlan BuildOperationPlanCounterexample(const std::string &exact_logical_secret_name,
                                                       OperationPlanCounterexample counterexample);

@@ -17,7 +17,7 @@ namespace {
 using duckdb_api_test::BuildAnonymousScanRequest;
 using duckdb_api_test::BuildAuthenticatedScanRequest;
 using duckdb_api_test::Require;
-using duckdb_api_test::scan_plan_contract::FindRelationByRequirement;
+using duckdb_api_test::scan_plan_contract::FindRelation;
 using duckdb_api_test::scan_plan_contract::GroupedDigits;
 using duckdb_api_test::scan_plan_contract::RuntimeCredentialCanary;
 using duckdb_api_test::scan_plan_contract::ScopedEnvironment;
@@ -101,11 +101,33 @@ void RequireDuckDbRelationalOwnership(const duckdb_api::ScanPlan &plan) {
 	            plan.RuntimeLimit() == duckdb_api::RelationalDelegation::NONE &&
 	            plan.RuntimeOffset() == duckdb_api::RelationalDelegation::NONE,
 	        "plan introduced remote/runtime ordering or bound delegation");
-	Require(plan.Pagination() == duckdb_api::FeatureState::DISABLED &&
-	            plan.Providers() == duckdb_api::FeatureState::DISABLED &&
+	Require(plan.Providers() == duckdb_api::FeatureState::DISABLED &&
 	            plan.Retry() == duckdb_api::FeatureState::DISABLED &&
 	            plan.Cache() == duckdb_api::FeatureState::DISABLED,
-	        "plan enabled an excluded execution feature");
+	        "plan enabled an excluded provider, retry, or cache feature");
+}
+
+void RequireDisabledPaginationPayloadInaccessible(const duckdb_api::PaginationPlan &pagination) {
+	Require(pagination.Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED,
+	        "disabled pagination changed its discriminant");
+	duckdb_api_test::scan_plan_contract::RequireThrows<std::logic_error>(
+	    [&pagination]() { (void)pagination.Dependency(); }, "disabled pagination exposed dependency payload");
+	duckdb_api_test::scan_plan_contract::RequireThrows<std::logic_error>(
+	    [&pagination]() { (void)pagination.Consistency(); }, "disabled pagination exposed consistency payload");
+	duckdb_api_test::scan_plan_contract::RequireThrows<std::logic_error>(
+	    [&pagination]() { (void)pagination.LinkRelation(); }, "disabled pagination exposed Link-relation payload");
+	duckdb_api_test::scan_plan_contract::RequireThrows<std::logic_error>(
+	    [&pagination]() { (void)pagination.TargetScope(); }, "disabled pagination exposed target-scope payload");
+	duckdb_api_test::scan_plan_contract::RequireThrows<std::logic_error>(
+	    [&pagination]() { (void)pagination.SupportsTotal(); }, "disabled pagination exposed total payload");
+	duckdb_api_test::scan_plan_contract::RequireThrows<std::logic_error>(
+	    [&pagination]() { (void)pagination.SupportsResume(); }, "disabled pagination exposed resume payload");
+	duckdb_api_test::scan_plan_contract::RequireThrows<std::logic_error>([&pagination]() { (void)pagination.Target(); },
+	                                                                     "disabled pagination exposed target payload");
+	duckdb_api_test::scan_plan_contract::RequireThrows<std::logic_error>(
+	    [&pagination]() { (void)pagination.PageBudgets(); }, "disabled pagination exposed page-budget payload");
+	duckdb_api_test::scan_plan_contract::RequireThrows<std::logic_error>(
+	    [&pagination]() { (void)pagination.ScanBudgets(); }, "disabled pagination exposed scan-budget payload");
 }
 
 void RequireSelectedNetworkAndBudgets(const duckdb_api::ScanPlan &plan, const duckdb_api::CompiledRelation &relation) {
@@ -119,10 +141,9 @@ void RequireSelectedNetworkAndBudgets(const duckdb_api::ScanPlan &plan, const du
 	        "plan network capability was not narrowed to the selected operation");
 	Require(plan.Budgets().IsWithinLiveRestBounds() &&
 	            plan.Budgets().decoded_records ==
-	                std::min(relation.ResourceCeilings().max_records, duckdb_api::HOST_MAX_DECODED_RECORDS) &&
-	            plan.Budgets().extracted_string_bytes ==
-	                std::min(relation.ResourceCeilings().max_extracted_string_bytes,
-	                         duckdb_api::HOST_MAX_EXTRACTED_STRING_BYTES),
+	                std::min(relation.ResourceCeilings().MaxRecordsPerPage(), duckdb_api::HOST_MAX_DECODED_RECORDS) &&
+	            plan.Budgets().extracted_string_bytes == std::min(relation.ResourceCeilings().MaxExtractedStringBytes(),
+	                                                              duckdb_api::HOST_MAX_EXTRACTED_STRING_BYTES),
 	        "plan resource envelope did not intersect relation and host ceilings");
 }
 
@@ -132,6 +153,7 @@ void RequireAnonymousPlan(const duckdb_api::ScanPlan &plan, const duckdb_api::Co
 	            plan.RelationName() == relation.Name() && plan.SourceSnapshot() == relation.Snapshot(),
 	        "anonymous plan identity or selected provenance drifted");
 	Require(plan.Domain() == duckdb_api::BaseDomain::JSON_PATH_RECORDS &&
+	            plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED &&
 	            plan.Operation().cardinality == duckdb_api::PlannedCardinality::ZERO_TO_MANY &&
 	            plan.Operation().response_source == duckdb_api::PlannedResponseSource::JSON_PATH_MANY,
 	        "anonymous plan lost its multi-record source semantics");
@@ -146,6 +168,7 @@ void RequireAnonymousPlan(const duckdb_api::ScanPlan &plan, const duckdb_api::Co
 	        "anonymous plan did not retain the closed no-auth obligation");
 	RequireColumnsMatch(plan, relation);
 	RequireOperationMatches(plan, relation);
+	RequireDisabledPaginationPayloadInaccessible(plan.Pagination());
 	RequireDuckDbRelationalOwnership(plan);
 	RequireSelectedNetworkAndBudgets(plan, relation);
 }
@@ -156,6 +179,7 @@ void RequireAuthenticatedPlan(const duckdb_api::ScanPlan &plan, const duckdb_api
 	            plan.RelationName() == relation.Name() && plan.SourceSnapshot() == relation.Snapshot(),
 	        "authenticated plan identity or selected provenance drifted");
 	Require(plan.Domain() == duckdb_api::BaseDomain::SUCCESSFUL_ROOT_OBJECT &&
+	            plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED &&
 	            plan.Operation().cardinality == duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS &&
 	            plan.Operation().response_source == duckdb_api::PlannedResponseSource::ROOT_OBJECT,
 	        "authenticated plan lost its exactly-one root-object semantics");
@@ -181,6 +205,7 @@ void RequireAuthenticatedPlan(const duckdb_api::ScanPlan &plan, const duckdb_api
 	        "exactly-one cardinality or its distinct record budget was reclassified as LIMIT 1");
 	RequireColumnsMatch(plan, relation);
 	RequireOperationMatches(plan, relation);
+	RequireDisabledPaginationPayloadInaccessible(plan.Pagination());
 	RequireDuckDbRelationalOwnership(plan);
 	RequireSelectedNetworkAndBudgets(plan, relation);
 }
@@ -208,9 +233,8 @@ void RequireCanaryAbsent(const duckdb_api::ScanPlan &plan, const std::string &ca
 
 void TestNativeGoldenPlans() {
 	const auto connector = duckdb_api::BuildNativeGithubConnector();
-	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
-	const auto &authenticated =
-	    FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+	const auto &anonymous = FindRelation(connector, "duckdb_login_search_page");
+	const auto &authenticated = FindRelation(connector, "authenticated_user");
 	const auto anonymous_plan =
 	    duckdb_api::BuildConservativeScanPlan(connector, BuildAnonymousScanRequest(connector, anonymous.Name()));
 	const auto authenticated_plan = duckdb_api::BuildConservativeScanPlan(
@@ -218,6 +242,42 @@ void TestNativeGoldenPlans() {
 
 	RequireAnonymousPlan(anonymous_plan, connector, anonymous);
 	RequireAuthenticatedPlan(authenticated_plan, connector, authenticated, "github_default");
+	Require(anonymous_plan.ConnectorName() == "github" && anonymous_plan.ConnectorVersion() == "0.5.0" &&
+	            anonymous_plan.RelationName() == "duckdb_login_search_page" &&
+	            anonymous_plan.Operation().operation_name == "github_search_duckdb_login_page" &&
+	            anonymous_plan.Operation().path == "/search/users" &&
+	            anonymous_plan.Operation().query_parameters.size() == 2 &&
+	            anonymous_plan.Operation().query_parameters[0].name == "q" &&
+	            anonymous_plan.Operation().query_parameters[0].encoded_value == "duckdb+in%3Alogin" &&
+	            anonymous_plan.Operation().query_parameters[1].name == "per_page" &&
+	            anonymous_plan.Operation().query_parameters[1].encoded_value == "3" &&
+	            authenticated_plan.RelationName() == "authenticated_user" &&
+	            authenticated_plan.Operation().operation_name == "github_authenticated_user" &&
+	            authenticated_plan.Operation().path == "/user" &&
+	            authenticated_plan.Operation().query_parameters.empty() &&
+	            anonymous_plan.Operation().headers.size() == 3 &&
+	            anonymous_plan.Operation().headers[1].value == "duckdb-api/0.5.0" &&
+	            authenticated_plan.Operation().headers.size() == 3 &&
+	            authenticated_plan.Operation().headers[1].value == "duckdb-api/0.5.0",
+	        "existing native plan identity or fixed request changed during pagination planning work");
+	Require(anonymous_plan.OutputColumns().size() == 3 && anonymous_plan.OutputColumns()[0].name == "id" &&
+	            anonymous_plan.OutputColumns()[0].logical_type == "BIGINT" &&
+	            anonymous_plan.OutputColumns()[1].name == "login" &&
+	            anonymous_plan.OutputColumns()[1].logical_type == "VARCHAR" &&
+	            anonymous_plan.OutputColumns()[2].name == "site_admin" &&
+	            anonymous_plan.OutputColumns()[2].logical_type == "BOOLEAN" &&
+	            authenticated_plan.OutputColumns().size() == anonymous_plan.OutputColumns().size(),
+	        "existing native plan schema changed during pagination planning work");
+	for (const auto *plan : {&anonymous_plan, &authenticated_plan}) {
+		const auto expected_records = plan == &anonymous_plan ? 3U : 1U;
+		Require(plan->Budgets().request_attempts == 1 && plan->Budgets().response_bytes == 65536 &&
+		            plan->Budgets().header_bytes == 16384 && plan->Budgets().decompressed_bytes == 65536 &&
+		            plan->Budgets().decoded_records == expected_records &&
+		            plan->Budgets().extracted_string_bytes == 256 && plan->Budgets().json_nesting == 16 &&
+		            plan->Budgets().decoded_memory_bytes == 131072 && plan->Budgets().batch_rows == 2 &&
+		            plan->Budgets().wall_milliseconds == 5000 && plan->Budgets().concurrency == 1,
+		        "existing native plan resource envelope changed during pagination planning work");
+	}
 	Require(anonymous_plan.Snapshot().find("domain=json_path_records") != std::string::npos &&
 	            anonymous_plan.Snapshot().find("auth-obligation=requirement:none") != std::string::npos,
 	        "anonymous golden explanation omitted domain or closed auth state");
@@ -235,9 +295,8 @@ void TestNativeGoldenPlans() {
 
 void TestProviderOwnedDistinctSchemaPlans() {
 	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
-	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
-	const auto &authenticated =
-	    FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+	const auto &anonymous = FindRelation(connector, duckdb_api_test::DISTINCT_SCHEMA_ANONYMOUS_RELATION);
+	const auto &authenticated = FindRelation(connector, duckdb_api_test::DISTINCT_SCHEMA_AUTHENTICATED_RELATION);
 	Require(anonymous.Columns().size() != authenticated.Columns().size() ||
 	            anonymous.Columns()[0].name != authenticated.Columns()[0].name,
 	        "provider fixture does not prove distinct schema selection");
@@ -257,7 +316,7 @@ void TestProviderOwnedDistinctSchemaPlans() {
 
 void TestReferenceIdentityChangesOnlyReferenceAndExplanation() {
 	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
-	const auto &relation = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+	const auto &relation = FindRelation(connector, duckdb_api_test::DISTINCT_SCHEMA_AUTHENTICATED_RELATION);
 	const auto first = duckdb_api::BuildConservativeScanPlan(
 	    connector, BuildAuthenticatedScanRequest(connector, relation.Name(), "named_secret_a"));
 	const auto second = duckdb_api::BuildConservativeScanPlan(
@@ -283,7 +342,7 @@ void TestReferenceIdentityChangesOnlyReferenceAndExplanation() {
 
 void TestDeterministicCopyAndRedactedEnvironment() {
 	const auto connector = duckdb_api::BuildNativeGithubConnector();
-	const auto &relation = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+	const auto &relation = FindRelation(connector, "authenticated_user");
 	const auto request = BuildAuthenticatedScanRequest(connector, relation.Name(), "prepared_secret");
 	const auto baseline = duckdb_api::BuildConservativeScanPlan(connector, request);
 	const auto copy = baseline;

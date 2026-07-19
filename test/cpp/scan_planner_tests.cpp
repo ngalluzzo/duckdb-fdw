@@ -1,4 +1,5 @@
 #include "duckdb_api/scan_plan.hpp"
+#include "support/connector_catalog_test_access.hpp"
 #include "support/connector_catalog_test_fixtures.hpp"
 #include "support/live_scan_request.hpp"
 #include "support/require.hpp"
@@ -8,13 +9,15 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
 using duckdb_api_test::BuildAnonymousScanRequest;
 using duckdb_api_test::BuildAuthenticatedScanRequest;
 using duckdb_api_test::Require;
-using duckdb_api_test::scan_plan_contract::FindRelationByRequirement;
+using duckdb_api_test::scan_plan_contract::FindRelation;
 using duckdb_api_test::scan_plan_contract::RequireThrows;
 
 void RequireRequestRejected(const duckdb_api::CompiledConnector &connector, const duckdb_api::ScanRequest &request,
@@ -35,11 +38,74 @@ void RequireBudgetFieldBounded(const duckdb_api::ResourceBudgets &baseline,
 	Require(!invalid.IsWithinLiveRestBounds(), name + " budget widened its host cap");
 }
 
+duckdb_api::CompiledConnector
+BuildPaginationPlannerCandidate(std::uint64_t max_pages, std::uint64_t response_bytes_per_page,
+                                std::uint64_t response_bytes_per_scan, std::uint64_t records_per_page,
+                                std::uint64_t records_per_scan, std::uint64_t extracted_string_bytes) {
+	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledRestHost("api.github.com"), 443};
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(duckdb_api_test::ConnectorCatalogTestAccess::Relation(
+	    "planner_pagination_candidate",
+	    {{"record_id", "BIGINT", false, "$.record_id"}, {"label", "VARCHAR", false, "$.label"}},
+	    duckdb_api::CompiledOperation {"planner_pagination_candidate",
+	                                   true,
+	                                   duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	                                   duckdb_api::CompiledProtocol::REST,
+	                                   duckdb_api::CompiledHttpMethod::GET,
+	                                   duckdb_api::CompiledReplaySafety::SAFE,
+	                                   false,
+	                                   duckdb_api_test::ConnectorCatalogTestAccess::SequentialLink(
+	                                       "batch_size", 3, "cursor_page", 1, 1, max_pages),
+	                                   {origin,
+	                                    "/fixtures/planner-pagination",
+	                                    {{"batch_size", "3"}, {"cursor_page", "1"}},
+	                                    {{"X-Connector-Fixture", "planner-pagination"}}},
+	                                   duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
+	                                   "$.records[*]"},
+	    duckdb_api_test::ConnectorCatalogTestAccess::RequiredBearer(),
+	    duckdb_api_test::ConnectorCatalogTestAccess::PaginatedResources(response_bytes_per_page,
+	                                                                    response_bytes_per_scan, records_per_page,
+	                                                                    records_per_scan, extracted_string_bytes)));
+	return duckdb_api_test::ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "planner_pagination_catalog", "test-1",
+	    std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {
+	        {"https"}, {"api.github.com"}, false, false, false, false, response_bytes_per_page});
+}
+
+duckdb_api::CompiledConnector BuildDisabledRootArrayRepositoryCandidate() {
+	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledRestHost("api.github.com"), 443};
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(duckdb_api_test::ConnectorCatalogTestAccess::Relation(
+	    "authenticated_repositories", {{"id", "BIGINT", false, "$.id"}, {"full_name", "VARCHAR", false, "$.full_name"}},
+	    duckdb_api::CompiledOperation {"github_authenticated_repositories",
+	                                   true,
+	                                   duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	                                   duckdb_api::CompiledProtocol::REST,
+	                                   duckdb_api::CompiledHttpMethod::GET,
+	                                   duckdb_api::CompiledReplaySafety::SAFE,
+	                                   false,
+	                                   duckdb_api_test::ConnectorCatalogTestAccess::DisabledPagination(),
+	                                   {origin,
+	                                    "/user/repos",
+	                                    {{"per_page", "100"}, {"page", "1"}},
+	                                    {{"X-Connector-Fixture", "disabled-root-array"}}},
+	                                   duckdb_api::CompiledResponseSource::ROOT_ARRAY,
+	                                   "$"},
+	    duckdb_api_test::ConnectorCatalogTestAccess::RequiredBearer(),
+	    duckdb_api_test::ConnectorCatalogTestAccess::UnpaginatedResources(100, 512)));
+	return duckdb_api_test::ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "github", "test-disabled-root-array",
+	    std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"api.github.com"}, false, false, false, false, 8 * 1024 * 1024});
+}
+
 void TestExactSelectionHasNoFallback() {
 	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
-	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
-	const auto &authenticated =
-	    FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+	const auto &anonymous = FindRelation(connector, duckdb_api_test::DISTINCT_SCHEMA_ANONYMOUS_RELATION);
+	const auto &authenticated = FindRelation(connector, duckdb_api_test::DISTINCT_SCHEMA_AUTHENTICATED_RELATION);
 	const auto anonymous_plan =
 	    duckdb_api::BuildConservativeScanPlan(connector, BuildAnonymousScanRequest(connector, anonymous.Name()));
 	const auto authenticated_plan = duckdb_api::BuildConservativeScanPlan(
@@ -63,9 +129,8 @@ void TestExactSelectionHasNoFallback() {
 
 void TestReferenceRequirementMatrix() {
 	const auto connector = duckdb_api::BuildNativeGithubConnector();
-	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
-	const auto &authenticated =
-	    FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+	const auto &anonymous = FindRelation(connector, "duckdb_login_search_page");
+	const auto &authenticated = FindRelation(connector, "authenticated_user");
 
 	const auto anonymous_request = BuildAnonymousScanRequest(connector, anonymous.Name());
 	const auto authenticated_request = BuildAuthenticatedScanRequest(connector, authenticated.Name(), "matrix_secret");
@@ -99,9 +164,8 @@ void TestReferenceRequirementMatrix() {
 
 void TestSecretManagerCapabilityIsRequirementScoped() {
 	const auto connector = duckdb_api::BuildNativeGithubConnector();
-	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
-	const auto &authenticated =
-	    FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+	const auto &anonymous = FindRelation(connector, "duckdb_login_search_page");
+	const auto &authenticated = FindRelation(connector, "authenticated_user");
 
 	auto anonymous_without_capability = BuildAnonymousScanRequest(connector, anonymous.Name());
 	anonymous_without_capability.capabilities.secret_manager = false;
@@ -121,7 +185,7 @@ void TestSecretManagerCapabilityIsRequirementScoped() {
 
 void TestUnavailableRelationalCounterexamples() {
 	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
-	const auto &relation = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
+	const auto &relation = FindRelation(connector, duckdb_api_test::DISTINCT_SCHEMA_ANONYMOUS_RELATION);
 	const auto valid = BuildAnonymousScanRequest(connector, relation.Name());
 
 	auto request = valid;
@@ -170,9 +234,8 @@ void TestUnavailableRelationalCounterexamples() {
 
 void TestResponseSourceCardinalityAndLimitAreIndependent() {
 	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
-	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
-	const auto &authenticated =
-	    FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+	const auto &anonymous = FindRelation(connector, duckdb_api_test::DISTINCT_SCHEMA_ANONYMOUS_RELATION);
+	const auto &authenticated = FindRelation(connector, duckdb_api_test::DISTINCT_SCHEMA_AUTHENTICATED_RELATION);
 	const auto many =
 	    duckdb_api::BuildConservativeScanPlan(connector, BuildAnonymousScanRequest(connector, anonymous.Name()));
 	const auto one = duckdb_api::BuildConservativeScanPlan(
@@ -198,7 +261,7 @@ void TestResponseSourceCardinalityAndLimitAreIndependent() {
 
 void TestFixedSourceInputsRemainNonRelational() {
 	const auto connector = duckdb_api::BuildNativeGithubConnector();
-	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
+	const auto &anonymous = FindRelation(connector, "duckdb_login_search_page");
 	const auto plan =
 	    duckdb_api::BuildConservativeScanPlan(connector, BuildAnonymousScanRequest(connector, anonymous.Name()));
 	Require(plan.Operation().query_parameters.size() == anonymous.Operation().request.query_parameters.size() &&
@@ -214,12 +277,12 @@ void TestFixedSourceInputsRemainNonRelational() {
 
 void TestResourceEnvelopeBounds() {
 	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
-	const auto &anonymous = FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
+	const auto &anonymous = FindRelation(connector, duckdb_api_test::DISTINCT_SCHEMA_ANONYMOUS_RELATION);
 	const auto plan =
 	    duckdb_api::BuildConservativeScanPlan(connector, BuildAnonymousScanRequest(connector, anonymous.Name()));
 	Require(plan.Budgets().response_bytes == connector.NetworkPolicy().max_response_bytes &&
-	            plan.Budgets().decoded_records == anonymous.ResourceCeilings().max_records &&
-	            plan.Budgets().extracted_string_bytes == anonymous.ResourceCeilings().max_extracted_string_bytes,
+	            plan.Budgets().decoded_records == anonymous.ResourceCeilings().MaxRecordsPerPage() &&
+	            plan.Budgets().extracted_string_bytes == anonymous.ResourceCeilings().MaxExtractedStringBytes(),
 	        "smaller provider ceilings did not narrow host budgets");
 
 	RequireBudgetFieldBounded(plan.Budgets(), &duckdb_api::ResourceBudgets::response_bytes,
@@ -258,6 +321,59 @@ void TestResourceEnvelopeBounds() {
 	Require(invalid.IsWithinLiveRestBounds(), "generic host decoder ceiling retained a native relation-specific cap");
 }
 
+void TestPaginationRequiresExplicitSupportedProfile() {
+	const auto connector = duckdb_api_test::BuildPaginationConnectorCatalogFixture();
+	const auto &decoy = FindRelation(connector, duckdb_api_test::PAGINATION_DECOY_RELATION);
+	const auto &linked = FindRelation(connector, duckdb_api_test::PAGINATION_LINK_RELATION);
+	const auto decoy_plan = duckdb_api::BuildConservativeScanPlan(
+	    connector, BuildAuthenticatedScanRequest(connector, decoy.Name(), "pagination_secret"));
+	const auto linked_plan = duckdb_api::BuildConservativeScanPlan(
+	    connector, BuildAuthenticatedScanRequest(connector, linked.Name(), "pagination_secret"));
+	Require(decoy_plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED &&
+	            decoy_plan.Domain() == duckdb_api::BaseDomain::JSON_PATH_RECORDS,
+	        "planner inferred pagination from page-shaped request fields");
+	Require(linked_plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::LINK_HEADER &&
+	            linked_plan.Domain() == duckdb_api::BaseDomain::PAGINATED_JSON_PATH_RECORDS &&
+	            linked_plan.Pagination().ScanBudgets().pages == 4,
+	        "planner ignored the explicit supported Link profile");
+	const auto disabled_root_array = BuildDisabledRootArrayRepositoryCandidate();
+	const auto &disabled_root_array_relation = FindRelation(disabled_root_array, "authenticated_repositories");
+	RequireRequestRejected(
+	    disabled_root_array,
+	    BuildAuthenticatedScanRequest(disabled_root_array, disabled_root_array_relation.Name(), "pagination_secret"),
+	    "a repository-shaped root array with disabled pagination by falling back to page one");
+
+	const auto too_many_pages = BuildPaginationPlannerCandidate(33, 1024, 33 * 1024, 3, 99, 96);
+	const auto &too_many_relation = FindRelation(too_many_pages, "planner_pagination_candidate");
+	RequireRequestRejected(
+	    too_many_pages, BuildAuthenticatedScanRequest(too_many_pages, too_many_relation.Name(), "pagination_secret"),
+	    "a pagination profile wider than the 32-page scan envelope instead of rejecting page-one fallback");
+
+	const auto too_many_records = BuildPaginationPlannerCandidate(4, 1024, 4096, 101, 404, 96);
+	const auto &too_many_records_relation = FindRelation(too_many_records, "planner_pagination_candidate");
+	RequireRequestRejected(
+	    too_many_records,
+	    BuildAuthenticatedScanRequest(too_many_records, too_many_records_relation.Name(), "pagination_secret"),
+	    "a pagination profile wider than the per-page decoded-record envelope");
+
+	const auto too_many_response_bytes =
+	    BuildPaginationPlannerCandidate(9, duckdb_api::PAGINATION_MAX_RESPONSE_BYTES_PER_PAGE,
+	                                    9 * duckdb_api::PAGINATION_MAX_RESPONSE_BYTES_PER_PAGE, 3, 27, 96);
+	const auto &too_many_response_bytes_relation =
+	    FindRelation(too_many_response_bytes, "planner_pagination_candidate");
+	RequireRequestRejected(too_many_response_bytes,
+	                       BuildAuthenticatedScanRequest(too_many_response_bytes,
+	                                                     too_many_response_bytes_relation.Name(), "pagination_secret"),
+	                       "a pagination profile wider than the aggregate response-byte envelope");
+
+	const auto too_wide_strings = BuildPaginationPlannerCandidate(4, 1024, 4096, 3, 12, 513);
+	const auto &too_wide_strings_relation = FindRelation(too_wide_strings, "planner_pagination_candidate");
+	RequireRequestRejected(
+	    too_wide_strings,
+	    BuildAuthenticatedScanRequest(too_wide_strings, too_wide_strings_relation.Name(), "pagination_secret"),
+	    "a pagination profile wider than the extracted-string envelope");
+}
+
 } // namespace
 
 int main() {
@@ -269,6 +385,7 @@ int main() {
 		TestResponseSourceCardinalityAndLimitAreIndependent();
 		TestFixedSourceInputsRemainNonRelational();
 		TestResourceEnvelopeBounds();
+		TestPaginationRequiresExplicitSupportedProfile();
 		std::cout << "scan planner tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

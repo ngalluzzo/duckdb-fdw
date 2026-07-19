@@ -29,10 +29,8 @@ std::string ReadText(const std::string &path) {
 
 void TestValidFactoriesUsePublicPlanningPath() {
 	const auto connector = duckdb_api::BuildNativeGithubConnector();
-	const auto &anonymous =
-	    scan_plan_contract::FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::NONE);
-	const auto &authenticated =
-	    scan_plan_contract::FindRelationByRequirement(connector, duckdb_api::CompiledCredentialRequirement::REQUIRED);
+	const auto &anonymous = scan_plan_contract::FindRelation(connector, "duckdb_login_search_page");
+	const auto &authenticated = scan_plan_contract::FindRelation(connector, "authenticated_user");
 	const auto expected_anonymous =
 	    duckdb_api::BuildConservativeScanPlan(connector, BuildAnonymousScanRequest(connector, anonymous.Name()));
 	const auto expected_authenticated = duckdb_api::BuildConservativeScanPlan(
