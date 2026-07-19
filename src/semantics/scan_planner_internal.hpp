@@ -1,6 +1,6 @@
 #pragma once
 
-#include "duckdb_api/scan_plan.hpp"
+#include "duckdb_api/scan_planner.hpp"
 
 #include <cstdint>
 #include <stdexcept>

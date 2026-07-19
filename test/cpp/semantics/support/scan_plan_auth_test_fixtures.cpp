@@ -35,7 +35,7 @@ duckdb_api::ScanPlan ScanPlanTestAccess::Authenticated(duckdb_api::ScanPlan plan
 		plan.authentication_obligation.destination.port = 444;
 		break;
 	case AuthenticatedPlanCounterexample::MISSING_SECRET_REFERENCE:
-		plan.secret_reference = duckdb_api::LogicalSecretReference();
+		plan.secret_reference = duckdb_api::PlannedSecretReference();
 		break;
 	default:
 		throw std::invalid_argument("unknown closed authenticated plan counterexample");
@@ -73,7 +73,7 @@ duckdb_api::ScanPlan ScanPlanTestAccess::AnonymousAuth(duckdb_api::ScanPlan plan
 
 duckdb_api::ScanPlan ScanPlanTestAccess::AnonymousSecretReference(duckdb_api::ScanPlan plan,
                                                                   const std::string &exact_logical_secret_name) {
-	plan.secret_reference = duckdb_api::LogicalSecretReference::Named(exact_logical_secret_name);
+	plan.secret_reference = duckdb_api::PlannedSecretReference(exact_logical_secret_name);
 	return plan;
 }
 

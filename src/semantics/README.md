@@ -12,11 +12,15 @@ The package consumes Connector Experience's validated, immutable
 `CompiledConnector` and Query Experience's protocol-neutral `ScanRequest` and
 capability profile. It provides the stable `duckdb_api/scan_plan.hpp` facade:
 the immutable `ScanPlan`, its relational ownership and resource obligations,
-its explanation snapshot, and `BuildConservativeScanPlan`.
+its normalized logical-secret selector, and its explanation snapshot. Runtime
+links the corresponding plan-value service without Connector, Query, or planner
+construction dependencies. The separate `duckdb_api/scan_planner.hpp` facade
+provides `BuildConservativeScanPlan` to Query and Semantics fixtures.
 
 Dependencies point from Semantics to the bounded Connector and Query public
-facades. Remote Runtime and Query consumers depend on the Semantics facade;
-they do not construct or reinterpret planner internals.
+facades only inside planner construction. Query consumes the planner facade;
+Remote Runtime consumes only the plan facade. Neither consumer constructs or
+reinterprets planner internals.
 
 ## Implementation units
 

@@ -4,6 +4,7 @@
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb_api/duckdb_secret.hpp"
+#include "duckdb_api/scan_planner.hpp"
 #include "duckdb_api/scan_request.hpp"
 
 #include <memory>

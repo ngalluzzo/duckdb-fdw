@@ -1,6 +1,6 @@
 #include "query/integration/support/controlled_product_composition.hpp"
 
-#include "support/loopback_curl_runtime.hpp"
+#include "runtime/support/loopback_curl_runtime.hpp"
 
 #include <utility>
 

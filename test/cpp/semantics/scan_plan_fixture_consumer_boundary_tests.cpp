@@ -1,5 +1,6 @@
 #include "semantics/support/scan_plan_test_fixture_test_support.hpp"
 
+#include "duckdb_api/scan_planner.hpp"
 #include "query/support/live_scan_request.hpp"
 #include "support/require.hpp"
 #include "semantics/support/scan_plan_contract_test_support.hpp"
@@ -54,6 +55,8 @@ void TestSafeConsumerHeaderBoundary() {
 	const std::string root = DUCKDB_API_SOURCE_ROOT;
 	const auto header = ReadText(root + "/test/cpp/semantics/support/scan_plan_test_fixtures.hpp");
 	const auto consumer = ReadText(root + "/test/cpp/semantics/support/scan_plan_fixture_consumer_probe.cpp");
+	const auto plan_header = ReadText(root + "/src/include/duckdb_api/scan_plan.hpp");
+	const auto runtime_targets = ReadText(root + "/src/runtime/targets.cmake");
 	const std::vector<std::string> forbidden = {"scan_plan_test_access",
 	                                            "connector_catalog_test_access",
 	                                            "duckdb/main",
@@ -72,6 +75,16 @@ void TestSafeConsumerHeaderBoundary() {
 	Require(header.find("friend ") == std::string::npos &&
 	            header.find("#include \"duckdb_api/scan_plan.hpp\"") != std::string::npos,
 	        "safe fixture header exposed construction authority or omitted the public plan API");
+	for (const auto &value :
+	     {"duckdb_api/connector", "duckdb_api/scan_request", "LogicalSecretReference", "BuildConservativeScanPlan"}) {
+		Require(plan_header.find(value) == std::string::npos,
+		        "ScanPlan consumer header leaked a planner input dependency: " + std::string(value));
+	}
+	for (const auto &value :
+	     {"duckdb_api_connector", "duckdb_api_query_request", "duckdb_api_relational_planning_service"}) {
+		Require(runtime_targets.find(value) == std::string::npos,
+		        "Runtime production target linked a planner input or construction service: " + std::string(value));
+	}
 	const auto first_include = consumer.find("#include");
 	Require(first_include != std::string::npos &&
 	            consumer.find("#include", first_include + std::string("#include").size()) == std::string::npos &&

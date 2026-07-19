@@ -1,6 +1,7 @@
 #include "duckdb_api/scan_plan.hpp"
 
 #include <stdexcept>
+#include <utility>
 
 namespace duckdb_api {
 
@@ -132,6 +133,39 @@ const PlannedRestOrigin *PlannedAuthenticationObligation::Destination() const {
 	return has_destination ? &destination : nullptr;
 }
 
+PlannedSecretReference::PlannedSecretReference() : exact_duckdb_secret_name() {
+}
+
+PlannedSecretReference::PlannedSecretReference(std::string exact_duckdb_secret_name_p)
+    : exact_duckdb_secret_name(std::move(exact_duckdb_secret_name_p)) {
+}
+
+bool PlannedSecretReference::IsPresent() const noexcept {
+	return !exact_duckdb_secret_name.empty();
+}
+
+const std::string &PlannedSecretReference::Name() const {
+	if (!IsPresent()) {
+		throw std::logic_error("planned secret reference is absent");
+	}
+	return exact_duckdb_secret_name;
+}
+
+std::string PlannedSecretReference::Snapshot() const {
+	if (!IsPresent()) {
+		return "none";
+	}
+	static const char HEX_DIGITS[] = "0123456789abcdef";
+	std::string result = "named-hex:";
+	result.reserve(result.size() + exact_duckdb_secret_name.size() * 2);
+	for (const char character : exact_duckdb_secret_name) {
+		const auto byte = static_cast<unsigned char>(character);
+		result.push_back(HEX_DIGITS[byte >> 4]);
+		result.push_back(HEX_DIGITS[byte & 0x0f]);
+	}
+	return result;
+}
+
 ScanPlan::ScanPlan() {
 }
 
@@ -223,7 +257,7 @@ FeatureState ScanPlan::Authentication() const {
 	return authentication;
 }
 
-const LogicalSecretReference &ScanPlan::SecretReference() const {
+const PlannedSecretReference &ScanPlan::SecretReference() const {
 	return secret_reference;
 }
 

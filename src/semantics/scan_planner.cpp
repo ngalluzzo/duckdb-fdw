@@ -1,4 +1,4 @@
-#include "duckdb_api/scan_plan.hpp"
+#include "duckdb_api/scan_planner.hpp"
 
 #include "scan_planner_internal.hpp"
 
@@ -7,7 +7,12 @@
 
 namespace duckdb_api {
 
-ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const ScanRequest &request) {
+class ScanPlanBuilder {
+public:
+	static ScanPlan Build(const CompiledConnector &connector, const ScanRequest &request);
+};
+
+ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRequest &request) {
 	using namespace scan_planner_internal;
 
 	const auto &relation = ValidateAndSelectRelation(connector, request);
@@ -54,7 +59,9 @@ ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const Sca
 	result.providers = FeatureState::DISABLED;
 	result.retry = FeatureState::DISABLED;
 	result.cache = FeatureState::DISABLED;
-	result.secret_reference = request.secret_reference;
+	result.secret_reference = request.secret_reference.IsPresent()
+	                              ? PlannedSecretReference(request.secret_reference.Name())
+	                              : PlannedSecretReference();
 	const auto &authentication = relation.Authentication();
 	if (authentication.Requirement() == CompiledCredentialRequirement::NONE) {
 		result.authentication = FeatureState::DISABLED;
@@ -174,6 +181,10 @@ ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const Sca
 		    "selected JSON-path records define the complete base domain; DuckDB retains all relational operators";
 	}
 	return result;
+}
+
+ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const ScanRequest &request) {
+	return ScanPlanBuilder::Build(connector, request);
 }
 
 } // namespace duckdb_api

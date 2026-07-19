@@ -1,4 +1,4 @@
-#include "duckdb_api/scan_plan.hpp"
+#include "duckdb_api/scan_planner.hpp"
 #include "connector/support/connector_catalog_test_fixtures.hpp"
 #include "query/support/live_scan_request.hpp"
 #include "support/require.hpp"

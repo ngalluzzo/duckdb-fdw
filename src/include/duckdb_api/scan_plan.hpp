@@ -1,8 +1,5 @@
 #pragma once
 
-#include "duckdb_api/connector.hpp"
-#include "duckdb_api/scan_request.hpp"
-
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -12,6 +9,8 @@ class ScanPlanTestAccess;
 }
 
 namespace duckdb_api {
+
+class ScanPlanBuilder;
 
 static const uint64_t HOST_MAX_REQUEST_ATTEMPTS = 1;
 static const uint64_t HOST_MAX_RESPONSE_BYTES = 65536;
@@ -233,7 +232,7 @@ public:
 private:
 	friend class ScanPlan;
 	friend class duckdb_api_test::ScanPlanTestAccess;
-	friend ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const ScanRequest &request);
+	friend class ScanPlanBuilder;
 
 	PaginationPlan();
 	void RequireLinkHeader() const;
@@ -270,7 +269,7 @@ public:
 private:
 	friend class ScanPlan;
 	friend class duckdb_api_test::ScanPlanTestAccess;
-	friend ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const ScanRequest &request);
+	friend class ScanPlanBuilder;
 
 	PlannedAuthenticationObligation();
 
@@ -280,6 +279,35 @@ private:
 	PlannedCredentialPlacement placement;
 	bool has_destination;
 	PlannedRestOrigin destination;
+};
+
+// Relational Semantics' normalized logical-secret selector. Planning copies
+// only the exact DuckDB catalog name supplied by Query; the value contains no
+// secret bytes, catalog/provider handles, storage facts, or execution
+// authority. Only the planner and closed Semantics fixtures may construct it.
+class PlannedSecretReference {
+public:
+	PlannedSecretReference(const PlannedSecretReference &) = default;
+	PlannedSecretReference(PlannedSecretReference &&) = default;
+	PlannedSecretReference &operator=(const PlannedSecretReference &) = default;
+	PlannedSecretReference &operator=(PlannedSecretReference &&) = default;
+
+	bool IsPresent() const noexcept;
+	const std::string &Name() const;
+
+	// Stable safe rendering for plan explanation. This is not encryption,
+	// hashing, or a secrecy boundary.
+	std::string Snapshot() const;
+
+private:
+	PlannedSecretReference();
+	explicit PlannedSecretReference(std::string exact_duckdb_secret_name);
+
+	friend class ScanPlan;
+	friend class ScanPlanBuilder;
+	friend class duckdb_api_test::ScanPlanTestAccess;
+
+	std::string exact_duckdb_secret_name;
 };
 
 // Complete immutable Semantics handoff to Query and Remote Runtime. Only the
@@ -325,14 +353,14 @@ public:
 	FeatureState Cache() const;
 	FeatureState Authentication() const;
 
-	const LogicalSecretReference &SecretReference() const;
+	const PlannedSecretReference &SecretReference() const;
 	const PlannedAuthenticationObligation &AuthenticationObligation() const;
 	const NetworkCapability &Network() const;
 	const ResourceBudgets &Budgets() const;
 	const std::string &ClassificationReason() const;
 
 	// Stable, locale-independent explanation of semantic and executable facts.
-	// Logical secret names use Query's safe hex rendering; resolved credential
+	// Logical secret names use Semantics' safe hex rendering; resolved credential
 	// values can never enter this type. The snapshot is neither serialization nor
 	// runtime authority.
 	std::string Snapshot() const;
@@ -340,7 +368,7 @@ public:
 private:
 	ScanPlan();
 	friend class duckdb_api_test::ScanPlanTestAccess;
-	friend ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const ScanRequest &request);
+	friend class ScanPlanBuilder;
 
 	std::string connector_name;
 	std::string connector_version;
@@ -364,17 +392,11 @@ private:
 	FeatureState retry;
 	FeatureState cache;
 	FeatureState authentication;
-	LogicalSecretReference secret_reference;
+	PlannedSecretReference secret_reference;
 	PlannedAuthenticationObligation authentication_obligation;
 	NetworkCapability network;
 	ResourceBudgets budgets;
 	std::string classification_reason;
 };
-
-// Deterministically selects and plans exactly the relation named by request.
-// It consumes only immutable Connector and Query team APIs and performs no
-// DuckDB callback, secret lookup, network/filesystem/environment access,
-// runtime construction, or other I/O.
-ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const ScanRequest &request);
 
 } // namespace duckdb_api

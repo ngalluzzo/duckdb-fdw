@@ -245,9 +245,9 @@ void TestEnvironmentIndependenceAndCredentialAbsence() {
 	const auto baseline = duckdb_api::BuildConservativeScanRequest(
 	    connector, AUTHENTICATED_RELATION, duckdb_api::LogicalSecretReference::Named("github_default"));
 	const auto canary = RuntimeCredentialCanary();
-	for (const auto &path : {"src/include/duckdb_api/scan_request.hpp", "src/query/scan_request.cpp",
-	                         "test/cpp/query/scan_request_tests.cpp",
-	                         "test/cpp/query/support/scan_request_test_support.hpp"}) {
+	for (const auto &path :
+	     {"src/include/duckdb_api/scan_request.hpp", "src/query/scan_request.cpp",
+	      "test/cpp/query/scan_request_tests.cpp", "test/cpp/query/support/scan_request_test_support.hpp"}) {
 		Require(ReadText(path).find(canary) == std::string::npos, "credential canary pre-existed in request source");
 	}
 	const auto production_source =

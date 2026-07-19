@@ -113,24 +113,24 @@ BuildPaginationPlannerCandidate(std::uint64_t max_pages, std::uint64_t response_
 	relations.push_back(ConnectorCatalogTestAccess::Relation(
 	    "planner_pagination_candidate",
 	    {{"record_id", "BIGINT", false, "$.record_id"}, {"label", "VARCHAR", false, "$.label"}},
-	    duckdb_api::CompiledOperation {"planner_pagination_candidate",
-	                                   true,
-	                                   duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
-	                                   duckdb_api::CompiledProtocol::REST,
-	                                   duckdb_api::CompiledHttpMethod::GET,
-	                                   duckdb_api::CompiledReplaySafety::SAFE,
-	                                   false,
-	                                   ConnectorCatalogTestAccess::SequentialLink("batch_size", 3, "cursor_page", 1,
-	                                                                                  1, max_pages),
-	                                   {origin,
-	                                    "/fixtures/planner-pagination",
-	                                    {{"batch_size", "3"}, {"cursor_page", "1"}},
-	                                    {{"X-Connector-Fixture", "planner-pagination"}}},
-	                                   duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
-	                                   "$.records[*]"},
+	    duckdb_api::CompiledOperation {
+	        "planner_pagination_candidate",
+	        true,
+	        duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	        duckdb_api::CompiledProtocol::REST,
+	        duckdb_api::CompiledHttpMethod::GET,
+	        duckdb_api::CompiledReplaySafety::SAFE,
+	        false,
+	        ConnectorCatalogTestAccess::SequentialLink("batch_size", 3, "cursor_page", 1, 1, max_pages),
+	        {origin,
+	         "/fixtures/planner-pagination",
+	         {{"batch_size", "3"}, {"cursor_page", "1"}},
+	         {{"X-Connector-Fixture", "planner-pagination"}}},
+	        duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
+	        "$.records[*]"},
 	    ConnectorCatalogTestAccess::RequiredBearer(),
 	    ConnectorCatalogTestAccess::PaginatedResources(response_bytes_per_page, response_bytes_per_scan,
-	                                                    records_per_page, records_per_scan, extracted_string_bytes)));
+	                                                   records_per_page, records_per_scan, extracted_string_bytes)));
 	return ConnectorCatalogTestAccess::Catalog(
 	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "planner_pagination_catalog", "test-1",
 	    std::move(relations),
@@ -162,8 +162,7 @@ duckdb_api::CompiledConnector BuildDisabledRootArrayRepositoryCandidate() {
 	return ConnectorCatalogTestAccess::Catalog(
 	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "github", "test-disabled-root-array",
 	    std::move(relations),
-	    duckdb_api::CompiledNetworkPolicy {
-	        {"https"}, {"api.github.com"}, false, false, false, false, 8 * 1024 * 1024});
+	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"api.github.com"}, false, false, false, false, 8 * 1024 * 1024});
 }
 
 } // namespace duckdb_api_test

@@ -97,8 +97,8 @@ CONTROLLED_PRODUCT_SOURCE_PATHS = (
     "test/cpp/query/integration/controlled_extension_entrypoint.cpp",
     "test/cpp/query/integration/support/controlled_product_composition.cpp",
     "test/cpp/query/integration/support/controlled_product_composition.hpp",
-    "test/cpp/support/loopback_curl_runtime.cpp",
-    "test/cpp/support/loopback_curl_runtime.hpp",
+    "test/cpp/runtime/support/loopback_curl_runtime.cpp",
+    "test/cpp/runtime/support/loopback_curl_runtime.hpp",
 )
 
 
