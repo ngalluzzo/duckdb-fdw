@@ -264,16 +264,53 @@ private:
 	std::shared_ptr<const CompiledGraphqlOperation> graphql;
 };
 
-// Immutable operation-selection facts. Relational Semantics alone resolves
-// bindings, determines eligibility, ranks candidates, and chooses/fails.
+// A required selector reference retains its compiled namespace. Relation
+// inputs and operation-local predicate inputs may share an identifier without
+// becoming interchangeable or requiring a consumer to parse `input.` or
+// `conditional.` prefixes.
+enum class CompiledRequiredInputKind { RELATION_INPUT, CONDITIONAL_INPUT };
+
+class CompiledRequiredInputReference {
+public:
+	CompiledRequiredInputReference(const CompiledRequiredInputReference &) = default;
+	CompiledRequiredInputReference(CompiledRequiredInputReference &&) = default;
+	CompiledRequiredInputReference &operator=(const CompiledRequiredInputReference &) = delete;
+	CompiledRequiredInputReference &operator=(CompiledRequiredInputReference &&) = delete;
+
+	CompiledRequiredInputKind Kind() const;
+	const std::string &Id() const;
+
+private:
+	friend class internal::CompiledModelBuilder;
+
+	CompiledRequiredInputReference(CompiledRequiredInputKind kind, std::string id);
+
+	CompiledRequiredInputKind kind;
+	std::string id;
+};
+
+// Immutable operation-selection facts. duckdb_api/v1 carries only tagged
+// required references and fallback. Relational Semantics alone resolves
+// bindings, determines eligibility, ranks by satisfied-reference count, and
+// chooses or fails a tie.
 class CompiledOperationSelector {
 public:
+	// Temporary native/controlled-fixture compatibility bridge. It creates an
+	// empty legacy selector; package generations must use Connector's private v1
+	// builder, including for an empty required-reference set.
 	CompiledOperationSelector();
 	CompiledOperationSelector(const CompiledOperationSelector &) = default;
 	CompiledOperationSelector(CompiledOperationSelector &&) = default;
 	CompiledOperationSelector &operator=(const CompiledOperationSelector &) = delete;
 	CompiledOperationSelector &operator=(CompiledOperationSelector &&) = delete;
 
+	const std::vector<CompiledRequiredInputReference> &RequiredInputReferences() const;
+	bool IsLegacyCompatibilityBridge() const;
+
+	// Temporary bridge for the pre-v1 controlled selector fixtures consumed by
+	// Semantics. Package generations always return empty values and priority
+	// zero here. Delete these accessors and the matching test constructor after
+	// Semantics migrates to RequiredInputReferences().
 	const std::vector<std::string> &RequiredInputs() const;
 	const std::vector<std::vector<std::string>> &AnyInputSets() const;
 	const std::vector<std::string> &ForbiddenInputs() const;
@@ -287,11 +324,14 @@ private:
 	CompiledOperationSelector(std::vector<std::string> required_inputs,
 	                          std::vector<std::vector<std::string>> any_input_sets,
 	                          std::vector<std::string> forbidden_inputs, std::int32_t priority);
+	CompiledOperationSelector(std::vector<CompiledRequiredInputReference> required_input_references);
 
+	std::vector<CompiledRequiredInputReference> required_input_references;
 	std::vector<std::string> required_inputs;
 	std::vector<std::vector<std::string>> any_input_sets;
 	std::vector<std::string> forbidden_inputs;
 	std::int32_t priority;
+	bool legacy_compatibility_bridge;
 };
 
 // One base-row operation declaration. Connector owns source facts, Semantics

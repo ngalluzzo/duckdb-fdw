@@ -28,6 +28,9 @@ public:
 		                                      max_pages_per_scan);
 	}
 
+	// Temporary compatibility bridge for Semantics-owned controlled fixtures.
+	// Delete this factory with the legacy CompiledOperationSelector accessors
+	// after those fixtures consume structural tagged references.
 	static duckdb_api::CompiledOperationSelector OperationSelector(std::vector<std::string> required_inputs,
 	                                                               std::vector<std::vector<std::string>> any_input_sets,
 	                                                               std::vector<std::string> forbidden_inputs,

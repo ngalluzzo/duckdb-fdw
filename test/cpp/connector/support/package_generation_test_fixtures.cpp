@@ -61,13 +61,13 @@ CompiledOperation RestOperation(std::string name, bool fallback, std::string pat
 	                          std::move(selector)};
 }
 
-std::vector<duckdb_api::CompiledRelationInput> TypedInputs(bool changed) {
+std::vector<duckdb_api::CompiledRelationInput> TypedInputs(bool default_changed) {
 	std::vector<duckdb_api::CompiledRelationInput> inputs;
 	inputs.push_back(
 	    CompiledModelBuilder::Input("query", CompiledScalarType::VARCHAR, false, CompiledModelBuilder::NoDefault()));
-	inputs.push_back(
-	    CompiledModelBuilder::Input("limit", CompiledScalarType::BIGINT, false,
-	                                CompiledModelBuilder::Default(CompiledModelBuilder::Bigint(changed ? 50 : 25))));
+	inputs.push_back(CompiledModelBuilder::Input(
+	    "limit", CompiledScalarType::BIGINT, false,
+	    CompiledModelBuilder::Default(CompiledModelBuilder::Bigint(default_changed ? 50 : 25))));
 	inputs.push_back(CompiledModelBuilder::Input("include_archived", CompiledScalarType::BOOLEAN, false,
 	                                             CompiledModelBuilder::Default(CompiledModelBuilder::Boolean(false))));
 	inputs.push_back(CompiledModelBuilder::Input(
@@ -88,17 +88,21 @@ std::vector<duckdb_api::CompiledColumn> TypedColumns(bool changed) {
 CompiledRelation BuildTypedRelation(bool tie, PackageCompatibilityFixture variant) {
 	const bool operation_changed = variant == PackageCompatibilityFixture::OPERATION_CHANGED;
 	const bool origin_changed = variant == PackageCompatibilityFixture::OPERATION_ORIGIN_CHANGED;
+	const bool selector_changed = variant == PackageCompatibilityFixture::SELECTOR_REFERENCE_CHANGED;
 	std::vector<CompiledOperation> operations;
-	operations.push_back(RestOperation("typed_by_query", false,
-	                                   operation_changed ? "/fixtures/typed-records-v2" : "/fixtures/typed-records",
-	                                   CompiledModelBuilder::OperationSelector({"query"}, {}, {}, 10),
-	                                   origin_changed ? "secondary.example" : "api.github.com"));
+	operations.push_back(RestOperation(
+	    "typed_by_query", false, operation_changed ? "/fixtures/typed-records-v2" : "/fixtures/typed-records",
+	    CompiledModelBuilder::V1OperationSelector(
+	        {CompiledModelBuilder::RelationInputReference(selector_changed ? "cursor" : "query")}),
+	    origin_changed ? "secondary.example" : "api.github.com"));
 	if (tie) {
-		operations.push_back(RestOperation("typed_by_query_peer", false, "/fixtures/typed-records-peer",
-		                                   CompiledModelBuilder::OperationSelector({"query"}, {}, {}, 10)));
+		operations.push_back(
+		    RestOperation("typed_by_query_peer", false, "/fixtures/typed-records-peer",
+		                  CompiledModelBuilder::V1OperationSelector(
+		                      {CompiledModelBuilder::RelationInputReference(selector_changed ? "cursor" : "query")})));
 	} else {
 		operations.push_back(RestOperation("typed_default", true, "/fixtures/typed-records-default",
-		                                   CompiledModelBuilder::OperationSelector({}, {}, {}, 0)));
+		                                   CompiledModelBuilder::V1OperationSelector({})));
 	}
 	const auto authentication = variant == PackageCompatibilityFixture::AUTHENTICATION_CHANGED
 	                                ? ConnectorCatalogTestAccess::RequiredBearer()
@@ -119,7 +123,7 @@ CompiledRelation BuildDistinctRelation(bool renamed = false) {
 	                                             CompiledModelBuilder::Default(CompiledModelBuilder::Varchar("all"))));
 	std::vector<CompiledOperation> operations;
 	operations.push_back(RestOperation("distinct_status", true, "/fixtures/distinct-status",
-	                                   CompiledModelBuilder::OperationSelector({}, {}, {}, 0)));
+	                                   CompiledModelBuilder::V1OperationSelector({})));
 	return ConnectorCatalogTestAccess::Relation(renamed ? "distinct_state" : PACKAGE_DISTINCT_RELATION,
 	                                            std::move(columns), std::move(inputs), std::move(operations),
 	                                            ConnectorCatalogTestAccess::Anonymous(),
@@ -157,7 +161,7 @@ CompiledRelation BuildPredicateRelation(bool changed) {
 	                                         {{"X-Connector-Fixture", "exact-duplicate-repositories"}}},
 	                                        CompiledResponseSource::ROOT_ARRAY,
 	                                        "$",
-	                                        CompiledModelBuilder::OperationSelector({}, {}, {}, 0)});
+	                                        CompiledModelBuilder::V1OperationSelector({})});
 	std::vector<duckdb_api::CompiledPredicateMapping> mappings;
 	mappings.push_back(ExactPredicateMapping("visibility"));
 	if (changed) {
@@ -173,8 +177,8 @@ CompiledRelation BuildAppendedRelation(const std::string &name = "appended_recor
 	std::vector<duckdb_api::CompiledColumn> columns;
 	columns.push_back(CompiledModelBuilder::Column("value", CompiledScalarType::VARCHAR, false, "$.value"));
 	std::vector<CompiledOperation> operations;
-	operations.push_back(RestOperation(name, true, "/fixtures/" + name,
-	                                   CompiledModelBuilder::OperationSelector({}, {}, {}, 0), "secondary.example"));
+	operations.push_back(RestOperation(name, true, "/fixtures/" + name, CompiledModelBuilder::V1OperationSelector({}),
+	                                   "secondary.example"));
 	return ConnectorCatalogTestAccess::Relation(name, std::move(columns), {}, std::move(operations),
 	                                            ConnectorCatalogTestAccess::Anonymous(),
 	                                            ConnectorCatalogTestAccess::UnpaginatedResources(4, 64));

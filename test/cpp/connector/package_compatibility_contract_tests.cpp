@@ -92,9 +92,24 @@ void TestPackageGenerationFixtureBoundary() {
 	            !typed->Inputs()[2].Default().Value().Boolean() && typed->Inputs()[3].Nullable() &&
 	            typed->Inputs()[3].Default().Value().IsNull(),
 	        "typed package fixture collapsed order, scalar types, defaults, or typed NULL");
-	Require(!typed->Operations()[0].fallback && typed->Operations()[0].selector.RequiredInputs().size() == 1 &&
-	            typed->Operations()[0].selector.RequiredInputs()[0] == "query" && typed->Operations()[1].fallback,
-	        "fallback fixture lost its input-selected and fallback operations");
+	const auto &required = typed->Operations()[0].selector.RequiredInputReferences();
+	Require(!typed->Operations()[0].fallback && required.size() == 1 &&
+	            required[0].Kind() == duckdb_api::CompiledRequiredInputKind::RELATION_INPUT &&
+	            required[0].Id() == "query" && typed->Operations()[1].fallback,
+	        "fallback fixture lost its tagged relation-input and fallback operations");
+	for (const auto &relation : fallback.Connector().Relations()) {
+		for (const auto &operation : relation.Operations()) {
+			Require(!operation.selector.IsLegacyCompatibilityBridge() && operation.selector.RequiredInputs().empty() &&
+			            operation.selector.AnyInputSets().empty() && operation.selector.ForbiddenInputs().empty() &&
+			            operation.selector.Priority() == 0,
+			        "package fixture exposed legacy author selector policy");
+		}
+	}
+	const auto snapshot = typed->Snapshot();
+	Require(snapshot.find("selector=required:[relation_input:query]") != std::string::npos &&
+	            snapshot.find("any:[") == std::string::npos && snapshot.find("forbidden:[") == std::string::npos &&
+	            snapshot.find("priority:") == std::string::npos,
+	        "package snapshot lost the structural tag or rendered excluded selector policy");
 	Require(fallback.Connector().FindRelation(duckdb_api_test::PACKAGE_DISTINCT_RELATION) != nullptr,
 	        "typed package fixture lost its structurally distinct relation");
 
@@ -102,8 +117,13 @@ void TestPackageGenerationFixtureBoundary() {
 	const auto *tied = tie.Connector().FindRelation(duckdb_api_test::PACKAGE_TYPED_RELATION);
 	Require(tied != nullptr && tied->Operations().size() == 2 && !tied->Operations()[0].fallback &&
 	            !tied->Operations()[1].fallback &&
-	            tied->Operations()[0].selector.RequiredInputs() == tied->Operations()[1].selector.RequiredInputs() &&
-	            tied->Operations()[0].selector.Priority() == tied->Operations()[1].selector.Priority(),
+	            tied->Operations()[0].selector.RequiredInputReferences().size() == 1 &&
+	            tied->Operations()[1].selector.RequiredInputReferences().size() == 1 &&
+	            tied->Operations()[0].selector.RequiredInputReferences()[0].Kind() ==
+	                duckdb_api::CompiledRequiredInputKind::RELATION_INPUT &&
+	            tied->Operations()[0].selector.RequiredInputReferences()[0].Id() ==
+	                tied->Operations()[1].selector.RequiredInputReferences()[0].Id() &&
+	            tied->Operations()[0].selector.Priority() == 0 && tied->Operations()[1].selector.Priority() == 0,
 	        "tie fixture did not preserve two equally ranked valid operations");
 
 	const auto distinct = duckdb_api_test::BuildDistinctPackageGenerationFixture();
@@ -164,12 +184,19 @@ void TestStructuralRejections() {
 	const auto active =
 	    duckdb_api_test::BuildPackageCompatibilityFixture(PackageCompatibilityFixture::BASELINE, "1.2.3", 'a');
 	const std::vector<PackageCompatibilityFixture> incompatible = {
-	    PackageCompatibilityFixture::RELATION_REMOVED,         PackageCompatibilityFixture::RELATION_REORDERED,
-	    PackageCompatibilityFixture::RELATION_INSERTED_BEFORE, PackageCompatibilityFixture::RELATION_CHANGED,
-	    PackageCompatibilityFixture::COLUMN_CHANGED,           PackageCompatibilityFixture::INPUT_CHANGED,
-	    PackageCompatibilityFixture::OPERATION_CHANGED,        PackageCompatibilityFixture::PREDICATE_CHANGED,
-	    PackageCompatibilityFixture::AUTHENTICATION_CHANGED,   PackageCompatibilityFixture::RESOURCE_CHANGED,
-	    PackageCompatibilityFixture::OPERATION_ORIGIN_CHANGED, PackageCompatibilityFixture::NETWORK_POLICY_CHANGED};
+	    PackageCompatibilityFixture::RELATION_REMOVED,
+	    PackageCompatibilityFixture::RELATION_REORDERED,
+	    PackageCompatibilityFixture::RELATION_INSERTED_BEFORE,
+	    PackageCompatibilityFixture::RELATION_CHANGED,
+	    PackageCompatibilityFixture::COLUMN_CHANGED,
+	    PackageCompatibilityFixture::INPUT_CHANGED,
+	    PackageCompatibilityFixture::SELECTOR_REFERENCE_CHANGED,
+	    PackageCompatibilityFixture::OPERATION_CHANGED,
+	    PackageCompatibilityFixture::PREDICATE_CHANGED,
+	    PackageCompatibilityFixture::AUTHENTICATION_CHANGED,
+	    PackageCompatibilityFixture::RESOURCE_CHANGED,
+	    PackageCompatibilityFixture::OPERATION_ORIGIN_CHANGED,
+	    PackageCompatibilityFixture::NETWORK_POLICY_CHANGED};
 	for (std::size_t index = 0; index < incompatible.size(); index++) {
 		RequireClassification(
 		    active, duckdb_api_test::BuildPackageCompatibilityFixture(incompatible[index], "1.3.0", 'f'),

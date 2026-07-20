@@ -85,16 +85,21 @@ bool HasControlledExactHeaders(const CompiledOperation &operation) {
 bool HasControlledExactSelector(const CompiledOperation &operation, const CompiledPredicateMapping &mapping) {
 	const auto &selector = operation.selector;
 	if (operation.fallback) {
-		return selector.RequiredInputs().empty() && selector.AnyInputSets().empty() &&
-		       selector.ForbiddenInputs().empty() && selector.Priority() == 0;
+		return selector.RequiredInputReferences().empty() && selector.RequiredInputs().empty() &&
+		       selector.AnyInputSets().empty() && selector.ForbiddenInputs().empty() && selector.Priority() == 0;
 	}
+	const bool tagged_binding =
+	    selector.RequiredInputReferences().size() == 1 &&
+	    selector.RequiredInputReferences()[0].Kind() == CompiledRequiredInputKind::CONDITIONAL_INPUT &&
+	    selector.RequiredInputReferences()[0].Id() == mapping.RemoteInputName() && selector.RequiredInputs().empty() &&
+	    selector.AnyInputSets().empty() && selector.ForbiddenInputs().empty() && selector.Priority() == 0;
 	const bool required_binding = selector.RequiredInputs().size() == 1 &&
 	                              selector.RequiredInputs()[0] == mapping.RemoteInputName() &&
 	                              selector.AnyInputSets().empty();
 	const bool alternative_binding = selector.RequiredInputs().empty() && selector.AnyInputSets().size() == 1 &&
 	                                 selector.AnyInputSets()[0].size() == 1 &&
 	                                 selector.AnyInputSets()[0][0] == mapping.RemoteInputName();
-	return (required_binding || alternative_binding) && selector.ForbiddenInputs().empty();
+	return tagged_binding || ((required_binding || alternative_binding) && selector.ForbiddenInputs().empty());
 }
 
 bool HasControlledExactProfile(const std::string &relation_name, const CompiledOperation &operation,

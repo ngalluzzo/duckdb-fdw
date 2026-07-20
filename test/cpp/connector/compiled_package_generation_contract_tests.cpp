@@ -37,6 +37,7 @@ DEFINE_MEMBER_PROBE(HasPredicateMappingsMember, PredicateMappings);
 DEFINE_MEMBER_PROBE(HasNetworkPolicyMember, NetworkPolicy);
 DEFINE_MEMBER_PROBE(HasExtractorMember, Extractor);
 DEFINE_MEMBER_PROBE(HasSnapshotMember, Snapshot);
+DEFINE_MEMBER_PROBE(HasLegacyOperationSelectorBuilder, OperationSelector);
 
 #undef DEFINE_MEMBER_PROBE
 
@@ -62,6 +63,12 @@ static_assert(!HasExtractorMember<duckdb_api::CompiledRegistrationColumn>::VALUE
               "Query registration must not expose extractor syntax");
 static_assert(!HasSnapshotMember<duckdb_api::CompiledGenerationHandle>::VALUE,
               "opaque generation handles must not become a metadata side channel");
+static_assert(!HasLegacyOperationSelectorBuilder<CompiledModelBuilder>::VALUE,
+              "package builder must not accept author priority, alternatives, or forbidden inputs");
+static_assert(!std::is_default_constructible<duckdb_api::CompiledRequiredInputReference>::value,
+              "tagged required inputs must originate from Connector's validated builder");
+static_assert(!std::is_copy_assignable<duckdb_api::CompiledRequiredInputReference>::value,
+              "tagged required input assignment would replace immutable authority");
 
 template <class Exception, class Callable>
 void RequireThrows(Callable callable, const std::string &message) {
@@ -78,7 +85,8 @@ std::string Digest(char digit = 'a') {
 }
 
 duckdb_api::CompiledConnector BuildPackageConnector(std::string connector_id = "acme",
-                                                    std::string package_version = "1.2.3") {
+                                                    std::string package_version = "1.2.3",
+                                                    bool legacy_selector = false) {
 	const duckdb_api::CompiledHttpOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
 	                                               duckdb_api::CompiledHttpHost("service.example"), 443};
 	std::vector<duckdb_api::CompiledColumn> columns;
@@ -95,6 +103,8 @@ duckdb_api::CompiledConnector BuildPackageConnector(std::string connector_id = "
 	    CompiledModelBuilder::Default(CompiledModelBuilder::Null(CompiledScalarType::VARCHAR))));
 
 	std::vector<duckdb_api::CompiledOperation> operations;
+	auto selector =
+	    legacy_selector ? duckdb_api::CompiledOperationSelector() : CompiledModelBuilder::V1OperationSelector({});
 	operations.push_back(duckdb_api::CompiledOperation {"list_rows",
 	                                                    true,
 	                                                    duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
@@ -106,7 +116,7 @@ duckdb_api::CompiledConnector BuildPackageConnector(std::string connector_id = "
 	                                                    {origin, "/rows", {}, {{"Accept", "application/json"}}},
 	                                                    duckdb_api::CompiledResponseSource::ROOT_ARRAY,
 	                                                    "$",
-	                                                    duckdb_api::CompiledOperationSelector()});
+	                                                    std::move(selector)});
 
 	std::vector<duckdb_api::CompiledRelation> relations;
 	relations.push_back(CompiledModelBuilder::Relation(
@@ -188,6 +198,96 @@ void TestInputValidationAndOrdering() {
 	Require(!inputs[0].Default().HasDefault() && inputs[1].Default().Value().Bigint() == 10 && inputs[2].Nullable() &&
 	            inputs[2].Default().Value().IsNull(),
 	        "compiled relation lost default presence, value, or nullability");
+}
+
+duckdb_api::CompiledOperation SelectorTestOperation(duckdb_api::CompiledOperationSelector selector) {
+	const duckdb_api::CompiledHttpOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledHttpHost("service.example"), 443};
+	return duckdb_api::CompiledOperation {"selected_rows",
+	                                      false,
+	                                      duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	                                      duckdb_api::CompiledProtocol::REST,
+	                                      duckdb_api::CompiledHttpMethod::GET,
+	                                      duckdb_api::CompiledReplaySafety::SAFE,
+	                                      false,
+	                                      CompiledModelBuilder::DisabledPagination(),
+	                                      {origin, "/selected", {}, {}},
+	                                      duckdb_api::CompiledResponseSource::ROOT_ARRAY,
+	                                      "$",
+	                                      std::move(selector)};
+}
+
+void TestTaggedRequiredInputReferences() {
+	const auto relation_reference = CompiledModelBuilder::RelationInputReference("query");
+	const auto conditional_reference = CompiledModelBuilder::ConditionalInputReference("visibility");
+	Require(relation_reference.Kind() == duckdb_api::CompiledRequiredInputKind::RELATION_INPUT &&
+	            relation_reference.Id() == "query" &&
+	            conditional_reference.Kind() == duckdb_api::CompiledRequiredInputKind::CONDITIONAL_INPUT &&
+	            conditional_reference.Id() == "visibility",
+	        "compiled required-input tags or exact identifiers drifted");
+	RequireThrows<std::invalid_argument>(
+	    []() { (void)CompiledModelBuilder::RelationInputReference("input.query"); },
+	    "compiled reference parsed an author prefix instead of accepting an exact identifier");
+	RequireThrows<std::invalid_argument>(
+	    []() { (void)CompiledModelBuilder::ConditionalInputReference(std::string(64, 'a')); },
+	    "compiled reference accepted an overlong identifier");
+	RequireThrows<std::invalid_argument>(
+	    []() {
+		    (void)CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::RelationInputReference("query"),
+		                                                     CompiledModelBuilder::RelationInputReference("query")});
+	    },
+	    "v1 selector accepted a duplicate tagged reference");
+
+	const auto canonical = CompiledModelBuilder::V1OperationSelector(
+	    {CompiledModelBuilder::ConditionalInputReference("zeta"), CompiledModelBuilder::RelationInputReference("zeta"),
+	     CompiledModelBuilder::RelationInputReference("alpha")});
+	Require(
+	    !canonical.IsLegacyCompatibilityBridge() && canonical.RequiredInputReferences().size() == 3 &&
+	        canonical.RequiredInputReferences()[0].Kind() == duckdb_api::CompiledRequiredInputKind::RELATION_INPUT &&
+	        canonical.RequiredInputReferences()[0].Id() == "alpha" &&
+	        canonical.RequiredInputReferences()[1].Kind() == duckdb_api::CompiledRequiredInputKind::RELATION_INPUT &&
+	        canonical.RequiredInputReferences()[1].Id() == "zeta" &&
+	        canonical.RequiredInputReferences()[2].Kind() == duckdb_api::CompiledRequiredInputKind::CONDITIONAL_INPUT &&
+	        canonical.RequiredInputReferences()[2].Id() == "zeta" && canonical.RequiredInputs().empty() &&
+	        canonical.AnyInputSets().empty() && canonical.ForbiddenInputs().empty() && canonical.Priority() == 0,
+	    "v1 selector failed canonical tagged ordering or exposed legacy policy");
+
+	const auto make_relation = [](duckdb_api::CompiledOperationSelector selector) {
+		std::vector<duckdb_api::CompiledColumn> columns;
+		columns.push_back(CompiledModelBuilder::Column("id", CompiledScalarType::BIGINT, false, "$.id"));
+		std::vector<duckdb_api::CompiledRelationInput> inputs;
+		inputs.push_back(CompiledModelBuilder::Input("query", CompiledScalarType::VARCHAR, false,
+		                                             CompiledModelBuilder::NoDefault()));
+		std::vector<duckdb_api::CompiledOperation> operations;
+		operations.push_back(SelectorTestOperation(std::move(selector)));
+		return CompiledModelBuilder::Relation("selected", std::move(columns), std::move(inputs), {},
+		                                      std::move(operations), CompiledModelBuilder::AnonymousAuthentication(),
+		                                      CompiledModelBuilder::UnpaginatedResources(8, 64));
+	};
+	const auto relation = make_relation(
+	    CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::RelationInputReference("query")}));
+	Require(relation.Operations()[0].selector.RequiredInputReferences()[0].Id() == "query",
+	        "exact tagged relation input did not survive relation validation");
+	RequireThrows<std::invalid_argument>(
+	    [&]() {
+		    (void)make_relation(
+		        CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::ConditionalInputReference("query")}));
+	    },
+	    "wrong-kind conditional reference matched a relation input with the same identifier");
+	RequireThrows<std::invalid_argument>(
+	    [&]() {
+		    (void)make_relation(
+		        CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::RelationInputReference("missing")}));
+	    },
+	    "missing tagged relation input escaped validation");
+
+	RequireThrows<std::invalid_argument>(
+	    []() {
+		    auto identity = CompiledModelBuilder::PackageIdentity("duckdb_api/v1", "acme", "1.2.3", Digest());
+		    (void)CompiledModelBuilder::PackageGeneration(std::move(identity),
+		                                                  BuildPackageConnector("acme", "1.2.3", true));
+	    },
+	    "package generation accepted the temporary legacy selector bridge");
 }
 
 void TestStableIdentityValidation() {
@@ -287,6 +387,7 @@ int main() {
 	try {
 		TestTypedValuesAndDefaultPresence();
 		TestInputValidationAndOrdering();
+		TestTaggedRequiredInputReferences();
 		TestStableIdentityValidation();
 		TestQueryProjectionAndLifetime();
 		TestNativeCompatibility();

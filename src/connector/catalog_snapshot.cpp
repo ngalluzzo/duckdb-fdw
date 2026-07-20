@@ -116,8 +116,31 @@ void AppendAuthentication(std::ostringstream &result, const CompiledAuthenticati
 	result << ",placement:" << PlacementName(authentication.Placement());
 }
 
+const char *RequiredInputKindName(CompiledRequiredInputKind kind) {
+	switch (kind) {
+	case CompiledRequiredInputKind::RELATION_INPUT:
+		return "relation_input";
+	case CompiledRequiredInputKind::CONDITIONAL_INPUT:
+		return "conditional_input";
+	}
+	throw std::logic_error("compiled selector contains an unknown required-input namespace");
+}
+
 void AppendSelector(std::ostringstream &result, const CompiledOperationSelector &selector) {
 	result << ";selector=required:[";
+	if (!selector.IsLegacyCompatibilityBridge()) {
+		for (std::size_t index = 0; index < selector.RequiredInputReferences().size(); index++) {
+			if (index > 0) {
+				result << ',';
+			}
+			const auto &reference = selector.RequiredInputReferences()[index];
+			result << RequiredInputKindName(reference.Kind()) << ':' << reference.Id();
+		}
+		result << ']';
+		return;
+	}
+	// Temporary snapshot bridge for native/controlled selector fixtures. V1
+	// package snapshots never render alternative, forbidden, or priority fields.
 	AppendStrings(result, selector.RequiredInputs());
 	result << "],any:[";
 	for (std::size_t index = 0; index < selector.AnyInputSets().size(); index++) {
@@ -137,9 +160,9 @@ void AppendOperation(std::ostringstream &result, const CompiledOperation &operat
 	result << "operation=" << operation.name << ':' << (operation.fallback ? "fallback" : "selected") << ':'
 	       << CardinalityName(operation.cardinality) << ':';
 	internal::AppendProtocolOperation(result, operation);
-	if (!operation.fallback || !operation.selector.RequiredInputs().empty() ||
-	    !operation.selector.AnyInputSets().empty() || !operation.selector.ForbiddenInputs().empty() ||
-	    operation.selector.Priority() != 0) {
+	if (!operation.fallback || !operation.selector.RequiredInputReferences().empty() ||
+	    !operation.selector.RequiredInputs().empty() || !operation.selector.AnyInputSets().empty() ||
+	    !operation.selector.ForbiddenInputs().empty() || operation.selector.Priority() != 0) {
 		AppendSelector(result, operation.selector);
 	}
 }

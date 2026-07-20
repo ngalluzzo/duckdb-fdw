@@ -244,12 +244,17 @@ CompiledPagination CompiledModelBuilder::DisabledPagination() {
 	return CompiledPagination::Disabled();
 }
 
-CompiledOperationSelector CompiledModelBuilder::OperationSelector(std::vector<std::string> required_inputs,
-                                                                  std::vector<std::vector<std::string>> any_input_sets,
-                                                                  std::vector<std::string> forbidden_inputs,
-                                                                  std::int32_t priority) {
-	return CompiledOperationSelector(std::move(required_inputs), std::move(any_input_sets), std::move(forbidden_inputs),
-	                                 priority);
+CompiledRequiredInputReference CompiledModelBuilder::RelationInputReference(std::string id) {
+	return CompiledRequiredInputReference(CompiledRequiredInputKind::RELATION_INPUT, std::move(id));
+}
+
+CompiledRequiredInputReference CompiledModelBuilder::ConditionalInputReference(std::string id) {
+	return CompiledRequiredInputReference(CompiledRequiredInputKind::CONDITIONAL_INPUT, std::move(id));
+}
+
+CompiledOperationSelector
+CompiledModelBuilder::V1OperationSelector(std::vector<CompiledRequiredInputReference> required_input_references) {
+	return CompiledOperationSelector(std::move(required_input_references));
 }
 
 CompiledAuthenticationPolicy CompiledModelBuilder::AnonymousAuthentication() {
@@ -289,6 +294,13 @@ CompiledPackageGeneration CompiledModelBuilder::PackageGeneration(CompiledPackag
 	if (connector.Origin() != CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA ||
 	    connector.ConnectorName() != identity.ConnectorId() || connector.Version() != identity.PackageVersion()) {
 		throw std::invalid_argument("compiled generation identity disagrees with its connector metadata");
+	}
+	for (const auto &relation : connector.Relations()) {
+		for (const auto &operation : relation.Operations()) {
+			if (operation.selector.legacy_compatibility_bridge) {
+				throw std::invalid_argument("compiled package generation contains a legacy operation selector");
+			}
+		}
 	}
 	return CompiledPackageGeneration(
 	    std::make_shared<const CompiledPackageGenerationState>(std::move(identity), std::move(connector)));

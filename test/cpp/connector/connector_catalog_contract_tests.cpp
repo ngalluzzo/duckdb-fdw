@@ -216,10 +216,11 @@ void TestSafeImmutableService() {
 void TestOperationSelectorValidation() {
 	const auto selector =
 	    ConnectorCatalogTestAccess::OperationSelector({"zeta", "alpha"}, {{"gamma"}, {"beta", "alpha"}}, {"omega"}, 17);
-	Require(selector.RequiredInputs() == std::vector<std::string>({"alpha", "zeta"}) &&
+	Require(selector.IsLegacyCompatibilityBridge() && selector.RequiredInputReferences().empty() &&
+	            selector.RequiredInputs() == std::vector<std::string>({"alpha", "zeta"}) &&
 	            selector.AnyInputSets() == std::vector<std::vector<std::string>>({{"alpha", "beta"}, {"gamma"}}) &&
 	            selector.ForbiddenInputs() == std::vector<std::string>({"omega"}) && selector.Priority() == 17,
-	        "compiled selector did not canonicalize its immutable set facts");
+	        "legacy compatibility selector did not preserve and canonicalize its immutable facts");
 	const auto negative_priority = ConnectorCatalogTestAccess::OperationSelector({}, {}, {}, -3);
 	Require(negative_priority.Priority() == -3, "compiled selector rejected a valid signed priority");
 

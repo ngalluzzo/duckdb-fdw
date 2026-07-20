@@ -90,6 +90,20 @@ tie/fallback operation shapes, and a structurally distinct relation. Consumer
 tests link that target and cannot reach `CompiledModelBuilder` or
 `ConnectorCatalogTestAccess` through its public header.
 
+Package generations use structural selector references tagged as relation
+inputs or operation-local conditional inputs. Connector validates each tag
+against its exact declaration namespace, canonicalizes the tagged references,
+and compares both tag and identifier for reload compatibility. The v1 package
+model has no author priority, alternative-input sets, forbidden-input sets, or
+string-prefix interpretation.
+
+One temporary compatibility bridge remains while Semantics migrates its
+controlled fixtures: `ConnectorCatalogTestAccess::OperationSelector` can build
+the legacy string/priority model, and `CompiledOperationSelector` retains the
+corresponding legacy accessors. Package generations reject that model. Delete
+the test factory, legacy constructor/storage/accessors, and the controlled
+fixture uses together after Semantics consumes `RequiredInputReferences()`.
+
 ## Tests
 
 `make test` runs the focused Connector executables:

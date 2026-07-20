@@ -27,10 +27,12 @@ public:
 
 	static CompiledColumn Column(std::string name, CompiledScalarType type, bool nullable, std::string extractor);
 	static CompiledPagination DisabledPagination();
-	static CompiledOperationSelector OperationSelector(std::vector<std::string> required_inputs,
-	                                                   std::vector<std::vector<std::string>> any_input_sets,
-	                                                   std::vector<std::string> forbidden_inputs,
-	                                                   std::int32_t priority);
+	static CompiledRequiredInputReference RelationInputReference(std::string id);
+	static CompiledRequiredInputReference ConditionalInputReference(std::string id);
+	// duckdb_api/v1 admits required references only. There is intentionally no
+	// author priority, alternative-input, or forbidden-input parameter.
+	static CompiledOperationSelector
+	V1OperationSelector(std::vector<CompiledRequiredInputReference> required_input_references);
 	static CompiledAuthenticationPolicy AnonymousAuthentication();
 	static CompiledResourceCeilings UnpaginatedResources(std::uint64_t max_records,
 	                                                     std::uint64_t max_extracted_string_bytes);

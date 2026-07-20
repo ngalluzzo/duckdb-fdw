@@ -120,8 +120,23 @@ bool SameGraphql(const CompiledGraphqlOperation &left, const CompiledGraphqlOper
 	       left.providers_enabled == right.providers_enabled;
 }
 
+bool SameRequiredReferences(const std::vector<CompiledRequiredInputReference> &left,
+                            const std::vector<CompiledRequiredInputReference> &right) {
+	if (left.size() != right.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.size(); index++) {
+		if (left[index].Kind() != right[index].Kind() || left[index].Id() != right[index].Id()) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool SameSelector(const CompiledOperationSelector &left, const CompiledOperationSelector &right) {
-	return left.RequiredInputs() == right.RequiredInputs() && left.AnyInputSets() == right.AnyInputSets() &&
+	return SameRequiredReferences(left.RequiredInputReferences(), right.RequiredInputReferences()) &&
+	       left.IsLegacyCompatibilityBridge() == right.IsLegacyCompatibilityBridge() &&
+	       left.RequiredInputs() == right.RequiredInputs() && left.AnyInputSets() == right.AnyInputSets() &&
 	       left.ForbiddenInputs() == right.ForbiddenInputs() && left.Priority() == right.Priority();
 }
 

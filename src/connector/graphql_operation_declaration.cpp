@@ -263,8 +263,9 @@ void ValidateCanonicalGraphqlRelation(const std::string &relation_name, const st
 	if (relation_name != "viewer_repository_metrics" || operation.name != "github_viewer_repository_metrics" ||
 	    !operation.fallback || operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY ||
 	    operation.Protocol() != CompiledProtocol::GRAPHQL || !predicate_mappings.empty() ||
-	    !operation.selector.RequiredInputs().empty() || !operation.selector.AnyInputSets().empty() ||
-	    !operation.selector.ForbiddenInputs().empty() || operation.selector.Priority() != 0) {
+	    !operation.selector.RequiredInputReferences().empty() || !operation.selector.RequiredInputs().empty() ||
+	    !operation.selector.AnyInputSets().empty() || !operation.selector.ForbiddenInputs().empty() ||
+	    operation.selector.Priority() != 0) {
 		throw std::invalid_argument("compiled GraphQL relation identity or relational authority drifted");
 	}
 	if (columns.size() != 8 || !HasColumn(columns[0], "id", "VARCHAR", false, "$.id") ||
