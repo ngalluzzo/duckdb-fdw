@@ -18,6 +18,7 @@ public:
 	                                    GraphqlRuntimeAdmissionCounterexample counterexample);
 	static duckdb_api::ScanPlan GraphqlNonAuthorityVariation(duckdb_api::ScanPlan plan,
 	                                                         GraphqlRuntimeNonAuthorityVariation variation);
+	static duckdb_api::ScanPlan DistinctGraphqlProvenance(duckdb_api::ScanPlan plan);
 	static duckdb_api::ScanPlan GraphqlVariation(duckdb_api::ScanPlan plan, GraphqlPlanVariation variation);
 	static GraphqlProtocolEnvelopeShape GraphqlProtocolShape(const duckdb_api::ScanPlan &plan);
 	static bool MutateGraphqlProtocol(duckdb_api::ScanPlan &plan, GraphqlRuntimeAdmissionCounterexample counterexample);

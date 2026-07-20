@@ -14,6 +14,18 @@ void ScanPlanTestAccess::ReplaceGraphql(duckdb_api::ScanPlan &plan, duckdb_api::
 	    duckdb_api::PlannedProtocolOperation::FromGraphql(std::move(operation)));
 }
 
+duckdb_api::ScanPlan ScanPlanTestAccess::DistinctGraphqlProvenance(duckdb_api::ScanPlan plan) {
+	plan.connector_name = "package_graphql_fixture";
+	plan.connector_version = "1.2.3";
+	plan.relation_name = "repository_activity";
+	plan.source_snapshot = "package=package_graphql_fixture@1.2.3;relation=repository_activity;"
+	                       "operation=package_repository_activity_graphql;profile=canonical_graphql_authority";
+	auto operation = plan.Operation().Graphql();
+	operation.operation_name = "package_repository_activity_graphql";
+	ReplaceGraphql(plan, std::move(operation));
+	return plan;
+}
+
 duckdb_api::ScanPlan ScanPlanTestAccess::Graphql(duckdb_api::ScanPlan plan,
                                                  GraphqlRuntimeAdmissionCounterexample counterexample) {
 	if (!MutateGraphqlProtocol(plan, counterexample) && !MutateGraphqlOperationOrSchema(plan, counterexample) &&
@@ -49,6 +61,11 @@ duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_l
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name,
                                                       GraphqlLocalResidualProfile profile) {
 	return BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, profile);
+}
+
+duckdb_api::ScanPlan BuildDistinctGraphqlProvenanceScanPlanFixture(const std::string &exact_logical_secret_name) {
+	return ScanPlanTestAccess::DistinctGraphqlProvenance(
+	    BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, GraphqlLocalResidualProfile::UNRESTRICTED));
 }
 
 duckdb_api::ScanPlan BuildGraphqlRuntimeNonAuthorityVariation(const std::string &exact_logical_secret_name,

@@ -57,6 +57,20 @@ void TestFixtureBoundary() {
 	}
 	Require(profile_sentinel_rejected, "GraphQL fixture accepted a local-residual profile outside its closed enum");
 
+	const auto distinct_provenance = BuildDistinctGraphqlProvenanceScanPlanFixture("distinct_graphql_secret");
+	Require(distinct_provenance.ConnectorName() == "package_graphql_fixture" &&
+	            distinct_provenance.ConnectorVersion() == "1.2.3" &&
+	            distinct_provenance.RelationName() == "repository_activity" &&
+	            distinct_provenance.Operation().Graphql().operation_name == "package_repository_activity_graphql" &&
+	            distinct_provenance.SourceSnapshot() != fixture.SourceSnapshot() &&
+	            distinct_provenance.SourceSnapshot().find("package_graphql_fixture@1.2.3") != std::string::npos &&
+	            distinct_provenance.SourceSnapshot().find("repository_activity") != std::string::npos &&
+	            distinct_provenance.SecretReference().Name() == "distinct_graphql_secret" &&
+	            distinct_provenance.SourceSnapshot().find("distinct_graphql_secret") == std::string::npos,
+	        "distinct GraphQL provenance fixture lost its coherent package identity or exact logical secret handle");
+	Require(CountGraphqlPlanDifferences(fixture, distinct_provenance) == 5,
+	        "distinct GraphQL provenance fixture changed executable authority beyond names and logical secret handle");
+
 	const auto admission_count = static_cast<std::size_t>(GraphqlRuntimeAdmissionCounterexample::COUNT);
 	Require(admission_count == 140, "closed Runtime-facing GraphQL admission catalog changed without self-test review");
 	std::vector<duckdb_api::ScanPlan> admission_candidates;
