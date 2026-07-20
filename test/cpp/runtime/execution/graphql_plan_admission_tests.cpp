@@ -219,7 +219,7 @@ void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 
 void TestEveryProviderCounterexampleFailsClosed() {
 	const auto count = static_cast<std::size_t>(duckdb_api_test::GraphqlRuntimeAdmissionCounterexample::COUNT);
-	Require(count == 140, "Runtime must exercise the complete Semantics counterexample corpus");
+	Require(count == 141, "Runtime must exercise the complete Semantics counterexample corpus, including unknown domains");
 	for (std::size_t value = 0; value < count; value++) {
 		const auto counterexample = static_cast<duckdb_api_test::GraphqlRuntimeAdmissionCounterexample>(value);
 		const auto plan =
