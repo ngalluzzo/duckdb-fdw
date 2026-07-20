@@ -188,12 +188,10 @@ void TestPaginationProfileValidation() {
 	               []() { (void)ConnectorCatalogTestAccess::SequentialLink("", 5, "page", 1, 1, 4); });
 	for (const auto &name : {std::string("bad name"), std::string("bad%name"), std::string("bad\0name", 8),
 	                         std::string("bad\tname"), std::string(u8"página"), std::string(64, 'a')}) {
-		RequireInvalid("Link pagination accepted a page-size name outside the shared query grammar", [&name]() {
-			(void)ConnectorCatalogTestAccess::SequentialLink(name, 5, "page", 1, 1, 4);
-		});
-		RequireInvalid("Link pagination accepted a page-number name outside the shared query grammar", [&name]() {
-			(void)ConnectorCatalogTestAccess::SequentialLink("page_size", 5, name, 1, 1, 4);
-		});
+		RequireInvalid("Link pagination accepted a page-size name outside the shared query grammar",
+		               [&name]() { (void)ConnectorCatalogTestAccess::SequentialLink(name, 5, "page", 1, 1, 4); });
+		RequireInvalid("Link pagination accepted a page-number name outside the shared query grammar",
+		               [&name]() { (void)ConnectorCatalogTestAccess::SequentialLink("page_size", 5, name, 1, 1, 4); });
 	}
 	RequireInvalid("Link pagination accepted duplicate page parameter names",
 	               []() { (void)ConnectorCatalogTestAccess::SequentialLink("page", 5, "page", 1, 1, 4); });
@@ -201,8 +199,8 @@ void TestPaginationProfileValidation() {
 	               []() { (void)ConnectorCatalogTestAccess::SequentialLink("page_size", 0, "page", 1, 1, 4); });
 	RequireInvalid("Link pagination accepted a zero first page",
 	               []() { (void)ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", 0, 1, 4); });
-	RequireInvalid("Link pagination accepted a non-unit page transition",
-	               []() { (void)ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", 1, 2, 4); });
+	RequireInvalid("Link pagination accepted a zero page transition",
+	               []() { (void)ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", 1, 0, 4); });
 	RequireInvalid("Link pagination accepted an empty scan page budget",
 	               []() { (void)ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", 1, 1, 0); });
 	const auto bigint_max = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
@@ -211,15 +209,20 @@ void TestPaginationProfileValidation() {
 	});
 	{
 		auto operation = BuildPaginatedOperation(
-		    ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", bigint_max - 1, 1, 2),
+		    ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", bigint_max - 2, 2, 2),
 		    {ConnectorCatalogTestAccess::PageSizeQuery("page_size", 5),
-		     ConnectorCatalogTestAccess::PageNumberQuery("page", bigint_max - 1)});
+		     ConnectorCatalogTestAccess::PageNumberQuery("page", bigint_max - 2)});
 		const auto relation = ConnectorCatalogTestAccess::Relation(
 		    "bigint_boundary_pages", Columns(), std::move(operation), ConnectorCatalogTestAccess::RequiredBearer(),
 		    ConnectorCatalogTestAccess::PaginatedResources(1024, 2048, 5, 10, 64));
-		Require(relation.Operation().Rest().pagination.FirstPage() == bigint_max - 1,
-		        "Link pagination rejected its last representable two-page sequence");
+		Require(relation.Operation().Rest().pagination.FirstPage() == bigint_max - 2 &&
+		            relation.Operation().Rest().pagination.PageIncrement() == 2 &&
+		            relation.Snapshot().find("increment:2") != std::string::npos,
+		        "Link pagination rejected or hid its last representable increment-two sequence");
 	}
+	RequireInvalid("Link pagination accepted an increment-two sequence one past BIGINT request authority", [=]() {
+		(void)ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", bigint_max - 1, 2, 2);
+	});
 
 	RequireInvalid("Link pagination inferred a mismatched fixed page size", []() {
 		auto operation =

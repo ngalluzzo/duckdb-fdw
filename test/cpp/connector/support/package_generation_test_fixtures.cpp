@@ -208,10 +208,19 @@ CompiledRelation BuildScalarPredicateRelation(const std::string &package_digest,
                                               duckdb_api::CompiledScalarValue literal,
                                               const std::string &encoded_value) {
 	const std::string operation_name = relation_name + "_selected";
+	const std::string conditional_wire_name = column_name + "_filter";
 	std::vector<duckdb_api::CompiledColumn> columns;
 	columns.push_back(
 	    CompiledModelBuilder::Column("occurrence_id", CompiledScalarType::BIGINT, false, "$.occurrence_id"));
 	columns.push_back(CompiledModelBuilder::Column(column_name, type, false, "$." + column_name));
+	std::vector<duckdb_api::CompiledRelationInput> inputs;
+	inputs.push_back(CompiledModelBuilder::Input("scope", CompiledScalarType::VARCHAR, false,
+	                                             CompiledModelBuilder::Default(CompiledModelBuilder::Varchar("all"))));
+	inputs.push_back(
+	    CompiledModelBuilder::Input("omitted", CompiledScalarType::VARCHAR, true, CompiledModelBuilder::NoDefault()));
+	inputs.push_back(CompiledModelBuilder::Input(
+	    "nullable_default", CompiledScalarType::VARCHAR, true,
+	    CompiledModelBuilder::Default(CompiledModelBuilder::Null(CompiledScalarType::VARCHAR))));
 	std::vector<CompiledOperation> operations;
 	operations.push_back(CompiledOperation {
 	    operation_name,
@@ -224,8 +233,11 @@ CompiledRelation BuildScalarPredicateRelation(const std::string &package_digest,
 	    CompiledModelBuilder::DisabledPagination(),
 	    {Origin("predicate-proof.invalid"),
 	     "/fixtures/" + relation_name + "/restricted",
-	     {duckdb_api::CompiledQueryParameter(column_name, duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT,
-	                                         column_name, true, false)},
+	     {CompiledModelBuilder::FixedQueryParameter("view", CompiledModelBuilder::Varchar("summary")),
+	      CompiledModelBuilder::RelationInputQueryParameter("scope_name", "scope"),
+	      CompiledModelBuilder::RelationInputQueryParameter("omitted_name", "omitted"),
+	      CompiledModelBuilder::RelationInputQueryParameter("null_name", "nullable_default"),
+	      CompiledModelBuilder::ConditionalInputQueryParameter(conditional_wire_name, column_name)},
 	     {{"X-Connector-Fixture", relation_name}}},
 	    CompiledResponseSource::JSON_PATH_MANY,
 	    "$.records[*]",
@@ -250,9 +262,10 @@ CompiledRelation BuildScalarPredicateRelation(const std::string &package_digest,
 	std::vector<duckdb_api::CompiledPredicateMapping> mappings;
 	mappings.push_back(PackagePredicateMapping(column_name, std::move(literal), operation_name, column_name,
 	                                           encoded_value, identities, relation_name));
-	return ConnectorCatalogTestAccess::Relation(
-	    relation_name, std::move(columns), {}, std::move(operations), ConnectorCatalogTestAccess::Anonymous(),
-	    ConnectorCatalogTestAccess::UnpaginatedResources(8, 128), std::move(mappings));
+	return ConnectorCatalogTestAccess::Relation(relation_name, std::move(columns), std::move(inputs),
+	                                            std::move(operations), ConnectorCatalogTestAccess::Anonymous(),
+	                                            ConnectorCatalogTestAccess::UnpaginatedResources(8, 128),
+	                                            std::move(mappings));
 }
 
 CompiledRelation BuildAppendedRelation(const std::string &name = "appended_records") {

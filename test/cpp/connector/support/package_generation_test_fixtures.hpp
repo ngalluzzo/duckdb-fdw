@@ -57,9 +57,11 @@ duckdb_api::CompiledPackageGeneration
 BuildPredicateConflictPackageGenerationFixture(const std::string &package_version = "1.2.3", char digest_fill = 'e');
 
 // Three independent package-declared equality mappings over BOOLEAN, BIGINT,
-// and VARCHAR columns. Each selected operation owns one conditional input and
-// one empty-selector fallback so Semantics can exercise its closed typed
-// matcher without compiler-private construction access.
+// and VARCHAR columns. Each selected operation owns one conditional input
+// whose emitted query name differs from its source ID, ordered fixed and
+// relation-input fields, one unbound omission, and one typed-NULL omission.
+// An empty-selector fallback lets Semantics exercise matching, resolution, and
+// request materialization without compiler-private construction access.
 duckdb_api::CompiledPackageGeneration
 BuildTypedPredicatePackageGenerationFixture(const std::string &package_version = "1.2.3", char digest_fill = 'f');
 

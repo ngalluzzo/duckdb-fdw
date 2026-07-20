@@ -291,8 +291,8 @@ void TestQueryScalarEncodingAndSourceLaws() {
 	}
 	std::vector<duckdb_api::CompiledQueryParameter> excessive_query;
 	for (std::size_t index = 0; index < 65; index++) {
-		excessive_query.push_back(CompiledModelBuilder::FixedQueryParameter(
-		    "field" + std::to_string(index), CompiledModelBuilder::Varchar("value")));
+		excessive_query.push_back(CompiledModelBuilder::FixedQueryParameter("field" + std::to_string(index),
+		                                                                    CompiledModelBuilder::Varchar("value")));
 	}
 	RequireThrows<std::invalid_argument>([&]() { (void)BuildRelationWithQuery(std::move(excessive_query)); },
 	                                     "65 query fields entered immutable compiled IR");
@@ -340,6 +340,44 @@ void TestStructuralExtractorLaws() {
 	    "interior array syntax entered structural record segments");
 	RequireThrows<std::invalid_argument>([&]() { require_invalid_records("$.records\n[*]", {"records\n"}); },
 	                                     "control-bearing structural record segment was accepted");
+
+	std::vector<std::string> exact_segments(511, "a");
+	exact_segments.back() = "aa";
+	std::string exact_field = "$";
+	for (const auto &segment : exact_segments) {
+		exact_field += "." + segment;
+	}
+	Require(exact_field.size() == 1024 && exact_segments.size() > 16, "deep REST path boundary fixture is not exact");
+	const auto exact_column =
+	    CompiledModelBuilder::Column("deep", CompiledScalarType::VARCHAR, false, exact_field, exact_segments);
+	Require(exact_column.ExtractorSegments() == exact_segments,
+	        "exact 1024-byte REST column path or its deep structural segments were rejected");
+	RequireThrows<std::invalid_argument>(
+	    [&]() {
+		    auto one_over_segments = exact_segments;
+		    one_over_segments.back() = "aaa";
+		    (void)CompiledModelBuilder::Column("deep", CompiledScalarType::VARCHAR, false, exact_field + "a",
+		                                       std::move(one_over_segments));
+	    },
+	    "1025-byte REST column extractor entered immutable compiled IR");
+
+	const auto exact_collection = exact_field + "[*]";
+	auto deep_records =
+	    CompiledModelBuilder::RestOperation("deep_rows", true, duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	                                        CompiledModelBuilder::DisabledPagination(), {origin, "/deep-rows", {}, {}},
+	                                        duckdb_api::CompiledResponseSource::JSON_PATH_MANY, exact_collection,
+	                                        exact_segments, CompiledModelBuilder::V1OperationSelector({}));
+	const auto deep_relation = BuildRelationWithOperation(std::move(deep_records));
+	Require(exact_collection.size() == 1027 &&
+	            deep_relation.Operation().Rest().records_extractor_segments == exact_segments,
+	        "exact 1027-byte deep REST collection path was rejected or truncated");
+	RequireThrows<std::invalid_argument>(
+	    [&]() {
+		    auto one_over_segments = exact_segments;
+		    one_over_segments.back() = "aaa";
+		    require_invalid_records(exact_field + "a[*]", std::move(one_over_segments));
+	    },
+	    "1028-byte REST collection extractor entered immutable compiled IR");
 
 	auto root_with_segments =
 	    CompiledModelBuilder::RestOperation("list_rows", true, duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,

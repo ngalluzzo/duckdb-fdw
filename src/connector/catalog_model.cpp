@@ -13,6 +13,10 @@ namespace duckdb_api {
 
 namespace {
 
+// This is an aggregate spelling bound, not a path-depth limit. Consumers use
+// ExtractorSegments() as the structural authority after construction.
+static const std::size_t MAX_COMPILED_COLUMN_EXTRACTOR_BYTES = 1024;
+
 bool IsAsciiLower(char value) {
 	return value >= 'a' && value <= 'z';
 }
@@ -94,7 +98,8 @@ bool Contains(const std::vector<std::string> &values, const std::string &expecte
 }
 
 void ValidateColumn(const CompiledColumn &column) {
-	if (!IsIdentifier(column.name) || column.extractor.empty() || column.extractor.front() != '$') {
+	if (!IsIdentifier(column.name) || column.extractor.empty() ||
+	    column.extractor.size() > MAX_COMPILED_COLUMN_EXTRACTOR_BYTES || column.extractor.front() != '$') {
 		throw std::invalid_argument("compiled relation contains an invalid column declaration");
 	}
 	if (column.logical_type != CompiledScalarTypeName(column.ScalarType())) {
@@ -282,15 +287,21 @@ const CompiledInputDefault &CompiledRelationInput::Default() const {
 
 CompiledColumn::CompiledColumn(std::string name_p, std::string logical_type_p, bool nullable_p, std::string extractor_p)
     : name(std::move(name_p)), logical_type(std::move(logical_type_p)), nullable(nullable_p),
-      extractor(std::move(extractor_p)), scalar_type(ScalarTypeFromName(logical_type)),
-      extractor_segments(internal::ParseLegacyJsonExtractorSegments(extractor)) {
+      extractor(std::move(extractor_p)), scalar_type(ScalarTypeFromName(logical_type)), extractor_segments() {
+	if (extractor.size() > MAX_COMPILED_COLUMN_EXTRACTOR_BYTES) {
+		throw std::invalid_argument("compiled relation column extractor exceeds its byte limit");
+	}
+	extractor_segments = internal::ParseLegacyJsonExtractorSegments(extractor);
 }
 
 CompiledColumn::CompiledColumn(std::string name_p, CompiledScalarType type_p, bool nullable_p, std::string extractor_p)
     : name(std::move(name_p)), logical_type(CompiledScalarTypeName(type_p)), nullable(nullable_p),
-      extractor(std::move(extractor_p)), scalar_type(type_p),
-      extractor_segments(internal::ParseLegacyJsonExtractorSegments(extractor)) {
+      extractor(std::move(extractor_p)), scalar_type(type_p), extractor_segments() {
 	ValidateScalarType(scalar_type);
+	if (extractor.size() > MAX_COMPILED_COLUMN_EXTRACTOR_BYTES) {
+		throw std::invalid_argument("compiled relation column extractor exceeds its byte limit");
+	}
+	extractor_segments = internal::ParseLegacyJsonExtractorSegments(extractor);
 }
 
 CompiledColumn::CompiledColumn(std::string name_p, CompiledScalarType type_p, bool nullable_p, std::string extractor_p,
@@ -298,7 +309,8 @@ CompiledColumn::CompiledColumn(std::string name_p, CompiledScalarType type_p, bo
     : name(std::move(name_p)), logical_type(CompiledScalarTypeName(type_p)), nullable(nullable_p),
       extractor(std::move(extractor_p)), scalar_type(type_p), extractor_segments(std::move(extractor_segments_p)) {
 	ValidateScalarType(scalar_type);
-	if (!internal::MatchesStructuralFieldExtractor(extractor, extractor_segments)) {
+	if (extractor.size() > MAX_COMPILED_COLUMN_EXTRACTOR_BYTES ||
+	    !internal::MatchesStructuralFieldExtractor(extractor, extractor_segments)) {
 		throw std::invalid_argument("compiled relation column extractor disagrees with its structural segments");
 	}
 }

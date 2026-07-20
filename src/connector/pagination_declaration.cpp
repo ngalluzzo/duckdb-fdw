@@ -11,12 +11,14 @@ namespace duckdb_api {
 
 namespace {
 
-bool FitsBigintPageSequence(std::uint64_t first_page, std::uint64_t max_pages_per_scan) {
-	if (first_page == 0 || max_pages_per_scan == 0) {
+bool FitsBigintPageSequence(std::uint64_t first_page, std::uint64_t page_increment, std::uint64_t max_pages_per_scan) {
+	if (first_page == 0 || page_increment == 0 || max_pages_per_scan == 0) {
 		return false;
 	}
 	const auto bigint_max = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
-	return first_page <= bigint_max && max_pages_per_scan - 1 <= bigint_max - first_page;
+	// Division proves the terminal value fits without overflowing an
+	// intermediate multiplication or addition.
+	return first_page <= bigint_max && max_pages_per_scan - 1 <= (bigint_max - first_page) / page_increment;
 }
 
 const char *PaginationStrategyName(CompiledPaginationStrategy strategy) {
@@ -78,10 +80,9 @@ CompiledPagination::CompiledPagination(std::string page_size_parameter_p, std::u
     : strategy(CompiledPaginationStrategy::LINK_HEADER), page_size_parameter(std::move(page_size_parameter_p)),
       page_size(page_size_p), page_number_parameter(std::move(page_number_parameter_p)), first_page(first_page_p),
       page_increment(page_increment_p), max_pages_per_scan(max_pages_per_scan_p) {
-	if (!internal::IsCompiledQueryName(page_size_parameter) ||
-	    !internal::IsCompiledQueryName(page_number_parameter) ||
-	    page_size_parameter == page_number_parameter || page_size == 0 || first_page == 0 || page_increment != 1 ||
-	    max_pages_per_scan == 0 || !FitsBigintPageSequence(first_page, max_pages_per_scan)) {
+	if (!internal::IsCompiledQueryName(page_size_parameter) || !internal::IsCompiledQueryName(page_number_parameter) ||
+	    page_size_parameter == page_number_parameter || page_size == 0 || first_page == 0 || page_increment == 0 ||
+	    max_pages_per_scan == 0 || !FitsBigintPageSequence(first_page, page_increment, max_pages_per_scan)) {
 		throw std::invalid_argument("compiled Link pagination contains invalid typed page bindings");
 	}
 }
@@ -187,9 +188,9 @@ void ValidatePagination(const CompiledOperation &operation) {
 	if (!IsCompiledQueryName(pagination.PageSizeParameter()) ||
 	    !IsCompiledQueryName(pagination.PageNumberParameter()) ||
 	    pagination.PageSizeParameter() == pagination.PageNumberParameter() || pagination.PageSize() == 0 ||
-	    pagination.FirstPage() == 0 || pagination.PageIncrement() != 1 || pagination.MaxPagesPerScan() == 0 ||
+	    pagination.FirstPage() == 0 || pagination.PageIncrement() == 0 || pagination.MaxPagesPerScan() == 0 ||
 	    pagination.PageSize() > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
-	    !FitsBigintPageSequence(pagination.FirstPage(), pagination.MaxPagesPerScan())) {
+	    !FitsBigintPageSequence(pagination.FirstPage(), pagination.PageIncrement(), pagination.MaxPagesPerScan())) {
 		throw std::invalid_argument("compiled Link pagination contains invalid typed page bindings");
 	}
 	const CompiledQueryParameter *page_size = nullptr;

@@ -1,4 +1,5 @@
 #include "connector/support/package_generation_test_fixtures.hpp"
+#include "connector/support/catalog_test_access.hpp"
 #include "duckdb_api/internal/connector/compiled_model_builder.hpp"
 #include "duckdb_api/internal/connector/operation_selector_declaration.hpp"
 #include "duckdb_api/package_compatibility.hpp"
@@ -18,6 +19,37 @@ using duckdb_api::PackageReloadClassification;
 using duckdb_api::internal::CompiledModelBuilder;
 using duckdb_api_test::PackageCompatibilityFixture;
 using duckdb_api_test::Require;
+
+duckdb_api::CompiledPackageGeneration
+BuildPaginationCompatibilityGeneration(const std::string &version, char digest_fill, std::uint64_t page_increment) {
+	const duckdb_api::CompiledHttpOrigin origin {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                             duckdb_api::CompiledHttpHost("api.github.com"), 443};
+	std::vector<duckdb_api::CompiledOperation> operations;
+	operations.push_back(CompiledModelBuilder::RestOperation(
+	    "paged_records", true, duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	    CompiledModelBuilder::LinkPagination("per_page", 5, "page", 1, page_increment, 4),
+	    {origin,
+	     "/paged-records",
+	     {CompiledModelBuilder::PageSizeQueryParameter("per_page", 5),
+	      CompiledModelBuilder::PageNumberQueryParameter("page", 1)},
+	     {}},
+	    duckdb_api::CompiledResponseSource::JSON_PATH_MANY, "$.items[*]", {"items"},
+	    CompiledModelBuilder::V1OperationSelector({})));
+	std::vector<duckdb_api::CompiledColumn> columns;
+	columns.push_back(
+	    CompiledModelBuilder::Column("id", duckdb_api::CompiledScalarType::BIGINT, false, "$.id", {"id"}));
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(CompiledModelBuilder::Relation(
+	    "paged_records", std::move(columns), {}, {}, std::move(operations),
+	    CompiledModelBuilder::AnonymousAuthentication(),
+	    duckdb_api_test::ConnectorCatalogTestAccess::PaginatedResources(1024, 4096, 5, 20, 64)));
+	const auto digest = "sha256." + std::string(64, digest_fill);
+	auto identity = CompiledModelBuilder::PackageIdentity("duckdb_api/v1", "pagination_package", version, digest);
+	auto connector = CompiledModelBuilder::Connector(duckdb_api::CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA,
+	                                                 "pagination_package", version, std::move(relations),
+	                                                 {{"https"}, {"api.github.com"}, false, false, false, false, 4096});
+	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
+}
 
 template <class Exception, class Callable>
 void RequireThrows(Callable callable, const std::string &message) {
@@ -163,8 +195,26 @@ void TestPackageGenerationFixtureBoundary() {
 	        "typed predicate fixture relation inventory drifted");
 	for (std::size_t index = 0; index < typed_relation_names.size(); index++) {
 		const auto *relation = typed_predicates.Connector().FindRelation(typed_relation_names[index]);
-		Require(relation != nullptr && relation->Columns().size() == 2 &&
-		            relation->Columns()[1].ScalarType() == typed_relation_types[index] &&
+		Require(relation != nullptr, "typed predicate fixture relation disappeared");
+		const auto &query = relation->Operations()[0].Rest().request.query_parameters;
+		Require(relation->Columns().size() == 2 && relation->Columns()[1].ScalarType() == typed_relation_types[index] &&
+		            relation->Inputs().size() == 3 && query.size() == 5 && relation->Inputs()[0].Name() == "scope" &&
+		            relation->Inputs()[0].Default().HasDefault() &&
+		            relation->Inputs()[0].Default().Value().Varchar() == "all" &&
+		            relation->Inputs()[1].Name() == "omitted" && !relation->Inputs()[1].Default().HasDefault() &&
+		            relation->Inputs()[2].Name() == "nullable_default" && relation->Inputs()[2].Nullable() &&
+		            relation->Inputs()[2].Default().HasDefault() && relation->Inputs()[2].Default().Value().IsNull() &&
+		            query[0].source == duckdb_api::CompiledQueryValueSource::FIXED && query[0].name == "view" &&
+		            query[0].DecodedValue().Varchar() == "summary" &&
+		            query[1].source == duckdb_api::CompiledQueryValueSource::RELATION_INPUT &&
+		            query[1].name == "scope_name" && query[1].source_id == "scope" &&
+		            query[2].source == duckdb_api::CompiledQueryValueSource::RELATION_INPUT &&
+		            query[2].name == "omitted_name" && query[2].source_id == "omitted" &&
+		            query[3].source == duckdb_api::CompiledQueryValueSource::RELATION_INPUT &&
+		            query[3].name == "null_name" && query[3].source_id == "nullable_default" &&
+		            query[4].source == duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT &&
+		            query[4].name == relation->Columns()[1].name + "_filter" &&
+		            query[4].source_id == relation->Columns()[1].name && query[4].name != query[4].source_id &&
 		            relation->Operations().size() == 2 && !relation->Operations()[0].fallback &&
 		            relation->Operations()[1].fallback &&
 		            relation->Operations()[0].Rest().response_source ==
@@ -307,6 +357,15 @@ void TestStructuralRejections() {
 		    PackageReloadClassification::INCOMPATIBLE_RELOAD,
 		    "normalized structural mutation escaped fail-closed classification at index " + std::to_string(index));
 	}
+
+	const auto pagination_active = BuildPaginationCompatibilityGeneration("1.2.3", '1', 1);
+	RequireClassification(pagination_active, BuildPaginationCompatibilityGeneration("1.3.0", '2', 2),
+	                      PackageReloadClassification::INCOMPATIBLE_RELOAD,
+	                      "page increment changed without a compatibility break");
+	RequireClassification(BuildPaginationCompatibilityGeneration("1.2.3", '3', 2),
+	                      BuildPaginationCompatibilityGeneration("1.2.4", '4', 2),
+	                      PackageReloadClassification::COMPATIBLE_PROVENANCE_PATCH,
+	                      "a stable increment-two descriptor was not compatibility-comparable");
 }
 
 } // namespace

@@ -29,6 +29,10 @@ bool IsCompiledQueryName(const std::string &value) {
 
 namespace {
 
+// A collection extractor is a bounded field extractor plus the exact "[*]"
+// terminal. There is deliberately no independent segment-depth limit.
+static const std::size_t MAX_COMPILED_COLLECTION_EXTRACTOR_BYTES = 1027;
+
 bool IsAsciiDigit(char value) {
 	return value >= '0' && value <= '9';
 }
@@ -339,7 +343,7 @@ void ValidateRestOperation(const CompiledOperation &operation) {
 	ValidateHeaders(rest.request.headers, "REST");
 	if (rest.response_source == CompiledResponseSource::JSON_PATH_MANY) {
 		if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY || rest.records_extractor.empty() ||
-		    rest.records_extractor == "$" ||
+		    rest.records_extractor == "$" || rest.records_extractor.size() > MAX_COMPILED_COLLECTION_EXTRACTOR_BYTES ||
 		    !MatchesRecordSegments(rest.records_extractor, rest.records_extractor_segments)) {
 			throw std::invalid_argument("multi-record response source has contradictory cardinality or extraction");
 		}
