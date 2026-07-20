@@ -9,19 +9,21 @@
 
 namespace duckdb {
 namespace duckdb_api_query_internal {
-namespace {
 
-const char *PredicateName(duckdb_api::PlannedPredicate predicate) {
-	switch (predicate) {
-	case duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN:
+const char *PredicateNameForExplanation(duckdb_api::PlannedPredicate predicate) {
+	if (predicate == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN) {
 		return "unrestricted";
-	case duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE:
+	}
+	if (predicate == duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE) {
 		return "visibility_equals_private";
-	case duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER:
+	}
+	if (predicate == duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER) {
 		return "complete_duckdb_filter";
 	}
 	throw InternalException("duckdb_api scan plan contains an unknown predicate state");
 }
+
+namespace {
 
 const char *AccuracyName(duckdb_api::RemotePredicateAccuracy accuracy) {
 	switch (accuracy) {
@@ -303,11 +305,11 @@ InsertionOrderPreservingMap<string> ExplainSelectedScan(const duckdb_api::ScanRe
 	result["Stable Row Order"] = "none";
 	result["Snapshot Guarantee"] = "none";
 	result["Candidate"] = request.requested_predicate.Snapshot();
-	result["Remote Predicate"] = PredicateName(plan.RemotePredicate());
+	result["Remote Predicate"] = PredicateNameForExplanation(plan.RemotePredicate());
 	result["Remote Accuracy"] = AccuracyName(plan.RemoteAccuracy());
 	result["Offered Filter Scope"] = ScopeName(request.retained_predicate_scope);
 	result["Filter Action"] = "retained";
-	result["Residual Predicate"] = PredicateName(plan.ResidualPredicate());
+	result["Residual Predicate"] = PredicateNameForExplanation(plan.ResidualPredicate());
 	result["Residual Owner"] = OwnerName(plan.ResidualOwner());
 	result["Filter Owner"] = OwnerName(plan.Ownership().filter);
 	result["Projection Closure"] = ProjectionClosure(plan);

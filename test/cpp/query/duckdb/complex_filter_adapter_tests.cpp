@@ -1,5 +1,7 @@
+#include "duckdb/common/exception.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
+#include "scan_plan_explanation.hpp"
 #include "query/support/duckdb_adapter_test_support.hpp"
 #include "support/require.hpp"
 
@@ -175,6 +177,17 @@ void TestExactRecognitionResidualAndFallback() {
 	RequireNoRuntimeEntry(*probe, "recognition, fallback, and explanation matrix");
 }
 
+void TestUnknownPredicateExplanationFailsClosed() {
+	bool rejected = false;
+	try {
+		(void)duckdb::duckdb_api_query_internal::PredicateNameForExplanation(
+		    static_cast<duckdb_api::PlannedPredicate>(255));
+	} catch (const duckdb::InternalException &error) {
+		rejected = std::string(error.what()).find("unknown predicate state") != std::string::npos;
+	}
+	Require(rejected, "Query explanation did not reject an unknown planned-predicate value");
+}
+
 void TestDescribePrepareCopyAndBoundParameterReplanningStayOffline() {
 	duckdb::DuckDB database(nullptr);
 	auto probe = RegisterNativeAdapter(database, QueryRuntimeScenario::SUCCESS);
@@ -239,6 +252,7 @@ void TestDescribePrepareCopyAndBoundParameterReplanningStayOffline() {
 
 void RunComplexFilterAdapterTests() {
 	TestExactRecognitionResidualAndFallback();
+	TestUnknownPredicateExplanationFailsClosed();
 	TestDescribePrepareCopyAndBoundParameterReplanningStayOffline();
 }
 

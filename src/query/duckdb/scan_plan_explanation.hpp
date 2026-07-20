@@ -5,10 +5,16 @@
 namespace duckdb_api {
 class ScanPlan;
 struct ScanRequest;
+enum class PlannedPredicate;
 } // namespace duckdb_api
 
 namespace duckdb {
 namespace duckdb_api_query_internal {
+
+// Maps the predicate states Query currently understands to stable explanation
+// labels. Unknown values fail closed so a provider can extend its enum without
+// Query silently misrepresenting the new state.
+const char *PredicateNameForExplanation(duckdb_api::PlannedPredicate predicate);
 
 // Renders Query's typed, non-authoritative explanation of the immutable
 // request/plan handoff. No field is parsed to recover planning or execution
