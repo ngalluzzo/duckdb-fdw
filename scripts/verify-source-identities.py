@@ -91,6 +91,17 @@ HISTORICAL_RELEASES = {
             "c0d7b2ff6160874390a4f06d1b9954ba74604769efcfcf70420fa2702c26fae6"
         ),
     },
+    "0.6.0": {
+        "identities_canonical_json_sha256": (
+            "d584a8df92ef30c3870702de88564c562d575f8f72672249caa30c0f50c5da86"
+        ),
+        "pins_canonical_json_sha256": (
+            "fbb2d0521ae6cf420b29bc9957b9bd7c25d169d5b0a02997f44a4120bd48f012"
+        ),
+        "public_contract_sha256": (
+            "580a33b94357b2a539489ff2c2ba69289b89be3ee2ed019efe29832230f1cecf"
+        ),
+    },
 }
 GIT_ID = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -479,8 +490,8 @@ def verify(root: pathlib.Path = ROOT) -> dict[str, str]:
 
     validate_historical_releases(reader)
 
-    if version != "0.6.0":
-        raise AssertionError("current source identity verifier supports only 0.6.0")
+    if version != "0.7.0":
+        raise AssertionError("current source identity verifier supports only 0.7.0")
     identities = validate_current_identities(pins, reader, version)
     native_identity = identities["native_product_sources"]
     native_digest = path_bound_digest(reader, tuple(native_identity["paths"]))

@@ -36,7 +36,7 @@ if [[ "$(printf '%s\n' "${exported}" | sed '/^[[:space:]]*$/d' | wc -l | tr -d '
     exit 1
 fi
 
-readonly FORBIDDEN='127\.0\.0\.1|BuildControlledHttpRuntime|BuildControlledProductComposition|BuildLoopbackCurlRuntime|BuildDistinctSchemaConnectorCatalogFixture|ScanPlanTestAccess|ConnectorCatalogTestAccess|controlled_duckdb_api|duckdb_api_controlled|DUCKDB_API_CONTROLLED_PORT|duckdb_api_private_curl_option_observer_v1|FixtureScenario|MALFORMED|TYPE_MISMATCH|BLOCKING|UNKNOWN_FAILURE|duckdb_api_(stats|test|auth_adapter_test|secret_test)|fixture_secret|runtime_generated_|top-secret|test-only-(fixture|redacted)|DUCKDB_API_FIXTURE_SCENARIO|DUCKDB_API_CONNECTOR_PATH|DUCKDB_API_LIVE_PROOF_AUTHORITY'
+readonly FORBIDDEN='127\.0\.0\.1|BuildControlledHttpRuntime|BuildControlledProductComposition|BuildControlledRuntimeScenario|ControlledRuntimeScenario|BuildLoopbackCurlRuntime|BuildDistinctSchemaConnectorCatalogFixture|ScanPlanTestAccess|ConnectorCatalogTestAccess|controlled_duckdb_api|duckdb_api_controlled|DUCKDB_API_CONTROLLED_PORT|duckdb_api_private_curl_option_observer_v1|FixtureScenario|MALFORMED|TYPE_MISMATCH|BLOCKING|UNKNOWN_FAILURE|duckdb_api_(stats|test|auth_adapter_test|secret_test)|fixture_secret|runtime_generated_|top-secret|test-only-(fixture|redacted)|DUCKDB_API_FIXTURE_SCENARIO|DUCKDB_API_CONNECTOR_PATH|DUCKDB_API_LIVE_PROOF_AUTHORITY'
 if strings "${ARTIFACT}" | grep -E "${FORBIDDEN}" >/dev/null; then
     echo "loadable artifact contains a forbidden test-control identifier" >&2
     exit 1

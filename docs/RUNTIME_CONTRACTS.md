@@ -83,30 +83,32 @@ limit declarations, one bounded sequential pagination strategy, anonymous and
 capability-scoped bearer authentication, host-narrowing policies and budgets,
 immutable compilation, explicit local loading, and bounded pull execution.
 
-GraphQL is conditional on the `0.7.0` user-visible gate. Providers, partitions,
+GraphQL is retained by the `0.7.0` user-visible gate through one closed native
+query profile; declarative GraphQL authoring remains inactive. Providers, partitions,
 automatic retry or rate-limit waiting, cache/single-flight controls, broader
 authenticators, custom code or ABIs, dynamic schemas, metrics, and progress are
 post-v1 design areas unless a later accepted RFC and pre-freeze evidence add
 them. Their internal contracts remain useful design constraints; their presence
 here is not a v1 product promise.
 
-### 1.2 Current native `0.6.0` mapping
+### 1.2 Current native `0.7.0` mapping
 
 RFCs 0005 through 0008 define the bounded live REST, authenticated capability,
 sequential repository-traversal, and first predicate-selective subset mapped
-into private native C++ types. RFC 0010 completes the `0.6.0` conservative
-composition contract across the same lineage. Those types are neither a public
+into private native C++ types. RFC 0010 completes the conservative composition
+contract and RFC 0011 adds the fixed GraphQL repository-analytics profile
+across the same lineage. Those types are neither a public
 ABI nor frozen by v1, but RFC 0009 selects this permanent implementation rather
-than a Rust/stable-C-API replatform as the v1 product profile. The `0.6.0`
+than a Rust/stable-C-API replatform as the v1 product profile. The `0.7.0`
 identity names the current unreleased source; publication remains a separate
 release action.
 
 | Semantic artifact | Native preview mapping |
 |---|---|
-| `CompiledConnector` | Immutable `github` version `0.6.0` snapshot with the bounded anonymous page, exactly-one authenticated user, and bounded sequential authenticated repository relations; six-column repository schema; one closed visibility predicate mapping bound to a reviewed proof identity, base occurrence domain, occurrence guarantee, and single-positive-input encoding; fixed structural REST operations, logical credential policy, typed HTTPS origin, response source, extraction paths, pagination declaration, and connector-owned page/scan ceilings |
+| `CompiledConnector` | Immutable `github` version `0.7.0` snapshot with the bounded anonymous page, exactly-one authenticated user, bounded REST repository traversal, and fixed GraphQL viewer-repository analytics relations; one closed visibility predicate mapping for REST; a closed REST-or-GraphQL operation sum whose GraphQL alternative binds exact canonical bytes, identity, SHA-256 digest, variables, response paths, nullability, cursor declaration, and body ceilings; logical credential policy, typed HTTPS origins, extraction paths, and connector-owned page/scan ceilings |
 | `ScanRequest` | Selected relation and optional logical secret reference; full projection closure; a bounded immutable typed candidate tree (`TRUE`, equality, `AND`, `OR`, `NOT`, or opaque unsupported) and a separate retained-predicate scope (`unrestricted`, exact requested predicate, or opaque complete DuckDB filter); explicit adapter capability and residual-retention facts; empty ordering; unset limit and offset; no credential bytes, SQL text, DuckDB object, remote input, or I/O capability |
-| `ScanPlan` | One deterministically selected fixed operation; typed destination and bearer obligation where required; explicit disabled-or-Link `PaginationPlan`; unrestricted or `visibility_equals_private` remote predicate; exact, superset, unsupported, or ambiguous category with structured reason; DuckDB-owned residual, projection, ordering, limit, and offset; optional typed `VISIBILITY_PRIVATE` input; no remote/runtime ordering or bounds; disabled retry/cache/providers; and explicit page/scan budgets; no credential bytes, candidate tree, DuckDB object, or received Link values |
-| `BatchStream` | Synchronous pull stream owning either the anonymous or opaque GitHub-user authorization alternative; complete-plan admission before authorization; one attempt for a single-response relation or one attempt per accepted sequential repository page; bounded strict JSON decode and retained page memory; nonempty schema-aligned batches; one retained scan deadline; cancellation checks; and idempotent close |
+| `ScanPlan` | One deterministically selected closed REST-or-GraphQL operation; typed destination and bearer obligation where required; explicit disabled, Link, or GraphQL-cursor pagination; unrestricted or `visibility_equals_private` remote predicate; exact, superset, unsupported, or ambiguous category with structured reason; DuckDB-owned residual, projection, ordering, limit, and offset; GraphQL query replay derived from the canonical identity/bytes/digest; no remote/runtime ordering or bounds; disabled retry/cache/providers; and explicit page/scan/body budgets; no credential bytes, candidate tree, DuckDB object, or received continuation values |
+| `BatchStream` | Synchronous pull stream owning either the anonymous or opaque GitHub-user authorization alternative; complete-plan admission before authorization; one attempt for a single response or per accepted sequential REST/GraphQL page; bounded strict JSON and GraphQL-envelope decode, nullable typed values, retained page/cursor memory, and serialized-body accounting; nonempty schema-aligned batches; one retained scan deadline; cancellation checks; and idempotent close |
 
 The native adapter receives an immutable `ScanExecutor` from product
 composition and asks it to open each `BatchStream`. The production executor
@@ -186,7 +188,69 @@ and late-page failure release the capability and retained page state; a query
 that already consumed earlier batches still fails rather than claiming a
 complete partial relation.
 
-### 1.4 Native selective request admission
+### 1.4 Native GraphQL cursor lifecycle
+
+`github.viewer_repository_metrics` is the only native GraphQL profile.
+Semantics classifies it as the duplicate-preserving occurrence bag from the
+complete bounded `viewer.repositories` connection for the authenticated
+principal. The immutable plan carries the exact query identity, bytes and
+digest; typed endpoint, headers, variables and response paths; eight-column
+schema and nullability; sequential cursor declaration; and all body, response,
+decode, row, memory, concurrency and time budgets. It carries no mutable cursor,
+received body, credential, DuckDB object or relational delegation.
+
+Runtime admission independently computes SHA-256 over the admitted document
+and requires the identity, exact bytes, supplied digest and recomputed digest
+to match the one supported query profile. It also validates query-only replay
+safety, endpoint, fixed headers, page-size and cursor bindings, response paths,
+schema/nullability, disabled features and resource envelope. Admission performs
+no body construction, bearer placement, DNS, socket or transport observation.
+
+The local residual predicate and its classification category, reason and safe
+explanation remain Semantics-owned facts for DuckDB and Query; Runtime neither
+parses them nor requires that the residual be absent. GraphQL admission instead
+requires the executable authority envelope: remote `TRUE` with unsupported
+accuracy, DuckDB as residual and relational owner, no conditional input, and
+no remote or Runtime ordering, limit or offset delegation. An unrestricted
+scan, a retained mapped-unavailable filter, an unsupported predicate shape and
+a capability-unavailable fallback therefore share one canonical remote request
+profile without transferring local expression meaning into Runtime.
+
+For each page, `GraphqlBatchStream` constructs a fixed-order compact JSON body
+whose only changing value is the stream-owned nullable cursor. JSON escaping
+and body measurement complete before authorization. The stream intersects the
+8 KiB plan body ceiling with the 16 KiB host ceiling, debits the 256 KiB scan
+body ledger, then places the fixed bearer header and performs exactly one POST
+to `https://api.github.com:443/graphql`. Automatic retry remains disabled.
+
+The strict decoder validates the entire JSON syntax and GraphQL envelope before
+publishing page rows. Unknown JSON values are skipped without materializing
+their contents; every materialized token is bounded incrementally before
+append. A nonempty top-level `errors` array is a redacted `REMOTE_PROTOCOL`
+failure even when `data` is also present. Required paths, objects and scalar
+members must occur exactly once with the planned type. A null
+`primaryLanguage` yields an invalid `VARCHAR` `TypedValue`; missing or null
+required data fails. Response messages, values, cursors, documents, variables
+and credentials never enter diagnostics.
+
+When `hasNextPage` is false, the stream exhausts cleanly. When it is true,
+`endCursor` must be a nonempty string not used previously by the scan. Retained
+cursor bytes remain charged to the decoded-memory ceiling until terminal
+success, failure, close or destruction. A cursor grants no destination,
+document, selection or replay authority. Empty nonterminal pages advance
+internally, output batches contain at most 64 rows, and no next request begins
+until the current decoded page has drained.
+
+Cancellation is checked before authorization, before every request, during
+transport and decode, before publishing a batch and before the next page.
+GraphQL errors, status/transport/decode/schema failures, invalid or repeated
+cursors, page/row/body/response/memory/time exhaustion and cancellation become
+stable terminal errors even after prior batches. `Cancel`, `Close`, clean
+exhaustion, failure and destruction idempotently release authorization,
+transport, response, row, body and cursor state. Independent streams share no
+mutable continuation or credential state.
+
+### 1.5 Native selective request admission
 
 Runtime admits a repository plan into one immutable
 `AdmittedRepositoryRequestProfile` before it opens authorization or permits
@@ -970,7 +1034,7 @@ cleanup and cancellation, translates the failure into a safe DuckDB error, and
 never unwinds across the extension boundary. Failure-path evidence is required
 on every supported compatibility row.
 
-The native `0.6.0` profile has no async worker. Before any version inspection,
+The native `0.7.0` profile has no async worker. Before any version inspection,
 its process owner calls `curl_global_init(CURL_GLOBAL_DEFAULT)`, then verifies
 the exact supported libcurl version, TLS-backend identity, and
 `CURL_VERSION_THREADSAFE` capability. A rejected, unpublished initialization
@@ -2080,7 +2144,7 @@ pub struct AuthorizedSecrets {
 A `SecretHandle` is resolved only by an authorized authenticator or request
 builder. It should avoid exposing a cloneable plaintext string broadly.
 
-In the native `0.6.0` profile, Query resolves only an exact logical name in
+In the native `0.7.0` profile, Query resolves only an exact logical name in
 DuckDB's temporary `memory` storage. Persistent-only and alternate-storage
 entries are not candidates, and a same-name persistent entry cannot make the
 selection ambiguous. Query destroys DuckDB secret objects before moving one
@@ -2121,7 +2185,7 @@ The network layer validates:
 Connector network and resource policies are intersected with host policy. They
 can remove capabilities or lower limits but cannot widen either.
 
-The native `0.6.0` transport applies the plan's header-byte ceiling separately
+The native `0.7.0` transport applies the plan's header-byte ceiling separately
 to inbound response headers and outbound project-supplied request fields. The
 outbound aggregate counts each field as the bytes in
 `name + ": " + value + "\r\n"` and rejects more than 16,384 bytes before

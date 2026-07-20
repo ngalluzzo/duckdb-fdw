@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Verify that CMake's configured product graph matches the 0.6 release identity."""
+"""Verify that CMake's configured product graph matches the 0.7 release identity."""
 
 from __future__ import annotations
 
@@ -35,10 +35,10 @@ def verify(pins_path: pathlib.Path, observed_path: pathlib.Path) -> dict[str, in
     observed = load_object(observed_path, "configured product source record")
     if pins.get("project") != {
         "extension": "duckdb_api",
-        "tag": "v0.6.0",
-        "version": "0.6.0",
+        "tag": "v0.7.0",
+        "version": "0.7.0",
     }:
-        raise AssertionError("release pins do not name the 0.6.0 product")
+        raise AssertionError("release pins do not name the 0.7.0 product")
     try:
         expected = pins["identities"]["build_graph"]
     except (KeyError, TypeError) as error:

@@ -102,12 +102,13 @@ Connector
 
 ### 1.4 Native product metadata boundary
 
-The current unreleased 0.6 source compiles one exact three-relation `github`
+The current unreleased 0.7 source compiles one exact four-relation `github`
 catalog directly into the extension with the explicit `native_product_metadata`
 origin. Its stable order is `github.duckdb_login_search_page`,
-`github.authenticated_user`, then `github.authenticated_repositories`. The first
-two relations retain the accepted 0.4 anonymous search-page and authenticated
-root-object declarations. The third declares the required logical credential
+`github.authenticated_user`, `github.authenticated_repositories`, then
+`github.viewer_repository_metrics`. The first two relations retain the
+accepted 0.4 anonymous search-page and authenticated root-object declarations.
+The third declares the required logical credential
 `token`, bearer authentication, exact `https://api.github.com:443` destination,
 `Authorization` placement, and a root-array `GET
 /user/repos?per_page=100&page=1` operation with required `id`, `full_name`,
@@ -156,6 +157,26 @@ connector directories, resolve caller-selected paths, read environment
 variables, expose author tooling, or establish package compatibility. Existing
 package and YAML syntax therefore remains inactive and unchanged.
 
+The fourth native relation is a separate closed GraphQL alternative, not an
+instance of the draft syntax below. Connector owns the exact canonical
+`GITHUB_VIEWER_REPOSITORY_METRICS_V1` query bytes and SHA-256 digest, typed
+`https://api.github.com:443/graphql` endpoint, fixed non-secret headers,
+`pageSize=100` and nullable cursor bindings, nodes/errors/page-info response
+paths, eight-column schema and nullability, sequential cursor declaration, and
+8 KiB per-request plus 256 KiB per-scan serialized-body ceilings. Validation
+accepts only that complete repository-owned profile; an unknown identity,
+changed byte, mismatched digest, unsupported variable or response path,
+credential-bearing document/header/variable, mutation, subscription, extra
+operation, or widened resource or network declaration fails.
+
+The GraphQL base domain is the duplicate-preserving occurrence bag of every
+node returned by complete bounded traversal of the authenticated viewer's
+repository connection. It has no caller input beyond the existing explicit
+secret name, no conditional-domain input, and no remote predicate, projection,
+ordering, limit, or offset capability. The fixed `UPDATED_AT DESC` argument is
+cursor enumeration only. The nullable `primary_language` declaration is a
+schema fact; consumers may not infer nullability from received values.
+
 The durable internal provider boundary is the immutable `CompiledConnector`
 catalog. Consumers select a relation by exact identifier and receive a const
 relation or absence. They may rely on stable catalog order and identifiers;
@@ -191,9 +212,10 @@ read-only, and static-schema. It includes:
 - schema-backed validation, source-located diagnostics, deterministic compile
   and explain output, offline fixtures, atomic load, and migration fixtures.
 
-GraphQL remains conditional on the `0.7.0` user-visible evidence gate. If that
-gate fails, v1 narrows to REST rather than freezing an unproved GraphQL author
-surface.
+The `0.7.0` user-visible evidence gate retains GraphQL in the intended v1
+protocol set through one closed native relation. It does not activate either
+draft GraphQL authoring mode below. The accepted stable successor specification
+and complete package subset remain `0.8.0` decisions and work.
 
 The following sections remain post-v1 design proposals unless a later accepted
 RFC and pre-freeze product evidence add them to the candidate: dynamic schemas;
@@ -1486,6 +1508,12 @@ consume incrementally.
 ## 17. GraphQL Operations
 
 GraphQL is a separate protocol compiler, not a REST body-template convention.
+
+The following authoring syntax remains design-only. `0.7.0` does not accept
+either mode from YAML; it ships only the closed native profile described in
+Section 1.4. That profile uses one exact query document and fail-only partial
+data behavior, with no generated selection, caller variable, introspection, or
+author-selected endpoint.
 
 The specification supports two modes:
 
@@ -3055,7 +3083,7 @@ Custom code is not permission to bypass host security policy.
 
 Package loading in the intended v1 candidate is local and explicit. The native
 preview embeds one exact repository-owned `CompiledConnector` catalog
-containing the three fixed native relations and does not implement the loading
+containing the four fixed native relations and does not implement the loading
 behavior below.
 
 ### 33.1 Local packages

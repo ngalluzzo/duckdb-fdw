@@ -12,6 +12,17 @@ import sys
 import tempfile
 
 
+TEST_ROOT = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(TEST_ROOT))
+
+from source_demo_contracts.graphql_repository import (  # noqa: E402
+    validate_help as validate_graphql_help,
+    validate_privacy_mutation_oracles as validate_graphql_privacy_mutations,
+    validate_runner_source as validate_graphql_runner_source,
+    validate_sql_source as validate_graphql_sql_source,
+)
+
+
 EXPECTED_STATIC_SUMMARY = {
     "duckdb": ["v1.5.4", "08e34c447b"],
     "extension": {
@@ -19,7 +30,7 @@ EXPECTED_STATIC_SUMMARY = {
         "installed": False,
         "loaded": True,
         "name": "duckdb_api",
-        "version": "0.6.0",
+        "version": "0.7.0",
     },
     "relation": {
         "connector": "github",
@@ -204,6 +215,8 @@ def main() -> int:
     authenticated_sql = repository_root / "examples/authenticated-user.sql"
     repositories_runner = repository_root / "examples/authenticated_repositories.py"
     repositories_sql = repository_root / "examples/authenticated-repositories.sql"
+    graphql_runner = repository_root / "examples/viewer_repository_metrics.py"
+    graphql_sql = repository_root / "examples/viewer-repository-metrics.sql"
 
     with tempfile.TemporaryDirectory(prefix="duckdb-api-source-demo-") as directory:
         isolated = pathlib.Path(directory)
@@ -304,7 +317,7 @@ def main() -> int:
             )
         for fragment in (
             "getpass.getpass",
-            'EXPECTED_EXTENSION = ("duckdb_api", "0.6.0"',
+            'EXPECTED_EXTENSION = ("duckdb_api", "0.7.0"',
             '"private_repository_count": private_repository_count',
             '"repository_count": repository_count',
             '"request_profile": {',
@@ -318,6 +331,23 @@ def main() -> int:
             raise AssertionError(
                 "repository example must contain exactly the privacy-safe schema and count SQL"
             )
+
+        graphql_help = run(
+            [str(pinned_python), "-I", str(graphql_runner), "--help"],
+            isolated,
+            environment,
+        )
+        if graphql_help.returncode != 0:
+            raise AssertionError(
+                "GraphQL repository example help failed:\n"
+                f"stdout:\n{graphql_help.stdout}\n"
+                f"stderr:\n{graphql_help.stderr}"
+            )
+        validate_graphql_help(graphql_help.stdout)
+        graphql_runner_source = graphql_runner.read_text(encoding="utf-8")
+        validate_graphql_runner_source(graphql_runner_source)
+        validate_graphql_privacy_mutations(graphql_runner_source)
+        validate_graphql_sql_source(graphql_sql.read_text(encoding="utf-8"))
 
         failure = run(
             [str(pinned_python), "-I", "-c", FAILURE_PROGRAM],

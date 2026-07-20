@@ -7,6 +7,21 @@ This file records user-visible changes to duckdb-fdw.
 ### Added
 
 - The project is now distributed under the MIT License.
+- `github.viewer_repository_metrics`, a fixed authenticated GraphQL relation
+  with required repository identity, ownership, stars, privacy, archive, and
+  update values plus nullable `primary_language`.
+- Canonical query-only GraphQL execution through the existing immutable plan,
+  authorization capability, bounded HTTP transport, pull-based batch stream,
+  cancellation, and close boundaries. Sequential cursor traversal is limited
+  to 32 pages and 3,200 rows; complete serialized request bodies are limited to
+  8 KiB per page and 256 KiB per scan.
+- Strict GraphQL envelope and scalar validation. Every nonempty `errors` array
+  fails, including data-plus-errors; invalid required values and cursors fail
+  terminally; nullable language values become SQL `NULL`.
+- Offline bind, `DESCRIBE`, `EXPLAIN`, and `PREPARE` plus actual-DuckDB
+  filtering, ordering, limit, join, repeated-execution, controlled multi-page,
+  lifecycle, and privacy-safe live-compatibility evidence for the GraphQL
+  relation.
 - `visibility VARCHAR` as a required trailing column on
   `github.authenticated_repositories`.
 - Predicate-selective repository traversal for the exact structured predicate
@@ -27,8 +42,12 @@ This file records user-visible changes to duckdb-fdw.
 
 ### Changed
 
-- The working extension identity advances to the unreleased `0.6.0` line. The
+- The working extension identity advances to the unreleased `0.7.0` line. The
   published `0.5.0` source, contract, and release records remain immutable.
+- GraphQL remains in the intended v1 protocol set after one permanent relation
+  passed the same user-visible SQL, authority, resource, diagnostic,
+  cancellation, and lifecycle boundaries as REST. This does not activate the
+  declarative GraphQL authoring syntax described in the design documents.
 - Unsupported, ambiguous, unencodable, `NULL`, differently valued, and
   capability-unavailable predicates use the complete repository traversal and
   are evaluated by DuckDB. Invalid planning contracts fail before Runtime or
@@ -43,6 +62,10 @@ This file records user-visible changes to duckdb-fdw.
 
 ### Limitations
 
+- GraphQL is limited to the repository-owned
+  `viewer_repository_metrics` query profile. Callers cannot supply documents,
+  variables, endpoints, selections, introspection, mutations, pagination
+  values, or partial-data policy. All relational operators remain DuckDB-owned.
 - The only remote predicate optimization is
   `github.authenticated_repositories.visibility = 'private'`. Projection,
   ordering, limit, offset, and every other predicate remain local. The

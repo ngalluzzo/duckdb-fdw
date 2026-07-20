@@ -14,7 +14,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.6.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.7.0", True, False, "NOT_INSTALLED")
 EXPECTED_BEARER_TOKEN_BYTES = 8 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_BYTES = 16 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_ACCOUNTING = 'name + ": " + value + "\\r\\n"'
@@ -40,6 +40,16 @@ EXPECTED_REPOSITORY_SCHEMA = [
     ("fork", "BOOLEAN"),
     ("archived", "BOOLEAN"),
     ("visibility", "VARCHAR"),
+]
+EXPECTED_GRAPHQL_SCHEMA = [
+    ("id", "VARCHAR"),
+    ("full_name", "VARCHAR"),
+    ("owner_login", "VARCHAR"),
+    ("stars", "BIGINT"),
+    ("primary_language", "VARCHAR"),
+    ("private", "BOOLEAN"),
+    ("archived", "BOOLEAN"),
+    ("updated_at", "VARCHAR"),
 ]
 EXPECTED_EXPLAIN_FIELDS = [
     "relation",
@@ -67,6 +77,9 @@ FORBIDDEN_ARTIFACT_MARKERS = (
     b"runtime_generated_",
     b"duckdb_api_auth_adapter_test",
     b"duckdb_api_secret_test",
+    b"BuildControlledRuntimeScenario",
+    b"ControlledRuntimeScenario",
+    b"runtime-owned private canary",
     b"test-only-redacted",
 )
 
@@ -138,7 +151,7 @@ def main() -> int:
 
     repository_root = pathlib.Path(__file__).resolve().parents[2]
     expected_behavior = json.loads(
-        (repository_root / "release/0.6.0/public_contract.json").read_text()
+        (repository_root / "release/0.7.0/public_contract.json").read_text()
     )
     source_artifact = pathlib.Path(sys.argv[1]).resolve(strict=True)
     artifact_bytes = source_artifact.read_bytes()
@@ -355,6 +368,12 @@ def main() -> int:
         expect_bind_error(
             connection,
             "SELECT * FROM duckdb_api_scan(connector := 'github', "
+            "relation := 'viewer_repository_metrics')",
+            diagnostics["graphql_secret_missing"],
+        )
+        expect_bind_error(
+            connection,
+            "SELECT * FROM duckdb_api_scan(connector := 'github', "
             "relation := 'duckdb_login_search_page', secret := 'unused')",
             diagnostics["anonymous_secret_rejected"],
         )
@@ -405,6 +424,78 @@ def main() -> int:
             """
         )
         connection.execute("DEALLOCATE repository_bind")
+        graphql_description = connection.execute(
+            """
+            DESCRIBE SELECT * FROM duckdb_api_scan(
+                connector := 'github', relation := 'viewer_repository_metrics',
+                secret := 'not_resolved_during_bind'
+            )
+            """
+        ).fetchall()
+        if [
+            (row[0], row[1]) for row in graphql_description
+        ] != EXPECTED_GRAPHQL_SCHEMA:
+            raise AssertionError("GraphQL repository offline schema drifted")
+        connection.execute(
+            """
+            PREPARE graphql_bind AS
+            SELECT id, full_name, owner_login, stars, primary_language,
+                   private, archived, updated_at
+            FROM duckdb_api_scan(
+                connector := 'github', relation := 'viewer_repository_metrics',
+                secret := 'not_resolved_during_bind'
+            )
+            WHERE archived = FALSE
+            ORDER BY stars DESC, full_name
+            LIMIT 10
+            """
+        )
+        connection.execute("DEALLOCATE graphql_bind")
+
+        graphql_explain = "\n".join(
+            str(value)
+            for row in connection.execute(
+                """
+                EXPLAIN SELECT full_name, stars, primary_language
+                FROM duckdb_api_scan(
+                    connector := 'github',
+                    relation := 'viewer_repository_metrics',
+                    secret := 'not_resolved_during_explain'
+                )
+                WHERE archived = FALSE
+                ORDER BY stars DESC
+                LIMIT 10
+                """
+            ).fetchall()
+            for value in row
+        )
+        for marker in (
+            "graphql",
+            "query",
+            "fail_on_any_error",
+            "primary_language",
+            "graphql_cursor",
+            "sequential",
+            "mutable",
+            "Projection Owner",
+            "Ordering Owner",
+            "Limit Owner",
+            "duckdb",
+        ):
+            if marker not in graphql_explain:
+                raise AssertionError(
+                    f"GraphQL EXPLAIN omitted {marker!r}: {graphql_explain!r}"
+                )
+        for forbidden in (
+            "query DuckdbApiViewerRepositoryMetrics",
+            "$pageSize",
+            "$cursor",
+            "Authorization",
+            "Bearer ",
+            "not_resolved_during_explain",
+        ):
+            if forbidden in graphql_explain:
+                raise AssertionError("GraphQL EXPLAIN exposed private execution state")
 
         selective_explain = "\n".join(
             str(value)
@@ -462,7 +553,7 @@ def main() -> int:
             "diagnostics": diagnostics,
             "duckdb": list(EXPECTED_DUCKDB[:2]),
             "explain_fields": EXPECTED_EXPLAIN_FIELDS,
-            "extension": ["duckdb_api", "0.6.0"],
+            "extension": ["duckdb_api", "0.7.0"],
             "function": {
                 "name": "duckdb_api_scan",
                 "named_parameters": {
@@ -522,7 +613,68 @@ def main() -> int:
                     "schema": [list(column) for column in EXPECTED_REPOSITORY_SCHEMA],
                     "secret": "required_explicit_name",
                 },
+                {
+                    "cardinality": {"maximum": 3200, "minimum": 0},
+                    "connector": "github",
+                    "consistency": "mutable_no_snapshot",
+                    "domain": (
+                        "bounded_duplicate_preserving_authenticated_viewer_"
+                        "repository_connection"
+                    ),
+                    "duckdb_visible_not_null": False,
+                    "name": "viewer_repository_metrics",
+                    "nullability": {
+                        "nullable": ["primary_language"],
+                        "required": [
+                            "id",
+                            "full_name",
+                            "owner_login",
+                            "stars",
+                            "private",
+                            "archived",
+                            "updated_at",
+                        ],
+                    },
+                    "pagination": {
+                        "caller_inputs": False,
+                        "maximum_pages": 32,
+                        "page_size": 100,
+                        "request_order": "sequential",
+                        "resume": False,
+                        "retries": 0,
+                        "strategy": "graphql_cursor",
+                        "total": "unknown",
+                    },
+                    "public_row_identity": "not_deduplicated",
+                    "public_row_order": "not_guaranteed",
+                    "relational_ownership": {
+                        "filter": "duckdb",
+                        "limit": "duckdb",
+                        "offset": "duckdb",
+                        "ordering": "duckdb",
+                        "projection": "duckdb",
+                    },
+                    "schema": [list(column) for column in EXPECTED_GRAPHQL_SCHEMA],
+                    "secret": "required_explicit_name",
+                },
             ],
+            "protocols": {
+                "graphql": {
+                    "arbitrary_documents": False,
+                    "canonical_document_digest": (
+                        "9d3d78e2214669f11b9caabc2a7f062e2985f9da9628485f124e1f24e3a50c85"
+                    ),
+                    "canonical_document_identity": (
+                        "GITHUB_VIEWER_REPOSITORY_METRICS_V1"
+                    ),
+                    "endpoint": "https://api.github.com:443/graphql",
+                    "generated_selections": False,
+                    "introspection": False,
+                    "operation_kind": "query",
+                    "partial_data": "fail_on_any_error",
+                },
+                "rest": {"enabled": True},
+            },
             "relational_ownership": {
                 "filter": "duckdb",
                 "limit": "duckdb",
@@ -571,6 +723,30 @@ def main() -> int:
                     "maximum_string_bytes": 512,
                     "terminal_failure": "statement_error_no_successful_partial",
                 },
+                "viewer_repository_metrics": {
+                    "decoded_memory_bytes": 2 * 1024 * 1024,
+                    "decompressed_response_bytes_per_page": 8 * 1024 * 1024,
+                    "decompressed_response_bytes_per_scan": 64 * 1024 * 1024,
+                    "maximum_concurrency": 1,
+                    "maximum_decoded_records_per_page": 100,
+                    "maximum_decoded_records_per_scan": 3200,
+                    "maximum_execution_milliseconds": 30000,
+                    "maximum_json_nesting": 16,
+                    "maximum_output_batch_rows": 64,
+                    "maximum_pages": 32,
+                    "maximum_request_attempts": 32,
+                    "maximum_request_attempts_per_page": 1,
+                    "maximum_response_bytes_per_page": 8 * 1024 * 1024,
+                    "maximum_response_bytes_per_scan": 64 * 1024 * 1024,
+                    "maximum_response_header_bytes_per_page": 16 * 1024,
+                    "maximum_response_header_bytes_per_scan": 512 * 1024,
+                    "maximum_serialized_request_body_bytes_host": 16 * 1024,
+                    "maximum_serialized_request_body_bytes_per_page": 8 * 1024,
+                    "maximum_serialized_request_body_bytes_per_scan": 256 * 1024,
+                    "maximum_string_bytes": 512,
+                    "retained_cursor_bytes": "charged_to_decoded_memory",
+                    "terminal_failure": "statement_error_no_successful_partial",
+                },
                 "outbound_project_headers": {
                     "accounting": EXPECTED_OUTBOUND_PROJECT_HEADER_ACCOUNTING,
                     "maximum_bytes": EXPECTED_OUTBOUND_PROJECT_HEADER_BYTES,
@@ -601,7 +777,7 @@ def main() -> int:
             },
         }
         if behavior != expected_behavior:
-            raise AssertionError("observed public inventory disagrees with the 0.6.0 contract")
+            raise AssertionError("observed public inventory disagrees with the 0.7.0 contract")
         print(
             json.dumps(
                 {

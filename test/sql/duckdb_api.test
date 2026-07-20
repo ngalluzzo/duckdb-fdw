@@ -1,5 +1,5 @@
 # name: test/sql/duckdb_api.test
-# description: static public SQL and secret contract for 0.6.0
+# description: static public SQL and secret contract for 0.7.0
 # group: [duckdb_api]
 
 statement error
@@ -14,7 +14,7 @@ SELECT extension_version
 FROM duckdb_extensions()
 WHERE extension_name = 'duckdb_api';
 ----
-0.6.0
+0.7.0
 
 query TT
 SELECT type, default_provider
@@ -172,6 +172,52 @@ DEALLOCATE selective_repositories_scan;
 statement ok
 DEALLOCATE parameterized_repositories_scan;
 
+# The GraphQL repository relation preserves the same offline bind boundary.
+# Nullable primary_language is an execution value contract; the DuckDB table
+# function conservatively exposes every output column as nullable at bind.
+query TTTTTT
+DESCRIBE SELECT *
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'viewer_repository_metrics',
+    secret := 'offline_secret'
+);
+----
+id	VARCHAR	YES	NULL	NULL	NULL
+full_name	VARCHAR	YES	NULL	NULL	NULL
+owner_login	VARCHAR	YES	NULL	NULL	NULL
+stars	BIGINT	YES	NULL	NULL	NULL
+primary_language	VARCHAR	YES	NULL	NULL	NULL
+private	BOOLEAN	YES	NULL	NULL	NULL
+archived	BOOLEAN	YES	NULL	NULL	NULL
+updated_at	VARCHAR	YES	NULL	NULL	NULL
+
+statement ok
+EXPLAIN SELECT full_name, stars, primary_language, updated_at
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'viewer_repository_metrics',
+    secret := 'offline_secret'
+)
+WHERE archived = FALSE
+ORDER BY stars DESC, full_name
+LIMIT 10;
+
+statement ok
+PREPARE viewer_repository_metrics_scan AS
+SELECT id, full_name, owner_login, stars, primary_language, private, archived, updated_at
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'viewer_repository_metrics',
+    secret := 'offline_secret'
+)
+WHERE archived = FALSE
+ORDER BY stars DESC, full_name
+LIMIT 10;
+
+statement ok
+DEALLOCATE viewer_repository_metrics_scan;
+
 statement ok
 CREATE TEMPORARY SECRET sql_contract (
     TYPE duckdb_api,
@@ -213,6 +259,14 @@ SELECT * FROM duckdb_api_scan(
 );
 ----
 Binder Error: [duckdb_api][bind] connector=github relation=authenticated_repositories: required named argument secret is missing
+
+statement error
+SELECT * FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'viewer_repository_metrics'
+);
+----
+Binder Error: [duckdb_api][bind] connector=github relation=viewer_repository_metrics: required named argument secret is missing
 
 statement error
 SELECT * FROM duckdb_api_scan(

@@ -4,9 +4,9 @@
 typed, resource-bounded relations. It is FDW-like in purpose, but its public
 surface is DuckDB-native and it does not implement PostgreSQL's FDW API.
 
-The project is currently a source-built preview. It exposes three fixed GitHub
-relations while the general connector-authoring and distribution surfaces are
-still under development.
+The project is currently a source-built preview. It exposes four fixed GitHub
+relations across REST and GraphQL while the general connector-authoring and
+distribution surfaces are still under development.
 
 ## What works today
 
@@ -15,6 +15,7 @@ still under development.
 | `github.duckdb_login_search_page` | None | Up to three public GitHub users with `id`, `login`, and `site_admin` |
 | `github.authenticated_user` | Explicit temporary DuckDB secret | The current GitHub identity with `id`, `login`, and `site_admin` |
 | `github.authenticated_repositories` | Explicit temporary DuckDB secret | A bounded page chain of repositories with `id`, `full_name`, `private`, `fork`, `archived`, and `visibility` |
+| `github.viewer_repository_metrics` | Explicit temporary DuckDB secret | A bounded GraphQL cursor traversal with repository identity, ownership, stars, nullable primary language, visibility state, and update time |
 
 The anonymous relation uses the current public SQL surface:
 
@@ -36,13 +37,14 @@ optimization states use the complete traversal without changing the result.
 `EXPLAIN` reports the selected or fallback path, ownership, capabilities, and
 safe classification reason.
 
-Execution is bounded and fails the statement on malformed data, an invalid
-page transition, cancellation, or resource exhaustion; it does not return a
-complete-looking partial result. The [changelog](CHANGELOG.md) describes the
+Execution is bounded and fails the statement on malformed data, GraphQL
+errors, an invalid page transition, cancellation, or resource exhaustion; it
+does not return a complete-looking partial result. A nullable GraphQL primary
+language becomes SQL `NULL`. The [changelog](CHANGELOG.md) describes the
 current unreleased source. The [0.5.0 release notes](docs/releases/0.5.0-notes.md)
 remain the contract for the last published version; the
-[0.6.0 notes](docs/releases/0.6.0-notes.md) describe the current unreleased
-semantic-trust line.
+[0.7.0 notes](docs/releases/0.7.0-notes.md) describe the current unreleased
+GraphQL product line.
 
 ## Quick start
 
@@ -96,6 +98,17 @@ envelope, but never private repository rows or names.
 The underlying SQL is in
 [`examples/authenticated-user.sql`](examples/authenticated-user.sql) and
 [`examples/authenticated-repositories.sql`](examples/authenticated-repositories.sql).
+
+The GraphQL analytics example uses the same secret contract and reports only
+schema and safe aggregate evidence:
+
+```sh
+/absolute/pinned_python -I examples/viewer_repository_metrics.py \
+  /absolute/duckdb_api.duckdb_extension
+```
+
+Its SQL is in
+[`examples/viewer-repository-metrics.sql`](examples/viewer-repository-metrics.sql).
 
 After creating the temporary secret, the selective repository query is:
 
@@ -151,8 +164,9 @@ Repository, Git, verification, and documentation practices are in
 
 - The extension is not published or signed and cannot be installed from the
   DuckDB Community repository.
-- Only the three compiled-in GitHub relations above are available. Arbitrary
-  URLs, headers, connector packages, and GraphQL execution are not supported.
+- Only the four compiled-in GitHub relations above are available. Arbitrary
+  URLs, headers, connector packages, GraphQL documents, variables, selections,
+  and endpoints are not supported.
 - Authentication supports one explicitly named temporary `duckdb_api/config`
   bearer secret. Persistent and environment-backed providers, implicit secret
   selection, and OAuth are not supported.

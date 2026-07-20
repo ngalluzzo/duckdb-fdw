@@ -13,7 +13,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.6.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.7.0", True, False, "NOT_INSTALLED")
 EXPECTED_SCHEMA = [
     ("id", "BIGINT"),
     ("full_name", "VARCHAR"),
@@ -61,7 +61,7 @@ def main() -> int:
             """
         ).fetchone()
         if extension != EXPECTED_EXTENSION:
-            raise SystemExit("extension identity is outside the 0.6.0 product cell")
+            raise SystemExit("extension identity is outside the 0.7.0 product cell")
         connection.execute(
             "CREATE TEMPORARY SECRET github_default "
             "(TYPE duckdb_api, PROVIDER config, TOKEN "

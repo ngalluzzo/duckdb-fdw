@@ -206,9 +206,12 @@ release notes, and product diagnostics remain outside Runtime ownership.
 The exit becomes **Satisfied; X-as-a-Service** only when the final tree proves:
 
 1. `duckdb_api_runtime_executor_service` links only
-   `duckdb_api_runtime_interface_service` and `duckdb_api_scan_plan_service`;
-   its sources include no Connector, Query, DuckDB adapter, planner, or
-   Semantics-private header/source.
+   `duckdb_api_runtime_interface_service`, `duckdb_api_scan_plan_service`, and
+   Connector's protocol-neutral `duckdb_api_content_digest_service`; its
+   sources include no Connector metadata, Query, DuckDB adapter, planner, or
+   Semantics-private header/source. The digest service computes bytes to
+   SHA-256 only and grants no catalog, canonical-profile, relational, replay,
+   network, credential, or lifecycle authority.
 2. Focused Runtime GraphQL targets link
    `duckdb_api_semantics_fixture_service` and include only its public GraphQL
    fixture header; they link neither Connector metadata/fixtures nor relational

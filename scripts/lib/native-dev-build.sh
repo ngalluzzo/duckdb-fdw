@@ -147,24 +147,34 @@ run_build() {
         duckdb_api_connector_tests \
         duckdb_api_connector_catalog_fixture_tests \
         duckdb_api_scan_request_tests \
+        duckdb_api_typed_value_adapter_tests \
         duckdb_api_scan_planner_tests \
         duckdb_api_scan_plan_contract_tests \
         duckdb_api_scan_plan_pagination_contract_tests \
         duckdb_api_scan_plan_fixture_tests \
+        duckdb_api_graphql_semantics_tests \
         duckdb_api_execution_contract_tests \
         duckdb_api_authorization_contract_tests \
         duckdb_api_network_policy_tests \
         duckdb_api_uri_reference_tests \
         duckdb_api_link_pagination_tests \
         duckdb_api_scan_resource_accounting_tests \
+        duckdb_api_http_transport_contract_tests \
         duckdb_api_decoded_page_buffer_tests \
         duckdb_api_json_decoder_tests \
         duckdb_api_json_root_array_decoder_tests \
+        duckdb_api_graphql_response_decoder_tests \
+        duckdb_api_graphql_cursor_pagination_tests \
+        duckdb_api_controlled_runtime_scenario_tests \
         duckdb_api_http_scan_executor_tests \
         duckdb_api_http_scan_pagination_tests \
         duckdb_api_http_scan_executor_policy_tests \
+        duckdb_api_graphql_paginated_scan_tests \
+        duckdb_api_graphql_plan_admission_tests \
         duckdb_api_duckdb_secret_tests \
         duckdb_api_adapter_tests \
+        duckdb_api_graphql_query_contract_tests \
+        duckdb_api_graphql_product_contract_tests \
         duckdb_api_adapter_stream_contract_tests; do
         python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
             linkage "${PINS_FILE}" curl-free "${NATIVE_TEST_ROOT}/${target}" >/dev/null
@@ -212,22 +222,30 @@ run_tests() {
     "${NATIVE_TEST_ROOT}/duckdb_api_connector_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_connector_catalog_fixture_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_typed_value_adapter_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_pagination_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_fixture_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_graphql_semantics_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_execution_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_authorization_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_network_policy_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_uri_reference_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_link_pagination_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_resource_accounting_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_http_transport_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_decoded_page_buffer_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_json_decoder_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_json_root_array_decoder_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_graphql_response_decoder_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_graphql_cursor_pagination_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_controlled_runtime_scenario_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_pagination_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_policy_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_graphql_paginated_scan_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_graphql_plan_admission_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_transport_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_budget_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_lifecycle_tests"
@@ -238,6 +256,8 @@ run_tests() {
         "${REPOSITORY_ROOT}/test/python/runtime_curl_tls_tests.py" \
         "${NATIVE_TEST_ROOT}/duckdb_api_curl_tls_security_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_adapter_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_graphql_query_contract_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_graphql_product_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_adapter_stream_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_duckdb_secret_tests"
     (

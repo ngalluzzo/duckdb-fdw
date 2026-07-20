@@ -4,8 +4,9 @@
 > semantic pushdown, bounded streaming execution, pagination, enrichment,
 > shared auth and transport infrastructure, and an escape hatch for custom code.
 
-**Status:** Design proposal, revision 0.6; conservative relational composition
-is accepted by RFC 0010, predicate-selective repository scans by RFC 0008, the
+**Status:** Design proposal, revision 0.7; GraphQL repository analytics is
+accepted by RFC 0011, conservative relational composition by RFC 0010,
+predicate-selective repository scans by RFC 0008, the
 bounded repository-traversal native profile by RFC 0007, its authenticated
 capability base by RFC 0006, its live REST base by RFC 0005, and the
 distribution and native v1 boundary by RFC 0009.
@@ -49,16 +50,19 @@ The design deliberately separates:
 5. **Connector authoring** — declarative specifications for common APIs and
    trusted Rust or sandboxed WASM for exceptional cases.
 
-The current unreleased `0.6.0` source uses a native C++ table function to query
-one anonymous fixed HTTPS relation, one fixed authenticated identity, and one
-bounded sequential authenticated repository relation on one exact DuckDB and
-platform-dependency cell. It adds one safe predicate-selective path to the
-published `0.5.0` traversal and proves that projections, Boolean predicates,
-ordering, limits, and offsets compose conservatively while DuckDB remains the
-semantic owner. RFC 0009 selects that permanent native C++ table-function
-lineage for v1 on an exact tested compatibility matrix. A Rust/stable-C-API
-implementation and a custom attached catalog or logical-plan optimizer are
-optional future profiles, not v1 requirements or public ABI commitments.
+The current unreleased `0.7.0` source uses a native C++ table function to query
+four fixed GitHub relations on one exact DuckDB and platform-dependency cell:
+the retained anonymous and authenticated REST relations plus an authenticated
+GraphQL repository-analytics relation. The REST repository relation retains
+one safe predicate-selective path and the conservative composition evidence
+from `0.6.0`. The GraphQL relation proves that a second protocol can share the
+same permanent metadata, planning, authorization, transport, resource,
+streaming, cancellation, and close boundaries without acquiring relational or
+caller-selected request authority. RFC 0009 selects that permanent native C++
+table-function lineage for v1 on an exact tested compatibility matrix. A
+Rust/stable-C-API implementation and a custom attached catalog or logical-plan
+optimizer are optional future profiles, not v1 requirements or public ABI
+commitments.
 
 ---
 
@@ -189,7 +193,7 @@ flowchart TB
     subgraph P[Selected native v1 lineage]
         NATIVE[DuckDB native C++ extension]
         DISPATCH[duckdb_api_scan dispatcher]
-        LIVE[Fixed GitHub REST relation]
+        LIVE[Fixed GitHub REST and GraphQL relations]
         NATIVE --> DISPATCH --> LIVE
     end
 
@@ -214,9 +218,9 @@ flowchart TB
 
 ### 5.0 Current native C++ preview
 
-RFCs 0005 through 0008 define the current deliberately narrow native profile.
+RFCs 0005 through 0011 define the current deliberately narrow native profile.
 It is a source-built DuckDB C++ extension named `duckdb_api`, on the unreleased
-`0.6.0` source line, with one project-defined SQL function and three compiled-in
+`0.7.0` source line, with one project-defined SQL function and four compiled-in
 relations. The
 anonymous `github.duckdb_login_search_page` relation and capability-scoped
 `github.authenticated_user` relation retain their accepted `0.4.0` behavior.
@@ -333,6 +337,71 @@ authority. A malformed or escaping transition, exhausted budget, cancellation,
 close, status failure, decode failure, or schema failure is terminal and can
 never be reported as a complete-looking truncated relation.
 
+The fourth relation, `github.viewer_repository_metrics`, uses the same
+execution-time secret capability and public SQL function for one fixed
+GraphQL query profile:
+
+```sql
+SELECT full_name, stars, primary_language, updated_at
+FROM duckdb_api_scan(
+    connector := 'github',
+    relation := 'viewer_repository_metrics',
+    secret := 'github_default'
+)
+WHERE archived = FALSE
+ORDER BY stars DESC
+LIMIT 10;
+```
+
+Its eight columns are required `id VARCHAR`, `full_name VARCHAR`,
+`owner_login VARCHAR`, `stars BIGINT`, `private BOOLEAN`, `archived BOOLEAN`,
+and `updated_at VARCHAR`, plus nullable `primary_language VARCHAR`. The fixed
+query selects `viewer.repositories` for the complete owner, collaborator, and
+organization-member affiliation set, 100 rows at a time, using a nullable
+forward cursor and fixed `UPDATED_AT DESC` enumeration. That enumeration is
+cursor mechanics, not DuckDB-visible ordering or snapshot authority. The base
+relation is the duplicate-preserving occurrence bag across a mutable complete
+traversal; Runtime never deduplicates and DuckDB owns every relational
+operator.
+
+Connector Experience owns the exact canonical query bytes, identity, SHA-256
+digest, variable and response paths, schema/nullability, endpoint, and cursor
+declaration. Relational Semantics copies the validated facts into the closed
+REST-or-GraphQL planned-operation sum and derives query replay safety; it does
+not infer meaning by parsing the document. Runtime independently recomputes
+the digest and admits only that complete typed profile. A label, operation-kind
+flag, relation name, explanation string, or caller-supplied document grants no
+authority.
+
+DuckDB-owned residual predicates remain opaque to Runtime. Runtime admits the
+canonical GraphQL request profile when the plan keeps the remote predicate
+`TRUE`, marks its accuracy unsupported, assigns residual and all relational
+ownership to DuckDB, supplies no conditional input, and delegates no ordering,
+limit or offset to the remote or Runtime. It does not require an unrestricted
+local predicate or reinterpret Semantics' classification category, reason or
+explanation.
+
+For each page, Runtime serializes the complete compact JSON request from the
+immutable document, fixed `pageSize=100`, and stream-owned nullable cursor. It
+intersects the plan's 8 KiB per-body ceiling with the 16 KiB host ceiling and
+debits a 256 KiB scan body budget before bearer placement or transport. It
+sends one `application/json` POST to
+`https://api.github.com:443/graphql`, fully validates the JSON and GraphQL
+envelope before publishing the page, and fails every nonempty top-level
+`errors` array even when data is present. Required missing, null, duplicate, or
+wrongly typed values fail; a null primary language becomes a typed invalid
+`VARCHAR` and then SQL `NULL`.
+
+Cursor traversal is sequential with no prefetch. When `hasNextPage` is true,
+`endCursor` must be a nonempty string not previously used by the scan; it
+grants only the next variable value and never destination, document, or
+selection authority. The same 32-page, 100-row-per-page, 3,200-row-per-scan,
+64-row-batch, concurrency-one, response, decode, string, memory, nesting, and
+30-second ceilings used by the repository traversal remain enforced. GraphQL
+errors, invalid cursors, later-page failures, resource exhaustion,
+cancellation, close, and destruction use the standard terminal stream and
+capability-release rules.
+
 The `TOKEN` value is limited to 8,192 bytes at both DuckDB secret creation and
 resolution. Remote Runtime independently applies the same capability limit and
 a 16,384-byte aggregate ceiling to project-supplied request fields, counting
@@ -388,7 +457,7 @@ narrowings. DuckDB interruption reaches transfer and decoding. Stream cancel,
 close, and destruction are idempotent and non-throwing; connection close is
 bounded by the hard execution deadline but is not promised to cancel promptly.
 
-The installed composition contains only the three fixed public HTTPS relations and
+The installed composition contains only the four fixed public HTTPS relations and
 runtime service. Deterministic correctness evidence uses a separate private,
 non-installable composition whose compiled connector selects a controlled
 loopback service; it traverses the same registration, bind/copy, planning,
@@ -401,8 +470,9 @@ cannot invalidate the controlled relational oracle.
 The profile adds no token table-function argument, implicit secret selection,
 persistent or environment secret source, caller-selected URL or header, proxy,
 redirect, retry, rate-limit wait, parallel page, resume, cache, provider,
-GraphQL, connector-package loader, YAML compiler, runtime file path, or public
-native ABI. It intentionally replaces
+caller-selected GraphQL document, variables, endpoint, selection, mutation,
+introspection, partial-data policy, connector-package loader, YAML compiler,
+runtime file path, or public native ABI. It intentionally replaces
 the historical `example.items` fixture relation rather than shipping a second
 product relation. The `0.1.0`/`0.2.0` fixture behavior remains historical
 release evidence, not a fallback: a live failure returns a bounded diagnostic
@@ -1815,7 +1885,7 @@ Reuse as a concrete source of API patterns:
 
 | Area                       | Decision                                                               |
 | -------------------------- | ---------------------------------------------------------------------- |
-| Native product             | V1 lineage: C++ table-function extension on an exact evidence-derived matrix; current unreleased `0.6.0` source has three fixed GitHub relations and one retained, superset `visibility = 'private'` restriction |
+| Native product             | V1 lineage: C++ table-function extension on an exact evidence-derived matrix; current unreleased `0.7.0` source has four fixed GitHub relations across REST and one closed GraphQL query profile, plus one retained REST superset `visibility = 'private'` restriction |
 | Portable integration       | Possible post-v1 Rust C Extension API profile requiring its own RFC and parity evidence |
 | Deep integration           | Possible post-v1 thin C++ catalog/optimizer shell                      |
 | Core abstraction           | `ScanRequest` → explicit `ScanPlan` → `BatchStream`                    |

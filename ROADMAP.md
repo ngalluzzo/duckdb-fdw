@@ -200,6 +200,21 @@ is narrowed to REST before this release. Evidence includes a deterministic
 corpus of protocol and error variations and proof that retained protocols
 require no bespoke authority or lifecycle path.
 
+Current unreleased evidence retains GraphQL through the fixed authenticated
+`github.viewer_repository_metrics` relation. Connector publishes one
+repository-owned canonical query profile; Relational Semantics carries it as
+an immutable protocol-operation and cursor plan; Runtime admits and executes
+it through the standard authorization, transport, resource, cancellation, and
+`BatchStream` services; and Query exposes it through the unchanged
+`duckdb_api_scan` function. DuckDB owns every relational operator, nullable
+language values become SQL `NULL`, every nonempty GraphQL error array fails,
+and sequential traversal stays within the accepted page, row, body, response,
+memory, concurrency, and time budgets.
+
+This outcome does not activate declarative GraphQL authoring. It proves the
+permanent product path needed before `0.8.0` chooses and implements the complete
+local-package subset.
+
 ### `0.8.0` — local package lifecycle and analytical workflows
 
 Before this release begins, accepted product RFCs choose the intended SQL and
