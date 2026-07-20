@@ -6,15 +6,21 @@
 
 namespace duckdb_api_test {
 
-// Closed Semantics provider API for focused Runtime consumers. Each named
-// counterexample changes exactly one public leaf across the complete admitted
-// GraphQL plan. Factories expose immutable plan values, never arbitrary
-// builders, Connector catalogs, ScanRequest values, Runtime types, or
-// credential bytes. COUNT is an iteration sentinel, not a plan candidate.
-enum class GraphqlPlanCounterexample {
-	OTHER_CONNECTOR_NAME,
-	OTHER_CONNECTOR_VERSION,
-	OTHER_RELATION_NAME,
+// Closed Semantics provider API for focused Runtime admission consumers. Each
+// counterexample changes exactly one structured executable fact that Runtime
+// must reject before authorization or transport. Provenance prose and valid
+// logical-secret names are intentionally outside this rejection surface.
+// Factories expose immutable plans, never private builders, Connector catalogs,
+// ScanRequest values, Runtime types, or credential bytes. COUNT is an iteration
+// sentinel, not a plan candidate.
+enum class GraphqlRuntimeAdmissionCounterexample {
+	UNKNOWN_PROTOCOL,
+	GRAPHQL_CONTRADICTORY_PROTOCOL_PAYLOADS,
+	GRAPHQL_MISSING_ACTIVE_PROTOCOL_PAYLOAD,
+	GRAPHQL_WRONG_PROTOCOL_PAYLOAD,
+	REST_CONTRADICTORY_PROTOCOL_PAYLOADS,
+	REST_MISSING_ACTIVE_PROTOCOL_PAYLOAD,
+	REST_WRONG_PROTOCOL_PAYLOAD,
 	OTHER_OPERATION_NAME,
 	OTHER_OPERATION_CARDINALITY,
 	UNKNOWN_REPLAY_SAFETY,
@@ -29,16 +35,22 @@ enum class GraphqlPlanCounterexample {
 	OTHER_OPERATION_PATH,
 	OTHER_HEADER_NAME,
 	OTHER_HEADER_VALUE,
+	MISSING_OPERATION_HEADER,
+	REORDERED_OPERATION_HEADERS,
 	EXTRA_OPERATION_HEADER,
 	OTHER_VARIABLE_NAME,
 	UNKNOWN_VARIABLE_TYPE,
 	UNKNOWN_VARIABLE_SOURCE,
 	OTHER_VARIABLE_INTEGER_VALUE,
+	MISSING_OPERATION_VARIABLE,
+	REORDERED_OPERATION_VARIABLES,
 	EXTRA_OPERATION_VARIABLE,
 	OTHER_RESULT_NAME,
 	UNKNOWN_RESULT_SCALAR,
 	OTHER_RESULT_NULLABILITY,
 	OTHER_RESULT_PATH,
+	MISSING_OPERATION_RESULT_COLUMN,
+	REORDERED_OPERATION_RESULT_COLUMNS,
 	EXTRA_OPERATION_RESULT_COLUMN,
 	OTHER_RESPONSE_NODES_PATH,
 	OTHER_RESPONSE_ERRORS_PATH,
@@ -63,6 +75,8 @@ enum class GraphqlPlanCounterexample {
 	OTHER_OUTPUT_LOGICAL_TYPE,
 	OTHER_OUTPUT_NULLABILITY,
 	OTHER_OUTPUT_EXTRACTOR,
+	MISSING_OUTPUT_COLUMN,
+	REORDERED_OUTPUT_COLUMNS,
 	EXTRA_OUTPUT_COLUMN,
 	OTHER_DOMAIN,
 	OTHER_REMOTE_PREDICATE,
@@ -87,7 +101,6 @@ enum class GraphqlPlanCounterexample {
 	RETRY_ENABLED,
 	CACHE_ENABLED,
 	AUTHENTICATION_DISABLED,
-	OTHER_SECRET_REFERENCE,
 	SECRET_REFERENCE_ABSENT,
 	OTHER_AUTH_REQUIREMENT,
 	OTHER_LOGICAL_CREDENTIAL,
@@ -143,12 +156,11 @@ enum class GraphqlPlanCounterexample {
 	OTHER_SCAN_WALL_MILLISECONDS,
 	OTHER_SCAN_CONCURRENCY,
 	OTHER_SCAN_SERIALIZED_BODY_BYTES,
-	OTHER_CLASSIFICATION_REASON,
 	COUNT
 };
 
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name);
-duckdb_api::ScanPlan BuildGraphqlPlanCounterexample(const std::string &exact_logical_secret_name,
-                                                    GraphqlPlanCounterexample counterexample);
+duckdb_api::ScanPlan BuildGraphqlRuntimeAdmissionCounterexample(const std::string &exact_logical_secret_name,
+                                                                GraphqlRuntimeAdmissionCounterexample counterexample);
 
 } // namespace duckdb_api_test

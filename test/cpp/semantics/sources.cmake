@@ -3,6 +3,7 @@
 # internals into their targets.
 set(RELATIONAL_PLAN_TEST_SERVICE_SOURCES
     test/cpp/semantics/support/graphql_scan_plan_test_fixtures.cpp
+    test/cpp/semantics/support/graphql_protocol_plan_counterexamples.cpp
     test/cpp/semantics/support/graphql_operation_plan_counterexamples.cpp
     test/cpp/semantics/support/graphql_authority_plan_counterexamples.cpp
     test/cpp/semantics/support/graphql_cursor_plan_counterexamples.cpp
@@ -33,6 +34,8 @@ set(RELATIONAL_PLAN_TEST_CONTRACT_SOURCES
     test/cpp/semantics/scan_plan_fixture_consumer_boundary_tests.cpp)
 set(GRAPHQL_SEMANTICS_TEST_SOURCES
     test/cpp/semantics/support/graphql_plan_equality.cpp
+    test/cpp/semantics/support/graphql_plan_variations.cpp
+    test/cpp/semantics/support/graphql_protocol_test_inspection.cpp
     test/cpp/semantics/graphql_operation_plan_tests.cpp
     test/cpp/semantics/graphql_base_domain_tests.cpp
     test/cpp/semantics/graphql_cursor_resource_plan_tests.cpp

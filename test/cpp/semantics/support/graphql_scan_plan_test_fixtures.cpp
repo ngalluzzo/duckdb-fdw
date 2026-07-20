@@ -13,8 +13,9 @@ void ScanPlanTestAccess::ReplaceGraphql(duckdb_api::ScanPlan &plan, duckdb_api::
 	    duckdb_api::PlannedProtocolOperation::FromGraphql(std::move(operation)));
 }
 
-duckdb_api::ScanPlan ScanPlanTestAccess::Graphql(duckdb_api::ScanPlan plan, GraphqlPlanCounterexample counterexample) {
-	if (!MutateGraphqlOperationOrSchema(plan, counterexample) &&
+duckdb_api::ScanPlan ScanPlanTestAccess::Graphql(duckdb_api::ScanPlan plan,
+                                                 GraphqlRuntimeAdmissionCounterexample counterexample) {
+	if (!MutateGraphqlProtocol(plan, counterexample) && !MutateGraphqlOperationOrSchema(plan, counterexample) &&
 	    !MutateGraphqlRelationalOrAuthority(plan, counterexample) && !MutateGraphqlCursor(plan, counterexample) &&
 	    !MutateGraphqlResources(plan, counterexample)) {
 		throw std::invalid_argument("unknown closed GraphQL plan counterexample");
@@ -26,8 +27,8 @@ duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_l
 	return BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name);
 }
 
-duckdb_api::ScanPlan BuildGraphqlPlanCounterexample(const std::string &exact_logical_secret_name,
-                                                    GraphqlPlanCounterexample counterexample) {
+duckdb_api::ScanPlan BuildGraphqlRuntimeAdmissionCounterexample(const std::string &exact_logical_secret_name,
+                                                                GraphqlRuntimeAdmissionCounterexample counterexample) {
 	return ScanPlanTestAccess::Graphql(BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name), counterexample);
 }
 

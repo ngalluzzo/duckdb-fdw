@@ -2,6 +2,8 @@
 
 #include "semantics/support/scan_plan_test_fixtures.hpp"
 #include "semantics/support/graphql_scan_plan_test_fixtures.hpp"
+#include "semantics/support/graphql_plan_test_variations.hpp"
+#include "semantics/support/graphql_protocol_test_inspection.hpp"
 
 namespace duckdb_api_test {
 
@@ -12,12 +14,18 @@ class ScanPlanTestAccess {
 public:
 	static void ReplaceRest(duckdb_api::ScanPlan &plan, duckdb_api::PlannedRestOperation operation);
 	static void ReplaceGraphql(duckdb_api::ScanPlan &plan, duckdb_api::PlannedGraphqlOperation operation);
-	static duckdb_api::ScanPlan Graphql(duckdb_api::ScanPlan plan, GraphqlPlanCounterexample counterexample);
-	static bool MutateGraphqlOperationOrSchema(duckdb_api::ScanPlan &plan, GraphqlPlanCounterexample counterexample);
+	static duckdb_api::ScanPlan Graphql(duckdb_api::ScanPlan plan,
+	                                    GraphqlRuntimeAdmissionCounterexample counterexample);
+	static duckdb_api::ScanPlan GraphqlVariation(duckdb_api::ScanPlan plan, GraphqlPlanVariation variation);
+	static GraphqlProtocolEnvelopeShape GraphqlProtocolShape(const duckdb_api::ScanPlan &plan);
+	static bool MutateGraphqlProtocol(duckdb_api::ScanPlan &plan, GraphqlRuntimeAdmissionCounterexample counterexample);
+	static bool MutateGraphqlOperationOrSchema(duckdb_api::ScanPlan &plan,
+	                                           GraphqlRuntimeAdmissionCounterexample counterexample);
 	static bool MutateGraphqlRelationalOrAuthority(duckdb_api::ScanPlan &plan,
-	                                               GraphqlPlanCounterexample counterexample);
-	static bool MutateGraphqlCursor(duckdb_api::ScanPlan &plan, GraphqlPlanCounterexample counterexample);
-	static bool MutateGraphqlResources(duckdb_api::ScanPlan &plan, GraphqlPlanCounterexample counterexample);
+	                                               GraphqlRuntimeAdmissionCounterexample counterexample);
+	static bool MutateGraphqlCursor(duckdb_api::ScanPlan &plan, GraphqlRuntimeAdmissionCounterexample counterexample);
+	static bool MutateGraphqlResources(duckdb_api::ScanPlan &plan,
+	                                   GraphqlRuntimeAdmissionCounterexample counterexample);
 	static duckdb_api::ScanPlan Operation(duckdb_api::ScanPlan plan, OperationPlanCounterexample counterexample);
 	static duckdb_api::ScanPlan Authenticated(duckdb_api::ScanPlan plan,
 	                                          AuthenticatedPlanCounterexample counterexample);

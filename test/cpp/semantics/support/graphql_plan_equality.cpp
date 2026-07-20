@@ -1,6 +1,6 @@
 #include "semantics/support/graphql_plan_equality.hpp"
 
-#include <algorithm>
+#include <stdexcept>
 
 namespace duckdb_api_test {
 namespace {
@@ -20,6 +20,62 @@ void CountOrigin(std::size_t &count, const duckdb_api::PlannedHttpOrigin &left,
 void CountPath(std::size_t &count, const duckdb_api::PlannedGraphqlResponsePath &left,
                const duckdb_api::PlannedGraphqlResponsePath &right) {
 	CountValue(count, left.segments, right.segments);
+}
+
+bool HeadersEqual(const std::vector<duckdb_api::PlannedHttpHeader> &left,
+                  const std::vector<duckdb_api::PlannedHttpHeader> &right) {
+	if (left.size() != right.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.size(); index++) {
+		if (left[index].name != right[index].name || left[index].value != right[index].value) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool VariablesEqual(const std::vector<duckdb_api::PlannedGraphqlVariable> &left,
+                    const std::vector<duckdb_api::PlannedGraphqlVariable> &right) {
+	if (left.size() != right.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.size(); index++) {
+		if (left[index].name != right[index].name || left[index].type != right[index].type ||
+		    left[index].source != right[index].source || left[index].integer_value != right[index].integer_value) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool ResultColumnsEqual(const std::vector<duckdb_api::PlannedGraphqlResultColumn> &left,
+                        const std::vector<duckdb_api::PlannedGraphqlResultColumn> &right) {
+	if (left.size() != right.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.size(); index++) {
+		if (left[index].name != right[index].name || left[index].scalar_kind != right[index].scalar_kind ||
+		    left[index].nullable != right[index].nullable ||
+		    left[index].response_path.segments != right[index].response_path.segments) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool OutputColumnsEqual(const std::vector<duckdb_api::PlannedColumn> &left,
+                        const std::vector<duckdb_api::PlannedColumn> &right) {
+	if (left.size() != right.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.size(); index++) {
+		if (left[index].name != right[index].name || left[index].logical_type != right[index].logical_type ||
+		    left[index].nullable != right[index].nullable || left[index].extractor != right[index].extractor) {
+			return false;
+		}
+	}
+	return true;
 }
 
 void CountCursor(std::size_t &count, const duckdb_api::PlannedGraphqlCursor &left,
@@ -50,25 +106,9 @@ void CountOperation(std::size_t &count, const duckdb_api::PlannedGraphqlOperatio
 	CountValue(count, left.document_digest, right.document_digest);
 	CountOrigin(count, left.origin, right.origin);
 	CountValue(count, left.path, right.path);
-	CountValue(count, left.headers.size(), right.headers.size());
-	for (std::size_t index = 0; index < std::min(left.headers.size(), right.headers.size()); index++) {
-		CountValue(count, left.headers[index].name, right.headers[index].name);
-		CountValue(count, left.headers[index].value, right.headers[index].value);
-	}
-	CountValue(count, left.variables.size(), right.variables.size());
-	for (std::size_t index = 0; index < std::min(left.variables.size(), right.variables.size()); index++) {
-		CountValue(count, left.variables[index].name, right.variables[index].name);
-		CountValue(count, left.variables[index].type, right.variables[index].type);
-		CountValue(count, left.variables[index].source, right.variables[index].source);
-		CountValue(count, left.variables[index].integer_value, right.variables[index].integer_value);
-	}
-	CountValue(count, left.result_columns.size(), right.result_columns.size());
-	for (std::size_t index = 0; index < std::min(left.result_columns.size(), right.result_columns.size()); index++) {
-		CountValue(count, left.result_columns[index].name, right.result_columns[index].name);
-		CountValue(count, left.result_columns[index].scalar_kind, right.result_columns[index].scalar_kind);
-		CountValue(count, left.result_columns[index].nullable, right.result_columns[index].nullable);
-		CountPath(count, left.result_columns[index].response_path, right.result_columns[index].response_path);
-	}
+	CountValue(count, HeadersEqual(left.headers, right.headers), true);
+	CountValue(count, VariablesEqual(left.variables, right.variables), true);
+	CountValue(count, ResultColumnsEqual(left.result_columns, right.result_columns), true);
 	CountPath(count, left.response.nodes, right.response.nodes);
 	CountPath(count, left.response.errors, right.response.errors);
 	CountPath(count, left.response.page_info, right.response.page_info);
@@ -125,15 +165,22 @@ std::size_t CountGraphqlPlanDifferences(const duckdb_api::ScanPlan &left, const 
 	CountValue(count, left.Operation().Protocol(), right.Operation().Protocol());
 	if (left.Operation().Protocol() == duckdb_api::PlannedProtocol::GRAPHQL &&
 	    right.Operation().Protocol() == duckdb_api::PlannedProtocol::GRAPHQL) {
-		CountOperation(count, left.Operation().Graphql(), right.Operation().Graphql());
+		const duckdb_api::PlannedGraphqlOperation *left_graphql = nullptr;
+		const duckdb_api::PlannedGraphqlOperation *right_graphql = nullptr;
+		try {
+			left_graphql = &left.Operation().Graphql();
+		} catch (const std::logic_error &) {
+		}
+		try {
+			right_graphql = &right.Operation().Graphql();
+		} catch (const std::logic_error &) {
+		}
+		CountValue(count, left_graphql != nullptr, right_graphql != nullptr);
+		if (left_graphql != nullptr && right_graphql != nullptr) {
+			CountOperation(count, *left_graphql, *right_graphql);
+		}
 	}
-	CountValue(count, left.OutputColumns().size(), right.OutputColumns().size());
-	for (std::size_t index = 0; index < std::min(left.OutputColumns().size(), right.OutputColumns().size()); index++) {
-		CountValue(count, left.OutputColumns()[index].name, right.OutputColumns()[index].name);
-		CountValue(count, left.OutputColumns()[index].logical_type, right.OutputColumns()[index].logical_type);
-		CountValue(count, left.OutputColumns()[index].nullable, right.OutputColumns()[index].nullable);
-		CountValue(count, left.OutputColumns()[index].extractor, right.OutputColumns()[index].extractor);
-	}
+	CountValue(count, OutputColumnsEqual(left.OutputColumns(), right.OutputColumns()), true);
 	CountValue(count, left.RemotePredicate(), right.RemotePredicate());
 	CountValue(count, left.RemoteAccuracy(), right.RemoteAccuracy());
 	CountValue(count, left.ResidualPredicate(), right.ResidualPredicate());
