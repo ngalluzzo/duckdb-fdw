@@ -55,6 +55,7 @@ bool IsKnownBaseDomain(CompiledPredicateBaseDomain domain) {
 	switch (domain) {
 	case CompiledPredicateBaseDomain::GITHUB_AUTHENTICATED_REPOSITORY_OCCURRENCES:
 	case CompiledPredicateBaseDomain::CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES:
+	case CompiledPredicateBaseDomain::PACKAGE_DECLARED_OCCURRENCE_DOMAIN:
 		return true;
 	case CompiledPredicateBaseDomain::PACKAGE_DECLARED_OCCURRENCE_DOMAIN:
 		// Package proof validation belongs to the package-selection slice. Keep
@@ -64,15 +65,40 @@ bool IsKnownBaseDomain(CompiledPredicateBaseDomain domain) {
 	return false;
 }
 
+bool IsPackageProfile(const CompiledPredicateMapping &mapping) {
+	return mapping.Literal() == CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL ||
+	       mapping.ProofIdentity() == CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1 ||
+	       mapping.BaseDomain() == CompiledPredicateBaseDomain::PACKAGE_DECLARED_OCCURRENCE_DOMAIN;
+}
+
 void ValidateMappingFacts(const CompiledOperation &operation, const CompiledPredicateMapping &mapping) {
 	if (mapping.OperationName() != operation.name || !IsKnownBaseDomain(mapping.BaseDomain()) ||
 	    mapping.EncodingCapability() != CompiledPredicateEncodingCapability::SINGLE_POSITIVE_REST_QUERY_INPUT ||
 	    mapping.MaximumConditionalInputs() != 1 || mapping.SupportsCompoundConjunctionEncoding() ||
 	    mapping.SupportsDisjunctionEncoding() || mapping.SupportsComplementEncoding() ||
 	    mapping.InputPlacement() != CompiledPredicateInputPlacement::REST_QUERY_PARAMETER ||
-	    mapping.RemoteInputName().empty() || mapping.EncodedRemoteValue().empty()) {
+	    mapping.RemoteInputName().empty() || (!IsPackageProfile(mapping) && mapping.EncodedRemoteValue().empty())) {
 		throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
 		                    "selected predicate mapping contains inconsistent operation or encoding facts");
+	}
+	if (IsPackageProfile(mapping)) {
+		const bool exact = mapping.Accuracy() == CompiledPredicateAccuracy::EXACT;
+		const bool superset = mapping.Accuracy() == CompiledPredicateAccuracy::SUPERSET;
+		const auto expected_occurrences =
+		    exact ? CompiledPredicateOccurrencePreservation::PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES
+		          : CompiledPredicateOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES;
+		if ((!exact && !superset) || mapping.Literal() != CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL ||
+		    mapping.TypedLiteral().IsNull() ||
+		    mapping.ProofIdentity() != CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1 ||
+		    mapping.ProofIdentityValue().empty() ||
+		    mapping.BaseDomain() != CompiledPredicateBaseDomain::PACKAGE_DECLARED_OCCURRENCE_DOMAIN ||
+		    mapping.BaseDomainValue().empty() || mapping.MatchingFixture().empty() ||
+		    mapping.FalseOrNullFixture().empty() || mapping.DuplicatesFixture().empty() ||
+		    mapping.OccurrencePreservation() != expected_occurrences) {
+			throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
+			                    "package predicate mapping lacks its typed occurrence proof");
+		}
+		return;
 	}
 
 	switch (mapping.Accuracy()) {
@@ -99,16 +125,49 @@ void ValidateMappingFacts(const CompiledOperation &operation, const CompiledPred
 	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, "predicate mapping contains an unknown accuracy");
 }
 
-bool ColumnTypeMatches(const std::string &logical_type, RequestedPredicateValueKind type) {
+bool ColumnTypeMatches(CompiledScalarType scalar_type, RequestedPredicateValueKind type) {
 	switch (type) {
 	case RequestedPredicateValueKind::BIGINT:
-		return logical_type == "BIGINT";
+		return scalar_type == CompiledScalarType::BIGINT;
 	case RequestedPredicateValueKind::VARCHAR:
-		return logical_type == "VARCHAR";
+		return scalar_type == CompiledScalarType::VARCHAR;
 	case RequestedPredicateValueKind::BOOLEAN:
-		return logical_type == "BOOLEAN";
+		return scalar_type == CompiledScalarType::BOOLEAN;
 	}
 	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, "predicate comparison contains an unknown logical type");
+}
+
+bool TypedLiteralMatches(const CompiledScalarValue &compiled, const RequestedPredicateValue &requested) {
+	if (compiled.IsNull()) {
+		return false;
+	}
+	switch (requested.Kind()) {
+	case RequestedPredicateValueKind::BOOLEAN:
+		return compiled.Type() == CompiledScalarType::BOOLEAN && compiled.Boolean() == requested.BooleanValue();
+	case RequestedPredicateValueKind::BIGINT:
+		return compiled.Type() == CompiledScalarType::BIGINT && compiled.Bigint() == requested.BigIntValue();
+	case RequestedPredicateValueKind::VARCHAR:
+		return compiled.Type() == CompiledScalarType::VARCHAR && compiled.Varchar() == requested.VarcharValue();
+	}
+	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, "predicate comparison contains an unknown literal kind");
+}
+
+bool SameTypedLiteral(const CompiledScalarValue &left, const CompiledScalarValue &right) {
+	if (left.Type() != right.Type() || left.IsNull() != right.IsNull()) {
+		return false;
+	}
+	if (left.IsNull()) {
+		return true;
+	}
+	switch (left.Type()) {
+	case CompiledScalarType::BOOLEAN:
+		return left.Boolean() == right.Boolean();
+	case CompiledScalarType::BIGINT:
+		return left.Bigint() == right.Bigint();
+	case CompiledScalarType::VARCHAR:
+		return left.Varchar() == right.Varchar();
+	}
+	return false;
 }
 
 bool MappingMatches(const CompiledRelation &relation, const CompiledOperation &operation,
@@ -117,12 +176,21 @@ bool MappingMatches(const CompiledRelation &relation, const CompiledOperation &o
 		return false;
 	}
 	const auto &column = relation.Columns()[candidate.BoundColumnIndex()];
-	if (column.name != mapping.ColumnName() || !ColumnTypeMatches(column.logical_type, candidate.BoundColumnType()) ||
-	    column.nullable || candidate.ComparisonOperator() != RequestedPredicateComparisonOperator::EQUALS ||
-	    mapping.Operator() != CompiledPredicateOperator::EQUALS ||
-	    candidate.Literal().Kind() != RequestedPredicateValueKind::VARCHAR ||
-	    mapping.Literal() != CompiledPredicateLiteral::VARCHAR_PRIVATE ||
-	    candidate.Literal().VarcharValue() != "private") {
+	if (column.name != mapping.ColumnName() || !ColumnTypeMatches(column.ScalarType(), candidate.BoundColumnType()) ||
+	    candidate.ComparisonOperator() != RequestedPredicateComparisonOperator::EQUALS ||
+	    mapping.Operator() != CompiledPredicateOperator::EQUALS) {
+		return false;
+	}
+	// Package predicates retain their exact typed literal; native compatibility
+	// remains deliberately limited to non-null VARCHAR `private`. Matching here
+	// derives candidate-local selection evidence only and grants no request-
+	// materialization authority.
+	const bool package_match = mapping.Literal() == CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL &&
+	                           TypedLiteralMatches(mapping.TypedLiteral(), candidate.Literal());
+	const bool native_match = !column.nullable && mapping.Literal() == CompiledPredicateLiteral::VARCHAR_PRIVATE &&
+	                          candidate.Literal().Kind() == RequestedPredicateValueKind::VARCHAR &&
+	                          candidate.Literal().VarcharValue() == "private";
+	if (!package_match && !native_match) {
 		return false;
 	}
 	ValidateMappingFacts(operation, mapping);
@@ -136,7 +204,7 @@ void ValidateCandidateBindings(const CompiledRelation &relation, const Requested
 		return;
 	case RequestedPredicateKind::COMPARISON:
 		if (candidate.BoundColumnIndex() >= relation.Columns().size() ||
-		    !ColumnTypeMatches(relation.Columns()[candidate.BoundColumnIndex()].logical_type,
+		    !ColumnTypeMatches(relation.Columns()[candidate.BoundColumnIndex()].ScalarType(),
 		                       candidate.BoundColumnType()) ||
 		    candidate.BoundColumnType() != candidate.Literal().Kind()) {
 			throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
@@ -240,13 +308,19 @@ bool SameMappingAndBinding(const MatchedCandidate &left, const MatchedCandidate 
 	return left.candidate->StructurallyEquals(*right.candidate) &&
 	       left_mapping.ColumnName() == right_mapping.ColumnName() &&
 	       left_mapping.Operator() == right_mapping.Operator() && left_mapping.Literal() == right_mapping.Literal() &&
+	       SameTypedLiteral(left_mapping.TypedLiteral(), right_mapping.TypedLiteral()) &&
 	       left_mapping.OperationName() == right_mapping.OperationName() &&
 	       left_mapping.InputPlacement() == right_mapping.InputPlacement() &&
 	       left_mapping.RemoteInputName() == right_mapping.RemoteInputName() &&
 	       left_mapping.EncodedRemoteValue() == right_mapping.EncodedRemoteValue() &&
 	       left_mapping.Accuracy() == right_mapping.Accuracy() &&
 	       left_mapping.ProofIdentity() == right_mapping.ProofIdentity() &&
+	       left_mapping.ProofIdentityValue() == right_mapping.ProofIdentityValue() &&
 	       left_mapping.BaseDomain() == right_mapping.BaseDomain() &&
+	       left_mapping.BaseDomainValue() == right_mapping.BaseDomainValue() &&
+	       left_mapping.MatchingFixture() == right_mapping.MatchingFixture() &&
+	       left_mapping.FalseOrNullFixture() == right_mapping.FalseOrNullFixture() &&
+	       left_mapping.DuplicatesFixture() == right_mapping.DuplicatesFixture() &&
 	       left_mapping.OccurrencePreservation() == right_mapping.OccurrencePreservation() &&
 	       left_mapping.EncodingCapability() == right_mapping.EncodingCapability();
 }
@@ -347,6 +421,13 @@ PredicatePlanDecision Classify(const CompiledRelation &relation, const CompiledO
 	}
 
 	const auto &mapping = *matches.front().mapping;
+	if (mapping.Literal() == CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL) {
+		// Selection can reason about the package binding before Runtime's typed
+		// request field exists, but a complete ScanPlan must never relabel that
+		// binding as the legacy visibility-private authority.
+		throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
+		                    "package predicate request materialization is not present in this planning slice");
+	}
 	const bool exact =
 	    mapping.Accuracy() == CompiledPredicateAccuracy::EXACT && !contains_unmapped_structure &&
 	    (IsSingleComparison(request.requested_predicate) ||

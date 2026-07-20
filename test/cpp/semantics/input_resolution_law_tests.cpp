@@ -41,12 +41,13 @@ void TestOmissionAndTypedDefaults() {
 	const auto generation = duckdb_api_test::BuildTypedFallbackPackageGenerationFixture();
 	const auto resolved =
 	    duckdb_api::input_resolution::ResolveRelationInputs(TypedRelation(generation), ExplicitInputs());
-	Require(resolved.Size() == 4, "input resolution changed declaration order or count");
+	Require(resolved.Size() == 5, "input resolution changed declaration order or count");
 
 	const auto *query = resolved.Find("query");
 	const auto *limit = resolved.Find("limit");
 	const auto *include_archived = resolved.Find("include_archived");
 	const auto *cursor = resolved.Find("cursor");
+	const auto *locale = resolved.Find("locale");
 	Require(query != nullptr && query->State() == ResolvedInputState::UNBOUND &&
 	            query->Source() == ResolvedInputSource::NONE,
 	        "omitted input without a default did not remain UNBOUND");
@@ -59,6 +60,9 @@ void TestOmissionAndTypedDefaults() {
 	Require(cursor != nullptr && cursor->State() == ResolvedInputState::BOUND_NULL &&
 	            cursor->Source() == ResolvedInputSource::DEFAULT_VALUE,
 	        "omitted nullable VARCHAR did not preserve its typed NULL default");
+	Require(locale != nullptr && locale->State() == ResolvedInputState::BOUND_VALUE &&
+	            locale->VarcharValue() == "global" && locale->Source() == ResolvedInputSource::DEFAULT_VALUE,
+	        "omitted nullable VARCHAR did not receive its concrete compiled default");
 }
 
 void TestExplicitValuesOverrideDefaultsWithoutCollapsingNull() {
@@ -67,7 +71,8 @@ void TestExplicitValuesOverrideDefaultsWithoutCollapsingNull() {
 	const auto resolved = duckdb_api::input_resolution::ResolveRelationInputs(
 	    relation, ExplicitInputs({ExplicitInput::Varchar("query", ""), ExplicitInput::BigInt("limit", 0),
 	                              ExplicitInput::Boolean("include_archived", false),
-	                              ExplicitInput::Null("cursor", ExplicitInputValueKind::VARCHAR)}));
+	                              ExplicitInput::Null("cursor", ExplicitInputValueKind::VARCHAR),
+	                              ExplicitInput::Null("locale", ExplicitInputValueKind::VARCHAR)}));
 	Require(resolved.Find("query")->State() == ResolvedInputState::BOUND_VALUE &&
 	            resolved.Find("query")->VarcharValue().empty() &&
 	            resolved.Find("query")->Source() == ResolvedInputSource::EXPLICIT,
@@ -80,7 +85,10 @@ void TestExplicitValuesOverrideDefaultsWithoutCollapsingNull() {
 	        "false BOOLEAN was replaced by its default");
 	Require(resolved.Find("cursor")->State() == ResolvedInputState::BOUND_NULL &&
 	            resolved.Find("cursor")->Source() == ResolvedInputSource::EXPLICIT,
-	        "explicit NULL did not suppress the compiled NULL default");
+	        "explicit NULL did not remain distinct from the compiled NULL default");
+	Require(resolved.Find("locale")->State() == ResolvedInputState::BOUND_NULL &&
+	            resolved.Find("locale")->Source() == ResolvedInputSource::EXPLICIT,
+	        "explicit NULL did not suppress the nullable concrete default");
 
 	const auto concrete_cursor = duckdb_api::input_resolution::ResolveRelationInputs(
 	    relation, ExplicitInputs({ExplicitInput::Varchar("cursor", "after-token")}));
