@@ -39,8 +39,7 @@ public:
 private:
 	friend std::shared_ptr<ControlledRuntimeScenario>
 	BuildControlledRuntimeScenario(ControlledRuntimeScenarioId scenario);
-	ControlledRuntimeScenario(std::shared_ptr<State> state,
-	                          std::shared_ptr<const duckdb_api::ScanExecutor> executor);
+	ControlledRuntimeScenario(std::shared_ptr<State> state, std::shared_ptr<const duckdb_api::ScanExecutor> executor);
 
 	std::shared_ptr<State> state;
 	std::shared_ptr<const duckdb_api::ScanExecutor> executor;

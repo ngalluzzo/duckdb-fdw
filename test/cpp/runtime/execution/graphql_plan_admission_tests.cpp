@@ -219,7 +219,7 @@ void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 
 void TestEveryProviderCounterexampleFailsClosed() {
 	const auto count = static_cast<std::size_t>(duckdb_api_test::GraphqlRuntimeAdmissionCounterexample::COUNT);
-	Require(count == 142, "Runtime must exercise the complete Semantics counterexample corpus");
+	Require(count == 143, "Runtime must exercise the complete Semantics counterexample corpus");
 	for (std::size_t value = 0; value < count; value++) {
 		const auto counterexample = static_cast<duckdb_api_test::GraphqlRuntimeAdmissionCounterexample>(value);
 		const auto plan =
@@ -231,12 +231,26 @@ void TestEveryProviderCounterexampleFailsClosed() {
 	}
 }
 
+void TestDocumentAdmissionRequiresIntegrityAndCanonicalMembership() {
+	using Counterexample = duckdb_api_test::GraphqlRuntimeAdmissionCounterexample;
+	const auto wrong_digest = duckdb_api_test::BuildGraphqlRuntimeAdmissionCounterexample(
+	    "digest_secret", Counterexample::OTHER_DOCUMENT_DIGEST);
+	Require(!duckdb_api::internal::TryAdmitGraphqlPlan(wrong_digest, PublicProfile()),
+	        "Runtime must recompute the digest of the admitted document bytes");
+
+	const auto coherent_drift = duckdb_api_test::BuildGraphqlRuntimeAdmissionCounterexample(
+	    "digest_secret", Counterexample::CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST);
+	Require(!duckdb_api::internal::TryAdmitGraphqlPlan(coherent_drift, PublicProfile()),
+	        "a self-consistent document and digest must not replace canonical-profile membership");
+}
+
 } // namespace
 
 int main() {
 	try {
 		TestValidPlanProducesClosedProfileAndCanonicalBodies();
 		TestRequestBodyExactOneOverAggregateAndPreBearerOrdering();
+		TestDocumentAdmissionRequiresIntegrityAndCanonicalMembership();
 		TestEveryProviderCounterexampleFailsClosed();
 		std::cout << "GraphQL plan admission tests passed\n";
 		return EXIT_SUCCESS;
