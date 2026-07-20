@@ -2,6 +2,7 @@
 
 #include "duckdb_api/connector_catalog.hpp"
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -134,6 +135,31 @@ public:
 		for (auto &relation : connector.relations) {
 			relation.predicate_mappings.clear();
 		}
+		return connector;
+	}
+
+	// Replaces one already-validated GraphQL payload after canonical fixture
+	// construction. This intentionally creates an invalid test value without
+	// making invalid production construction possible.
+	static duckdb_api::CompiledConnector WithInvalidGraphqlOperation(duckdb_api::CompiledConnector connector,
+	                                                                 duckdb_api::CompiledGraphqlOperation operation) {
+		connector.relations.at(0).operations.at(0).protocol_operation.graphql =
+		    std::make_shared<const duckdb_api::CompiledGraphqlOperation>(std::move(operation));
+		return connector;
+	}
+
+	// Changes one relation schema fact only after the canonical fixture passed
+	// production validation. The resulting value is confined to test targets.
+	static duckdb_api::CompiledConnector WithInvalidGraphqlColumnType(duckdb_api::CompiledConnector connector,
+	                                                                  std::size_t column_index,
+	                                                                  std::string logical_type) {
+		connector.relations.at(0).columns.at(column_index).logical_type = std::move(logical_type);
+		return connector;
+	}
+
+	static duckdb_api::CompiledConnector WithInvalidGraphqlColumnNullability(duckdb_api::CompiledConnector connector,
+	                                                                         std::size_t column_index, bool nullable) {
+		connector.relations.at(0).columns.at(column_index).nullable = nullable;
 		return connector;
 	}
 };

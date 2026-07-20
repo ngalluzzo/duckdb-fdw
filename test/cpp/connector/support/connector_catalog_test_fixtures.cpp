@@ -1,8 +1,10 @@
 #include "connector/support/connector_catalog_test_fixtures.hpp"
 
 #include "connector/support/catalog_test_access.hpp"
+#include "duckdb_api/content_digest.hpp"
 #include "duckdb_api/internal/connector/graphql_operation_declaration.hpp"
 
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -438,6 +440,56 @@ duckdb_api::CompiledConnector BuildCanonicalGraphqlConnectorCatalogFixture() {
 	    std::move(relations),
 	    duckdb_api::CompiledNetworkPolicy {
 	        {"https"}, {"api.github.com"}, false, false, false, false, 8ULL * 1024ULL * 1024ULL});
+}
+
+duckdb_api::CompiledConnector BuildInvalidGraphqlConnectorCatalogCandidate(InvalidGraphqlCatalogCandidate candidate) {
+	auto catalog = BuildCanonicalGraphqlConnectorCatalogFixture();
+	if (candidate == InvalidGraphqlCatalogCandidate::SCHEMA_TYPE_DRIFT) {
+		return ConnectorCatalogTestAccess::WithInvalidGraphqlColumnType(std::move(catalog), 3, "VARCHAR");
+	}
+	if (candidate == InvalidGraphqlCatalogCandidate::SCHEMA_NULLABILITY_DRIFT) {
+		return ConnectorCatalogTestAccess::WithInvalidGraphqlColumnNullability(std::move(catalog), 4, false);
+	}
+
+	auto graphql = catalog.Relations().at(0).Operation().Graphql();
+	switch (candidate) {
+	case InvalidGraphqlCatalogCandidate::UNKNOWN_DOCUMENT_IDENTITY:
+		graphql.document_identity = static_cast<duckdb_api::CompiledGraphqlDocumentIdentity>(255);
+		break;
+	case InvalidGraphqlCatalogCandidate::CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST:
+		graphql.document.replace(graphql.document.find("DuckdbApiViewerRepositoryMetrics"),
+		                         std::string("DuckdbApiViewerRepositoryMetrics").size(),
+		                         "DuckdbApiViewerRepositoryMetricsAlternate");
+		graphql.document_digest = duckdb_api::ComputeSha256Hex(graphql.document);
+		break;
+	case InvalidGraphqlCatalogCandidate::DOCUMENT_DIGEST_MISMATCH:
+		graphql.document_digest.at(0) = graphql.document_digest.at(0) == '0' ? '1' : '0';
+		break;
+	case InvalidGraphqlCatalogCandidate::VARIABLE_PROFILE_DRIFT:
+		graphql.variables.at(1).source = duckdb_api::CompiledGraphqlVariableSource::CALLER_INPUT;
+		break;
+	case InvalidGraphqlCatalogCandidate::RESPONSE_NODES_PATH_DRIFT:
+		graphql.response.nodes.segments.back() = "edges";
+		break;
+	case InvalidGraphqlCatalogCandidate::RESPONSE_ERRORS_PATH_DRIFT:
+		graphql.response.errors.segments.back() = "graphqlErrors";
+		break;
+	case InvalidGraphqlCatalogCandidate::PARTIAL_DATA_POLICY_DRIFT:
+		graphql.response.partial_data = static_cast<duckdb_api::CompiledGraphqlPartialDataPolicy>(255);
+		break;
+	case InvalidGraphqlCatalogCandidate::CURSOR_PROFILE_DRIFT:
+		graphql.cursor.dependency = duckdb_api::CompiledGraphqlCursorDependency::INDEPENDENT;
+		break;
+	case InvalidGraphqlCatalogCandidate::BODY_BUDGET_DRIFT:
+		graphql.max_serialized_request_body_bytes_per_request++;
+		break;
+	case InvalidGraphqlCatalogCandidate::SCHEMA_TYPE_DRIFT:
+	case InvalidGraphqlCatalogCandidate::SCHEMA_NULLABILITY_DRIFT:
+		throw std::logic_error("GraphQL schema candidate dispatch escaped its fixture-only branch");
+	default:
+		throw std::invalid_argument("unknown invalid GraphQL catalog candidate");
+	}
+	return ConnectorCatalogTestAccess::WithInvalidGraphqlOperation(std::move(catalog), std::move(graphql));
 }
 
 } // namespace duckdb_api_test

@@ -1,4 +1,5 @@
 #include "connector/support/connector_catalog_test_fixtures.hpp"
+#include "duckdb_api/content_digest.hpp"
 #include "support/require.hpp"
 
 #include <cstdlib>
@@ -28,6 +29,102 @@ void RequireColumn(const duckdb_api::CompiledColumn &column, const std::string &
 	Require(column.logical_type == logical_type, "fixture column type drifted: " + name);
 	Require(!column.nullable, "fixture column became nullable: " + name);
 	Require(column.extractor == extractor, "fixture column extractor drifted: " + name);
+}
+
+bool SameOrigin(const duckdb_api::CompiledHttpOrigin &left, const duckdb_api::CompiledHttpOrigin &right) {
+	return left.scheme == right.scheme && left.host.Value() == right.host.Value() && left.port == right.port;
+}
+
+bool SameHeaders(const std::vector<duckdb_api::CompiledHttpHeader> &left,
+                 const std::vector<duckdb_api::CompiledHttpHeader> &right) {
+	if (left.size() != right.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.size(); index++) {
+		if (left[index].name != right[index].name || left[index].value != right[index].value) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool SamePath(const duckdb_api::CompiledGraphqlResponsePath &left,
+              const duckdb_api::CompiledGraphqlResponsePath &right) {
+	return left.segments == right.segments;
+}
+
+bool SameVariables(const std::vector<duckdb_api::CompiledGraphqlVariable> &left,
+                   const std::vector<duckdb_api::CompiledGraphqlVariable> &right) {
+	if (left.size() != right.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.size(); index++) {
+		if (left[index].name != right[index].name || left[index].type != right[index].type ||
+		    left[index].source != right[index].source || left[index].integer_value != right[index].integer_value) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool SameResultColumns(const std::vector<duckdb_api::CompiledGraphqlResultColumn> &left,
+                       const std::vector<duckdb_api::CompiledGraphqlResultColumn> &right) {
+	if (left.size() != right.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.size(); index++) {
+		if (left[index].name != right[index].name || left[index].scalar_kind != right[index].scalar_kind ||
+		    left[index].nullable != right[index].nullable ||
+		    !SamePath(left[index].response_path, right[index].response_path)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool SameGraphqlOperation(const duckdb_api::CompiledGraphqlOperation &left,
+                          const duckdb_api::CompiledGraphqlOperation &right) {
+	const auto &left_cursor = left.cursor;
+	const auto &right_cursor = right.cursor;
+	return left.document_identity == right.document_identity && left.document == right.document &&
+	       left.digest_algorithm == right.digest_algorithm && left.document_digest == right.document_digest &&
+	       SameOrigin(left.endpoint_origin, right.endpoint_origin) && left.endpoint_path == right.endpoint_path &&
+	       SameHeaders(left.headers, right.headers) && SameVariables(left.variables, right.variables) &&
+	       SameResultColumns(left.result_columns, right.result_columns) &&
+	       SamePath(left.response.nodes, right.response.nodes) &&
+	       SamePath(left.response.errors, right.response.errors) &&
+	       SamePath(left.response.page_info, right.response.page_info) &&
+	       left.response.partial_data == right.response.partial_data &&
+	       left_cursor.direction == right_cursor.direction && left_cursor.dependency == right_cursor.dependency &&
+	       left_cursor.consistency == right_cursor.consistency &&
+	       left_cursor.supports_total == right_cursor.supports_total &&
+	       left_cursor.supports_resume == right_cursor.supports_resume &&
+	       left_cursor.max_concurrent_pages == right_cursor.max_concurrent_pages &&
+	       left_cursor.page_size_variable == right_cursor.page_size_variable &&
+	       left_cursor.page_size == right_cursor.page_size &&
+	       left_cursor.cursor_variable == right_cursor.cursor_variable &&
+	       SamePath(left_cursor.has_next_page, right_cursor.has_next_page) &&
+	       SamePath(left_cursor.end_cursor, right_cursor.end_cursor) &&
+	       left_cursor.max_pages_per_scan == right_cursor.max_pages_per_scan &&
+	       left.max_document_bytes == right.max_document_bytes &&
+	       left.max_serialized_request_body_bytes_per_request == right.max_serialized_request_body_bytes_per_request &&
+	       left.max_serialized_request_body_bytes_per_scan == right.max_serialized_request_body_bytes_per_scan &&
+	       left.retry_enabled == right.retry_enabled && left.cache_enabled == right.cache_enabled &&
+	       left.providers_enabled == right.providers_enabled;
+}
+
+bool SameColumns(const std::vector<duckdb_api::CompiledColumn> &left,
+                 const std::vector<duckdb_api::CompiledColumn> &right) {
+	if (left.size() != right.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.size(); index++) {
+		if (left[index].name != right[index].name || left[index].logical_type != right[index].logical_type ||
+		    left[index].nullable != right[index].nullable || left[index].extractor != right[index].extractor) {
+			return false;
+		}
+	}
+	return true;
 }
 
 void TestDistinctSchemaCatalogFixture() {
@@ -454,6 +551,168 @@ void TestCanonicalGraphqlCatalogFixture() {
 	}
 }
 
+void RequireSameGraphqlCatalogEnvelope(const duckdb_api::CompiledConnector &candidate,
+                                       const duckdb_api::CompiledConnector &canonical) {
+	Require(candidate.Origin() == canonical.Origin() && candidate.ConnectorName() == canonical.ConnectorName() &&
+	            candidate.Version() == canonical.Version() && candidate.Relations().size() == 1,
+	        "invalid GraphQL candidate changed catalog identity");
+	const auto &candidate_network = candidate.NetworkPolicy();
+	const auto &canonical_network = canonical.NetworkPolicy();
+	Require(candidate_network.allowed_schemes == canonical_network.allowed_schemes &&
+	            candidate_network.allowed_hosts == canonical_network.allowed_hosts &&
+	            candidate_network.redirects_enabled == canonical_network.redirects_enabled &&
+	            candidate_network.private_addresses_enabled == canonical_network.private_addresses_enabled &&
+	            candidate_network.link_local_addresses_enabled == canonical_network.link_local_addresses_enabled &&
+	            candidate_network.loopback_addresses_enabled == canonical_network.loopback_addresses_enabled &&
+	            candidate_network.max_response_bytes == canonical_network.max_response_bytes,
+	        "invalid GraphQL candidate changed network policy");
+
+	const auto &candidate_relation = candidate.Relations()[0];
+	const auto &canonical_relation = canonical.Relations()[0];
+	Require(candidate_relation.Name() == canonical_relation.Name() && candidate_relation.PredicateMappings().empty() &&
+	            candidate_relation.Operations().size() == 1 && candidate_relation.HasSingleOperation(),
+	        "invalid GraphQL candidate changed relation or operation cardinality");
+	const auto &candidate_operation = candidate_relation.Operation();
+	const auto &canonical_operation = canonical_relation.Operation();
+	Require(candidate_operation.name == canonical_operation.name &&
+	            candidate_operation.fallback == canonical_operation.fallback &&
+	            candidate_operation.cardinality == canonical_operation.cardinality &&
+	            candidate_operation.Protocol() == duckdb_api::CompiledProtocol::GRAPHQL &&
+	            candidate_operation.selector.RequiredInputs() == canonical_operation.selector.RequiredInputs() &&
+	            candidate_operation.selector.AnyInputSets() == canonical_operation.selector.AnyInputSets() &&
+	            candidate_operation.selector.ForbiddenInputs() == canonical_operation.selector.ForbiddenInputs() &&
+	            candidate_operation.selector.Priority() == canonical_operation.selector.Priority(),
+	        "invalid GraphQL candidate changed common operation facts");
+
+	const auto &candidate_auth = candidate_relation.Authentication();
+	const auto &canonical_auth = canonical_relation.Authentication();
+	Require(candidate_auth.Requirement() == canonical_auth.Requirement() &&
+	            candidate_auth.LogicalCredential() == canonical_auth.LogicalCredential() &&
+	            candidate_auth.Authenticator() == canonical_auth.Authenticator() &&
+	            candidate_auth.Placement() == canonical_auth.Placement() && candidate_auth.Destination() != nullptr &&
+	            canonical_auth.Destination() != nullptr &&
+	            SameOrigin(*candidate_auth.Destination(), *canonical_auth.Destination()),
+	        "invalid GraphQL candidate changed logical authentication policy");
+	const auto &candidate_resources = candidate_relation.ResourceCeilings();
+	const auto &canonical_resources = canonical_relation.ResourceCeilings();
+	Require(candidate_resources.HasResponseByteNarrowing() == canonical_resources.HasResponseByteNarrowing() &&
+	            candidate_resources.MaxResponseBytesPerPage() == canonical_resources.MaxResponseBytesPerPage() &&
+	            candidate_resources.MaxResponseBytesPerScan() == canonical_resources.MaxResponseBytesPerScan() &&
+	            candidate_resources.MaxRecordsPerPage() == canonical_resources.MaxRecordsPerPage() &&
+	            candidate_resources.MaxRecordsPerScan() == canonical_resources.MaxRecordsPerScan() &&
+	            candidate_resources.MaxExtractedStringBytes() == canonical_resources.MaxExtractedStringBytes(),
+	        "invalid GraphQL candidate changed relation resource ceilings");
+}
+
+void TestInvalidGraphqlCatalogCandidateFixtures() {
+	using Candidate = duckdb_api_test::InvalidGraphqlCatalogCandidate;
+	using CandidateFactory = duckdb_api::CompiledConnector (*)(Candidate);
+	CandidateFactory factory = &duckdb_api_test::BuildInvalidGraphqlConnectorCatalogCandidate;
+	const auto canonical = duckdb_api_test::BuildCanonicalGraphqlConnectorCatalogFixture();
+	const auto &canonical_relation = canonical.Relations()[0];
+	const auto &canonical_graphql = canonical_relation.Operation().Graphql();
+	const std::vector<Candidate> candidates = {
+	    Candidate::UNKNOWN_DOCUMENT_IDENTITY, Candidate::CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST,
+	    Candidate::DOCUMENT_DIGEST_MISMATCH,  Candidate::VARIABLE_PROFILE_DRIFT,
+	    Candidate::RESPONSE_NODES_PATH_DRIFT, Candidate::RESPONSE_ERRORS_PATH_DRIFT,
+	    Candidate::PARTIAL_DATA_POLICY_DRIFT, Candidate::CURSOR_PROFILE_DRIFT,
+	    Candidate::BODY_BUDGET_DRIFT,         Candidate::SCHEMA_TYPE_DRIFT,
+	    Candidate::SCHEMA_NULLABILITY_DRIFT,
+	};
+
+	for (const auto candidate_name : candidates) {
+		const auto candidate = factory(candidate_name);
+		RequireSameGraphqlCatalogEnvelope(candidate, canonical);
+		const auto &candidate_relation = candidate.Relations()[0];
+		const auto &candidate_graphql = candidate_relation.Operation().Graphql();
+		auto normalized_graphql = candidate_graphql;
+		auto normalized_columns = candidate_relation.Columns();
+
+		switch (candidate_name) {
+		case Candidate::UNKNOWN_DOCUMENT_IDENTITY:
+			Require(candidate_graphql.document_identity != canonical_graphql.document_identity,
+			        "unknown-document candidate did not change identity");
+			normalized_graphql.document_identity = canonical_graphql.document_identity;
+			break;
+		case Candidate::CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST:
+			Require(candidate_graphql.document != canonical_graphql.document &&
+			            candidate_graphql.document_digest != canonical_graphql.document_digest &&
+			            candidate_graphql.document.find(
+			                "query DuckdbApiViewerRepositoryMetricsAlternate($pageSize: Int!, $cursor: String) {") ==
+			                0 &&
+			            candidate_graphql.document_digest == duckdb_api::ComputeSha256Hex(candidate_graphql.document),
+			        "changed-document candidate was not a valid alternate operation with its recomputed digest");
+			normalized_graphql.document = canonical_graphql.document;
+			normalized_graphql.document_digest = canonical_graphql.document_digest;
+			break;
+		case Candidate::DOCUMENT_DIGEST_MISMATCH:
+			Require(candidate_graphql.document_digest != canonical_graphql.document_digest &&
+			            candidate_graphql.document_digest != duckdb_api::ComputeSha256Hex(candidate_graphql.document),
+			        "digest-mismatch candidate remained content-addressed");
+			normalized_graphql.document_digest = canonical_graphql.document_digest;
+			break;
+		case Candidate::VARIABLE_PROFILE_DRIFT:
+			Require(candidate_graphql.variables[1].source != canonical_graphql.variables[1].source,
+			        "variable-profile candidate did not drift");
+			normalized_graphql.variables[1].source = canonical_graphql.variables[1].source;
+			break;
+		case Candidate::RESPONSE_NODES_PATH_DRIFT:
+			Require(!SamePath(candidate_graphql.response.nodes, canonical_graphql.response.nodes),
+			        "response-nodes candidate did not drift");
+			normalized_graphql.response.nodes = canonical_graphql.response.nodes;
+			break;
+		case Candidate::RESPONSE_ERRORS_PATH_DRIFT:
+			Require(!SamePath(candidate_graphql.response.errors, canonical_graphql.response.errors),
+			        "response-errors candidate did not drift");
+			normalized_graphql.response.errors = canonical_graphql.response.errors;
+			break;
+		case Candidate::PARTIAL_DATA_POLICY_DRIFT:
+			Require(candidate_graphql.response.partial_data != canonical_graphql.response.partial_data,
+			        "partial-data-policy candidate did not drift");
+			normalized_graphql.response.partial_data = canonical_graphql.response.partial_data;
+			break;
+		case Candidate::CURSOR_PROFILE_DRIFT:
+			Require(candidate_graphql.cursor.dependency != canonical_graphql.cursor.dependency,
+			        "cursor-profile candidate did not drift");
+			normalized_graphql.cursor.dependency = canonical_graphql.cursor.dependency;
+			break;
+		case Candidate::BODY_BUDGET_DRIFT:
+			Require(candidate_graphql.max_serialized_request_body_bytes_per_request !=
+			            canonical_graphql.max_serialized_request_body_bytes_per_request,
+			        "body-budget candidate did not drift");
+			normalized_graphql.max_serialized_request_body_bytes_per_request =
+			    canonical_graphql.max_serialized_request_body_bytes_per_request;
+			break;
+		case Candidate::SCHEMA_TYPE_DRIFT:
+			Require(candidate_relation.Columns()[3].logical_type != canonical_relation.Columns()[3].logical_type,
+			        "schema-type candidate did not drift");
+			normalized_columns[3].logical_type = canonical_relation.Columns()[3].logical_type;
+			break;
+		case Candidate::SCHEMA_NULLABILITY_DRIFT:
+			Require(candidate_relation.Columns()[4].nullable != canonical_relation.Columns()[4].nullable,
+			        "schema-nullability candidate did not drift");
+			normalized_columns[4].nullable = canonical_relation.Columns()[4].nullable;
+			break;
+		}
+
+		Require(SameGraphqlOperation(normalized_graphql, canonical_graphql),
+		        "invalid GraphQL candidate changed more than its named operation fact");
+		Require(SameColumns(normalized_columns, canonical_relation.Columns()),
+		        "invalid GraphQL candidate changed more than its named schema fact");
+		const bool document_candidate = candidate_name == Candidate::UNKNOWN_DOCUMENT_IDENTITY ||
+		                                candidate_name == Candidate::CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST ||
+		                                candidate_name == Candidate::DOCUMENT_DIGEST_MISMATCH;
+		Require(duckdb_api::IsCanonicalGraphqlDocumentProfile(
+		            candidate_graphql.document_identity, candidate_graphql.document, candidate_graphql.digest_algorithm,
+		            candidate_graphql.document_digest) == !document_candidate,
+		        "invalid GraphQL candidate changed the wrong canonical-document membership fact");
+	}
+
+	RequireInvalid("unknown invalid-GraphQL candidate escaped the closed fixture API", []() {
+		(void)duckdb_api_test::BuildInvalidGraphqlConnectorCatalogCandidate(static_cast<Candidate>(255));
+	});
+}
+
 } // namespace
 
 int main() {
@@ -467,6 +726,7 @@ int main() {
 		TestSelectableOperationsCatalogFixtures();
 		TestAmbiguousPredicateMappingsCatalogFixture();
 		TestCanonicalGraphqlCatalogFixture();
+		TestInvalidGraphqlCatalogCandidateFixtures();
 		std::cout << "connector catalog fixture tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

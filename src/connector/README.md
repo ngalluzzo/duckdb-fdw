@@ -59,6 +59,16 @@ fields, or snapshots. The installed catalog retains only the reviewed GitHub
 `SUPERSET` mapping; the controlled exact identity creates no public relation,
 request, package, or ABI promise.
 
+The same non-installable fixture service exposes a closed set of deliberately
+invalid GraphQL catalog candidates for defensive consumer tests. Each candidate
+starts as the production-validated canonical fixture; Connector-private test
+access then changes only its named document, variable, response, cursor, body,
+or schema fact. These values are not installable metadata, perform no I/O,
+contain no secret or live request/response state, and must be rejected before
+planning or execution. Consumer tests import only the public fixture header,
+never `catalog_test_access.hpp`; production constructors continue to reject the
+same drift.
+
 ## Tests
 
 `make test` runs both focused Connector executables:

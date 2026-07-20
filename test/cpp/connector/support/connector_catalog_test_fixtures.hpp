@@ -101,4 +101,30 @@ duckdb_api::CompiledConnector BuildMultipleFallbackOperationsCatalogFixture();
 // not import catalog_test_access.hpp or Connector implementation files.
 duckdb_api::CompiledConnector BuildCanonicalGraphqlConnectorCatalogFixture();
 
+// Closed names for deliberately invalid GraphQL catalogs used to prove that a
+// consumer defensively rejects drift after Connector's validated handoff. The
+// values are produced only by this non-installable test service, perform no
+// I/O, and contain no secret, credential value, request, response, or runtime
+// state. They are not connector metadata and cannot be installed.
+enum class InvalidGraphqlCatalogCandidate {
+	UNKNOWN_DOCUMENT_IDENTITY,
+	CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST,
+	DOCUMENT_DIGEST_MISMATCH,
+	VARIABLE_PROFILE_DRIFT,
+	RESPONSE_NODES_PATH_DRIFT,
+	RESPONSE_ERRORS_PATH_DRIFT,
+	PARTIAL_DATA_POLICY_DRIFT,
+	CURSOR_PROFILE_DRIFT,
+	BODY_BUDGET_DRIFT,
+	SCHEMA_TYPE_DRIFT,
+	SCHEMA_NULLABILITY_DRIFT
+};
+
+// Returns exactly one named invalid candidate. Construction begins with the
+// production-validated canonical fixture, then Connector-owned private test
+// access changes only the named fact. This does not weaken or bypass any
+// production constructor: consumers receive only public const catalog access
+// and must reject the result before planning or execution.
+duckdb_api::CompiledConnector BuildInvalidGraphqlConnectorCatalogCandidate(InvalidGraphqlCatalogCandidate candidate);
+
 } // namespace duckdb_api_test
