@@ -65,6 +65,39 @@ target_link_libraries(
   PRIVATE duckdb_api_package_generation_fixture_service)
 
 add_executable(
+  duckdb_api_failsafe_yaml_tests
+  test/cpp/connector/package/failsafe_yaml_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_failsafe_yaml_tests)
+target_include_directories(
+  duckdb_api_failsafe_yaml_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_failsafe_yaml_tests
+  PRIVATE duckdb_api_package_source_service)
+
+add_executable(
+  duckdb_api_package_digest_tests
+  test/cpp/connector/package/package_digest_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_package_digest_tests)
+target_include_directories(
+  duckdb_api_package_digest_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_package_digest_tests
+  PRIVATE duckdb_api_package_source_service)
+
+add_executable(
+  duckdb_api_package_source_tests
+  test/cpp/connector/package/package_source_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_package_source_tests)
+target_include_directories(
+  duckdb_api_package_source_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_package_source_tests
+  PRIVATE duckdb_api_package_source_service)
+
+add_executable(
   duckdb_api_connector_catalog_fixture_tests
   test/cpp/connector/connector_catalog_test_fixtures_tests.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_connector_catalog_fixture_tests)

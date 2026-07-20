@@ -189,6 +189,9 @@ python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
 for target in \
     duckdb_api_connector_tests \
     duckdb_api_connector_catalog_fixture_tests \
+    duckdb_api_failsafe_yaml_tests \
+    duckdb_api_package_digest_tests \
+    duckdb_api_package_source_tests \
     duckdb_api_scan_request_tests \
     duckdb_api_typed_value_adapter_tests \
     duckdb_api_scan_planner_tests \
@@ -249,6 +252,12 @@ done
 python3 -I -B "${PROJECT_SOURCE}/scripts/test-native-dependencies.py"
 "${NATIVE_TEST_ROOT}/duckdb_api_connector_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_connector_catalog_fixture_tests"
+(
+    cd "${PROJECT_SOURCE}"
+    "${NATIVE_TEST_ROOT}/duckdb_api_failsafe_yaml_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_package_digest_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_package_source_tests"
+)
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_typed_value_adapter_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"

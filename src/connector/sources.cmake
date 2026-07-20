@@ -15,6 +15,14 @@ set(CONNECTOR_CATALOG_SOURCES
     src/connector/resource_ceiling_declaration.cpp)
 set(CONNECTOR_CONTENT_DIGEST_SOURCES
     src/connector/content_digest.cpp)
+set(CONNECTOR_PACKAGE_YAML_SOURCES
+    src/connector/package/failsafe_yaml.cpp
+    src/connector/package/failsafe_yaml_lexical.cpp
+    src/connector/package/failsafe_yaml_parser.cpp)
+set(CONNECTOR_PACKAGE_SOURCE_SOURCES
+    src/connector/package/package_digest.cpp
+    src/connector/package/package_source.cpp
+    src/connector/package/package_source_filesystem.cpp)
 set(CONNECTOR_NATIVE_PROFILE_SOURCES
     src/connector/native_github_composition.cpp)
 set(CONNECTOR_METADATA_IMPLEMENTATION_SOURCES
