@@ -32,7 +32,9 @@ behind their public interfaces; do not reproduce those rules in the adapter.
    request construction, or expression-text reconstruction.
 5. Global initialization freezes the selected plan, resolves an explicitly
    named temporary secret, and opens one Runtime stream.
-6. Each scan pull validates a bounded typed batch before writing a `DataChunk`.
+6. Each scan pull validates complete row arity, planned scalar kinds, batch
+   bounds, and planned nullability before changing a `DataChunk`. Runtime nulls
+   become typed vector NULLs; zero, `false`, and empty strings stay valid.
 7. Interruption cancels the stream. Exhaustion marks it complete. Destruction
    cancels unfinished work and closes the stream without throwing.
 8. The adapter translates provider failures at the DuckDB exception boundary;
@@ -45,12 +47,14 @@ behind their public interfaces; do not reproduce those rules in the adapter.
 | `ScanRequest` values or DuckDB capability reporting | `scan_request.cpp`, `duckdb_api/scan_request.hpp` | `duckdb_api_scan_request_tests` |
 | Pinned structured-expression translation | `duckdb/complex_filter_adapter.*` | `predicate_candidate_translation_tests.cpp` and `complex_filter_adapter_tests.cpp` in `duckdb_api_adapter_tests` |
 | Typed selected-plan explanation | `duckdb/scan_plan_explanation.*` | `complex_filter_adapter_tests.cpp` in `duckdb_api_adapter_tests` |
+| Planned scalar/nullability enforcement and DuckDB vector writes | `duckdb/typed_value_adapter.*` | `duckdb_api_typed_value_adapter_tests` |
 | Baseline request retention and copied plan selection | `duckdb/table_function_plan_state.*` | `table_function_plan_state_tests.cpp` in `duckdb_api_adapter_tests` |
 | Installed connector/runtime assembly | `product_composition.cpp`, `duckdb_api/product_composition.hpp` | `test/python/source_demo_contract.py` through `make test`; `make demo` for the live path |
 | Table-function registration, callback composition, explain, bind/init/scan, cancellation, or batch transfer | `duckdb/table_function_adapter.cpp` | `duckdb_api_adapter_tests`, `duckdb_api_adapter_stream_contract_tests` |
 | Secret registration, validation, or exact-name resolution | `duckdb/secret_integration.cpp`, `duckdb_api/duckdb_secret.hpp` | `duckdb_api_duckdb_secret_tests` |
 | Extension identity, load order, or initialization containment | `duckdb/extension_entrypoint.cpp`, `duckdb_api_extension.hpp` | `test/sql/duckdb_api.test`, `test/python/source_demo_contract.py` |
 | Controlled end-to-end composition | `test/cpp/query/integration/` | `test/python/live_rest_product_contract.py`, `test/python/authenticated_relation_product_contract.py`, `test/python/repository_pagination_product_contract.py` |
+| GraphQL bind, explanation, nullable rows, SQL composition, and protocol errors through provider APIs | unchanged generic adapter plus `duckdb/scan_plan_explanation.*` | `duckdb_api_graphql_query_contract_tests` |
 
 Production and test inventories are in `src/query/{sources,targets}.cmake` and
 `test/cpp/query/{sources,targets}.cmake`. Shared test helpers live under
@@ -85,7 +89,7 @@ make demo
 
 After `make build`, focused binaries are under
 `<build_root>/extension/duckdb_api/`, where `build_root` is printed by
-`make paths`. `make test` runs all four Query targets plus SQL, controlled
+`make paths`. `make test` runs the Query targets plus SQL, controlled
 service, artifact, and direct-load oracles. Run `make verify` before handoff on
 the supported product cell.
 

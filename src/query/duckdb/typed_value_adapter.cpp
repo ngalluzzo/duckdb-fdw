@@ -46,8 +46,8 @@ Value DuckdbValue(const duckdb_api::TypedValue &value, const PlannedValueColumn 
 	throw std::logic_error("runtime value contract contains an unknown scalar kind");
 }
 
-void ValidateTypedBatch(const duckdb_api::TypedBatch &batch,
-                        const std::vector<PlannedValueColumn> &expected_columns, std::uint64_t max_batch_rows) {
+void ValidateTypedBatch(const duckdb_api::TypedBatch &batch, const std::vector<PlannedValueColumn> &expected_columns,
+                        std::uint64_t max_batch_rows) {
 	if (batch.rows.empty()) {
 		throw std::logic_error("batch stream returned an empty successful batch");
 	}
@@ -97,6 +97,9 @@ std::vector<PlannedValueColumn> PlannedValueColumns(const duckdb_api::ScanPlan &
 void WriteTypedBatch(DataChunk &output, const duckdb_api::TypedBatch &batch,
                      const std::vector<PlannedValueColumn> &expected_columns, std::uint64_t max_batch_rows) {
 	ValidateTypedBatch(batch, expected_columns, max_batch_rows);
+	if (output.ColumnCount() != expected_columns.size()) {
+		throw std::logic_error("DuckDB output chunk does not match the planned column arity");
+	}
 	for (idx_t row_index = 0; row_index < batch.rows.size(); row_index++) {
 		for (idx_t column_index = 0; column_index < expected_columns.size(); column_index++) {
 			output.SetValue(column_index, row_index,

@@ -15,7 +15,8 @@ using duckdb::duckdb_api_query_internal::PlannedValueColumn;
 using duckdb_api_test::Require;
 
 std::vector<PlannedValueColumn> ExpectedColumns() {
-	return {{duckdb_api::ValueKind::BIGINT, false}, {duckdb_api::ValueKind::VARCHAR, true},
+	return {{duckdb_api::ValueKind::BIGINT, false},
+	        {duckdb_api::ValueKind::VARCHAR, true},
 	        {duckdb_api::ValueKind::BOOLEAN, false}};
 }
 
@@ -48,8 +49,9 @@ void TestNullAndSentinelCounterexamples() {
 	duckdb_api::TypedBatch batch;
 	batch.column_kinds = {duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR,
 	                      duckdb_api::ValueKind::BOOLEAN};
-	batch.rows.push_back({{duckdb_api::TypedValue::BigInt(0), duckdb_api::TypedValue::Null(duckdb_api::ValueKind::VARCHAR),
-	                       duckdb_api::TypedValue::Boolean(false)}});
+	batch.rows.push_back(
+	    {{duckdb_api::TypedValue::BigInt(0), duckdb_api::TypedValue::Null(duckdb_api::ValueKind::VARCHAR),
+	      duckdb_api::TypedValue::Boolean(false)}});
 	batch.rows.push_back({{duckdb_api::TypedValue::BigInt(-1), duckdb_api::TypedValue::Varchar(""),
 	                       duckdb_api::TypedValue::Boolean(true)}});
 
@@ -114,20 +116,26 @@ void TestArityAndBatchBoundsFailClosed() {
 	RequireLogicError(
 	    [&]() { duckdb::duckdb_api_query_internal::WriteTypedBatch(output, batch, ExpectedColumns(), 1); },
 	    "widened successful batch was accepted");
+
+	duckdb::DataChunk short_output;
+	short_output.Initialize(duckdb::Allocator::DefaultAllocator(), {duckdb::LogicalType::BIGINT});
+	batch.rows.pop_back();
+	RequireLogicError(
+	    [&]() { duckdb::duckdb_api_query_internal::WriteTypedBatch(short_output, batch, ExpectedColumns(), 1); },
+	    "DuckDB output-column mismatch was accepted");
+	Require(short_output.size() == 0, "output-column mismatch partially changed output cardinality");
 }
 
 void TestPlannedLogicalTypeMappingIsClosed() {
 	Require(duckdb::duckdb_api_query_internal::PlannedLogicalType({"id", "BIGINT", false, "id"}) ==
-	            duckdb::LogicalType::BIGINT &&
+	                duckdb::LogicalType::BIGINT &&
 	            duckdb::duckdb_api_query_internal::PlannedLogicalType({"name", "VARCHAR", true, "name"}) ==
 	                duckdb::LogicalType::VARCHAR &&
 	            duckdb::duckdb_api_query_internal::PlannedLogicalType({"flag", "BOOLEAN", false, "flag"}) ==
 	                duckdb::LogicalType::BOOLEAN,
 	        "planned scalar mapping changed");
 	RequireLogicError(
-	    []() {
-		    (void)duckdb::duckdb_api_query_internal::PlannedLogicalType({"value", "INTEGER", false, "value"});
-	    },
+	    []() { (void)duckdb::duckdb_api_query_internal::PlannedLogicalType({"value", "INTEGER", false, "value"}); },
 	    "unsupported planned logical type was accepted");
 }
 

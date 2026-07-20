@@ -15,12 +15,12 @@ struct ProductComposition {
 	std::shared_ptr<const ScanExecutor> executor;
 };
 
-// Builds the sole installed RFC 0005/0006/0007 composition. Connector supplies
-// the immutable three-relation catalog and Runtime supplies the bounded
+// Builds the sole installed native composition. Connector supplies the
+// immutable four-relation catalog and Runtime supplies the bounded
 // anonymous-or-bearer executor service; Query assembles them without mutating
-// either provider or retaining credential state. Runtime initialization is
-// checked before DuckDB registers the function, and this path has no authority
-// or test-scenario override.
+// either provider, inspecting a protocol alternative, or retaining credential
+// state. Runtime initialization is checked before DuckDB registers the
+// function, and this path has no authority or test-scenario override.
 ProductComposition BuildProductComposition();
 
 } // namespace duckdb_api

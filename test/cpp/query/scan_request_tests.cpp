@@ -24,6 +24,7 @@ using duckdb_api_test::query_scan_request::ScopedEnvironment;
 const char ANONYMOUS_RELATION[] = "duckdb_login_search_page";
 const char AUTHENTICATED_RELATION[] = "authenticated_user";
 const char REPOSITORY_RELATION[] = "authenticated_repositories";
+const char GRAPHQL_RELATION[] = "viewer_repository_metrics";
 
 void TestLogicalSecretReferenceContract() {
 	const duckdb_api::LogicalSecretReference absent;
@@ -149,6 +150,36 @@ void TestAuthenticatedRepositoryRequest() {
 	}
 }
 
+void TestGraphqlRepositoryMetricsRequestStaysProtocolNeutral() {
+	const auto connector = duckdb_api::BuildNativeGithubConnector();
+	const auto request = duckdb_api::BuildConservativeScanRequest(
+	    connector, GRAPHQL_RELATION, duckdb_api::LogicalSecretReference::Named("github_default"));
+	const auto copy = request;
+	const auto *relation = connector.FindRelation(GRAPHQL_RELATION);
+
+	Require(relation, "native GraphQL relation disappeared");
+	Require(request.connector_name == "github" && request.relation_name == GRAPHQL_RELATION,
+	        "GraphQL request did not copy exact selected identity");
+	RequireFullSelectedSchema(request, *relation);
+	Require(request.projected_columns ==
+	                std::vector<std::string>({"id", "full_name", "owner_login", "stars", "primary_language", "private",
+	                                          "archived", "updated_at"}) &&
+	            request.explicit_inputs.empty(),
+	        "GraphQL request did not preserve its exact full-schema closure");
+	Require(request.requested_predicate == duckdb_api::RequestedPredicate::Unrestricted() &&
+	            request.retained_predicate_scope == duckdb_api::RetainedPredicateScope::UNRESTRICTED &&
+	            request.orderings.empty() && !request.has_limit && !request.has_offset &&
+	            request.capabilities.HasConservativeRelationalProfile() && request.capabilities.secret_manager &&
+	            request.secret_reference.Name() == "github_default",
+	        "GraphQL request changed Query's conservative capability or secret-selector profile");
+	Require(copy.Snapshot() == request.Snapshot(), "GraphQL request copy changed its immutable snapshot");
+	for (const auto &forbidden : {"api.github.com", "viewer {", "repositories(", "query DuckdbApi", "$cursor",
+	                              "pageSize", "Authorization", "Bearer ", "SHA256"}) {
+		Require(request.Snapshot().find(forbidden) == std::string::npos,
+		        "protocol-specific operation authority entered Query's ScanRequest");
+	}
+}
+
 void TestProviderOwnedDistinctSchemaRequests() {
 	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
 	const auto anonymous = duckdb_api::BuildConservativeScanRequest(
@@ -196,6 +227,12 @@ void TestPresenceRulesAndExactSelection() {
 		                                                   duckdb_api::LogicalSecretReference());
 	    },
 	    "repository relation accepted an absent logical reference");
+	RequireThrows<std::invalid_argument>(
+	    [&]() {
+		    (void)duckdb_api::BuildConservativeScanRequest(connector, GRAPHQL_RELATION,
+		                                                   duckdb_api::LogicalSecretReference());
+	    },
+	    "GraphQL relation accepted an absent logical reference");
 	for (const auto &relation_name : {"Authenticated_User", "Authenticated_Repositories", "missing"}) {
 		RequireThrows<std::invalid_argument>(
 		    [&]() {
@@ -331,6 +368,7 @@ int main() {
 		TestLogicalSecretReferenceContract();
 		TestAcceptedAnonymousAndAuthenticatedRequests();
 		TestAuthenticatedRepositoryRequest();
+		TestGraphqlRepositoryMetricsRequestStaysProtocolNeutral();
 		TestProviderOwnedDistinctSchemaRequests();
 		TestPresenceRulesAndExactSelection();
 		TestCapabilityClassificationAndSemanticsMutation();

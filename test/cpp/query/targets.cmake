@@ -60,6 +60,28 @@ target_link_libraries(
 target_include_directories(duckdb_api_adapter_tests PRIVATE test/cpp src/query/duckdb)
 configure_duckdb_api_cpp_target(duckdb_api_adapter_tests)
 
+# Query's focused GraphQL boundary oracle composes only public provider
+# services with the unchanged DuckDB registration path. Runtime's eventual
+# controlled product remains the sole whole-graph execution target.
+add_executable(
+  duckdb_api_graphql_query_contract_tests
+  test/cpp/query/duckdb/graphql_adapter_contract_tests.cpp
+  ${QUERY_DUCKDB_SECRET_SOURCES}
+  ${QUERY_DUCKDB_ADAPTER_SUPPORT_SOURCES}
+  src/query/duckdb/table_function_adapter.cpp
+  ${QUERY_ADAPTER_TEST_SUPPORT_SOURCES})
+target_link_libraries(
+  duckdb_api_graphql_query_contract_tests
+  PRIVATE duckdb_api_relational_planning_service
+          duckdb_api_runtime_interface_service
+          dummy_static_extension_loader
+          duckdb_static
+          Threads::Threads)
+target_include_directories(
+  duckdb_api_graphql_query_contract_tests
+  PRIVATE test/cpp src src/query/duckdb)
+configure_duckdb_api_cpp_target(duckdb_api_graphql_query_contract_tests)
+
 add_executable(
   duckdb_api_adapter_stream_contract_tests
   test/cpp/query/duckdb/duckdb_adapter_stream_contract_tests.cpp

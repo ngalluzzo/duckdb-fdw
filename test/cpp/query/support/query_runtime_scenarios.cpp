@@ -15,6 +15,21 @@ duckdb_api::TypedRow Row(int64_t id, const std::string &login, bool site_admin) 
 	return result;
 }
 
+duckdb_api::TypedRow GraphqlRow(const std::string &id, const std::string &full_name, const std::string &owner_login,
+                                int64_t stars, duckdb_api::TypedValue primary_language, bool private_repository,
+                                bool archived, const std::string &updated_at) {
+	duckdb_api::TypedRow result;
+	result.values.push_back(duckdb_api::TypedValue::Varchar(id));
+	result.values.push_back(duckdb_api::TypedValue::Varchar(full_name));
+	result.values.push_back(duckdb_api::TypedValue::Varchar(owner_login));
+	result.values.push_back(duckdb_api::TypedValue::BigInt(stars));
+	result.values.push_back(std::move(primary_language));
+	result.values.push_back(duckdb_api::TypedValue::Boolean(private_repository));
+	result.values.push_back(duckdb_api::TypedValue::Boolean(archived));
+	result.values.push_back(duckdb_api::TypedValue::Varchar(updated_at));
+	return result;
+}
+
 void ThrowScenarioError(QueryRuntimeScenario scenario) {
 	switch (scenario) {
 	case QueryRuntimeScenario::TRANSPORT_ERROR:
@@ -36,6 +51,9 @@ void ThrowScenarioError(QueryRuntimeScenario scenario) {
 	case QueryRuntimeScenario::AUTHORIZATION_ERROR:
 		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::AUTHORIZATION, "",
 		                                 "authenticated principal is not authorized");
+	case QueryRuntimeScenario::REMOTE_PROTOCOL_ERROR:
+		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::REMOTE_PROTOCOL, "errors",
+		                                 "remote protocol response reported application errors");
 	case QueryRuntimeScenario::INTERNAL_ERROR:
 		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::INTERNAL, "", "top-secret-provider-detail");
 	case QueryRuntimeScenario::UNKNOWN_ERROR:
@@ -47,10 +65,10 @@ void ThrowScenarioError(QueryRuntimeScenario scenario) {
 
 class QueryScenarioStream : public duckdb_api::BatchStream {
 public:
-	QueryScenarioStream(QueryRuntimeScenario scenario_p, bool authenticated_p,
+	QueryScenarioStream(QueryRuntimeScenario scenario_p, bool authenticated_p, duckdb_api::PlannedProtocol protocol_p,
 	                    std::shared_ptr<QueryLifecycleProbe> probe_p)
-	    : scenario(scenario_p), authenticated(authenticated_p), probe(std::move(probe_p)), offset(0), cancelled(false),
-	      closed(false) {
+	    : scenario(scenario_p), authenticated(authenticated_p), protocol(protocol_p), probe(std::move(probe_p)),
+	      offset(0), cancelled(false), closed(false) {
 	}
 
 	~QueryScenarioStream() noexcept override {
@@ -74,6 +92,28 @@ public:
 			throw duckdb_api::ExecutionCancelled();
 		}
 		ThrowScenarioError(scenario);
+		if (scenario == QueryRuntimeScenario::GRAPHQL_SUCCESS) {
+			if (!authenticated || protocol != duckdb_api::PlannedProtocol::GRAPHQL) {
+				throw std::logic_error("GraphQL Query fixture received the wrong public provider alternatives");
+			}
+			batch.column_kinds = {duckdb_api::ValueKind::VARCHAR, duckdb_api::ValueKind::VARCHAR,
+			                      duckdb_api::ValueKind::VARCHAR, duckdb_api::ValueKind::BIGINT,
+			                      duckdb_api::ValueKind::VARCHAR, duckdb_api::ValueKind::BOOLEAN,
+			                      duckdb_api::ValueKind::BOOLEAN, duckdb_api::ValueKind::VARCHAR};
+			if (offset != 0) {
+				return false;
+			}
+			batch.rows.push_back(GraphqlRow("NODE-A", "fixture/zero", "fixture", 0,
+			                                duckdb_api::TypedValue::Null(duckdb_api::ValueKind::VARCHAR), false, false,
+			                                "2026-07-19T00:00:00Z"));
+			batch.rows.push_back(GraphqlRow("NODE-B", "fixture/typed", "fixture", 9,
+			                                duckdb_api::TypedValue::Varchar("C++"), true, true,
+			                                "2026-07-18T00:00:00Z"));
+			offset = batch.rows.size();
+			probe->batches.fetch_add(1, std::memory_order_relaxed);
+			probe->rows.fetch_add(batch.rows.size(), std::memory_order_relaxed);
+			return true;
+		}
 
 		batch.column_kinds = {duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR,
 		                      duckdb_api::ValueKind::BOOLEAN};
@@ -158,6 +198,7 @@ public:
 private:
 	QueryRuntimeScenario scenario;
 	const bool authenticated;
+	const duckdb_api::PlannedProtocol protocol;
 	std::shared_ptr<QueryLifecycleProbe> probe;
 	std::size_t offset;
 	std::atomic<bool> cancelled;
@@ -188,11 +229,19 @@ protected:
 		} else {
 			probe->github_bearer_authorizations.fetch_add(1, std::memory_order_relaxed);
 		}
-		if (authenticated && (plan.RelationName() != "authenticated_user" ||
-		                      plan.Authentication() != duckdb_api::FeatureState::ENABLED ||
-		                      plan.Domain() != duckdb_api::BaseDomain::SUCCESSFUL_ROOT_OBJECT ||
-		                      plan.Operation().cardinality != duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS)) {
-			throw std::logic_error("bearer authorization received the wrong planned relation");
+		if (authenticated && plan.Operation().Protocol() == duckdb_api::PlannedProtocol::REST &&
+		    (plan.RelationName() != "authenticated_user" ||
+		     plan.Authentication() != duckdb_api::FeatureState::ENABLED ||
+		     plan.Domain() != duckdb_api::BaseDomain::SUCCESSFUL_ROOT_OBJECT ||
+		     plan.Operation().Rest().cardinality != duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS)) {
+			throw std::logic_error("bearer authorization received the wrong REST plan profile");
+		}
+		if (authenticated && plan.Operation().Protocol() == duckdb_api::PlannedProtocol::GRAPHQL &&
+		    (plan.RelationName() != "viewer_repository_metrics" ||
+		     plan.Authentication() != duckdb_api::FeatureState::ENABLED ||
+		     plan.Domain() != duckdb_api::BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES ||
+		     plan.Operation().Graphql().cardinality != duckdb_api::PlannedCardinality::ZERO_TO_MANY)) {
+			throw std::logic_error("bearer authorization received the wrong GraphQL plan profile");
 		}
 		if (!authenticated && plan.Authentication() != duckdb_api::FeatureState::DISABLED) {
 			throw std::logic_error("anonymous authorization received an authenticated scan plan");
@@ -225,7 +274,8 @@ protected:
 		const auto stream_scenario = scenario == QueryRuntimeScenario::LATE_RESOURCE_ERROR_ONCE && prior_streams > 0
 		                                 ? QueryRuntimeScenario::SUCCESS
 		                                 : scenario;
-		return std::unique_ptr<duckdb_api::BatchStream>(new QueryScenarioStream(stream_scenario, authenticated, probe));
+		return std::unique_ptr<duckdb_api::BatchStream>(
+		    new QueryScenarioStream(stream_scenario, authenticated, plan.Operation().Protocol(), probe));
 	}
 
 private:

@@ -106,8 +106,8 @@ struct DuckdbApiGlobalState : public GlobalTableFunctionState {
 	                     std::vector<PlannedValueColumn> expected_columns_p, uint64_t max_batch_rows_p,
 	                     std::string connector_name_p, std::string relation_name_p)
 	    : stream(std::move(stream_p)), expected_columns(std::move(expected_columns_p)),
-	      max_batch_rows(max_batch_rows_p),
-	      connector_name(std::move(connector_name_p)), relation_name(std::move(relation_name_p)), finished(false) {
+	      max_batch_rows(max_batch_rows_p), connector_name(std::move(connector_name_p)),
+	      relation_name(std::move(relation_name_p)), finished(false) {
 	}
 
 	~DuckdbApiGlobalState() override {
@@ -291,10 +291,8 @@ unique_ptr<GlobalTableFunctionState> DuckdbApiInit(ClientContext &context, Table
 		if (!stream) {
 			throw std::logic_error("scan executor returned no stream");
 		}
-		return make_uniq<DuckdbApiGlobalState>(std::move(stream),
-		                                       duckdb_api_query_internal::PlannedValueColumns(plan),
-		                                       plan.Budgets().batch_rows,
-		                                       plan.ConnectorName(), plan.RelationName());
+		return make_uniq<DuckdbApiGlobalState>(std::move(stream), duckdb_api_query_internal::PlannedValueColumns(plan),
+		                                       plan.Budgets().batch_rows, plan.ConnectorName(), plan.RelationName());
 	} catch (const duckdb_api::ExecutionCancelled &) {
 		ThrowCancellation(nullptr);
 	} catch (const duckdb_api::ExecutionError &error) {
