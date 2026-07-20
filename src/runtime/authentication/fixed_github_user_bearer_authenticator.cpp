@@ -2,6 +2,7 @@
 
 #include "duckdb_api/execution.hpp"
 #include "duckdb_api/internal/runtime/policy/request_header_budget.hpp"
+#include "duckdb_api/internal/runtime/transport/graphql_request_body.hpp"
 
 #include <cstddef>
 #include <limits>
@@ -124,6 +125,25 @@ bool IsFixedAdmittedRepositoryRequest(const AdmittedRepositoryRequestProfile &pr
 	return true;
 }
 
+bool IsFixedAdmittedGraphqlRequest(const AdmittedGraphqlRequestProfile &profile, const HttpRequest &request) {
+	if (request.method != profile.Method() || request.scheme != profile.Scheme() || request.host != profile.Host() ||
+	    request.port != profile.Port() || request.target != profile.Path() ||
+	    request.headers.size() != profile.Headers().size() || request.body.empty() ||
+	    static_cast<uint64_t>(request.body.size()) > profile.MaxRequestBodyBytes() ||
+	    request.content_type != "application/json" || !IsCanonicalAdmittedGraphqlBody(request.body)) {
+		return false;
+	}
+	for (std::size_t index = 0; index < request.headers.size(); index++) {
+		if (request.headers[index].name != profile.Headers()[index].name ||
+		    request.headers[index].value != profile.Headers()[index].value ||
+		    EqualsAsciiIgnoreCase(request.headers[index].name, "Authorization") ||
+		    EqualsAsciiIgnoreCase(request.headers[index].name, "Content-Type")) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool IsFixedAuthenticatedUserRequest(const HttpRequest &request) {
 	return request.method == "GET" && request.scheme == "https" && request.host == "api.github.com" &&
 	       request.port == 443 && request.target == "/user" && request.body.empty() && request.content_type.empty() &&
@@ -186,6 +206,39 @@ HttpRequest FixedGithubUserBearerAuthenticator::AuthorizeRepository(const Admitt
 		}
 	}
 	if (bearer_value.size() > ScanAuthorization::GithubUserBearerTokenByteLimit() ||
+	    !TryAccumulateRequestHeaderBytes(max_header_bytes, sizeof("Authorization") - 1,
+	                                     (sizeof("Bearer ") - 1) + bearer_value.size(), header_bytes)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
+		                     "HTTP request headers exceed the 16384-byte aggregate limit");
+	}
+	try {
+		bearer_value.insert(0, "Bearer ");
+		request.headers.push_back({"Authorization", std::move(bearer_value)});
+		return request;
+	} catch (const std::bad_alloc &) {
+		throw ExecutionError(ErrorStage::RESOURCE, "authorization",
+		                     "authorization header could not be allocated within its memory budget");
+	}
+}
+
+HttpRequest FixedGithubUserBearerAuthenticator::AuthorizeGraphql(const AdmittedGraphqlRequestProfile &profile,
+                                                                 uint64_t max_header_bytes, HttpRequest request,
+                                                                 const ScanAuthorization &authorization) {
+	if (!IsFixedAdmittedGraphqlRequest(profile, request)) {
+		throw ExecutionError(ErrorStage::POLICY, "authorization",
+		                     "bearer authorization is outside the installed execution profile");
+	}
+	auto bearer_value = CopyToken(authorization);
+	uint64_t header_bytes = 0;
+	for (const auto &header : request.headers) {
+		if (!TryAccumulateRequestHeaderBytes(max_header_bytes, header.name.size(), header.value.size(), header_bytes)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
+			                     "HTTP request headers exceed the 16384-byte aggregate limit");
+		}
+	}
+	if (!TryAccumulateRequestHeaderBytes(max_header_bytes, sizeof("Content-Type") - 1, request.content_type.size(),
+	                                     header_bytes) ||
+	    bearer_value.size() > ScanAuthorization::GithubUserBearerTokenByteLimit() ||
 	    !TryAccumulateRequestHeaderBytes(max_header_bytes, sizeof("Authorization") - 1,
 	                                     (sizeof("Bearer ") - 1) + bearer_value.size(), header_bytes)) {
 		throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",

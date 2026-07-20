@@ -1,6 +1,8 @@
 #include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 
 #include "duckdb_api/internal/runtime/authentication/fixed_github_user_bearer_authenticator.hpp"
+#include "duckdb_api/internal/runtime/execution/graphql_paginated_scan.hpp"
+#include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
 #include "duckdb_api/internal/runtime/execution/http_paginated_scan.hpp"
 #include "duckdb_api/internal/runtime/execution/http_plan_admission.hpp"
 #include "duckdb_api/internal/runtime/decoding/json_decoder.hpp"
@@ -282,6 +284,20 @@ public:
 
 	std::unique_ptr<BatchStream> Open(const ScanPlan &plan, ExecutionControl &control) const override {
 		CheckCancellation(control);
+		try {
+			if (plan.Operation().Protocol() == PlannedProtocol::GRAPHQL) {
+				if (!TryAdmitGraphqlPlan(plan, profile)) {
+					throw ExecutionError(ErrorStage::POLICY, "",
+					                     "scan plan is outside the installed execution profile");
+				}
+				throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
+				                     "authenticated execution requires a bearer authorization capability");
+			}
+		} catch (const ExecutionError &) {
+			throw;
+		} catch (...) {
+			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
+		}
 		if (TryAdmitRepositoryHttpPlan(plan, profile)) {
 			throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
 			                     "authenticated execution requires a bearer authorization capability");
@@ -300,6 +316,25 @@ public:
 protected:
 	std::unique_ptr<BatchStream> OpenAuthorizationEnvelope(const ScanPlan &plan, ScanAuthorization authorization,
 	                                                       ExecutionControl &control) const override {
+		try {
+			if (plan.Operation().Protocol() == PlannedProtocol::GRAPHQL) {
+				auto graphql_profile = TryAdmitGraphqlPlan(plan, profile);
+				if (!graphql_profile) {
+					throw ExecutionError(ErrorStage::POLICY, "",
+					                     "scan plan is outside the installed execution profile");
+				}
+				if (AlternativeOf(authorization) != AuthorizationAlternative::GITHUB_USER_BEARER) {
+					throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
+					                     "authorization capability does not match the scan plan");
+				}
+				return OpenGraphqlPaginatedScan(plan, std::move(graphql_profile), std::move(authorization), transport,
+				                                profile.max_wall_milliseconds, control);
+			}
+		} catch (const ExecutionError &) {
+			throw;
+		} catch (...) {
+			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
+		}
 		auto repository_profile = TryAdmitRepositoryHttpPlan(plan, profile);
 		if (repository_profile) {
 			if (AlternativeOf(authorization) != AuthorizationAlternative::GITHUB_USER_BEARER) {

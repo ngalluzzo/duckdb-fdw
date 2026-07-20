@@ -46,9 +46,10 @@ struct ControlledRequestObservation {
 	uint64_t max_metadata_bytes;
 };
 
-// Test-only Remote Runtime composition. Query tests consume only this helper
-// and the public executor contract; the implementation translation unit alone
-// sees the private transport seam. It is never linked into an installed target.
+// Runtime-private programmable transport fixture. Focused Runtime tests may
+// inspect exact synthetic material through this type; cross-team Query tests
+// consume only the dedicated service/controlled_runtime_scenario.hpp and the
+// public executor contract. It is never linked into an installed target.
 class ControlledHttpRuntime {
 public:
 	struct State;

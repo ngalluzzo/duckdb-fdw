@@ -12,4 +12,5 @@ configure_duckdb_api_cpp_target(duckdb_api_runtime_executor_service)
 target_link_libraries(
   duckdb_api_runtime_executor_service
   PUBLIC duckdb_api_runtime_interface_service
-         duckdb_api_scan_plan_service)
+         duckdb_api_scan_plan_service
+         duckdb_api_content_digest_service)

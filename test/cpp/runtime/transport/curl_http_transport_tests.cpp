@@ -1,9 +1,13 @@
 #include "duckdb_api/authorization.hpp"
+#include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
+#include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 #include "duckdb_api/internal/runtime/transport/curl_http_transport.hpp"
+#include "duckdb_api/internal/runtime/transport/graphql_request_body.hpp"
 #include "runtime/support/controlled_socket_service.hpp"
 #include "runtime/support/loopback_curl_runtime.hpp"
 #include "support/require.hpp"
 #include "runtime/support/runtime_http_test_support.hpp"
+#include "semantics/support/graphql_scan_plan_test_fixtures.hpp"
 
 #include <csignal>
 #include <cstdlib>
@@ -31,6 +35,19 @@ duckdb_api::internal::HttpRequest InstalledRepositoryRequest(std::string target)
 	                   {"User-Agent", "duckdb-api/0.6.0"},
 	                   {"X-GitHub-Api-Version", "2022-11-28"},
 	                   {"Authorization", "Bearer fixture-token"}};
+	return request;
+}
+
+duckdb_api::internal::HttpRequest InstalledGraphqlRequest() {
+	const duckdb_api::internal::HttpExecutionProfile host {
+	    duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443, false, false, false, 30000, 100};
+	const auto plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("curl_policy_secret");
+	auto admitted = duckdb_api::internal::TryAdmitGraphqlPlan(plan, host);
+	if (!admitted) {
+		throw std::runtime_error("canonical GraphQL transport fixture was not admitted");
+	}
+	auto request = duckdb_api::internal::BuildAdmittedGraphqlRequest(*admitted, nullptr);
+	request.headers.push_back({"Authorization", "Bearer fixture-token"});
 	return request;
 }
 
@@ -63,6 +80,60 @@ void TestInstalledRepositoryRequestPolicy() {
 	content_type.content_type = "application/json";
 	Require(ClassifyInstalledHttpRequest(content_type) == InstalledHttpRequestKind::UNSUPPORTED,
 	        "installed REST transport accepted content type without a body");
+}
+
+void TestInstalledGraphqlRequestPolicy() {
+	using duckdb_api::internal::ClassifyInstalledHttpRequest;
+	using duckdb_api::internal::InstalledHttpRequestKind;
+	auto request = InstalledGraphqlRequest();
+	Require(ClassifyInstalledHttpRequest(request) == InstalledHttpRequestKind::GRAPHQL_VIEWER_REPOSITORY_METRICS,
+	        "installed transport rejected the admitted GraphQL POST shape");
+	auto wrong_method = request;
+	wrong_method.method = "GET";
+	Require(ClassifyInstalledHttpRequest(wrong_method) == InstalledHttpRequestKind::UNSUPPORTED,
+	        "installed transport widened GraphQL request method authority");
+	auto wrong_target = request;
+	wrong_target.target = "/graphql?query=other";
+	Require(ClassifyInstalledHttpRequest(wrong_target) == InstalledHttpRequestKind::UNSUPPORTED,
+	        "installed transport widened GraphQL endpoint authority");
+	auto wrong_content_type = request;
+	wrong_content_type.content_type = "text/plain";
+	Require(ClassifyInstalledHttpRequest(wrong_content_type) == InstalledHttpRequestKind::UNSUPPORTED,
+	        "installed transport widened GraphQL content-type authority");
+	auto wrong_document = request;
+	const auto document_byte = wrong_document.body.find("nameWithOwner");
+	Require(document_byte != std::string::npos, "canonical GraphQL body fixture lost its document identity");
+	wrong_document.body[document_byte] = 'N';
+	Require(ClassifyInstalledHttpRequest(wrong_document) == InstalledHttpRequestKind::UNSUPPORTED,
+	        "installed transport accepted changed GraphQL document bytes");
+}
+
+void TestExactGraphqlCurlPost() {
+	ControlledSocketService service(ControlledSocketMode::GRAPHQL_SUCCESS);
+	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
+	ManualControl control;
+	auto token = duckdb_api_test::RuntimeCurlBearerToken(901);
+	const auto expected_authorization = "Authorization: Bearer " + token + "\r\n";
+	auto stream = runtime->Executor()->OpenWithAuthorization(
+	    duckdb_api_test::BuildValidGraphqlScanPlanFixture("graphql_curl_secret"),
+	    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+	Require(service.ConnectionCount() == 0, "GraphQL curl Open performed socket work");
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 1 && batch.rows[0].values.size() == 8 &&
+	            batch.rows[0].values[0].varchar_value == "R44" && !stream->Next(control, batch),
+	        "real curl GraphQL POST did not decode and exhaust one terminal page");
+	Require(service.WaitForRequest(std::chrono::seconds(2)), "controlled service did not receive GraphQL POST");
+	const auto wire = service.Request();
+	const auto body_begin = wire.find("\r\n\r\n");
+	Require(wire.find("POST /graphql HTTP/1.1\r\n") == 0 && body_begin != std::string::npos &&
+	            wire.find("\r\nContent-Type: application/json\r\n") != std::string::npos &&
+	            wire.find(expected_authorization) != std::string::npos,
+	        "curl GraphQL method, target, content type, or bearer placement drifted");
+	const auto body = wire.substr(body_begin + 4);
+	Require(body.find("{\"query\":\"query DuckdbApiViewerRepositoryMetrics") == 0 &&
+	            body.find("\",\"variables\":{\"pageSize\":100,\"cursor\":null}}") != std::string::npos &&
+	            runtime->Observation().request_count == 1 && runtime->Observation().socket_policy_checks == 1,
+	        "curl did not transmit exactly one canonical policy-checked GraphQL body");
 }
 
 void TestExactAnonymousCurlRequest() {
@@ -192,7 +263,9 @@ int main() {
 	(void)std::signal(SIGPIPE, SIG_IGN);
 	try {
 		TestInstalledRepositoryRequestPolicy();
+		TestInstalledGraphqlRequestPolicy();
 		TestExactAnonymousCurlRequest();
+		TestExactGraphqlCurlPost();
 		TestAuthenticatedCurlRequestIsolationAndFailures();
 		TestAnonymousStatusRedirectAndTransportFailures();
 		std::cout << "curl HTTP request tests passed" << std::endl;

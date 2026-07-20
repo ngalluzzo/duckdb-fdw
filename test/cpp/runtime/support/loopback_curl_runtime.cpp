@@ -26,10 +26,18 @@ struct LoopbackCurlRuntime::State {
 
 namespace {
 
+bool IsBearerHeader(const duckdb_api::internal::HttpHeader &header);
+
 bool HasFixedHeaders(const std::vector<duckdb_api::internal::HttpHeader> &headers) {
 	return headers.size() >= 3 && headers[0].name == "Accept" && headers[0].value == "application/vnd.github+json" &&
 	       headers[1].name == "User-Agent" && headers[1].value == "duckdb-api/0.6.0" &&
 	       headers[2].name == "X-GitHub-Api-Version" && headers[2].value == "2022-11-28";
+}
+
+bool HasGraphqlHeaders(const std::vector<duckdb_api::internal::HttpHeader> &headers) {
+	return headers.size() == 4 && headers[0].name == "Accept" && headers[0].value == "application/vnd.github+json" &&
+	       headers[1].name == "User-Agent" && headers[1].value == "duckdb-api/0.7.0" &&
+	       headers[2].name == "X-GitHub-Api-Version" && headers[2].value == "2022-11-28" && IsBearerHeader(headers[3]);
 }
 
 bool IsBearerHeader(const duckdb_api::internal::HttpHeader &header) {
@@ -96,6 +104,32 @@ public:
 		// This separately linked private seam routes an already validated public
 		// request to the owned loopback socket. Installed objects contain neither
 		// this numeric authority nor a caller-selected routing facility.
+		const auto url = authority + request.target;
+		const duckdb_api::internal::CurlTransferProfile profile {url.c_str(),
+		                                                         "http",
+		                                                         IsOwnedLoopbackSocket,
+		                                                         state.get()
+#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
+		                                                             ,
+		                                                         nullptr,
+		                                                         nullptr,
+		                                                         nullptr,
+		                                                         nullptr
+#endif
+		};
+		return duckdb_api::internal::PerformCurlTransfer(profile, request, limits, control);
+	}
+
+	duckdb_api::internal::HttpResponse Post(const duckdb_api::internal::HttpRequest &request,
+	                                        const duckdb_api::internal::HttpLimits &limits,
+	                                        duckdb_api::ExecutionControl &control) const override {
+		if (request.method != "POST" || request.scheme != "https" || request.host != "api.github.com" ||
+		    request.port != 443 || request.target != "/graphql" || request.content_type != "application/json" ||
+		    request.body.empty() || !HasGraphqlHeaders(request.headers)) {
+			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::POLICY, "",
+			                                 "HTTP request is outside the controlled test profile");
+		}
+		state->request_count.fetch_add(1, std::memory_order_relaxed);
 		const auto url = authority + request.target;
 		const duckdb_api::internal::CurlTransferProfile profile {url.c_str(),
 		                                                         "http",

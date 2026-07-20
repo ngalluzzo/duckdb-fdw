@@ -1,7 +1,8 @@
 #include "duckdb_api/internal/runtime/transport/curl_http_transport.hpp"
 
-#include "duckdb_api/internal/runtime/transport/curl_transfer.hpp"
 #include "duckdb_api/internal/runtime/policy/network_policy.hpp"
+#include "duckdb_api/internal/runtime/transport/curl_transfer.hpp"
+#include "duckdb_api/internal/runtime/transport/graphql_request_body.hpp"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -16,6 +17,7 @@ namespace {
 
 const char *const PUBLIC_SEARCH_URL = "https://api.github.com/search/users?q=duckdb+in%3Alogin&per_page=3";
 const char *const PUBLIC_AUTHENTICATED_USER_URL = "https://api.github.com/user";
+const char *const PUBLIC_GRAPHQL_URL = "https://api.github.com/graphql";
 
 bool HasFixedHeaders(const std::vector<HttpHeader> &headers, const char *user_agent) {
 	return headers.size() >= 3 && headers[0].name == "Accept" && headers[0].value == "application/vnd.github+json" &&
@@ -86,6 +88,14 @@ bool HasExpectedRepositoriesRequest(const HttpRequest &request) {
 	return page > 0;
 }
 
+bool HasExpectedGraphqlRequest(const HttpRequest &request) {
+	return request.method == "POST" && request.scheme == "https" && request.host == "api.github.com" &&
+	       request.port == 443 && request.target == "/graphql" && request.content_type == "application/json" &&
+	       IsCanonicalAdmittedGraphqlBody(request.body) && request.headers.size() == 4 &&
+	       HasFixedHeaders(request.headers, "duckdb-api/0.7.0") && request.headers[3].name == "Authorization" &&
+	       IsVisibleAsciiBearer(request.headers[3].value);
+}
+
 bool IsPublicHttpsSocket(const sockaddr *address, socklen_t address_length, const void *) noexcept {
 	if (!address || !IsPublicSocketAddress(address, address_length)) {
 		return false;
@@ -113,6 +123,9 @@ InstalledHttpRequestKind ClassifyInstalledHttpRequest(const HttpRequest &request
 	if (HasExpectedRepositoriesRequest(request)) {
 		return InstalledHttpRequestKind::AUTHENTICATED_REPOSITORIES;
 	}
+	if (HasExpectedGraphqlRequest(request)) {
+		return InstalledHttpRequestKind::GRAPHQL_VIEWER_REPOSITORY_METRICS;
+	}
 	return InstalledHttpRequestKind::UNSUPPORTED;
 }
 
@@ -134,10 +147,31 @@ public:
 			repository_url = std::string("https://api.github.com") + request.target;
 			url = repository_url.c_str();
 			break;
+		case InstalledHttpRequestKind::GRAPHQL_VIEWER_REPOSITORY_METRICS:
+			throw ExecutionError(ErrorStage::POLICY, "method", "GraphQL requests require HTTP POST");
 		case InstalledHttpRequestKind::UNSUPPORTED:
 			throw ExecutionError(ErrorStage::POLICY, "", "HTTP request is outside the installed execution profile");
 		}
 		const CurlTransferProfile profile {url,
+		                                   "https",
+		                                   IsPublicHttpsSocket,
+		                                   nullptr
+#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
+		                                   ,
+		                                   nullptr,
+		                                   nullptr,
+		                                   nullptr,
+		                                   nullptr
+#endif
+		};
+		return PerformCurlTransfer(profile, request, limits, control);
+	}
+
+	HttpResponse Post(const HttpRequest &request, const HttpLimits &limits, ExecutionControl &control) const override {
+		if (ClassifyInstalledHttpRequest(request) != InstalledHttpRequestKind::GRAPHQL_VIEWER_REPOSITORY_METRICS) {
+			throw ExecutionError(ErrorStage::POLICY, "", "HTTP request is outside the installed execution profile");
+		}
+		const CurlTransferProfile profile {PUBLIC_GRAPHQL_URL,
 		                                   "https",
 		                                   IsPublicHttpsSocket,
 		                                   nullptr

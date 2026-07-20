@@ -11,10 +11,16 @@ set(REMOTE_RUNTIME_PAGINATION_SOURCES
 set(REMOTE_RUNTIME_EXECUTOR_SOURCES
     ${REMOTE_RUNTIME_PAGINATION_SOURCES}
     src/runtime/authentication/fixed_github_user_bearer_authenticator.cpp
+    src/runtime/decoding/graphql_response_decoder.cpp
     src/runtime/decoding/json_decoder.cpp
+    src/runtime/decoding/strict_json_reader.cpp
+    src/runtime/execution/graphql_paginated_scan.cpp
+    src/runtime/execution/graphql_plan_admission.cpp
     src/runtime/execution/http_plan_admission.cpp
     src/runtime/execution/http_paginated_scan.cpp
-    src/runtime/execution/http_scan_executor.cpp)
+    src/runtime/execution/http_scan_executor.cpp
+    src/runtime/pagination/graphql_cursor_pagination.cpp
+    src/runtime/transport/graphql_request_body.cpp)
 set(REMOTE_RUNTIME_SOURCES
     ${REMOTE_RUNTIME_EXECUTOR_SOURCES}
     src/runtime/policy/network_policy.cpp

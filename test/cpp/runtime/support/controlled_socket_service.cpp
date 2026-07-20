@@ -38,6 +38,35 @@ std::string Binary(const unsigned char *bytes, std::size_t size) {
 	return std::string(reinterpret_cast<const char *>(bytes), size);
 }
 
+bool RequestComplete(const std::string &request) {
+	const auto header_end = request.find("\r\n\r\n");
+	if (header_end == std::string::npos) {
+		return false;
+	}
+	const std::string marker = "\r\nContent-Length: ";
+	const auto begin = request.find(marker);
+	if (begin == std::string::npos || begin >= header_end) {
+		return true;
+	}
+	const auto digits = begin + marker.size();
+	const auto line_end = request.find("\r\n", digits);
+	if (line_end == std::string::npos || line_end > header_end || line_end == digits) {
+		return true;
+	}
+	std::size_t body_bytes = 0;
+	for (std::size_t index = digits; index < line_end; index++) {
+		if (request[index] < '0' || request[index] > '9') {
+			return true;
+		}
+		const auto digit = static_cast<std::size_t>(request[index] - '0');
+		if (body_bytes > (65536 - digit) / 10) {
+			return true;
+		}
+		body_bytes = body_bytes * 10 + digit;
+	}
+	return request.size() >= header_end + 4 + body_bytes;
+}
+
 } // namespace
 
 ControlledSocketService::ControlledSocketService(ControlledSocketMode mode_p, uint16_t redirect_port_p)
@@ -140,6 +169,16 @@ std::string ControlledSocketService::Response(ControlledSocketMode response_mode
 	                                 "{\"id\":22,\"login\":\"duckdb-fdw\",\"site_admin\":true},"
 	                                 "{\"id\":33,\"login\":\"three\",\"site_admin\":false}]}";
 	const std::string authenticated_body = "{\"id\":44,\"login\":\"authenticated\",\"site_admin\":false}";
+	const std::string graphql_body =
+	    "{\"data\":{\"viewer\":{\"repositories\":{\"nodes\":[{\"id\":\"R44\","
+	    "\"nameWithOwner\":\"owner/graphql\",\"owner\":{\"login\":\"owner\"},\"stargazerCount\":44,"
+	    "\"primaryLanguage\":{\"name\":\"C++\"},\"isPrivate\":false,\"isArchived\":false,"
+	    "\"updatedAt\":\"2026-01-01T00:00:00Z\"}],\"pageInfo\":{\"hasNextPage\":false,"
+	    "\"endCursor\":null}}}},\"errors\":[]}";
+	if (response_mode == ControlledSocketMode::GRAPHQL_SUCCESS) {
+		return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+		       std::to_string(graphql_body.size()) + "\r\nConnection: close\r\n\r\n" + graphql_body;
+	}
 	if (response_mode == ControlledSocketMode::AUTHENTICATED_SUCCESS ||
 	    response_mode == ControlledSocketMode::AUTHENTICATED_SET_COOKIE) {
 		const std::string cookie_header = response_mode == ControlledSocketMode::AUTHENTICATED_SET_COOKIE
@@ -283,7 +322,7 @@ void ControlledSocketService::Serve() noexcept {
 		connection_count.fetch_add(1, std::memory_order_relaxed);
 		std::string received;
 		char buffer[2048];
-		while (received.find("\r\n\r\n") == std::string::npos && received.size() < 65536) {
+		while (!RequestComplete(received) && received.size() < 65536) {
 			const auto count = recv(accepted, buffer, sizeof(buffer), 0);
 			if (count <= 0) {
 				break;

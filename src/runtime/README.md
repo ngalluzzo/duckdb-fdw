@@ -8,12 +8,14 @@ Runtime accepts a complete plan and explicit authorization capability. It does
 not construct connector metadata, classify relational operations, or depend on
 DuckDB callback state.
 
-Repository admission converts the complete Semantics handoff into one immutable
-`AdmittedRepositoryRequestProfile`. That profile owns the canonical operation,
-six-column schema, pagination target, and the optional closed
-`visibility=private` input. Request construction, bearer placement, decoding,
-and Link validation consume only that profile or an exact derived request;
-they do not inspect relational predicates or Connector declarations.
+Protocol-specific admission converts the complete Semantics handoff into an
+immutable Runtime profile. REST repository execution owns its six-column
+schema, typed page target, and optional closed `visibility=private` input.
+GraphQL analytics execution owns the canonical document, eight-column nullable
+schema, fixed variables, cursor policy, and body limits. Request construction,
+bearer placement, decoding, and pagination consume only those admitted profiles
+or exact derived requests; they do not inspect relation labels, SQL,
+explanation prose, or Connector declarations.
 
 Admission exhaustively validates the structured predicate-decision values and
 the DuckDB-owned execution envelope, but does not reclassify them. The installed
@@ -28,6 +30,16 @@ fallback reasons admit only the retained-filter scopes that the Semantics
 decision service can emit. Unknown or contradictory structured values,
 unsupported operation/input pairs, and delegated projection, filtering,
 ordering, or bounds fail before authorization materialization or network I/O.
+
+GraphQL admission is the same kind of exhaustive check over the public
+Semantics handoff. It validates both cursor copies, ordered variables and
+columns, exact document bytes and digest, fail-only envelope paths, authentication
+and network authority, and every page/scan budget. The serializer then emits a
+compact POST body whose only changing value is the scan-owned nullable cursor.
+The body is debited before bearer placement or I/O. A separate strict lexical
+reader validates complete JSON; the GraphQL decoder owns only envelope and
+schema mapping, including `errors` before data and SQL NULL for the declared
+nullable language value.
 
 ## Directory guide
 
@@ -58,6 +70,11 @@ in the package `sources.cmake` and `targets.cmake` files.
 - Keep credentials inside opaque, move-only capabilities bound to approved
   authenticators, placements, and hosts. Diagnostics must remain redacted.
 - Treat terminal failure as failure, never clean exhaustion.
+- Debit the complete GraphQL body before bearer placement, and subtract
+  persistent seen-cursor storage from every decoded-page memory allowance.
+- Validate a GraphQL cursor transition before installing or publishing that
+  page. A nonempty `errors` array fails the whole page without exposing remote
+  messages or paths.
 - Keep `Cancel` and `Close` non-throwing and idempotent. Each scan owns an
   isolated stream and call-scoped `ExecutionControl`.
 - Keep pagination sequential. A received Link target is validated and converted
@@ -91,6 +108,11 @@ Tests mirror the production directories under `test/cpp/runtime/`:
 | Network and resource policy | `duckdb_api_network_policy_tests`, `duckdb_api_scan_resource_accounting_tests` |
 | URI and Link pagination | `duckdb_api_uri_reference_tests`, `duckdb_api_link_pagination_tests` |
 | JSON and decoded-page ownership | `duckdb_api_json_decoder_tests`, `duckdb_api_json_root_array_decoder_tests`, `duckdb_api_decoded_page_buffer_tests` |
+| GraphQL admission and request bytes | `duckdb_api_graphql_plan_admission_tests` |
+| GraphQL envelope and cursor state | `duckdb_api_graphql_response_decoder_tests`, `duckdb_api_graphql_cursor_pagination_tests` |
+| GraphQL pull execution | `duckdb_api_graphql_paginated_scan_tests` |
+| Consumer-controlled named scenarios | `duckdb_api_runtime_controlled_service`, `duckdb_api_controlled_runtime_scenario_tests` (`runtime/service/controlled_runtime_scenario.hpp`) |
+| Runtime-private programmable and curl fixtures | `duckdb_api_runtime_programmable_test_service`, `duckdb_api_runtime_loopback_curl_test_service` (`runtime/support/controlled_http_transport.hpp`, `runtime/support/loopback_curl_runtime.hpp`) |
 | Executor and page lifecycle | `duckdb_api_http_scan_executor_tests`, `duckdb_api_http_scan_executor_policy_tests`, `duckdb_api_http_scan_pagination_tests` |
 | Curl transport and lifecycle | Targets beginning `duckdb_api_curl_` in `test/cpp/runtime/targets.cmake` |
 

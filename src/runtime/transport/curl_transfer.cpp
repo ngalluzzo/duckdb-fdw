@@ -147,6 +147,15 @@ void ValidateInputs(const CurlTransferProfile &profile, const HttpRequest &reque
 	    limits.max_response_bytes > static_cast<uint64_t>(std::numeric_limits<curl_off_t>::max())) {
 		throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP transport received an invalid resource budget");
 	}
+	const bool valid_get = request.method == "GET" && request.body.empty() && request.content_type.empty() &&
+	                       limits.max_request_body_bytes == 0;
+	const bool valid_post = request.method == "POST" && !request.body.empty() &&
+	                        request.content_type == "application/json" && limits.max_request_body_bytes != 0 &&
+	                        static_cast<uint64_t>(request.body.size()) <= limits.max_request_body_bytes &&
+	                        request.body.size() <= static_cast<std::size_t>(std::numeric_limits<curl_off_t>::max());
+	if (!valid_get && !valid_post) {
+		throw ExecutionError(ErrorStage::POLICY, "request_body", "HTTP request method and body authority conflict");
+	}
 	uint64_t request_header_bytes = 0;
 	for (const auto &header : request.headers) {
 		if (!TryAccumulateRequestHeaderBytes(limits.max_header_bytes, header.name.size(), header.value.size(),
@@ -154,6 +163,11 @@ void ValidateInputs(const CurlTransferProfile &profile, const HttpRequest &reque
 			throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
 			                     "HTTP request headers exceed the 16384-byte aggregate limit");
 		}
+	}
+	if (valid_post && !TryAccumulateRequestHeaderBytes(limits.max_header_bytes, sizeof("Content-Type") - 1,
+	                                                   request.content_type.size(), request_header_bytes)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
+		                     "HTTP request headers exceed the 16384-byte aggregate limit");
 	}
 }
 
@@ -163,6 +177,9 @@ void BuildHeaders(const HttpRequest &request, CurlHeaderList &headers) {
 		if (!headers.Append(header)) {
 			throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP request headers exceeded available memory");
 		}
+	}
+	if (!request.content_type.empty() && !headers.Append("Content-Type: " + request.content_type)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP request headers exceeded available memory");
 	}
 }
 
@@ -204,7 +221,13 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 #endif
 		const auto timeout_milliseconds = RemainingMilliseconds(limits.deadline);
 		options.Set(CURLOPT_URL, profile.url);
-		options.Set(CURLOPT_HTTPGET, 1L);
+		if (request.method == "GET") {
+			options.Set(CURLOPT_HTTPGET, 1L);
+		} else {
+			options.Set(CURLOPT_POST, 1L);
+			options.Set(CURLOPT_POSTFIELDS, request.body.c_str());
+			options.Set(CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(request.body.size()));
+		}
 		options.Set(CURLOPT_HTTP_VERSION, static_cast<long>(CURL_HTTP_VERSION_1_1));
 		options.Set(CURLOPT_HTTPHEADER, headers.Get());
 		options.Set(CURLOPT_PROTOCOLS_STR, profile.protocols);

@@ -17,7 +17,8 @@ enum class InstalledHttpRequestKind : uint8_t {
 	UNSUPPORTED,
 	ANONYMOUS_SEARCH,
 	AUTHENTICATED_USER,
-	AUTHENTICATED_REPOSITORIES
+	AUTHENTICATED_REPOSITORIES,
+	GRAPHQL_VIEWER_REPOSITORY_METRICS
 };
 
 InstalledHttpRequestKind ClassifyInstalledHttpRequest(const HttpRequest &request) noexcept;

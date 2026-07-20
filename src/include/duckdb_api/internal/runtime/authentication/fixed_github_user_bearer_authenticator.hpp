@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb_api/authorization.hpp"
+#include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
 #include "duckdb_api/internal/runtime/execution/http_plan_admission.hpp"
 #include "duckdb_api/internal/runtime/transport/http_transport.hpp"
 #include "duckdb_api/scan_plan.hpp"
@@ -21,6 +22,8 @@ public:
 	static HttpRequest Authorize(const ScanPlan &plan, HttpRequest request, const ScanAuthorization &authorization);
 	static HttpRequest AuthorizeRepository(const AdmittedRepositoryRequestProfile &profile, uint64_t max_header_bytes,
 	                                       HttpRequest request, const ScanAuthorization &authorization);
+	static HttpRequest AuthorizeGraphql(const AdmittedGraphqlRequestProfile &profile, uint64_t max_header_bytes,
+	                                    HttpRequest request, const ScanAuthorization &authorization);
 
 private:
 	static std::string CopyToken(const ScanAuthorization &authorization);
