@@ -4,6 +4,7 @@
 #include "scan_plan_explanation.hpp"
 #include "table_function_bind_data.hpp"
 #include "table_function_plan_state.hpp"
+#include "typed_value_adapter.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -22,6 +23,7 @@ namespace duckdb {
 namespace {
 
 using duckdb_api_query_internal::DuckdbApiBindData;
+using duckdb_api_query_internal::PlannedValueColumn;
 
 // Call-scoped DuckDB coupling. Runtime receives only this non-owning control
 // interface and cannot retain ClientContext or throw a DuckDB exception.
@@ -101,9 +103,10 @@ void DuckdbApiPushdownComplexFilter(ClientContext &, LogicalGet &get, FunctionDa
 // teardown; unfinished streams receive cancellation before close.
 struct DuckdbApiGlobalState : public GlobalTableFunctionState {
 	DuckdbApiGlobalState(std::unique_ptr<duckdb_api::BatchStream> stream_p,
-	                     std::vector<duckdb_api::ValueKind> expected_kinds_p, uint64_t max_batch_rows_p,
+	                     std::vector<PlannedValueColumn> expected_columns_p, uint64_t max_batch_rows_p,
 	                     std::string connector_name_p, std::string relation_name_p)
-	    : stream(std::move(stream_p)), expected_kinds(std::move(expected_kinds_p)), max_batch_rows(max_batch_rows_p),
+	    : stream(std::move(stream_p)), expected_columns(std::move(expected_columns_p)),
+	      max_batch_rows(max_batch_rows_p),
 	      connector_name(std::move(connector_name_p)), relation_name(std::move(relation_name_p)), finished(false) {
 	}
 
@@ -122,7 +125,7 @@ struct DuckdbApiGlobalState : public GlobalTableFunctionState {
 	}
 
 	std::unique_ptr<duckdb_api::BatchStream> stream;
-	const std::vector<duckdb_api::ValueKind> expected_kinds;
+	const std::vector<PlannedValueColumn> expected_columns;
 	const uint64_t max_batch_rows;
 	const std::string connector_name;
 	const std::string relation_name;
@@ -195,6 +198,8 @@ const char *ErrorStageName(duckdb_api::ErrorStage stage) {
 		return "authentication";
 	case duckdb_api::ErrorStage::AUTHORIZATION:
 		return "authorization";
+	case duckdb_api::ErrorStage::REMOTE_PROTOCOL:
+		return "remote_protocol";
 	}
 	return "internal";
 }
@@ -211,41 +216,6 @@ const char *ErrorStageName(duckdb_api::ErrorStage stage) {
 	}
 	throw InvalidInputException("[duckdb_api][%s] connector=%s relation=%s field=%s: %s", ErrorStageName(error.Stage()),
 	                            connector_name, relation_name, error.Field(), error.SafeMessage());
-}
-
-LogicalType PlannedLogicalType(const duckdb_api::PlannedColumn &column) {
-	if (column.logical_type == "BIGINT") {
-		return LogicalType::BIGINT;
-	}
-	if (column.logical_type == "VARCHAR") {
-		return LogicalType::VARCHAR;
-	}
-	if (column.logical_type == "BOOLEAN") {
-		return LogicalType::BOOLEAN;
-	}
-	throw InternalException("duckdb_api scan plan contains an unsupported logical type");
-}
-
-duckdb_api::ValueKind PlannedValueKind(const duckdb_api::PlannedColumn &column) {
-	if (column.logical_type == "BIGINT") {
-		return duckdb_api::ValueKind::BIGINT;
-	}
-	if (column.logical_type == "VARCHAR") {
-		return duckdb_api::ValueKind::VARCHAR;
-	}
-	if (column.logical_type == "BOOLEAN") {
-		return duckdb_api::ValueKind::BOOLEAN;
-	}
-	throw InternalException("duckdb_api scan plan contains an unsupported logical type");
-}
-
-std::vector<duckdb_api::ValueKind> PlannedValueKinds(const duckdb_api::ScanPlan &plan) {
-	std::vector<duckdb_api::ValueKind> result;
-	result.reserve(plan.OutputColumns().size());
-	for (const auto &column : plan.OutputColumns()) {
-		result.push_back(PlannedValueKind(column));
-	}
-	return result;
 }
 
 [[noreturn]] void ThrowCancellation(duckdb_api::BatchStream *stream) {
@@ -284,7 +254,7 @@ unique_ptr<FunctionData> DuckdbApiBind(ClientContext &, TableFunctionBindInput &
 
 	for (const auto &column : plan.OutputColumns()) {
 		names.push_back(column.name);
-		return_types.push_back(PlannedLogicalType(column));
+		return_types.push_back(duckdb_api_query_internal::PlannedLogicalType(column));
 	}
 	return make_uniq<DuckdbApiBindData>(std::move(request), std::move(plan), function_info.executor);
 }
@@ -321,7 +291,9 @@ unique_ptr<GlobalTableFunctionState> DuckdbApiInit(ClientContext &context, Table
 		if (!stream) {
 			throw std::logic_error("scan executor returned no stream");
 		}
-		return make_uniq<DuckdbApiGlobalState>(std::move(stream), PlannedValueKinds(plan), plan.Budgets().batch_rows,
+		return make_uniq<DuckdbApiGlobalState>(std::move(stream),
+		                                       duckdb_api_query_internal::PlannedValueColumns(plan),
+		                                       plan.Budgets().batch_rows,
 		                                       plan.ConnectorName(), plan.RelationName());
 	} catch (const duckdb_api::ExecutionCancelled &) {
 		ThrowCancellation(nullptr);
@@ -337,18 +309,6 @@ unique_ptr<GlobalTableFunctionState> DuckdbApiInit(ClientContext &context, Table
 		throw InvalidInputException("[duckdb_api][internal] connector=%s relation=%s: unexpected execution failure",
 		                            plan.ConnectorName(), plan.RelationName());
 	}
-}
-
-Value DuckdbValue(const duckdb_api::TypedValue &value) {
-	switch (value.kind) {
-	case duckdb_api::ValueKind::BIGINT:
-		return Value::BIGINT(value.bigint_value);
-	case duckdb_api::ValueKind::VARCHAR:
-		return Value(value.varchar_value);
-	case duckdb_api::ValueKind::BOOLEAN:
-		return Value::BOOLEAN(value.boolean_value);
-	}
-	throw InternalException("duckdb_api runtime returned an unknown typed value");
 }
 
 void DuckdbApiScan(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
@@ -368,19 +328,12 @@ void DuckdbApiScan(ClientContext &context, TableFunctionInput &input, DataChunk 
 		// exhaustion and will not pull again. Runtime therefore owns crossing an
 		// empty nonterminal source page inside the active Next call; a successful
 		// empty batch is a provider-contract violation, not clean exhaustion.
-		if (batch.rows.empty() || !batch.IsSchemaAligned() || batch.column_kinds != state.expected_kinds ||
-		    batch.rows.size() > state.max_batch_rows || batch.rows.size() > STANDARD_VECTOR_SIZE) {
-			throw std::logic_error("batch stream violated its bound schema or row ceiling");
-		}
 		for (idx_t row_index = 0; row_index < batch.rows.size(); row_index++) {
 			if (control.IsCancellationRequested()) {
 				throw duckdb_api::ExecutionCancelled();
 			}
-			for (idx_t column_index = 0; column_index < batch.rows[row_index].values.size(); column_index++) {
-				output.SetValue(column_index, row_index, DuckdbValue(batch.rows[row_index].values[column_index]));
-			}
 		}
-		output.SetCardinality(batch.rows.size());
+		duckdb_api_query_internal::WriteTypedBatch(output, batch, state.expected_columns, state.max_batch_rows);
 	} catch (const duckdb_api::ExecutionCancelled &) {
 		ThrowCancellation(state.stream.get());
 	} catch (const InterruptException &) {

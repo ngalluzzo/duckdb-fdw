@@ -10,7 +10,8 @@ set(QUERY_DUCKDB_SECRET_SOURCES
 set(QUERY_DUCKDB_ADAPTER_SUPPORT_SOURCES
     src/query/duckdb/complex_filter_adapter.cpp
     src/query/duckdb/scan_plan_explanation.cpp
-    src/query/duckdb/table_function_plan_state.cpp)
+    src/query/duckdb/table_function_plan_state.cpp
+    src/query/duckdb/typed_value_adapter.cpp)
 set(QUERY_DUCKDB_ADAPTER_SOURCES
     ${QUERY_DUCKDB_ADAPTER_SUPPORT_SOURCES}
     src/query/duckdb/table_function_adapter.cpp

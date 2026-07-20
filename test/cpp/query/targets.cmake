@@ -9,6 +9,15 @@ target_link_libraries(
           duckdb_api_query_request_service)
 
 add_executable(
+  duckdb_api_typed_value_adapter_tests
+  test/cpp/query/duckdb/typed_value_adapter_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_typed_value_adapter_tests)
+target_include_directories(duckdb_api_typed_value_adapter_tests PRIVATE test/cpp src)
+target_link_libraries(
+  duckdb_api_typed_value_adapter_tests
+  PRIVATE duckdb_api_query_typed_value_adapter_service)
+
+add_executable(
   duckdb_api_duckdb_secret_tests
   test/cpp/query/duckdb/duckdb_secret_tests.cpp
   test/cpp/query/duckdb/duckdb_secret_creation_tests.cpp
