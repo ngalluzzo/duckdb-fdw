@@ -25,7 +25,7 @@ using Clock = std::chrono::steady_clock;
 const std::string CANARY = "private-repository-canary";
 
 ScanResourceProfile Profile() {
-	return {{1, 10, 20, 30, 4, 50, 1}, {3, 3, 30, 60, 90, 12, 50, 100, 1}};
+	return {{1, 10, 20, 30, 4, 50, 1, 0}, {3, 3, 30, 60, 90, 12, 50, 100, 1, 0}};
 }
 
 void RequireError(const std::function<void()> &action, const std::string &field, const std::string &label) {
@@ -74,6 +74,16 @@ void TestProfileValidation() {
 	invalid.scan.max_wall_milliseconds = std::numeric_limits<uint64_t>::max();
 	RequireError([&]() { ScanResourceAccounting accounting(invalid); }, "resource_profile",
 	             "unrepresentable wall budget");
+
+	invalid = Profile();
+	invalid.page.serialized_request_body_bytes = 8;
+	RequireError([&]() { ScanResourceAccounting accounting(invalid); }, "resource_profile",
+	             "body page authority without scan authority");
+
+	invalid = Profile();
+	invalid.scan.serialized_request_body_bytes = 24;
+	RequireError([&]() { ScanResourceAccounting accounting(invalid); }, "resource_profile",
+	             "body scan authority without page authority");
 }
 
 void TestExactSequentialLifecycle() {
@@ -95,7 +105,7 @@ void TestExactSequentialLifecycle() {
 		}
 		Require(allowance.header_bytes == 10 && allowance.wire_response_bytes == 20 &&
 		            allowance.decompressed_response_bytes == 30 && allowance.decoded_records == 4 &&
-		            allowance.decoded_memory_bytes == 50,
+		            allowance.decoded_memory_bytes == 50 && allowance.serialized_request_body_bytes == 0,
 		        "page allowance did not preserve exact per-page ceilings");
 		Require(accounting.State() == ScanResourceState::REQUEST_ACTIVE && accounting.Counters().active_requests == 1,
 		        "BeginPage did not reserve one request before returning authority");
@@ -116,8 +126,51 @@ void TestExactSequentialLifecycle() {
 	Require(counters.request_attempts == 3 && counters.pages == 3 && counters.header_bytes == 30 &&
 	            counters.wire_response_bytes == 60 && counters.decompressed_response_bytes == 90 &&
 	            counters.decoded_records == 12 && counters.peak_decoded_memory_bytes == 30 &&
-	            counters.active_requests == 0,
+	            counters.active_requests == 0 && counters.serialized_request_body_bytes == 0,
 	        "exact-boundary counters drifted");
+}
+
+void TestSerializedRequestBodyAccounting() {
+	auto profile = Profile();
+	profile.page.serialized_request_body_bytes = 8;
+	profile.scan.serialized_request_body_bytes = 20;
+	const Clock::time_point start;
+	ScanResourceAccounting accounting(profile);
+
+	for (uint64_t page = 1; page <= 3; page++) {
+		const auto allowance = accounting.BeginPage(start);
+		const uint64_t expected_allowance = page < 3 ? 8 : 4;
+		Require(allowance.serialized_request_body_bytes == expected_allowance,
+		        "serialized body allowance did not intersect page and remaining scan authority");
+		accounting.CommitRequestBody(expected_allowance);
+		Require(accounting.State() == ScanResourceState::REQUEST_BODY_COMMITTED,
+		        "serialized body debit did not advance pre-transport state");
+		accounting.CommitTransport({0, 0, 0});
+		accounting.CommitDecodedPage({0, 0});
+		accounting.CompletePage(page != 3, start);
+	}
+	Require(accounting.Counters().serialized_request_body_bytes == 20 &&
+	            accounting.State() == ScanResourceState::EXHAUSTED,
+	        "serialized request bodies did not retain exact cumulative accounting");
+
+	ScanResourceAccounting oversized(profile);
+	oversized.BeginPage(start);
+	RequireError([&]() { oversized.CommitRequestBody(9); }, "request_body_bytes", "per-page body ceiling");
+	Require(oversized.Counters().serialized_request_body_bytes == 0 && oversized.Counters().active_requests == 0,
+	        "rejected request body retained a byte debit or active request");
+
+	ScanResourceAccounting empty(profile);
+	empty.BeginPage(start);
+	RequireError([&]() { empty.CommitRequestBody(0); }, "request_body_bytes", "empty serialized request body");
+
+	ScanResourceAccounting missing_debit(profile);
+	missing_debit.BeginPage(start);
+	RequireError([&]() { missing_debit.CommitTransport({0, 0, 0}); }, "resource_state",
+	             "transport before request-body debit");
+
+	ScanResourceAccounting bodyless(Profile());
+	bodyless.BeginPage(start);
+	RequireError([&]() { bodyless.CommitRequestBody(0); }, "resource_state", "body debit on bodyless profile");
 }
 
 void TestAdvertisedNextFailsAtScanCeilings() {
@@ -280,8 +333,8 @@ void TestOrderingAbortAndTerminalState() {
 
 void TestMaximumCounterBoundary() {
 	const auto maximum = std::numeric_limits<uint64_t>::max();
-	const ScanResourceProfile profile = {{1, maximum, maximum, maximum, maximum, maximum, 1},
-	                                     {2, 2, maximum, maximum, maximum, maximum, maximum, 100, 1}};
+	const ScanResourceProfile profile = {{1, maximum, maximum, maximum, maximum, maximum, 1, 0},
+	                                     {2, 2, maximum, maximum, maximum, maximum, maximum, 100, 1, 0}};
 	ScanResourceAccounting accounting(profile);
 	const Clock::time_point start;
 	const auto allowance = accounting.BeginPage(start);
@@ -302,6 +355,7 @@ int main() {
 	try {
 		TestProfileValidation();
 		TestExactSequentialLifecycle();
+		TestSerializedRequestBodyAccounting();
 		TestAdvertisedNextFailsAtScanCeilings();
 		TestPerPageCeilingsFailClosed();
 		TestAggregateRemainingAuthority();

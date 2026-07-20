@@ -36,6 +36,9 @@ struct PageResourceLimits {
 	uint64_t decoded_records;
 	uint64_t decoded_memory_bytes;
 	uint64_t active_requests;
+	// Zero denotes a bodyless protocol profile. A nonzero ceiling requires an
+	// explicit pre-transport debit for the complete serialized request body.
+	uint64_t serialized_request_body_bytes;
 };
 
 // Per-scan ceilings shared by every page. Header, wire, decompressed, and
@@ -52,6 +55,7 @@ struct ScanResourceLimits {
 	uint64_t retained_decoded_memory_bytes;
 	uint64_t max_wall_milliseconds;
 	uint64_t active_requests;
+	uint64_t serialized_request_body_bytes;
 };
 
 struct ScanResourceProfile {
@@ -68,6 +72,7 @@ struct PageResourceAllowance {
 	uint64_t decompressed_response_bytes;
 	uint64_t decoded_records;
 	uint64_t decoded_memory_bytes;
+	uint64_t serialized_request_body_bytes;
 	std::chrono::steady_clock::time_point deadline;
 };
 
@@ -94,15 +99,30 @@ struct ScanResourceCounters {
 	uint64_t retained_decoded_memory_bytes;
 	uint64_t peak_decoded_memory_bytes;
 	uint64_t active_requests;
+	uint64_t serialized_request_body_bytes;
 };
 
-enum class ScanResourceState : uint8_t { READY, REQUEST_ACTIVE, TRANSPORT_COMMITTED, PAGE_DECODED, EXHAUSTED, FAILED };
+enum class ScanResourceState : uint8_t {
+	READY,
+	REQUEST_ACTIVE,
+	REQUEST_BODY_COMMITTED,
+	TRANSPORT_COMMITTED,
+	PAGE_DECODED,
+	EXHAUSTED,
+	FAILED
+};
 
 // Scan-owned sequential accounting state. The required ordering is:
 //
-//   BeginPage -> CommitTransport -> CommitDecodedPage -> CompletePage
+//   bodyless: BeginPage -> CommitTransport -> CommitDecodedPage -> CompletePage
+//   body:     BeginPage -> CommitRequestBody -> CommitTransport
+//             -> CommitDecodedPage -> CompletePage
 //
 // BeginPage debits one request and page before transport authority is returned.
+// CommitRequestBody measures the complete serialized body against page and
+// remaining scan authority while the request is still side-effect free. A
+// body-authorized profile cannot commit transport until this debit succeeds;
+// a bodyless profile retains the existing direct transition.
 // Commit methods validate the previously returned allowance before adding to
 // aggregate counters. CompletePage releases retained decoded memory; when a
 // next page is advertised it fails immediately if any cumulative scan budget
@@ -115,6 +135,7 @@ public:
 	explicit ScanResourceAccounting(const ScanResourceProfile &profile);
 
 	PageResourceAllowance BeginPage(std::chrono::steady_clock::time_point now);
+	void CommitRequestBody(uint64_t serialized_request_body_bytes);
 	void CommitTransport(const TransportResourceUsage &usage);
 	void CommitDecodedPage(const DecodedPageResourceUsage &usage);
 	void CompletePage(bool has_next, std::chrono::steady_clock::time_point now);

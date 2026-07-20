@@ -64,10 +64,13 @@ bool HasFixedBearerObligation(const ScanPlan &plan) {
 }
 
 bool IsFixedAuthenticatedUserPlan(const ScanPlan &plan) {
-	const auto &operation = plan.Operation();
-	return plan.ConnectorName() == "github" && plan.ConnectorVersion() == "0.6.0" &&
+	if (plan.Operation().Protocol() != PlannedProtocol::REST) {
+		return false;
+	}
+	const auto &operation = plan.Operation().Rest();
+	return plan.ConnectorName() == "github" && plan.ConnectorVersion() == "0.7.0" &&
 	       plan.RelationName() == "authenticated_user" && operation.operation_name == "github_authenticated_user" &&
-	       operation.protocol == PlannedProtocol::REST && operation.method == PlannedHttpMethod::GET &&
+	       operation.method == PlannedHttpMethod::GET &&
 	       operation.cardinality == PlannedCardinality::EXACTLY_ONE_ON_SUCCESS &&
 	       operation.replay_safety == PlannedReplaySafety::SAFE && operation.origin.scheme == PlannedUrlScheme::HTTPS &&
 	       operation.origin.host == "api.github.com" && operation.origin.port == 443 && operation.path == "/user" &&
@@ -107,8 +110,8 @@ bool IsCanonicalAdmittedRepositoryTarget(const AdmittedRepositoryRequestProfile 
 
 bool IsFixedAdmittedRepositoryRequest(const AdmittedRepositoryRequestProfile &profile, const HttpRequest &request) {
 	if (request.method != profile.Method() || request.scheme != profile.Scheme() || request.host != profile.Host() ||
-	    request.port != profile.Port() || request.headers.size() != profile.Headers().size() ||
-	    !IsCanonicalAdmittedRepositoryTarget(profile, request.target)) {
+	    request.port != profile.Port() || request.headers.size() != profile.Headers().size() || !request.body.empty() ||
+	    !request.content_type.empty() || !IsCanonicalAdmittedRepositoryTarget(profile, request.target)) {
 		return false;
 	}
 	for (std::size_t index = 0; index < request.headers.size(); index++) {
@@ -123,7 +126,7 @@ bool IsFixedAdmittedRepositoryRequest(const AdmittedRepositoryRequestProfile &pr
 
 bool IsFixedAuthenticatedUserRequest(const HttpRequest &request) {
 	return request.method == "GET" && request.scheme == "https" && request.host == "api.github.com" &&
-	       request.port == 443 && request.target == "/user" &&
+	       request.port == 443 && request.target == "/user" && request.body.empty() && request.content_type.empty() &&
 	       HasFixedHeadersWithoutAuthorization(request.headers, "duckdb-api/0.6.0");
 }
 

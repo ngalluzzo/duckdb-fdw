@@ -57,8 +57,9 @@ bool IsRepositoryTarget(const std::string &target) {
 }
 
 bool HasExpectedRequest(const duckdb_api::internal::HttpRequest &request) {
-	if (request.method != "GET" || request.scheme != "https" || request.host != "api.github.com" ||
-	    request.port != 443 || !HasFixedHeaders(request.headers)) {
+	if (request.method != "GET" || !request.body.empty() || !request.content_type.empty() ||
+	    request.scheme != "https" || request.host != "api.github.com" || request.port != 443 ||
+	    !HasFixedHeaders(request.headers)) {
 		return false;
 	}
 	if (request.target == "/search/users?q=duckdb+in%3Alogin&per_page=3") {

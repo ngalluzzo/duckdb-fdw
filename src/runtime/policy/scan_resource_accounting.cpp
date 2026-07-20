@@ -33,7 +33,8 @@ void ValidateProfile(const ScanResourceProfile &profile) {
 	    page.header_bytes == 0 || page.wire_response_bytes == 0 || page.decompressed_response_bytes == 0 ||
 	    page.decoded_records == 0 || page.decoded_memory_bytes == 0 || scan.request_attempts == 0 || scan.pages == 0 ||
 	    scan.header_bytes == 0 || scan.wire_response_bytes == 0 || scan.decompressed_response_bytes == 0 ||
-	    scan.decoded_records == 0 || scan.retained_decoded_memory_bytes == 0 || scan.max_wall_milliseconds == 0) {
+	    scan.decoded_records == 0 || scan.retained_decoded_memory_bytes == 0 || scan.max_wall_milliseconds == 0 ||
+	    ((page.serialized_request_body_bytes == 0) != (scan.serialized_request_body_bytes == 0))) {
 		ThrowProfileError();
 	}
 	using Milliseconds = std::chrono::milliseconds;
@@ -70,8 +71,8 @@ const std::string &ScanResourceError::SafeMessage() const noexcept {
 }
 
 ScanResourceAccounting::ScanResourceAccounting(const ScanResourceProfile &profile_p)
-    : profile(profile_p), counters {0, 0, 0, 0, 0, 0, 0, 0, 0}, state(ScanResourceState::READY),
-      deadline_started(false), deadline(), active_allowance {0, 0, 0, 0, 0, {}} {
+    : profile(profile_p), counters {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, state(ScanResourceState::READY),
+      deadline_started(false), deadline(), active_allowance {0, 0, 0, 0, 0, 0, {}} {
 	ValidateProfile(profile);
 }
 
@@ -103,6 +104,10 @@ void ScanResourceAccounting::RequireReadyForNext(std::chrono::steady_clock::time
 	}
 	if (counters.decoded_records >= profile.scan.decoded_records) {
 		Fail("decoded_records", "scan exhausted its decoded-record budget");
+	}
+	if (profile.scan.serialized_request_body_bytes != 0 &&
+	    counters.serialized_request_body_bytes >= profile.scan.serialized_request_body_bytes) {
+		Fail("request_body_bytes", "scan exhausted its serialized-request-body budget");
 	}
 }
 
@@ -139,6 +144,12 @@ PageResourceAllowance ScanResourceAccounting::BeginPage(std::chrono::steady_cloc
 		    std::min(profile.page.decoded_records, Remaining(profile.scan.decoded_records, counters.decoded_records));
 		active_allowance.decoded_memory_bytes =
 		    std::min(profile.page.decoded_memory_bytes, profile.scan.retained_decoded_memory_bytes);
+		active_allowance.serialized_request_body_bytes =
+		    profile.page.serialized_request_body_bytes == 0
+		        ? 0
+		        : std::min(
+		              profile.page.serialized_request_body_bytes,
+		              Remaining(profile.scan.serialized_request_body_bytes, counters.serialized_request_body_bytes));
 		active_allowance.deadline = deadline;
 		state = ScanResourceState::REQUEST_ACTIVE;
 		return active_allowance;
@@ -147,8 +158,31 @@ PageResourceAllowance ScanResourceAccounting::BeginPage(std::chrono::steady_cloc
 	}
 }
 
+void ScanResourceAccounting::CommitRequestBody(uint64_t serialized_request_body_bytes) {
+	if (state != ScanResourceState::REQUEST_ACTIVE || profile.page.serialized_request_body_bytes == 0) {
+		Fail("resource_state", "scan resource state cannot commit a request body");
+	}
+	try {
+		if (serialized_request_body_bytes == 0) {
+			throw ScanResourceError("request_body_bytes", "serialized request body cannot be empty");
+		}
+		RequireWithin(serialized_request_body_bytes, active_allowance.serialized_request_body_bytes,
+		              "request_body_bytes");
+		counters.serialized_request_body_bytes =
+		    AddChecked(counters.serialized_request_body_bytes, serialized_request_body_bytes,
+		               profile.scan.serialized_request_body_bytes);
+		state = ScanResourceState::REQUEST_BODY_COMMITTED;
+	} catch (const ScanResourceError &error) {
+		Fail(error.Field(), error.SafeMessage());
+	}
+}
+
 void ScanResourceAccounting::CommitTransport(const TransportResourceUsage &usage) {
-	if (state != ScanResourceState::REQUEST_ACTIVE) {
+	const bool bodyless_ready =
+	    state == ScanResourceState::REQUEST_ACTIVE && profile.page.serialized_request_body_bytes == 0;
+	const bool body_ready =
+	    state == ScanResourceState::REQUEST_BODY_COMMITTED && profile.page.serialized_request_body_bytes != 0;
+	if (!bodyless_ready && !body_ready) {
 		Fail("resource_state", "scan resource state cannot commit transport");
 	}
 	try {

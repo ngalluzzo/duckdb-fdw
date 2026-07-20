@@ -47,10 +47,9 @@ bool HasFixedHeaders(const std::vector<PlannedHttpHeader> &headers) {
 }
 
 bool HasCommonOperation(const PlannedRestOperation &operation, const HttpExecutionProfile &profile) {
-	return operation.protocol == PlannedProtocol::REST && operation.method == PlannedHttpMethod::GET &&
-	       operation.replay_safety == PlannedReplaySafety::SAFE && operation.origin.scheme == profile.scheme &&
-	       operation.origin.host == profile.host && operation.origin.port == profile.port &&
-	       HasFixedHeaders(operation.headers);
+	return operation.method == PlannedHttpMethod::GET && operation.replay_safety == PlannedReplaySafety::SAFE &&
+	       operation.origin.scheme == profile.scheme && operation.origin.host == profile.host &&
+	       operation.origin.port == profile.port && HasFixedHeaders(operation.headers);
 }
 
 bool HasExpectedAnonymousOperation(const PlannedRestOperation &operation, const HttpExecutionProfile &profile) {
@@ -243,7 +242,11 @@ bool HasSupportedRelationalExecutionEnvelope(const ScanPlan &plan) {
 
 bool TryAdmitSingleResponsePlan(const ScanPlan &plan, const HttpExecutionProfile &profile,
                                 AdmittedHttpOperation &operation) {
-	if (plan.ConnectorName() != "github" || plan.ConnectorVersion() != "0.6.0" ||
+	if (plan.Operation().Protocol() != PlannedProtocol::REST) {
+		return false;
+	}
+	const auto &rest = plan.Operation().Rest();
+	if (plan.ConnectorName() != "github" || plan.ConnectorVersion() != "0.7.0" ||
 	    !HasUserColumns(plan.OutputColumns()) || plan.Pagination().Strategy() != PlannedPaginationStrategy::DISABLED ||
 	    plan.Providers() != FeatureState::DISABLED || plan.Retry() != FeatureState::DISABLED ||
 	    plan.Cache() != FeatureState::DISABLED || !HasExpectedNetwork(plan.Network(), profile) ||
@@ -252,14 +255,13 @@ bool TryAdmitSingleResponsePlan(const ScanPlan &plan, const HttpExecutionProfile
 		return false;
 	}
 	if (plan.RelationName() == "duckdb_login_search_page" && plan.Domain() == BaseDomain::JSON_PATH_RECORDS &&
-	    HasExpectedAnonymousOperation(plan.Operation(), profile) && plan.Authentication() == FeatureState::DISABLED &&
+	    HasExpectedAnonymousOperation(rest, profile) && plan.Authentication() == FeatureState::DISABLED &&
 	    HasAnonymousObligation(plan.AuthenticationObligation()) && !plan.SecretReference().IsPresent()) {
 		operation = AdmittedHttpOperation::ANONYMOUS_SEARCH;
 		return true;
 	}
 	if (plan.RelationName() == "authenticated_user" && plan.Domain() == BaseDomain::SUCCESSFUL_ROOT_OBJECT &&
-	    HasExpectedAuthenticatedOperation(plan.Operation(), profile) &&
-	    plan.Authentication() == FeatureState::ENABLED &&
+	    HasExpectedAuthenticatedOperation(rest, profile) && plan.Authentication() == FeatureState::ENABLED &&
 	    HasAuthenticatedObligation(plan.AuthenticationObligation(), profile) && plan.SecretReference().IsPresent()) {
 		operation = AdmittedHttpOperation::AUTHENTICATED_USER;
 		return true;
@@ -273,7 +275,8 @@ bool SamePageBudgets(const ResourceBudgets &left, const ResourceBudgets &right) 
 	       left.decoded_records == right.decoded_records &&
 	       left.extracted_string_bytes == right.extracted_string_bytes && left.json_nesting == right.json_nesting &&
 	       left.decoded_memory_bytes == right.decoded_memory_bytes && left.batch_rows == right.batch_rows &&
-	       left.wall_milliseconds == right.wall_milliseconds && left.concurrency == right.concurrency;
+	       left.wall_milliseconds == right.wall_milliseconds && left.concurrency == right.concurrency &&
+	       left.serialized_request_body_bytes == right.serialized_request_body_bytes;
 }
 
 bool HasExpectedPagination(const ScanPlan &plan) {
@@ -286,6 +289,8 @@ bool HasExpectedPagination(const ScanPlan &plan) {
 	    pagination.SupportsTotal() || pagination.SupportsResume() ||
 	    !pagination.PageBudgets().IsWithinPaginatedPageBounds() ||
 	    !pagination.ScanBudgets().IsWithinPaginatedScanBounds() ||
+	    pagination.PageBudgets().serialized_request_body_bytes != 0 ||
+	    pagination.ScanBudgets().serialized_request_body_bytes != 0 ||
 	    !SamePageBudgets(plan.Budgets(), pagination.PageBudgets())) {
 		return false;
 	}
@@ -302,10 +307,13 @@ bool HasExpectedPagination(const ScanPlan &plan) {
 }
 
 bool IsAuthenticatedRepositoriesPlan(const ScanPlan &plan, const HttpExecutionProfile &profile) {
-	return plan.ConnectorName() == "github" && plan.ConnectorVersion() == "0.6.0" &&
+	if (plan.Operation().Protocol() != PlannedProtocol::REST) {
+		return false;
+	}
+	return plan.ConnectorName() == "github" && plan.ConnectorVersion() == "0.7.0" &&
 	       plan.RelationName() == "authenticated_repositories" &&
 	       plan.Domain() == BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS && HasRepositoryColumns(plan.OutputColumns()) &&
-	       HasExpectedRepositoryOperation(plan.Operation(), profile) && HasExpectedPagination(plan) &&
+	       HasExpectedRepositoryOperation(plan.Operation().Rest(), profile) && HasExpectedPagination(plan) &&
 	       plan.Budgets().decoded_records <= profile.max_decoded_records &&
 	       plan.Providers() == FeatureState::DISABLED && plan.Retry() == FeatureState::DISABLED &&
 	       plan.Cache() == FeatureState::DISABLED && plan.Authentication() == FeatureState::ENABLED &&

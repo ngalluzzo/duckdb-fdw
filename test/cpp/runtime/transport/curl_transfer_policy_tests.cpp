@@ -100,8 +100,9 @@ void TestHostileProxyAndNetrcEnvironmentIsExcluded() {
 	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
 	ManualControl control;
 	const auto plan = duckdb_api_test::BuildRuntimePlan();
-	Require(plan.Operation().origin.scheme == duckdb_api::PlannedUrlScheme::HTTPS &&
-	            plan.Operation().origin.host == "api.github.com" && plan.Operation().origin.port == 443 &&
+	Require(plan.Operation().Protocol() == duckdb_api::PlannedProtocol::REST &&
+	            plan.Operation().Rest().origin.scheme == duckdb_api::PlannedUrlScheme::HTTPS &&
+	            plan.Operation().Rest().origin.host == "api.github.com" && plan.Operation().Rest().origin.port == 443 &&
 	            !plan.Network().loopback_addresses_enabled,
 	        "valid provider-owned authority drifted before private loopback routing");
 	auto stream = runtime->Executor()->Open(plan, control);

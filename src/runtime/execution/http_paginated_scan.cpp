@@ -51,10 +51,10 @@ ScanResourceProfile BuildResourceProfile(const ScanPlan &plan, uint64_t max_wall
 	const auto &page = plan.Pagination().PageBudgets();
 	const auto &scan = plan.Pagination().ScanBudgets();
 	return {{page.request_attempts, page.header_bytes, page.response_bytes, page.decompressed_bytes,
-	         page.decoded_records, page.decoded_memory_bytes, page.concurrency},
+	         page.decoded_records, page.decoded_memory_bytes, page.concurrency, page.serialized_request_body_bytes},
 	        {scan.request_attempts, scan.pages, scan.header_bytes, scan.response_bytes, scan.decompressed_bytes,
 	         scan.decoded_records, scan.decoded_memory_bytes, std::min(scan.wall_milliseconds, max_wall_milliseconds),
-	         scan.concurrency}};
+	         scan.concurrency, scan.serialized_request_body_bytes}};
 }
 
 void CheckState(ExecutionControl &control, std::chrono::steady_clock::time_point deadline) {
@@ -230,10 +230,13 @@ private:
 		auto request = BuildAdmittedRepositoryPageRequest(*admitted_profile, pagination.CurrentPage());
 		request = FixedGithubUserBearerAuthenticator::AuthorizeRepository(
 		    *admitted_profile, plan.Pagination().PageBudgets().header_bytes, std::move(request), *authorization);
-		const HttpLimits limits {allowance.header_bytes, allowance.wire_response_bytes,
+		const HttpLimits limits {0,
+		                         allowance.header_bytes,
+		                         allowance.wire_response_bytes,
 		                         allowance.decompressed_response_bytes,
-		                         std::min(allowance.header_bytes, allowance.decoded_memory_bytes), allowance.deadline};
-		auto response = transport->Get(request, limits, control);
+		                         std::min(allowance.header_bytes, allowance.decoded_memory_bytes),
+		                         allowance.deadline};
+		auto response = transport->Execute(request, limits, control);
 		CheckState(control, allowance.deadline);
 		if (response.header_bytes > limits.max_header_bytes || response.response_bytes > limits.max_response_bytes ||
 		    static_cast<uint64_t>(response.body.size()) > limits.max_decompressed_bytes ||

@@ -37,14 +37,16 @@ bool IsVisibleAsciiBearer(const std::string &value) {
 }
 
 bool HasExpectedAnonymousRequest(const HttpRequest &request) {
-	return request.method == "GET" && request.scheme == "https" && request.host == "api.github.com" &&
-	       request.port == 443 && request.target == "/search/users?q=duckdb+in%3Alogin&per_page=3" &&
-	       request.headers.size() == 3 && HasFixedHeaders(request.headers, "duckdb-api/0.6.0");
+	return request.method == "GET" && request.body.empty() && request.content_type.empty() &&
+	       request.scheme == "https" && request.host == "api.github.com" && request.port == 443 &&
+	       request.target == "/search/users?q=duckdb+in%3Alogin&per_page=3" && request.headers.size() == 3 &&
+	       HasFixedHeaders(request.headers, "duckdb-api/0.6.0");
 }
 
 bool HasExpectedAuthenticatedRequest(const HttpRequest &request) {
-	return request.method == "GET" && request.scheme == "https" && request.host == "api.github.com" &&
-	       request.port == 443 && request.target == "/user" && request.headers.size() == 4 &&
+	return request.method == "GET" && request.body.empty() && request.content_type.empty() &&
+	       request.scheme == "https" && request.host == "api.github.com" && request.port == 443 &&
+	       request.target == "/user" && request.headers.size() == 4 &&
 	       HasFixedHeaders(request.headers, "duckdb-api/0.6.0") && request.headers[3].name == "Authorization" &&
 	       IsVisibleAsciiBearer(request.headers[3].value);
 }
@@ -54,9 +56,10 @@ bool HasExpectedRepositoriesRequest(const HttpRequest &request) {
 	static const char selective_suffix[] = "&visibility=private";
 	const std::size_t prefix_size = sizeof(prefix) - 1;
 	const std::size_t selective_suffix_size = sizeof(selective_suffix) - 1;
-	if (request.method != "GET" || request.scheme != "https" || request.host != "api.github.com" ||
-	    request.port != 443 || request.target.compare(0, prefix_size, prefix) != 0 ||
-	    request.target.size() == prefix_size || request.target[prefix_size] == '0' || request.headers.size() != 4 ||
+	if (request.method != "GET" || !request.body.empty() || !request.content_type.empty() ||
+	    request.scheme != "https" || request.host != "api.github.com" || request.port != 443 ||
+	    request.target.compare(0, prefix_size, prefix) != 0 || request.target.size() == prefix_size ||
+	    request.target[prefix_size] == '0' || request.headers.size() != 4 ||
 	    !HasFixedHeaders(request.headers, "duckdb-api/0.6.0") || request.headers[3].name != "Authorization" ||
 	    !IsVisibleAsciiBearer(request.headers[3].value)) {
 		return false;

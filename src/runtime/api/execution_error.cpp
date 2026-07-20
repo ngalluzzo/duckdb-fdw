@@ -24,9 +24,19 @@ const std::string &ExecutionError::SafeMessage() const {
 	return safe_message;
 }
 
+TypedValue::TypedValue()
+    : kind(ValueKind::VARCHAR), valid(false), bigint_value(0), varchar_value(), boolean_value(false) {
+}
+
+TypedValue::TypedValue(ValueKind kind_p, int64_t bigint_value_p, std::string varchar_value_p, bool boolean_value_p)
+    : kind(kind_p), valid(true), bigint_value(bigint_value_p), varchar_value(std::move(varchar_value_p)),
+      boolean_value(boolean_value_p) {
+}
+
 TypedValue TypedValue::BigInt(int64_t value) {
 	TypedValue result;
 	result.kind = ValueKind::BIGINT;
+	result.valid = true;
 	result.bigint_value = value;
 	result.boolean_value = false;
 	return result;
@@ -35,6 +45,7 @@ TypedValue TypedValue::BigInt(int64_t value) {
 TypedValue TypedValue::Varchar(std::string value) {
 	TypedValue result;
 	result.kind = ValueKind::VARCHAR;
+	result.valid = true;
 	result.bigint_value = 0;
 	result.varchar_value = std::move(value);
 	result.boolean_value = false;
@@ -44,8 +55,18 @@ TypedValue TypedValue::Varchar(std::string value) {
 TypedValue TypedValue::Boolean(bool value) {
 	TypedValue result;
 	result.kind = ValueKind::BOOLEAN;
+	result.valid = true;
 	result.bigint_value = 0;
 	result.boolean_value = value;
+	return result;
+}
+
+TypedValue TypedValue::Null(ValueKind kind) {
+	TypedValue result;
+	result.kind = kind;
+	result.valid = false;
+	result.bigint_value = 0;
+	result.boolean_value = false;
 	return result;
 }
 

@@ -54,6 +54,15 @@ void TestInstalledRepositoryRequestPolicy() {
 		            InstalledHttpRequestKind::UNSUPPORTED,
 		        "installed transport accepted a target outside the admitted field set");
 	}
+	auto body = InstalledRepositoryRequest("/user/repos?per_page=100&page=1");
+	body.body = "request-body-canary";
+	body.content_type = "application/json";
+	Require(ClassifyInstalledHttpRequest(body) == InstalledHttpRequestKind::UNSUPPORTED,
+	        "installed REST transport accepted body-bearing request authority");
+	auto content_type = InstalledRepositoryRequest("/user/repos?per_page=100&page=1");
+	content_type.content_type = "application/json";
+	Require(ClassifyInstalledHttpRequest(content_type) == InstalledHttpRequestKind::UNSUPPORTED,
+	        "installed REST transport accepted content type without a body");
 }
 
 void TestExactAnonymousCurlRequest() {

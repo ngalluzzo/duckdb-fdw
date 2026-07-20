@@ -35,6 +35,11 @@ struct ControlledRequestObservation {
 	uint16_t port;
 	std::string target;
 	std::vector<std::pair<std::string, std::string>> headers;
+	// Exact synthetic request material is observable only through this
+	// non-installed fixture service. Production diagnostics never expose it.
+	std::string body;
+	std::string content_type;
+	uint64_t max_request_body_bytes;
 	uint64_t max_header_bytes;
 	uint64_t max_response_bytes;
 	uint64_t max_decompressed_bytes;

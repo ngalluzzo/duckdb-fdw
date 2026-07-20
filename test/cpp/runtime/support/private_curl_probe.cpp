@@ -95,10 +95,13 @@ PrivateCurlProbeResult PerformProbe(const PrivateCurlProbeOptions &options, duck
 	PublishChecks publish_checks(authority, options.completed_socket_policy_checks);
 	std::vector<PrivateCurlProbeResult::OptionObservation> option_observations;
 	option_observations.reserve(48);
-	const duckdb_api::internal::HttpLimits limits {
-	    duckdb_api::HOST_MAX_HEADER_BYTES, duckdb_api::HOST_MAX_RESPONSE_BYTES, duckdb_api::HOST_MAX_DECOMPRESSED_BYTES,
-	    duckdb_api::HOST_MAX_HEADER_BYTES,
-	    std::chrono::steady_clock::now() + std::chrono::milliseconds(options.wall_milliseconds)};
+	const duckdb_api::internal::HttpLimits limits {0,
+	                                               duckdb_api::HOST_MAX_HEADER_BYTES,
+	                                               duckdb_api::HOST_MAX_RESPONSE_BYTES,
+	                                               duckdb_api::HOST_MAX_DECOMPRESSED_BYTES,
+	                                               duckdb_api::HOST_MAX_HEADER_BYTES,
+	                                               std::chrono::steady_clock::now() +
+	                                                   std::chrono::milliseconds(options.wall_milliseconds)};
 	const duckdb_api::internal::CurlTransferProfile profile {
 	    options.url.c_str(),
 	    options.protocols.c_str(),

@@ -302,6 +302,13 @@ void TestFixedAuthenticatorRevalidatesFinalRequest() {
 	duplicate.headers.push_back({"Authorization", "test-only-redacted"});
 	duplicate.headers.push_back({"Authorization", "test-only-redacted"});
 	RequireFinalRequestDenied(std::move(duplicate), 504);
+	auto body = FixedAuthenticatedRequest();
+	body.body = "request-body-canary";
+	body.content_type = "application/json";
+	RequireFinalRequestDenied(std::move(body), 505);
+	auto content_type = FixedAuthenticatedRequest();
+	content_type.content_type = "application/json";
+	RequireFinalRequestDenied(std::move(content_type), 506);
 }
 
 void TestExecutionProfileNeverWidensRecordAuthority() {

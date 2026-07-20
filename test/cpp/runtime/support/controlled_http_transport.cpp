@@ -18,6 +18,7 @@ struct ControlledHttpRuntime::State {
 	      unexpected_bearer(false), bearer_barrier_released(true) {
 		observation.request_count = 0;
 		observation.port = 0;
+		observation.max_request_body_bytes = 0;
 		observation.max_header_bytes = 0;
 		observation.max_response_bytes = 0;
 		observation.max_decompressed_bytes = 0;
@@ -64,6 +65,19 @@ public:
 	duckdb_api::internal::HttpResponse Get(const duckdb_api::internal::HttpRequest &request,
 	                                       const duckdb_api::internal::HttpLimits &limits,
 	                                       duckdb_api::ExecutionControl &control) const override {
+		return Respond(request, limits, control);
+	}
+
+	duckdb_api::internal::HttpResponse Post(const duckdb_api::internal::HttpRequest &request,
+	                                        const duckdb_api::internal::HttpLimits &limits,
+	                                        duckdb_api::ExecutionControl &control) const override {
+		return Respond(request, limits, control);
+	}
+
+private:
+	duckdb_api::internal::HttpResponse Respond(const duckdb_api::internal::HttpRequest &request,
+	                                           const duckdb_api::internal::HttpLimits &limits,
+	                                           duckdb_api::ExecutionControl &control) const {
 		ControlledHttpMode mode;
 		uint32_t status;
 		std::string body;
@@ -80,6 +94,8 @@ public:
 			state->observation.host = request.host;
 			state->observation.port = request.port;
 			state->observation.target = request.target;
+			state->observation.body = request.body;
+			state->observation.content_type = request.content_type;
 			state->observation.headers.clear();
 			for (std::size_t index = 0; index < request.headers.size(); index++) {
 				if (request.headers[index].name == "Authorization" && !state->expected_bearer.empty()) {
@@ -94,6 +110,7 @@ public:
 				                                                    ? std::string("<redacted>")
 				                                                    : request.headers[index].value));
 			}
+			state->observation.max_request_body_bytes = limits.max_request_body_bytes;
 			state->observation.max_header_bytes = limits.max_header_bytes;
 			state->observation.max_response_bytes = limits.max_response_bytes;
 			state->observation.max_decompressed_bytes = limits.max_decompressed_bytes;
@@ -188,7 +205,6 @@ public:
 		        {std::move(link_field_values), metadata_bytes}};
 	}
 
-private:
 	const std::shared_ptr<ControlledHttpRuntime::State> state;
 };
 

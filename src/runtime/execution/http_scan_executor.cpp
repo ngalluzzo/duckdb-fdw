@@ -48,7 +48,7 @@ HttpRequest BuildRequest(const PlannedRestOperation &operation) {
 JsonDecodePlan BuildDecodePlan(const ScanPlan &plan, std::chrono::steady_clock::time_point deadline) {
 	const auto &budgets = plan.Budgets();
 	JsonDecodePlan result;
-	result.response_source = plan.Operation().response_source == PlannedResponseSource::ROOT_OBJECT
+	result.response_source = plan.Operation().Rest().response_source == PlannedResponseSource::ROOT_OBJECT
 	                             ? JsonResponseSource::ROOT_OBJECT
 	                             : JsonResponseSource::JSON_PATH_MANY;
 	result.records_field = result.response_source == JsonResponseSource::JSON_PATH_MANY ? "items" : "";
@@ -138,13 +138,17 @@ public:
 			CheckExecutionState(combined, deadline);
 			if (!attempted) {
 				attempted = true;
-				const HttpLimits limits {plan.Budgets().header_bytes, plan.Budgets().response_bytes,
-				                         plan.Budgets().decompressed_bytes, 0, deadline};
-				auto request = BuildRequest(plan.Operation());
+				const HttpLimits limits {0,
+				                         plan.Budgets().header_bytes,
+				                         plan.Budgets().response_bytes,
+				                         plan.Budgets().decompressed_bytes,
+				                         0,
+				                         deadline};
+				auto request = BuildRequest(plan.Operation().Rest());
 				if (installed_operation == AdmittedHttpOperation::AUTHENTICATED_USER) {
 					request = FixedGithubUserBearerAuthenticator::Authorize(plan, std::move(request), *authorization);
 				}
-				auto response = transport->Get(request, limits, combined);
+				auto response = transport->Execute(request, limits, combined);
 				authorization.reset();
 				CheckExecutionState(combined, deadline);
 				if (response.header_bytes > limits.max_header_bytes ||

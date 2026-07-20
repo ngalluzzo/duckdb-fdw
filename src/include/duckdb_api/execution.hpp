@@ -26,7 +26,12 @@ enum class ErrorStage : uint8_t {
 	// Invalid or missing Runtime authorization and remote HTTP 401.
 	AUTHENTICATION,
 	// Remote HTTP 403 after successful authentication.
-	AUTHORIZATION
+	AUTHORIZATION,
+	// A syntactically valid remote protocol envelope reported an application
+	// failure. Field and message remain structural and redacted: remote values,
+	// paths containing values, documents, variables, and credentials must not
+	// cross this boundary.
+	REMOTE_PROTOCOL
 };
 
 class ExecutionError : public std::exception {
@@ -59,17 +64,29 @@ public:
 	virtual bool IsCancellationRequested() const noexcept = 0;
 };
 
-// DuckDB-free scalar kinds supported by the native preview runtime. Values are
-// never nullable in RFC 0005's required schema; adding nullability is a shared
-// interface change rather than an adapter convention.
+// DuckDB-free scalar kinds supported by the native preview runtime.
 enum class ValueKind : uint8_t { BIGINT, VARCHAR, BOOLEAN };
 
+// Protocol-neutral scalar handoff owned by Remote Runtime and consumed by
+// Query Experience. Invalid values represent SQL NULL while retaining the
+// planned scalar kind; consumers must use validity rather than inspecting a
+// payload sentinel. Runtime may produce an invalid value only for a nullable
+// planned column. Values own their payload and remain valid for the lifetime of
+// the containing batch; the type carries no cancellation or close state.
 struct TypedValue {
+	// The default is a safe invalid VARCHAR. The four-argument constructor
+	// preserves the former C++11 aggregate-construction surface for existing
+	// non-null Runtime and fixture consumers.
+	TypedValue();
+	TypedValue(ValueKind kind, int64_t bigint_value, std::string varchar_value, bool boolean_value);
+
 	static TypedValue BigInt(int64_t value);
 	static TypedValue Varchar(std::string value);
 	static TypedValue Boolean(bool value);
+	static TypedValue Null(ValueKind kind);
 
 	ValueKind kind;
+	bool valid;
 	int64_t bigint_value;
 	std::string varchar_value;
 	bool boolean_value;
