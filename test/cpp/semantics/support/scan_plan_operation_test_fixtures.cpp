@@ -1,8 +1,14 @@
 #include "semantics/support/scan_plan_test_access.hpp"
 
 #include <stdexcept>
+#include <utility>
 
 namespace duckdb_api_test {
+
+void ScanPlanTestAccess::ReplaceRest(duckdb_api::ScanPlan &plan, duckdb_api::PlannedRestOperation operation) {
+	plan.operation = std::make_shared<const duckdb_api::PlannedProtocolOperation>(
+	    duckdb_api::PlannedProtocolOperation::FromRest(std::move(operation)));
+}
 
 duckdb_api::ScanPlan ScanPlanTestAccess::Operation(duckdb_api::ScanPlan plan,
                                                    OperationPlanCounterexample counterexample) {
@@ -16,43 +22,79 @@ duckdb_api::ScanPlan ScanPlanTestAccess::Operation(duckdb_api::ScanPlan plan,
 	case OperationPlanCounterexample::OTHER_RELATION_IDENTITY:
 		plan.relation_name = "other_relation";
 		break;
-	case OperationPlanCounterexample::EMPTY_IDENTITY:
-		plan.operation.operation_name.clear();
+	case OperationPlanCounterexample::EMPTY_IDENTITY: {
+		auto operation = plan.Operation().Rest();
+		operation.operation_name.clear();
+		ReplaceRest(plan, std::move(operation));
 		break;
-	case OperationPlanCounterexample::OTHER_OPERATION_IDENTITY:
-		plan.operation.operation_name = "other_operation";
+	}
+	case OperationPlanCounterexample::OTHER_OPERATION_IDENTITY: {
+		auto operation = plan.Operation().Rest();
+		operation.operation_name = "other_operation";
+		ReplaceRest(plan, std::move(operation));
 		break;
-	case OperationPlanCounterexample::UNKNOWN_METHOD:
-		plan.operation.method = static_cast<duckdb_api::PlannedHttpMethod>(127);
+	}
+	case OperationPlanCounterexample::UNKNOWN_METHOD: {
+		auto operation = plan.Operation().Rest();
+		operation.method = static_cast<duckdb_api::PlannedHttpMethod>(127);
+		ReplaceRest(plan, std::move(operation));
 		break;
-	case OperationPlanCounterexample::EMPTY_PATH:
-		plan.operation.path.clear();
+	}
+	case OperationPlanCounterexample::EMPTY_PATH: {
+		auto operation = plan.Operation().Rest();
+		operation.path.clear();
+		ReplaceRest(plan, std::move(operation));
 		break;
-	case OperationPlanCounterexample::OTHER_PATH:
-		plan.operation.path = "/other";
+	}
+	case OperationPlanCounterexample::OTHER_PATH: {
+		auto operation = plan.Operation().Rest();
+		operation.path = "/other";
+		ReplaceRest(plan, std::move(operation));
 		break;
-	case OperationPlanCounterexample::INVALID_QUERY:
-		plan.operation.query_parameters.push_back({"invalid?query", "fixed-test-value"});
+	}
+	case OperationPlanCounterexample::INVALID_QUERY: {
+		auto operation = plan.Operation().Rest();
+		operation.query_parameters.push_back({"invalid?query", "fixed-test-value"});
+		ReplaceRest(plan, std::move(operation));
 		break;
-	case OperationPlanCounterexample::EMPTY_FIXED_HEADER_VALUE:
-		plan.operation.headers.push_back({"X-Invalid-Fixture", ""});
+	}
+	case OperationPlanCounterexample::EMPTY_FIXED_HEADER_VALUE: {
+		auto operation = plan.Operation().Rest();
+		operation.headers.push_back({"X-Invalid-Fixture", ""});
+		ReplaceRest(plan, std::move(operation));
 		break;
-	case OperationPlanCounterexample::CASE_VARIANT_AUTHORIZATION_HEADER:
-		plan.operation.headers.push_back({"authorization", "test-only-redacted"});
+	}
+	case OperationPlanCounterexample::CASE_VARIANT_AUTHORIZATION_HEADER: {
+		auto operation = plan.Operation().Rest();
+		operation.headers.push_back({"authorization", "test-only-redacted"});
+		ReplaceRest(plan, std::move(operation));
 		break;
-	case OperationPlanCounterexample::DUPLICATE_AUTHORIZATION_HEADERS:
-		plan.operation.headers.push_back({"Authorization", "test-only-redacted"});
-		plan.operation.headers.push_back({"Authorization", "test-only-redacted"});
+	}
+	case OperationPlanCounterexample::DUPLICATE_AUTHORIZATION_HEADERS: {
+		auto operation = plan.Operation().Rest();
+		operation.headers.push_back({"Authorization", "test-only-redacted"});
+		operation.headers.push_back({"Authorization", "test-only-redacted"});
+		ReplaceRest(plan, std::move(operation));
 		break;
-	case OperationPlanCounterexample::HTTP_ORIGIN_SCHEME:
-		plan.operation.origin.scheme = duckdb_api::PlannedUrlScheme::HTTP;
+	}
+	case OperationPlanCounterexample::HTTP_ORIGIN_SCHEME: {
+		auto operation = plan.Operation().Rest();
+		operation.origin.scheme = duckdb_api::PlannedUrlScheme::HTTP;
+		ReplaceRest(plan, std::move(operation));
 		break;
-	case OperationPlanCounterexample::OTHER_ORIGIN_HOST:
-		plan.operation.origin.host = "other.example";
+	}
+	case OperationPlanCounterexample::OTHER_ORIGIN_HOST: {
+		auto operation = plan.Operation().Rest();
+		operation.origin.host = "other.example";
+		ReplaceRest(plan, std::move(operation));
 		break;
-	case OperationPlanCounterexample::OTHER_ORIGIN_PORT:
-		plan.operation.origin.port = 444;
+	}
+	case OperationPlanCounterexample::OTHER_ORIGIN_PORT: {
+		auto operation = plan.Operation().Rest();
+		operation.origin.port = 444;
+		ReplaceRest(plan, std::move(operation));
 		break;
+	}
 	default:
 		throw std::invalid_argument("unknown closed operation plan counterexample");
 	}

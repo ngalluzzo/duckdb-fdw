@@ -79,7 +79,7 @@ const duckdb_api::CompiledOperation &SelectedOperation(const duckdb_api::Compile
                                                        const duckdb_api::ScanPlan &plan) {
 	const duckdb_api::CompiledOperation *selected = nullptr;
 	for (const auto &operation : relation.Operations()) {
-		if (operation.name == plan.Operation().operation_name) {
+		if (operation.name == plan.Operation().Rest().operation_name) {
 			Require(selected == nullptr, "plan operation identity matched more than one Connector operation");
 			selected = &operation;
 		}

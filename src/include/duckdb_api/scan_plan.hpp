@@ -1,5 +1,7 @@
 #pragma once
 
+#include "duckdb_api/planned_protocol_operation.hpp"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -24,6 +26,7 @@ static const uint64_t HOST_MAX_DECODED_MEMORY_BYTES = 131072;
 static const uint64_t OUTPUT_BATCH_ROWS = 2;
 static const uint64_t MAX_EXECUTION_MILLISECONDS = 5000;
 static const uint64_t HOST_MAX_CONCURRENCY = 1;
+static const uint64_t HOST_MAX_SERIALIZED_REQUEST_BODY_BYTES = 16 * 1024;
 
 // RFC 0007's paginated execution profile is separate from the accepted
 // single-response profile above. Raising these ceilings must not widen either
@@ -45,20 +48,7 @@ static const uint64_t PAGINATION_MAX_DECODED_MEMORY_BYTES = 2 * 1024 * 1024;
 static const uint64_t PAGINATION_OUTPUT_BATCH_ROWS = 64;
 static const uint64_t PAGINATION_MAX_EXECUTION_MILLISECONDS = 30000;
 static const uint64_t PAGINATION_MAX_CONCURRENCY = 1;
-
-enum class PlannedProtocol { REST };
-enum class PlannedHttpMethod { GET };
-
-// Source cardinality is a semantic law over an accepted response, not an
-// estimate, decoder budget, or permission to apply a remote/runtime LIMIT.
-enum class PlannedCardinality { ZERO_TO_MANY, EXACTLY_ONE_ON_SUCCESS };
-
-enum class PlannedReplaySafety { SAFE };
-enum class PlannedUrlScheme { HTTP, HTTPS };
-
-// Runtime consumes this typed source classification directly. It must not
-// infer root-versus-array decoding from an extractor or cardinality value.
-enum class PlannedResponseSource { JSON_PATH_MANY, ROOT_ARRAY, ROOT_OBJECT };
+static const uint64_t PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN = 256 * 1024;
 
 // The base domain names the complete row-producing source before DuckDB-owned
 // relational operators. ROOT_ARRAY_RECORDS is admitted only for the controlled
@@ -72,6 +62,7 @@ enum class BaseDomain {
 	ROOT_ARRAY_RECORDS,
 	PAGINATED_JSON_PATH_RECORDS,
 	PAGINATED_ROOT_ARRAY_RECORDS,
+	GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES,
 	SUCCESSFUL_ROOT_OBJECT
 };
 
@@ -127,42 +118,6 @@ struct PlannedColumn {
 	std::string extractor;
 };
 
-struct PlannedQueryParameter {
-	std::string name;
-	std::string encoded_value;
-};
-
-struct PlannedHttpHeader {
-	std::string name;
-	std::string value;
-};
-
-// Exact executable origin copied from Connector's validated typed origin.
-// Keeping scheme, host, and port separate prevents consumers from reparsing a
-// URL to recover authority.
-struct PlannedRestOrigin {
-	PlannedUrlScheme scheme;
-	std::string host;
-	std::uint16_t port;
-};
-
-// Complete protocol operation assigned to Remote Runtime. Runtime may reject
-// unsupported executable facts, but it must not reclassify source cardinality,
-// response shape, or relational ownership.
-struct PlannedRestOperation {
-	std::string operation_name;
-	PlannedProtocol protocol;
-	PlannedHttpMethod method;
-	PlannedCardinality cardinality;
-	PlannedReplaySafety replay_safety;
-	PlannedRestOrigin origin;
-	std::string path;
-	std::vector<PlannedQueryParameter> query_parameters;
-	std::vector<PlannedHttpHeader> headers;
-	PlannedResponseSource response_source;
-	std::string records_extractor;
-};
-
 // Planner-owned classification. Runtime consumes these facts without deriving
 // them from the protocol request.
 struct RelationalOwnership {
@@ -201,6 +156,9 @@ struct ResourceBudgets {
 	uint64_t batch_rows;
 	uint64_t wall_milliseconds;
 	uint64_t concurrency;
+	// Zero for bodyless REST GET operations. A nonzero value is an outbound
+	// serialized-body ceiling, never row, limit, or retry authority.
+	uint64_t serialized_request_body_bytes;
 
 	bool IsWithinLiveRestBounds() const;
 	bool IsWithinPaginatedPageBounds() const;
@@ -222,11 +180,12 @@ struct ScanResourceBudgets {
 	uint64_t batch_rows;
 	uint64_t wall_milliseconds;
 	uint64_t concurrency;
+	uint64_t serialized_request_body_bytes;
 
 	bool IsWithinPaginatedScanBounds() const;
 };
 
-enum class PlannedPaginationStrategy { DISABLED, LINK_HEADER };
+enum class PlannedPaginationStrategy { DISABLED, LINK_HEADER, GRAPHQL_CURSOR };
 enum class PlannedPageDependency { SEQUENTIAL };
 enum class PlannedPageConsistency { MUTABLE };
 enum class PlannedLinkRelation { NEXT };
@@ -267,6 +226,7 @@ public:
 	bool SupportsTotal() const;
 	bool SupportsResume() const;
 	const PlannedPaginationTarget &Target() const;
+	const PlannedGraphqlCursor &GraphqlCursor() const;
 	const ResourceBudgets &PageBudgets() const;
 	const ScanResourceBudgets &ScanBudgets() const;
 
@@ -287,6 +247,7 @@ private:
 	bool supports_total;
 	bool supports_resume;
 	PlannedPaginationTarget target;
+	PlannedGraphqlCursor graphql_cursor;
 	ResourceBudgets page_budgets;
 	ScanResourceBudgets scan_budgets;
 };
@@ -376,7 +337,7 @@ public:
 	const std::string &SourceSnapshot() const;
 
 	BaseDomain Domain() const;
-	const PlannedRestOperation &Operation() const;
+	const PlannedProtocolOperation &Operation() const;
 	const std::vector<PlannedColumn> &OutputColumns() const;
 
 	PlannedPredicate RemotePredicate() const;
@@ -424,7 +385,7 @@ private:
 	std::string relation_name;
 	std::string source_snapshot;
 	BaseDomain domain;
-	PlannedRestOperation operation;
+	std::shared_ptr<const PlannedProtocolOperation> operation;
 	std::vector<PlannedColumn> output_columns;
 	PlannedPredicate remote_predicate;
 	RemotePredicateAccuracy remote_accuracy;

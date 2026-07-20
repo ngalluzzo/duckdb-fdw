@@ -55,9 +55,12 @@ void RequireColumnsMatch(const duckdb_api::ScanPlan &plan, const duckdb_api::Com
 }
 
 void RequireOperationMatches(const duckdb_api::ScanPlan &plan, const duckdb_api::CompiledRelation &relation) {
-	const auto &planned = plan.Operation();
-	const auto &compiled = relation.Operation();
-	Require(planned.operation_name == compiled.name && planned.protocol == duckdb_api::PlannedProtocol::REST &&
+	const auto &planned_sum = plan.Operation();
+	const auto &planned = planned_sum.Rest();
+	const auto &compiled_operation = relation.Operation();
+	const auto &compiled = compiled_operation.Rest();
+	Require(planned.operation_name == compiled_operation.name &&
+	            planned_sum.Protocol() == duckdb_api::PlannedProtocol::REST &&
 	            planned.method == duckdb_api::PlannedHttpMethod::GET &&
 	            planned.replay_safety == duckdb_api::PlannedReplaySafety::SAFE,
 	        "plan operation identity or closed protocol facts drifted");
@@ -134,10 +137,10 @@ void RequireDisabledPaginationPayloadInaccessible(const duckdb_api::PaginationPl
 
 void RequireSelectedNetworkAndBudgets(const duckdb_api::ScanPlan &plan, const duckdb_api::CompiledRelation &relation) {
 	const auto expected_scheme =
-	    relation.Operation().request.origin.scheme == duckdb_api::CompiledUrlScheme::HTTPS ? "https" : "http";
+	    relation.Operation().Rest().request.origin.scheme == duckdb_api::CompiledUrlScheme::HTTPS ? "https" : "http";
 	Require(plan.Network().allowed_schemes.size() == 1 && plan.Network().allowed_hosts.size() == 1 &&
 	            plan.Network().allowed_schemes[0] == expected_scheme &&
-	            plan.Network().allowed_hosts[0] == relation.Operation().request.origin.host.Value() &&
+	            plan.Network().allowed_hosts[0] == relation.Operation().Rest().request.origin.host.Value() &&
 	            !plan.Network().redirects_enabled && !plan.Network().private_addresses_enabled &&
 	            !plan.Network().link_local_addresses_enabled,
 	        "plan network capability was not narrowed to the selected operation");
@@ -156,8 +159,8 @@ void RequireAnonymousPlan(const duckdb_api::ScanPlan &plan, const duckdb_api::Co
 	        "anonymous plan identity or selected provenance drifted");
 	Require(plan.Domain() == duckdb_api::BaseDomain::JSON_PATH_RECORDS &&
 	            plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED &&
-	            plan.Operation().cardinality == duckdb_api::PlannedCardinality::ZERO_TO_MANY &&
-	            plan.Operation().response_source == duckdb_api::PlannedResponseSource::JSON_PATH_MANY,
+	            plan.Operation().Rest().cardinality == duckdb_api::PlannedCardinality::ZERO_TO_MANY &&
+	            plan.Operation().Rest().response_source == duckdb_api::PlannedResponseSource::JSON_PATH_MANY,
 	        "anonymous plan lost its multi-record source semantics");
 	Require(!plan.SecretReference().IsPresent() && plan.Authentication() == duckdb_api::FeatureState::DISABLED,
 	        "anonymous plan retained a secret reference or enabled authentication");
@@ -182,8 +185,8 @@ void RequireAuthenticatedPlan(const duckdb_api::ScanPlan &plan, const duckdb_api
 	        "authenticated plan identity or selected provenance drifted");
 	Require(plan.Domain() == duckdb_api::BaseDomain::SUCCESSFUL_ROOT_OBJECT &&
 	            plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED &&
-	            plan.Operation().cardinality == duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS &&
-	            plan.Operation().response_source == duckdb_api::PlannedResponseSource::ROOT_OBJECT,
+	            plan.Operation().Rest().cardinality == duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS &&
+	            plan.Operation().Rest().response_source == duckdb_api::PlannedResponseSource::ROOT_OBJECT,
 	        "authenticated plan lost its exactly-one root-object semantics");
 	Require(plan.SecretReference().IsPresent() && plan.SecretReference().Name() == secret_name &&
 	            plan.Authentication() == duckdb_api::FeatureState::ENABLED,
@@ -195,11 +198,11 @@ void RequireAuthenticatedPlan(const duckdb_api::ScanPlan &plan, const duckdb_api
 	            obligation.Authenticator() == duckdb_api::PlannedAuthenticator::BEARER &&
 	            obligation.Placement() == duckdb_api::PlannedCredentialPlacement::AUTHORIZATION_HEADER &&
 	            destination != nullptr && destination->scheme == duckdb_api::PlannedUrlScheme::HTTPS &&
-	            plan.Operation().origin.scheme == duckdb_api::PlannedUrlScheme::HTTPS &&
+	            plan.Operation().Rest().origin.scheme == duckdb_api::PlannedUrlScheme::HTTPS &&
 	            plan.Network().allowed_schemes == std::vector<std::string>({"https"}) &&
-	            destination->host == plan.Operation().origin.host &&
-	            destination->port == plan.Operation().origin.port &&
-	            destination->scheme == plan.Operation().origin.scheme,
+	            destination->host == plan.Operation().Rest().origin.host &&
+	            destination->port == plan.Operation().Rest().origin.port &&
+	            destination->scheme == plan.Operation().Rest().origin.scheme,
 	        "authenticated plan did not normalize the exact bearer destination obligation");
 	Require(plan.Budgets().decoded_records == 1 && plan.RemoteLimit() == duckdb_api::RelationalDelegation::NONE &&
 	            plan.RuntimeLimit() == duckdb_api::RelationalDelegation::NONE &&
@@ -227,7 +230,7 @@ void RequireCanaryAbsent(const duckdb_api::ScanPlan &plan, const std::string &ca
 		            column.extractor.find(canary) == std::string::npos,
 		        "credential canary entered plan schema");
 	}
-	for (const auto &header : plan.Operation().headers) {
+	for (const auto &header : plan.Operation().Rest().headers) {
 		Require(header.name.find(canary) == std::string::npos && header.value.find(canary) == std::string::npos,
 		        "credential canary entered a planned fixed header");
 	}
@@ -244,23 +247,23 @@ void TestNativeGoldenPlans() {
 
 	RequireAnonymousPlan(anonymous_plan, connector, anonymous);
 	RequireAuthenticatedPlan(authenticated_plan, connector, authenticated, "github_default");
-	Require(anonymous_plan.ConnectorName() == "github" && anonymous_plan.ConnectorVersion() == "0.6.0" &&
+	Require(anonymous_plan.ConnectorName() == "github" && anonymous_plan.ConnectorVersion() == "0.7.0" &&
 	            anonymous_plan.RelationName() == "duckdb_login_search_page" &&
-	            anonymous_plan.Operation().operation_name == "github_search_duckdb_login_page" &&
-	            anonymous_plan.Operation().path == "/search/users" &&
-	            anonymous_plan.Operation().query_parameters.size() == 2 &&
-	            anonymous_plan.Operation().query_parameters[0].name == "q" &&
-	            anonymous_plan.Operation().query_parameters[0].encoded_value == "duckdb+in%3Alogin" &&
-	            anonymous_plan.Operation().query_parameters[1].name == "per_page" &&
-	            anonymous_plan.Operation().query_parameters[1].encoded_value == "3" &&
+	            anonymous_plan.Operation().Rest().operation_name == "github_search_duckdb_login_page" &&
+	            anonymous_plan.Operation().Rest().path == "/search/users" &&
+	            anonymous_plan.Operation().Rest().query_parameters.size() == 2 &&
+	            anonymous_plan.Operation().Rest().query_parameters[0].name == "q" &&
+	            anonymous_plan.Operation().Rest().query_parameters[0].encoded_value == "duckdb+in%3Alogin" &&
+	            anonymous_plan.Operation().Rest().query_parameters[1].name == "per_page" &&
+	            anonymous_plan.Operation().Rest().query_parameters[1].encoded_value == "3" &&
 	            authenticated_plan.RelationName() == "authenticated_user" &&
-	            authenticated_plan.Operation().operation_name == "github_authenticated_user" &&
-	            authenticated_plan.Operation().path == "/user" &&
-	            authenticated_plan.Operation().query_parameters.empty() &&
-	            anonymous_plan.Operation().headers.size() == 3 &&
-	            anonymous_plan.Operation().headers[1].value == "duckdb-api/0.6.0" &&
-	            authenticated_plan.Operation().headers.size() == 3 &&
-	            authenticated_plan.Operation().headers[1].value == "duckdb-api/0.6.0",
+	            authenticated_plan.Operation().Rest().operation_name == "github_authenticated_user" &&
+	            authenticated_plan.Operation().Rest().path == "/user" &&
+	            authenticated_plan.Operation().Rest().query_parameters.empty() &&
+	            anonymous_plan.Operation().Rest().headers.size() == 3 &&
+	            anonymous_plan.Operation().Rest().headers[1].value == "duckdb-api/0.6.0" &&
+	            authenticated_plan.Operation().Rest().headers.size() == 3 &&
+	            authenticated_plan.Operation().Rest().headers[1].value == "duckdb-api/0.6.0",
 	        "existing native plan identity or fixed request changed during pagination planning work");
 	Require(anonymous_plan.OutputColumns().size() == 3 && anonymous_plan.OutputColumns()[0].name == "id" &&
 	            anonymous_plan.OutputColumns()[0].logical_type == "BIGINT" &&
@@ -311,7 +314,7 @@ void TestProviderOwnedDistinctSchemaPlans() {
 	RequireAuthenticatedPlan(authenticated_plan, connector, authenticated, "fixture_named_secret");
 	Require(anonymous_plan.Budgets().decoded_records == 4,
 	        "planner retained the native anonymous three-record ceiling in generic provider planning");
-	Require(anonymous_plan.Operation().path != authenticated_plan.Operation().path &&
+	Require(anonymous_plan.Operation().Rest().path != authenticated_plan.Operation().Rest().path &&
 	            anonymous_plan.OutputColumns()[0].name != authenticated_plan.OutputColumns()[0].name,
 	        "planner selected a native or cross-relation fallback instead of provider metadata");
 }
@@ -326,9 +329,9 @@ void TestReferenceIdentityChangesOnlyReferenceAndExplanation() {
 
 	Require(first.RelationName() == second.RelationName() && first.SourceSnapshot() == second.SourceSnapshot() &&
 	            first.Domain() == second.Domain() &&
-	            first.Operation().operation_name == second.Operation().operation_name &&
-	            first.Operation().cardinality == second.Operation().cardinality &&
-	            first.Operation().response_source == second.Operation().response_source &&
+	            first.Operation().Rest().operation_name == second.Operation().Rest().operation_name &&
+	            first.Operation().Rest().cardinality == second.Operation().Rest().cardinality &&
+	            first.Operation().Rest().response_source == second.Operation().Rest().response_source &&
 	            first.OutputColumns().size() == second.OutputColumns().size() &&
 	            first.Budgets().decoded_records == second.Budgets().decoded_records &&
 	            first.AuthenticationObligation().LogicalCredential() ==

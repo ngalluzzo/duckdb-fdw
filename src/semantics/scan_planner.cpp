@@ -35,24 +35,36 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	result.connector_version = connector.Version();
 	result.relation_name = relation.Name();
 	result.source_snapshot = relation.Snapshot();
-	result.domain = PlanBaseDomain(operation.response_source, operation.pagination.Strategy());
-
-	result.operation.operation_name = operation.name;
-	result.operation.protocol = PlanProtocol(operation.protocol);
-	result.operation.method = PlanMethod(operation.method);
-	result.operation.cardinality = PlanCardinality(operation.cardinality);
-	result.operation.replay_safety = PlanReplaySafety(operation.replay_safety);
-	result.operation.origin = {PlanUrlScheme(operation.request.origin.scheme), operation.request.origin.host.Value(),
-	                           operation.request.origin.port};
-	result.operation.path = operation.request.path;
-	for (const auto &query : operation.request.query_parameters) {
-		result.operation.query_parameters.push_back({query.name, query.encoded_value});
+	CompiledHttpOrigin operation_origin = operation.Protocol() == CompiledProtocol::REST
+	                                          ? operation.Rest().request.origin
+	                                          : operation.Graphql().endpoint_origin;
+	if (operation.Protocol() == CompiledProtocol::REST) {
+		const auto &rest = operation.Rest();
+		result.domain = PlanBaseDomain(rest.response_source, rest.pagination.Strategy());
+		PlannedRestOperation planned {
+		    operation.name,
+		    PlanMethod(rest.method),
+		    PlanCardinality(operation.cardinality),
+		    PlanReplaySafety(rest.replay_safety),
+		    {PlanUrlScheme(rest.request.origin.scheme), rest.request.origin.host.Value(), rest.request.origin.port},
+		    rest.request.path,
+		    {},
+		    {},
+		    PlanResponseSource(rest.response_source),
+		    rest.records_extractor};
+		for (const auto &query : rest.request.query_parameters) {
+			planned.query_parameters.push_back({query.name, query.encoded_value});
+		}
+		for (const auto &header : rest.request.headers) {
+			planned.headers.push_back({header.name, header.value});
+		}
+		result.operation =
+		    std::make_shared<const PlannedProtocolOperation>(PlannedProtocolOperation::FromRest(std::move(planned)));
+	} else {
+		result.domain = BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES;
+		result.operation = std::make_shared<const PlannedProtocolOperation>(
+		    PlannedProtocolOperation::FromGraphql(PlanGraphqlOperation(operation)));
 	}
-	for (const auto &header : operation.request.headers) {
-		result.operation.headers.push_back({header.name, header.value});
-	}
-	result.operation.response_source = PlanResponseSource(operation.response_source);
-	result.operation.records_extractor = operation.records_extractor;
 
 	for (const auto &column : relation.Columns()) {
 		result.output_columns.push_back({column.name, column.logical_type, column.nullable, column.extractor});
@@ -95,14 +107,15 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 
 	// The selected plan narrows catalog-wide network policy to the one operation
 	// origin. It never grants another relation's host or scheme to this scan.
-	result.network = {{UrlSchemeName(operation.request.origin.scheme)},
-	                  {operation.request.origin.host.Value()},
+	result.network = {{UrlSchemeName(operation_origin.scheme)},
+	                  {operation_origin.host.Value()},
 	                  false,
 	                  false,
 	                  false,
 	                  connector.NetworkPolicy().loopback_addresses_enabled};
 	const auto &ceilings = relation.ResourceCeilings();
-	if (operation.pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
+	if (operation.Protocol() == CompiledProtocol::REST &&
+	    operation.Rest().pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
 		const auto response_bytes =
 		    ceilings.HasResponseByteNarrowing()
 		        ? std::min(ceilings.MaxResponseBytesPerPage(), connector.NetworkPolicy().max_response_bytes)
@@ -117,12 +130,14 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		                  HOST_MAX_DECODED_MEMORY_BYTES,
 		                  OUTPUT_BATCH_ROWS,
 		                  MAX_EXECUTION_MILLISECONDS,
-		                  HOST_MAX_CONCURRENCY};
+		                  HOST_MAX_CONCURRENCY,
+		                  0};
 		if (!result.budgets.IsWithinLiveRestBounds()) {
 			throw std::logic_error("selected relation produced an invalid single-response resource envelope");
 		}
-	} else {
-		const auto &compiled_pagination = operation.pagination;
+	} else if (operation.Protocol() == CompiledProtocol::REST) {
+		const auto &rest = operation.Rest();
+		const auto &compiled_pagination = rest.pagination;
 		result.pagination.strategy = PlannedPaginationStrategy::LINK_HEADER;
 		result.pagination.dependency = PlanPageDependency(compiled_pagination.Dependency());
 		result.pagination.consistency = PlanPageConsistency(compiled_pagination.Consistency());
@@ -130,14 +145,14 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		result.pagination.target_scope = PlanTargetScope(compiled_pagination.TargetScope());
 		result.pagination.supports_total = compiled_pagination.SupportsTotal();
 		result.pagination.supports_resume = compiled_pagination.SupportsResume();
-		result.pagination.target = {{PlanUrlScheme(operation.request.origin.scheme),
-		                             operation.request.origin.host.Value(), operation.request.origin.port},
-		                            operation.request.path,
-		                            compiled_pagination.PageSizeParameter(),
-		                            compiled_pagination.PageSize(),
-		                            compiled_pagination.PageNumberParameter(),
-		                            compiled_pagination.FirstPage(),
-		                            compiled_pagination.PageIncrement()};
+		result.pagination.target = {
+		    {PlanUrlScheme(rest.request.origin.scheme), rest.request.origin.host.Value(), rest.request.origin.port},
+		    rest.request.path,
+		    compiled_pagination.PageSizeParameter(),
+		    compiled_pagination.PageSize(),
+		    compiled_pagination.PageNumberParameter(),
+		    compiled_pagination.FirstPage(),
+		    compiled_pagination.PageIncrement()};
 
 		const auto page_response_bytes =
 		    std::min(std::min(ceilings.MaxResponseBytesPerPage(), connector.NetworkPolicy().max_response_bytes),
@@ -153,7 +168,8 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    PAGINATION_MAX_DECODED_MEMORY_BYTES,
 		    PAGINATION_OUTPUT_BATCH_ROWS,
 		    PAGINATION_MAX_EXECUTION_MILLISECONDS,
-		    PAGINATION_MAX_CONCURRENCY};
+		    PAGINATION_MAX_CONCURRENCY,
+		    0};
 
 		const auto max_pages = compiled_pagination.MaxPagesPerScan();
 		result.pagination.scan_budgets = {
@@ -170,7 +186,8 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    PAGINATION_MAX_DECODED_MEMORY_BYTES,
 		    PAGINATION_OUTPUT_BATCH_ROWS,
 		    PAGINATION_MAX_EXECUTION_MILLISECONDS,
-		    PAGINATION_MAX_CONCURRENCY};
+		    PAGINATION_MAX_CONCURRENCY,
+		    0};
 		result.budgets = result.pagination.page_budgets;
 		if (!result.pagination.PageBudgets().IsWithinPaginatedPageBounds() ||
 		    !result.pagination.ScanBudgets().IsWithinPaginatedScanBounds() ||
@@ -180,10 +197,62 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    result.pagination.ScanBudgets().decoded_records < result.pagination.PageBudgets().decoded_records) {
 			throw std::logic_error("selected relation produced an invalid paginated page or scan resource envelope");
 		}
+	} else {
+		const auto &graphql = operation.Graphql();
+		result.pagination.strategy = PlannedPaginationStrategy::GRAPHQL_CURSOR;
+		result.pagination.graphql_cursor = result.Operation().Graphql().cursor;
+		const auto page_response_bytes =
+		    std::min(std::min(ceilings.MaxResponseBytesPerPage(), connector.NetworkPolicy().max_response_bytes),
+		             PAGINATION_MAX_RESPONSE_BYTES_PER_PAGE);
+		result.pagination.page_budgets = {
+		    PAGINATION_MAX_REQUEST_ATTEMPTS_PER_PAGE,
+		    page_response_bytes,
+		    PAGINATION_MAX_HEADER_BYTES_PER_PAGE,
+		    PAGINATION_MAX_DECOMPRESSED_BYTES_PER_PAGE,
+		    std::min(ceilings.MaxRecordsPerPage(), PAGINATION_MAX_DECODED_RECORDS_PER_PAGE),
+		    std::min(ceilings.MaxExtractedStringBytes(), PAGINATION_MAX_EXTRACTED_STRING_BYTES),
+		    PAGINATION_MAX_JSON_NESTING,
+		    PAGINATION_MAX_DECODED_MEMORY_BYTES,
+		    PAGINATION_OUTPUT_BATCH_ROWS,
+		    PAGINATION_MAX_EXECUTION_MILLISECONDS,
+		    PAGINATION_MAX_CONCURRENCY,
+		    std::min(graphql.max_serialized_request_body_bytes_per_request, HOST_MAX_SERIALIZED_REQUEST_BODY_BYTES)};
+		const auto max_pages = graphql.cursor.max_pages_per_scan;
+		result.pagination.scan_budgets = {
+		    max_pages,
+		    max_pages,
+		    std::min(ceilings.MaxResponseBytesPerScan(), PAGINATION_MAX_RESPONSE_BYTES_PER_SCAN),
+		    BoundedProduct(PAGINATION_MAX_HEADER_BYTES_PER_PAGE, max_pages, PAGINATION_MAX_HEADER_BYTES_PER_SCAN,
+		                   "aggregate header-byte scope"),
+		    BoundedProduct(PAGINATION_MAX_DECOMPRESSED_BYTES_PER_PAGE, max_pages,
+		                   PAGINATION_MAX_DECOMPRESSED_BYTES_PER_SCAN, "aggregate decompressed-byte scope"),
+		    std::min(ceilings.MaxRecordsPerScan(), PAGINATION_MAX_DECODED_RECORDS_PER_SCAN),
+		    std::min(ceilings.MaxExtractedStringBytes(), PAGINATION_MAX_EXTRACTED_STRING_BYTES),
+		    PAGINATION_MAX_JSON_NESTING,
+		    PAGINATION_MAX_DECODED_MEMORY_BYTES,
+		    PAGINATION_OUTPUT_BATCH_ROWS,
+		    PAGINATION_MAX_EXECUTION_MILLISECONDS,
+		    PAGINATION_MAX_CONCURRENCY,
+		    std::min(graphql.max_serialized_request_body_bytes_per_scan,
+		             PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN)};
+		result.budgets = result.pagination.page_budgets;
+		if (!result.pagination.PageBudgets().IsWithinPaginatedPageBounds() ||
+		    !result.pagination.ScanBudgets().IsWithinPaginatedScanBounds() ||
+		    result.pagination.ScanBudgets().serialized_request_body_bytes <
+		        result.pagination.PageBudgets().serialized_request_body_bytes ||
+		    result.pagination.ScanBudgets().decoded_records < result.pagination.PageBudgets().decoded_records) {
+			throw std::logic_error("selected GraphQL operation produced an invalid cursor resource envelope");
+		}
 	}
 
-	if (result.domain == BaseDomain::PAGINATED_JSON_PATH_RECORDS ||
-	    result.domain == BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS) {
+	if (result.domain == BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES) {
+		result.classification_reason =
+		    predicate_decision.reason +
+		    "; canonical viewer.repositories traversal defines a duplicate-preserving mutable occurrence bag; fixed "
+		    "UPDATED_AT DESC enumerates cursors but grants no DuckDB ordering or snapshot; body and row ceilings grant "
+		    "no limit or truncation authority; DuckDB retains every relational operator";
+	} else if (result.domain == BaseDomain::PAGINATED_JSON_PATH_RECORDS ||
+	           result.domain == BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS) {
 		result.classification_reason =
 		    predicate_decision.reason +
 		    "; accepted sequential page records define one duplicate-preserving mutable base-domain bag; traversal "

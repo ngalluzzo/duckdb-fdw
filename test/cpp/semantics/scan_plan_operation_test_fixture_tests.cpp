@@ -13,7 +13,7 @@ namespace {
 
 std::size_t CountHeader(const duckdb_api::ScanPlan &plan, const std::string &name) {
 	std::size_t count = 0;
-	for (const auto &header : plan.Operation().headers) {
+	for (const auto &header : plan.Operation().Rest().headers) {
 		if (header.name == name) {
 			count++;
 		}
@@ -57,32 +57,35 @@ void TestOperationCounterexamples(const std::string &canary) {
 			        "relation-identity counterexample retained authenticated_user");
 			break;
 		case OperationPlanCounterexample::EMPTY_IDENTITY:
-			Require(plan.Operation().operation_name.empty(), "operation identity counterexample changed another fact");
+			Require(plan.Operation().Rest().operation_name.empty(),
+			        "operation identity counterexample changed another fact");
 			break;
 		case OperationPlanCounterexample::OTHER_OPERATION_IDENTITY:
-			Require(plan.Operation().operation_name == "other_operation" &&
-			            plan.Operation().operation_name != baseline.Operation().operation_name,
+			Require(plan.Operation().Rest().operation_name == "other_operation" &&
+			            plan.Operation().Rest().operation_name != baseline.Operation().Rest().operation_name,
 			        "nonempty operation-identity counterexample retained the installed operation");
 			break;
 		case OperationPlanCounterexample::UNKNOWN_METHOD:
-			Require(plan.Operation().method != baseline.Operation().method,
+			Require(plan.Operation().Rest().method != baseline.Operation().Rest().method,
 			        "unknown-method counterexample retained the valid method");
 			break;
 		case OperationPlanCounterexample::EMPTY_PATH:
-			Require(plan.Operation().path.empty(), "empty-path counterexample retained a valid path");
+			Require(plan.Operation().Rest().path.empty(), "empty-path counterexample retained a valid path");
 			break;
 		case OperationPlanCounterexample::OTHER_PATH:
-			Require(plan.Operation().path == "/other" && plan.Operation().path != baseline.Operation().path,
+			Require(plan.Operation().Rest().path == "/other" &&
+			            plan.Operation().Rest().path != baseline.Operation().Rest().path,
 			        "nonempty path counterexample retained the installed path");
 			break;
 		case OperationPlanCounterexample::INVALID_QUERY:
-			Require(plan.Operation().query_parameters.size() == baseline.Operation().query_parameters.size() + 1 &&
-			            plan.Operation().query_parameters.back().name.find('?') != std::string::npos,
+			Require(plan.Operation().Rest().query_parameters.size() ==
+			                baseline.Operation().Rest().query_parameters.size() + 1 &&
+			            plan.Operation().Rest().query_parameters.back().name.find('?') != std::string::npos,
 			        "query counterexample did not expose invalid structural query data");
 			break;
 		case OperationPlanCounterexample::EMPTY_FIXED_HEADER_VALUE:
-			Require(plan.Operation().headers.size() == baseline.Operation().headers.size() + 1 &&
-			            plan.Operation().headers.back().value.empty(),
+			Require(plan.Operation().Rest().headers.size() == baseline.Operation().Rest().headers.size() + 1 &&
+			            plan.Operation().Rest().headers.back().value.empty(),
 			        "fixed-header counterexample did not expose its empty value");
 			break;
 		case OperationPlanCounterexample::CASE_VARIANT_AUTHORIZATION_HEADER:
@@ -94,15 +97,15 @@ void TestOperationCounterexamples(const std::string &canary) {
 			        "duplicate Authorization counterexample did not expose two headers");
 			break;
 		case OperationPlanCounterexample::HTTP_ORIGIN_SCHEME:
-			Require(plan.Operation().origin.scheme == duckdb_api::PlannedUrlScheme::HTTP,
+			Require(plan.Operation().Rest().origin.scheme == duckdb_api::PlannedUrlScheme::HTTP,
 			        "origin-scheme counterexample retained HTTPS");
 			break;
 		case OperationPlanCounterexample::OTHER_ORIGIN_HOST:
-			Require(plan.Operation().origin.host != baseline.Operation().origin.host,
+			Require(plan.Operation().Rest().origin.host != baseline.Operation().Rest().origin.host,
 			        "origin-host counterexample retained the valid host");
 			break;
 		case OperationPlanCounterexample::OTHER_ORIGIN_PORT:
-			Require(plan.Operation().origin.port != baseline.Operation().origin.port,
+			Require(plan.Operation().Rest().origin.port != baseline.Operation().Rest().origin.port,
 			        "origin-port counterexample retained the valid port");
 			break;
 		}

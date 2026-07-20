@@ -63,7 +63,7 @@ duckdb_api::ScanPlan ScanPlanTestAccess::AnonymousAuth(duckdb_api::ScanPlan plan
 		break;
 	case AnonymousAuthPlanCounterexample::DESTINATION_PRESENT:
 		plan.authentication_obligation.has_destination = true;
-		plan.authentication_obligation.destination = plan.operation.origin;
+		plan.authentication_obligation.destination = plan.Operation().Rest().origin;
 		break;
 	default:
 		throw std::invalid_argument("unknown closed anonymous authentication plan counterexample");

@@ -1,4 +1,5 @@
 #include "semantics/support/scan_plan_test_fixtures.hpp"
+#include "semantics/support/graphql_scan_plan_test_fixtures.hpp"
 
 #include <algorithm>
 #include <utility>
@@ -67,6 +68,7 @@ public:
 	                                       duckdb_api::PredicateDecisionCategory predicate_category,
 	                                       bool complete_residual);
 	static duckdb_api::ScanPlan GenericPagination(const std::string &secret_name);
+	static duckdb_api::ScanPlan Graphql(const std::string &secret_name);
 
 private:
 	static duckdb_api::ScanPlan Common(std::string connector, std::string version, std::string relation,
@@ -76,7 +78,13 @@ private:
 	                             std::string page_number_parameter, uint64_t max_pages,
 	                             uint64_t response_bytes_per_page, uint64_t response_bytes_per_scan,
 	                             uint64_t records_per_page, uint64_t records_per_scan, uint64_t extracted_string_bytes);
+	static void SetRestOperation(duckdb_api::ScanPlan &plan, duckdb_api::PlannedRestOperation operation);
 };
+
+void ScanPlanFixtureBuilder::SetRestOperation(duckdb_api::ScanPlan &plan, duckdb_api::PlannedRestOperation operation) {
+	plan.operation = std::make_shared<const duckdb_api::PlannedProtocolOperation>(
+	    duckdb_api::PlannedProtocolOperation::FromRest(std::move(operation)));
+}
 
 duckdb_api::ScanPlan ScanPlanFixtureBuilder::Common(std::string connector, std::string version, std::string relation,
                                                     std::string source_snapshot) {
@@ -133,8 +141,8 @@ void ScanPlanFixtureBuilder::EnablePagination(duckdb_api::ScanPlan &plan, std::s
 	plan.pagination.target_scope = duckdb_api::PlannedContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH;
 	plan.pagination.supports_total = false;
 	plan.pagination.supports_resume = false;
-	plan.pagination.target = {plan.operation.origin,
-	                          plan.operation.path,
+	plan.pagination.target = {plan.Operation().Rest().origin,
+	                          plan.Operation().Rest().path,
 	                          std::move(page_size_parameter),
 	                          page_size,
 	                          std::move(page_number_parameter),
@@ -150,7 +158,8 @@ void ScanPlanFixtureBuilder::EnablePagination(duckdb_api::ScanPlan &plan, std::s
 	                                duckdb_api::PAGINATION_MAX_DECODED_MEMORY_BYTES,
 	                                duckdb_api::PAGINATION_OUTPUT_BATCH_ROWS,
 	                                duckdb_api::PAGINATION_MAX_EXECUTION_MILLISECONDS,
-	                                duckdb_api::PAGINATION_MAX_CONCURRENCY};
+	                                duckdb_api::PAGINATION_MAX_CONCURRENCY,
+	                                0};
 	plan.pagination.scan_budgets = {max_pages,
 	                                max_pages,
 	                                response_bytes_per_scan,
@@ -164,53 +173,52 @@ void ScanPlanFixtureBuilder::EnablePagination(duckdb_api::ScanPlan &plan, std::s
 	                                duckdb_api::PAGINATION_MAX_DECODED_MEMORY_BYTES,
 	                                duckdb_api::PAGINATION_OUTPUT_BATCH_ROWS,
 	                                duckdb_api::PAGINATION_MAX_EXECUTION_MILLISECONDS,
-	                                duckdb_api::PAGINATION_MAX_CONCURRENCY};
+	                                duckdb_api::PAGINATION_MAX_CONCURRENCY,
+	                                0};
 	plan.budgets = plan.pagination.page_budgets;
 }
 
 duckdb_api::ScanPlan ScanPlanFixtureBuilder::Anonymous() {
-	auto plan = Common("github", "0.6.0", "duckdb_login_search_page", ANONYMOUS_SOURCE_SNAPSHOT);
+	auto plan = Common("github", "0.7.0", "duckdb_login_search_page", ANONYMOUS_SOURCE_SNAPSHOT);
 	plan.domain = duckdb_api::BaseDomain::JSON_PATH_RECORDS;
-	plan.operation = {"github_search_duckdb_login_page",
-	                  duckdb_api::PlannedProtocol::REST,
-	                  duckdb_api::PlannedHttpMethod::GET,
-	                  duckdb_api::PlannedCardinality::ZERO_TO_MANY,
-	                  duckdb_api::PlannedReplaySafety::SAFE,
-	                  {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
-	                  "/search/users",
-	                  {{"q", "duckdb+in%3Alogin"}, {"per_page", "3"}},
-	                  {{"Accept", "application/vnd.github+json"},
-	                   {"User-Agent", "duckdb-api/0.6.0"},
-	                   {"X-GitHub-Api-Version", "2022-11-28"}},
-	                  duckdb_api::PlannedResponseSource::JSON_PATH_MANY,
-	                  "$.items[*]"};
+	SetRestOperation(plan, {"github_search_duckdb_login_page",
+	                        duckdb_api::PlannedHttpMethod::GET,
+	                        duckdb_api::PlannedCardinality::ZERO_TO_MANY,
+	                        duckdb_api::PlannedReplaySafety::SAFE,
+	                        {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
+	                        "/search/users",
+	                        {{"q", "duckdb+in%3Alogin"}, {"per_page", "3"}},
+	                        {{"Accept", "application/vnd.github+json"},
+	                         {"User-Agent", "duckdb-api/0.6.0"},
+	                         {"X-GitHub-Api-Version", "2022-11-28"}},
+	                        duckdb_api::PlannedResponseSource::JSON_PATH_MANY,
+	                        "$.items[*]"});
 	plan.output_columns = {{"id", "BIGINT", false, "$.id"},
 	                       {"login", "VARCHAR", false, "$.login"},
 	                       {"site_admin", "BOOLEAN", false, "$.site_admin"}};
-	plan.budgets = {1, 65536, 16384, 65536, 3, 256, 16, 131072, 2, 5000, 1};
+	plan.budgets = {1, 65536, 16384, 65536, 3, 256, 16, 131072, 2, 5000, 1, 0};
 	return plan;
 }
 
 duckdb_api::ScanPlan ScanPlanFixtureBuilder::Authenticated(const std::string &secret_name) {
-	auto plan = Common("github", "0.6.0", "authenticated_user", AUTHENTICATED_SOURCE_SNAPSHOT);
+	auto plan = Common("github", "0.7.0", "authenticated_user", AUTHENTICATED_SOURCE_SNAPSHOT);
 	plan.domain = duckdb_api::BaseDomain::SUCCESSFUL_ROOT_OBJECT;
-	plan.operation = {"github_authenticated_user",
-	                  duckdb_api::PlannedProtocol::REST,
-	                  duckdb_api::PlannedHttpMethod::GET,
-	                  duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS,
-	                  duckdb_api::PlannedReplaySafety::SAFE,
-	                  {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
-	                  "/user",
-	                  {},
-	                  {{"Accept", "application/vnd.github+json"},
-	                   {"User-Agent", "duckdb-api/0.6.0"},
-	                   {"X-GitHub-Api-Version", "2022-11-28"}},
-	                  duckdb_api::PlannedResponseSource::ROOT_OBJECT,
-	                  "$"};
+	SetRestOperation(plan, {"github_authenticated_user",
+	                        duckdb_api::PlannedHttpMethod::GET,
+	                        duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS,
+	                        duckdb_api::PlannedReplaySafety::SAFE,
+	                        {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
+	                        "/user",
+	                        {},
+	                        {{"Accept", "application/vnd.github+json"},
+	                         {"User-Agent", "duckdb-api/0.6.0"},
+	                         {"X-GitHub-Api-Version", "2022-11-28"}},
+	                        duckdb_api::PlannedResponseSource::ROOT_OBJECT,
+	                        "$"});
 	plan.output_columns = {{"id", "BIGINT", false, "$.id"},
 	                       {"login", "VARCHAR", false, "$.login"},
 	                       {"site_admin", "BOOLEAN", false, "$.site_admin"}};
-	plan.budgets = {1, 65536, 16384, 65536, 1, 256, 16, 131072, 2, 5000, 1};
+	plan.budgets = {1, 65536, 16384, 65536, 1, 256, 16, 131072, 2, 5000, 1, 0};
 	RequireBearer(plan, secret_name);
 	return plan;
 }
@@ -218,21 +226,20 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Authenticated(const std::string &se
 duckdb_api::ScanPlan ScanPlanFixtureBuilder::Repository(const std::string &secret_name,
                                                         duckdb_api::PredicateDecisionCategory predicate_category,
                                                         bool complete_residual) {
-	auto plan = Common("github", "0.6.0", "authenticated_repositories", REPOSITORY_SOURCE_SNAPSHOT);
+	auto plan = Common("github", "0.7.0", "authenticated_repositories", REPOSITORY_SOURCE_SNAPSHOT);
 	plan.domain = duckdb_api::BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS;
-	plan.operation = {"github_authenticated_repositories",
-	                  duckdb_api::PlannedProtocol::REST,
-	                  duckdb_api::PlannedHttpMethod::GET,
-	                  duckdb_api::PlannedCardinality::ZERO_TO_MANY,
-	                  duckdb_api::PlannedReplaySafety::SAFE,
-	                  {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
-	                  "/user/repos",
-	                  {{"per_page", "100"}, {"page", "1"}},
-	                  {{"Accept", "application/vnd.github+json"},
-	                   {"User-Agent", "duckdb-api/0.6.0"},
-	                   {"X-GitHub-Api-Version", "2022-11-28"}},
-	                  duckdb_api::PlannedResponseSource::ROOT_ARRAY,
-	                  "$"};
+	SetRestOperation(plan, {"github_authenticated_repositories",
+	                        duckdb_api::PlannedHttpMethod::GET,
+	                        duckdb_api::PlannedCardinality::ZERO_TO_MANY,
+	                        duckdb_api::PlannedReplaySafety::SAFE,
+	                        {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
+	                        "/user/repos",
+	                        {{"per_page", "100"}, {"page", "1"}},
+	                        {{"Accept", "application/vnd.github+json"},
+	                         {"User-Agent", "duckdb-api/0.6.0"},
+	                         {"X-GitHub-Api-Version", "2022-11-28"}},
+	                        duckdb_api::PlannedResponseSource::ROOT_ARRAY,
+	                        "$"});
 	plan.output_columns = {{"id", "BIGINT", false, "$.id"},
 	                       {"full_name", "VARCHAR", false, "$.full_name"},
 	                       {"private", "BOOLEAN", false, "$.private"},
@@ -263,21 +270,118 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::GenericPagination(const std::string
 	auto plan = Common("fixture_pagination_catalog", "test-1", "fixture_explicit_link_records",
 	                   "fixture:explicit-link-records");
 	plan.domain = duckdb_api::BaseDomain::PAGINATED_JSON_PATH_RECORDS;
-	plan.operation = {"fixture_explicit_link_records",
-	                  duckdb_api::PlannedProtocol::REST,
-	                  duckdb_api::PlannedHttpMethod::GET,
-	                  duckdb_api::PlannedCardinality::ZERO_TO_MANY,
-	                  duckdb_api::PlannedReplaySafety::SAFE,
-	                  {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
-	                  "/fixtures/linked-records",
-	                  {{"batch_size", "3"}, {"cursor_page", "1"}},
-	                  {{"X-Connector-Fixture", "pagination-shape"}},
-	                  duckdb_api::PlannedResponseSource::JSON_PATH_MANY,
-	                  "$.records[*]"};
+	SetRestOperation(plan, {"fixture_explicit_link_records",
+	                        duckdb_api::PlannedHttpMethod::GET,
+	                        duckdb_api::PlannedCardinality::ZERO_TO_MANY,
+	                        duckdb_api::PlannedReplaySafety::SAFE,
+	                        {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
+	                        "/fixtures/linked-records",
+	                        {{"batch_size", "3"}, {"cursor_page", "1"}},
+	                        {{"X-Connector-Fixture", "pagination-shape"}},
+	                        duckdb_api::PlannedResponseSource::JSON_PATH_MANY,
+	                        "$.records[*]"});
 	plan.output_columns = {{"record_id", "BIGINT", false, "$.record_id"},
 	                       {"record_label", "VARCHAR", false, "$.record_label"}};
 	EnablePagination(plan, "batch_size", 3, "cursor_page", 4, 1024, 4096, 3, 12, 96);
 	RequireBearer(plan, secret_name);
+	return plan;
+}
+
+duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string &secret_name) {
+	static const std::string DOCUMENT = "query DuckdbApiViewerRepositoryMetrics($pageSize: Int!, $cursor: String) {\n"
+	                                    "  viewer {\n"
+	                                    "    repositories(\n"
+	                                    "      first: $pageSize\n"
+	                                    "      after: $cursor\n"
+	                                    "      affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]\n"
+	                                    "      ownerAffiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]\n"
+	                                    "      orderBy: {field: UPDATED_AT, direction: DESC}\n"
+	                                    "    ) {\n"
+	                                    "      nodes {\n"
+	                                    "        id\n"
+	                                    "        nameWithOwner\n"
+	                                    "        owner { login }\n"
+	                                    "        stargazerCount\n"
+	                                    "        primaryLanguage { name }\n"
+	                                    "        isPrivate\n"
+	                                    "        isArchived\n"
+	                                    "        updatedAt\n"
+	                                    "      }\n"
+	                                    "      pageInfo { hasNextPage endCursor }\n"
+	                                    "    }\n"
+	                                    "  }\n"
+	                                    "}";
+	auto plan = Common("canonical_graphql_fixture", "test-graphql-v1", "fixture_viewer_repository_metrics",
+	                   "fixture:canonical-graphql-viewer-repository-metrics");
+	plan.domain = duckdb_api::BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES;
+	duckdb_api::PlannedGraphqlOperation operation {
+	    "github_viewer_repository_metrics",
+	    duckdb_api::PlannedCardinality::ZERO_TO_MANY,
+	    duckdb_api::PlannedReplaySafety::SAFE,
+	    duckdb_api::PlannedGraphqlOperationKind::QUERY,
+	    duckdb_api::PlannedGraphqlDocumentIdentity::GITHUB_VIEWER_REPOSITORY_METRICS_V1,
+	    DOCUMENT,
+	    duckdb_api::PlannedGraphqlDigestAlgorithm::SHA256,
+	    "9d3d78e2214669f11b9caabc2a7f062e2985f9da9628485f124e1f24e3a50c85",
+	    {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
+	    "/graphql",
+	    {{"Accept", "application/vnd.github+json"},
+	     {"Content-Type", "application/json"},
+	     {"User-Agent", "duckdb-api/0.7.0"},
+	     {"X-GitHub-Api-Version", "2022-11-28"}},
+	    {{"pageSize", duckdb_api::PlannedGraphqlVariableType::INT_NON_NULL,
+	      duckdb_api::PlannedGraphqlVariableSource::FIXED_PAGE_SIZE, 100},
+	     {"cursor", duckdb_api::PlannedGraphqlVariableType::STRING_NULLABLE,
+	      duckdb_api::PlannedGraphqlVariableSource::RUNTIME_CURSOR, 0}},
+	    {{"id", duckdb_api::PlannedGraphqlScalarKind::STRING, false, {{"id"}}},
+	     {"full_name", duckdb_api::PlannedGraphqlScalarKind::STRING, false, {{"nameWithOwner"}}},
+	     {"owner_login", duckdb_api::PlannedGraphqlScalarKind::STRING, false, {{"owner", "login"}}},
+	     {"stars", duckdb_api::PlannedGraphqlScalarKind::INT64, false, {{"stargazerCount"}}},
+	     {"primary_language", duckdb_api::PlannedGraphqlScalarKind::STRING, true, {{"primaryLanguage", "name"}}},
+	     {"private", duckdb_api::PlannedGraphqlScalarKind::BOOLEAN, false, {{"isPrivate"}}},
+	     {"archived", duckdb_api::PlannedGraphqlScalarKind::BOOLEAN, false, {{"isArchived"}}},
+	     {"updated_at", duckdb_api::PlannedGraphqlScalarKind::STRING, false, {{"updatedAt"}}}},
+	    {{{"data", "viewer", "repositories", "nodes"}},
+	     {{"errors"}},
+	     {{"data", "viewer", "repositories", "pageInfo"}},
+	     duckdb_api::PlannedGraphqlPartialDataPolicy::FAIL_ON_ANY_ERROR},
+	    {duckdb_api::PlannedGraphqlCursorDirection::FORWARD,
+	     duckdb_api::PlannedGraphqlCursorDependency::SEQUENTIAL,
+	     duckdb_api::PlannedGraphqlCursorConsistency::MUTABLE,
+	     false,
+	     false,
+	     1,
+	     "pageSize",
+	     100,
+	     "cursor",
+	     {{"data", "viewer", "repositories", "pageInfo", "hasNextPage"}},
+	     {{"data", "viewer", "repositories", "pageInfo", "endCursor"}},
+	     32},
+	    4096,
+	    8 * 1024,
+	    256 * 1024};
+	plan.operation = std::make_shared<const duckdb_api::PlannedProtocolOperation>(
+	    duckdb_api::PlannedProtocolOperation::FromGraphql(std::move(operation)));
+	plan.output_columns = {{"id", "VARCHAR", false, "$.id"},
+	                       {"full_name", "VARCHAR", false, "$.nameWithOwner"},
+	                       {"owner_login", "VARCHAR", false, "$.owner.login"},
+	                       {"stars", "BIGINT", false, "$.stargazerCount"},
+	                       {"primary_language", "VARCHAR", true, "$.primaryLanguage.name"},
+	                       {"private", "BOOLEAN", false, "$.isPrivate"},
+	                       {"archived", "BOOLEAN", false, "$.isArchived"},
+	                       {"updated_at", "VARCHAR", false, "$.updatedAt"}};
+	plan.pagination.strategy = duckdb_api::PlannedPaginationStrategy::GRAPHQL_CURSOR;
+	plan.pagination.graphql_cursor = plan.Operation().Graphql().cursor;
+	plan.pagination.page_budgets = {1,  8 * 1024 * 1024, 16 * 1024, 8 * 1024 * 1024, 100, 512,
+	                                16, 2 * 1024 * 1024, 64,        30000,           1,   8 * 1024};
+	plan.pagination.scan_budgets = {
+	    32,    32, 64 * 1024 * 1024, 512 * 1024, 64 * 1024 * 1024, 3200, 512, 16, 2 * 1024 * 1024, 64,
+	    30000, 1,  256 * 1024};
+	plan.budgets = plan.pagination.page_budgets;
+	RequireBearer(plan, secret_name);
+	plan.classification_reason =
+	    "canonical GraphQL query defines duplicate-preserving viewer repository occurrences; DuckDB owns all "
+	    "relational operators";
 	return plan;
 }
 
@@ -316,6 +420,10 @@ duckdb_api::ScanPlan BuildCompleteResidualFallbackPlanFixture(const std::string 
 duckdb_api::ScanPlan BuildAmbiguousPredicateFallbackPlanFixture(const std::string &exact_logical_secret_name) {
 	return ScanPlanFixtureBuilder::Repository(exact_logical_secret_name,
 	                                          duckdb_api::PredicateDecisionCategory::AMBIGUOUS, true);
+}
+
+duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixtureImpl(const std::string &exact_logical_secret_name) {
+	return ScanPlanFixtureBuilder::Graphql(exact_logical_secret_name);
 }
 
 } // namespace duckdb_api_test

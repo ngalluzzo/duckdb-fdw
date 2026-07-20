@@ -176,7 +176,7 @@ void TestBooleanCompositionFallbackAndAmbiguity() {
 	RequireUnrestricted(ambiguous, duckdb_api::PredicateDecisionCategory::AMBIGUOUS,
 	                    duckdb_api::PredicateDecisionReason::AMBIGUOUS_CONDITIONAL_INPUT,
 	                    "controlled incompatible predicate mappings");
-	Require(ambiguous.Operation().operation_name == "controlled_exact_repositories" &&
+	Require(ambiguous.Operation().Rest().operation_name == "controlled_exact_repositories" &&
 	            ambiguous.ResidualPredicate() == duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE,
 	        "predicate ambiguity changed the selected base operation or lost the DuckDB residual");
 }

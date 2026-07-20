@@ -64,3 +64,17 @@ target_link_libraries(
   PRIVATE duckdb_api_semantics_fixture_service
           duckdb_api_connector_fixture_service
           duckdb_api_relational_planning_service)
+
+# Closed GraphQL planner oracle. It consumes Connector's public fixture service
+# and Semantics' public planning/fixture services without compiling provider
+# production sources or importing provider-private construction.
+add_executable(
+  duckdb_api_graphql_semantics_tests
+  ${GRAPHQL_SEMANTICS_TEST_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_graphql_semantics_tests)
+target_include_directories(duckdb_api_graphql_semantics_tests PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_graphql_semantics_tests
+  PRIVATE duckdb_api_semantics_fixture_service
+          duckdb_api_connector_fixture_service
+          duckdb_api_relational_planning_service)

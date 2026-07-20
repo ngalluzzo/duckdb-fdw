@@ -20,11 +20,11 @@ void TestResponseCounterexamples(const std::string &canary) {
 		const auto plan = BuildResponsePlanCounterexample("fixture_secret_name", variant);
 		switch (variant) {
 		case ResponsePlanCounterexample::JSON_PATH_RESPONSE_SOURCE:
-			Require(plan.Operation().response_source == duckdb_api::PlannedResponseSource::JSON_PATH_MANY,
+			Require(plan.Operation().Rest().response_source == duckdb_api::PlannedResponseSource::JSON_PATH_MANY,
 			        "response-source counterexample retained root object");
 			break;
 		case ResponsePlanCounterexample::ZERO_TO_MANY_CARDINALITY:
-			Require(plan.Operation().cardinality == duckdb_api::PlannedCardinality::ZERO_TO_MANY,
+			Require(plan.Operation().Rest().cardinality == duckdb_api::PlannedCardinality::ZERO_TO_MANY,
 			        "cardinality counterexample retained exactly-one");
 			break;
 		case ResponsePlanCounterexample::JSON_PATH_BASE_DOMAIN:
@@ -32,7 +32,8 @@ void TestResponseCounterexamples(const std::string &canary) {
 			        "base-domain counterexample retained successful root object");
 			break;
 		case ResponsePlanCounterexample::EMPTY_RECORDS_EXTRACTOR:
-			Require(plan.Operation().records_extractor.empty(), "records-extractor counterexample retained extraction");
+			Require(plan.Operation().Rest().records_extractor.empty(),
+			        "records-extractor counterexample retained extraction");
 			break;
 		case ResponsePlanCounterexample::EMPTY_SCHEMA_NAME:
 			Require(plan.OutputColumns().front().name.empty(), "schema-name counterexample retained a name");

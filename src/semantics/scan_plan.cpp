@@ -14,7 +14,7 @@ bool ResourceBudgets::IsWithinLiveRestBounds() const {
 	       json_nesting <= HOST_MAX_JSON_NESTING && decoded_memory_bytes > 0 &&
 	       decoded_memory_bytes <= HOST_MAX_DECODED_MEMORY_BYTES && batch_rows > 0 && batch_rows <= OUTPUT_BATCH_ROWS &&
 	       wall_milliseconds > 0 && wall_milliseconds <= MAX_EXECUTION_MILLISECONDS &&
-	       concurrency == HOST_MAX_CONCURRENCY;
+	       concurrency == HOST_MAX_CONCURRENCY && serialized_request_body_bytes == 0;
 }
 
 bool ResourceBudgets::IsWithinPaginatedPageBounds() const {
@@ -27,7 +27,8 @@ bool ResourceBudgets::IsWithinPaginatedPageBounds() const {
 	       json_nesting <= PAGINATION_MAX_JSON_NESTING && decoded_memory_bytes > 0 &&
 	       decoded_memory_bytes <= PAGINATION_MAX_DECODED_MEMORY_BYTES && batch_rows > 0 &&
 	       batch_rows <= PAGINATION_OUTPUT_BATCH_ROWS && wall_milliseconds > 0 &&
-	       wall_milliseconds <= PAGINATION_MAX_EXECUTION_MILLISECONDS && concurrency == PAGINATION_MAX_CONCURRENCY;
+	       wall_milliseconds <= PAGINATION_MAX_EXECUTION_MILLISECONDS && concurrency == PAGINATION_MAX_CONCURRENCY &&
+	       serialized_request_body_bytes <= HOST_MAX_SERIALIZED_REQUEST_BODY_BYTES;
 }
 
 bool ScanResourceBudgets::IsWithinPaginatedScanBounds() const {
@@ -41,7 +42,8 @@ bool ScanResourceBudgets::IsWithinPaginatedScanBounds() const {
 	       json_nesting <= PAGINATION_MAX_JSON_NESTING && decoded_memory_bytes > 0 &&
 	       decoded_memory_bytes <= PAGINATION_MAX_DECODED_MEMORY_BYTES && batch_rows > 0 &&
 	       batch_rows <= PAGINATION_OUTPUT_BATCH_ROWS && wall_milliseconds > 0 &&
-	       wall_milliseconds <= PAGINATION_MAX_EXECUTION_MILLISECONDS && concurrency == PAGINATION_MAX_CONCURRENCY;
+	       wall_milliseconds <= PAGINATION_MAX_EXECUTION_MILLISECONDS && concurrency == PAGINATION_MAX_CONCURRENCY &&
+	       serialized_request_body_bytes <= PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN;
 }
 
 PaginationPlan::PaginationPlan()
@@ -49,7 +51,19 @@ PaginationPlan::PaginationPlan()
       consistency(PlannedPageConsistency::MUTABLE), link_relation(PlannedLinkRelation::NEXT),
       target_scope(PlannedContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH), supports_total(false),
       supports_resume(false), target {{PlannedUrlScheme::HTTPS, "", 0}, "", "", 0, "", 0, 0},
-      page_budgets {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, scan_budgets {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} {
+      graphql_cursor {PlannedGraphqlCursorDirection::FORWARD,
+                      PlannedGraphqlCursorDependency::SEQUENTIAL,
+                      PlannedGraphqlCursorConsistency::MUTABLE,
+                      false,
+                      false,
+                      0,
+                      "",
+                      0,
+                      "",
+                      {},
+                      {},
+                      0},
+      page_budgets {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, scan_budgets {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} {
 }
 
 void PaginationPlan::RequireLinkHeader() const {
@@ -97,13 +111,24 @@ const PlannedPaginationTarget &PaginationPlan::Target() const {
 	return target;
 }
 
+const PlannedGraphqlCursor &PaginationPlan::GraphqlCursor() const {
+	if (strategy != PlannedPaginationStrategy::GRAPHQL_CURSOR) {
+		throw std::logic_error("pagination plan does not contain a GraphQL cursor payload");
+	}
+	return graphql_cursor;
+}
+
 const ResourceBudgets &PaginationPlan::PageBudgets() const {
-	RequireLinkHeader();
+	if (strategy == PlannedPaginationStrategy::DISABLED) {
+		throw std::logic_error("disabled pagination has no page resource payload");
+	}
 	return page_budgets;
 }
 
 const ScanResourceBudgets &PaginationPlan::ScanBudgets() const {
-	RequireLinkHeader();
+	if (strategy == PlannedPaginationStrategy::DISABLED) {
+		throw std::logic_error("disabled pagination has no scan resource payload");
+	}
 	return scan_budgets;
 }
 
@@ -189,8 +214,11 @@ BaseDomain ScanPlan::Domain() const {
 	return domain;
 }
 
-const PlannedRestOperation &ScanPlan::Operation() const {
-	return operation;
+const PlannedProtocolOperation &ScanPlan::Operation() const {
+	if (!operation) {
+		throw std::logic_error("scan plan contains no protocol operation");
+	}
+	return *operation;
 }
 
 const std::vector<PlannedColumn> &ScanPlan::OutputColumns() const {
@@ -286,7 +314,7 @@ const NetworkCapability &ScanPlan::Network() const {
 }
 
 const ResourceBudgets &ScanPlan::Budgets() const {
-	return pagination.Strategy() == PlannedPaginationStrategy::LINK_HEADER ? pagination.PageBudgets() : budgets;
+	return pagination.Strategy() == PlannedPaginationStrategy::DISABLED ? budgets : pagination.PageBudgets();
 }
 
 const std::string &ScanPlan::ClassificationReason() const {

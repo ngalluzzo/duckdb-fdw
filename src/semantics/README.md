@@ -41,6 +41,17 @@ predicate ambiguity or resolved by declaration order. Only the selected
 operation reaches full predicate classification and plan construction. Unknown
 relation identity is instead an invalid request contract.
 
+The planned operation is an exhaustive REST-or-GraphQL value. REST preserves
+the existing typed request and Link-pagination facts. GraphQL planning admits
+only Connector's canonical `GITHUB_VIEWER_REPOSITORY_METRICS_V1` profile:
+exact bytes and SHA-256 digest, query-only kind, fixed variables and response
+paths, duplicate-preserving viewer-repository occurrence domain, sequential
+mutable cursor traversal, and page/scan resource ceilings must all agree.
+Semantics does not parse or generate GraphQL, serialize a request, track a
+cursor, or decode a response. Fixed `UPDATED_AT DESC` enumerates the cursor but
+does not grant SQL ordering or snapshot authority; body and row ceilings do not
+grant limit, truncation, or retry authority.
+
 ## Start here
 
 | Change | Production code | Focused test |
@@ -48,11 +59,13 @@ relation identity is instead an invalid request contract.
 | Closed protocol-neutral request predicate | `relational_predicate.cpp`, `duckdb_api/relational_predicate.hpp` | `duckdb_api_scan_planner_tests` |
 | Exact/Superset proof matching, composition, and fallback | `predicate_classifier.cpp` | `duckdb_api_scan_planner_tests` |
 | Plan values, guarded payloads, or resource predicates | `scan_plan.cpp`, `duckdb_api/scan_plan.hpp` | `duckdb_api_scan_plan_contract_tests` |
+| Exhaustive REST/GraphQL planned operation value | `planned_protocol_operation.cpp`, `duckdb_api/planned_protocol_operation.hpp` | `duckdb_api_scan_plan_contract_tests`, `duckdb_api_graphql_semantics_tests` |
+| Canonical GraphQL admission and replay derivation | `graphql_operation_planner.cpp` | `duckdb_api_graphql_semantics_tests` |
 | Human-readable plan snapshots | `scan_plan_explain.cpp` | `duckdb_api_scan_plan_contract_tests`, `duckdb_api_scan_plan_fixture_tests` |
 | Capability narrowing or conservative classification | `scan_planner.cpp`, `duckdb_api/scan_planner.hpp` | `duckdb_api_scan_planner_tests` |
 | Connector, request, authorization, or pagination admission | `scan_planner_validation.cpp` | `duckdb_api_scan_planner_tests`, `duckdb_api_scan_plan_pagination_contract_tests` |
 | Private normalization shared by construction and validation | `scan_planner_internal.hpp` | `duckdb_api_scan_planner_tests` |
-| Reusable plan fixtures for Runtime consumers | `test/cpp/semantics/support/` | `duckdb_api_scan_plan_fixture_tests` |
+| Reusable plan fixtures for Runtime consumers | `test/cpp/semantics/support/scan_plan_test_fixtures.*`, `graphql_scan_plan_test_fixtures.*` | `duckdb_api_scan_plan_fixture_tests`, `duckdb_api_graphql_semantics_tests` |
 
 `relational_predicate.hpp` is the smaller service below Query request
 construction and Semantics classification. `scan_plan.hpp` is the value-only
@@ -60,9 +73,13 @@ Runtime consumer interface and intentionally carries no Connector, Query, or
 planner-construction dependency. `scan_planner.hpp` is the separate planning
 entry point used by Query. Keep those dependency directions intact.
 
-Runtime must use only `ScanPlan::ConditionalInput()` for predicate-derived
-request selection. `Operation().query_parameters`, Connector provenance, and
-the safe snapshot do not duplicate or supersede that authority.
+Runtime must exhaustively inspect `ScanPlan::Operation().Protocol()` and then
+use the guarded `Rest()` or `Graphql()` payload. For REST, only
+`ScanPlan::ConditionalInput()` supplies predicate-derived request selection;
+fixed query parameters, Connector provenance, and safe explanation do not
+duplicate or supersede that authority. For GraphQL, Runtime consumes the typed
+document, variable, response, and cursor plan without parsing relation names,
+source snapshots, or explanation to recover authority.
 
 `PredicateCategory()` and `PredicateReason()` are the stable diagnostic
 contract. `ClassificationReason()` and `Snapshot()` are safe prose and must
@@ -92,8 +109,9 @@ selection, declared capabilities, and connector-facing proof inputs, also read
 
 ## Tests
 
-`make test` runs the focused planner, plan-contract, pagination-contract, and
-fixture executables declared in `test/cpp/semantics/targets.cmake`. The planner
+`make test` runs the focused planner, plan-contract, pagination-contract,
+GraphQL, and fixture executables declared in
+`test/cpp/semantics/targets.cmake`. The planner
 target includes a pinned-DuckDB law oracle over TRUE/FALSE/NULL values and
 duplicate occurrence identifiers; it compares DuckDB-only with
 remote-plus-retained-residual result bags. Run

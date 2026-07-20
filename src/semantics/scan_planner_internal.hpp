@@ -32,6 +32,8 @@ inline PlannedProtocol PlanProtocol(CompiledProtocol protocol) {
 	switch (protocol) {
 	case CompiledProtocol::REST:
 		return PlannedProtocol::REST;
+	case CompiledProtocol::GRAPHQL:
+		return PlannedProtocol::GRAPHQL;
 	}
 	throw std::logic_error("compiled relation contains an unsupported protocol");
 }
@@ -143,6 +145,13 @@ struct SelectedRelationOperation {
 };
 
 SelectedRelationOperation ValidateAndSelectOperation(const CompiledConnector &connector, const ScanRequest &request);
+
+// GraphQL planning is a closed profile match, not a parser. These helpers
+// validate Connector's public typed handoff and derive the replay-safe planned
+// alternative only when every accepted fact agrees.
+void ValidateGraphqlOperationProfile(const CompiledRelation &relation, const CompiledOperation &operation,
+                                     const CompiledNetworkPolicy &network_policy);
+PlannedGraphqlOperation PlanGraphqlOperation(const CompiledOperation &operation);
 
 } // namespace scan_planner_internal
 } // namespace duckdb_api

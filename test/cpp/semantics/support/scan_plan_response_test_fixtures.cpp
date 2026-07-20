@@ -1,24 +1,34 @@
 #include "semantics/support/scan_plan_test_access.hpp"
 
 #include <stdexcept>
+#include <utility>
 
 namespace duckdb_api_test {
 
 duckdb_api::ScanPlan ScanPlanTestAccess::Response(duckdb_api::ScanPlan plan,
                                                   ResponsePlanCounterexample counterexample) {
 	switch (counterexample) {
-	case ResponsePlanCounterexample::JSON_PATH_RESPONSE_SOURCE:
-		plan.operation.response_source = duckdb_api::PlannedResponseSource::JSON_PATH_MANY;
+	case ResponsePlanCounterexample::JSON_PATH_RESPONSE_SOURCE: {
+		auto operation = plan.Operation().Rest();
+		operation.response_source = duckdb_api::PlannedResponseSource::JSON_PATH_MANY;
+		ReplaceRest(plan, std::move(operation));
 		break;
-	case ResponsePlanCounterexample::ZERO_TO_MANY_CARDINALITY:
-		plan.operation.cardinality = duckdb_api::PlannedCardinality::ZERO_TO_MANY;
+	}
+	case ResponsePlanCounterexample::ZERO_TO_MANY_CARDINALITY: {
+		auto operation = plan.Operation().Rest();
+		operation.cardinality = duckdb_api::PlannedCardinality::ZERO_TO_MANY;
+		ReplaceRest(plan, std::move(operation));
 		break;
+	}
 	case ResponsePlanCounterexample::JSON_PATH_BASE_DOMAIN:
 		plan.domain = duckdb_api::BaseDomain::JSON_PATH_RECORDS;
 		break;
-	case ResponsePlanCounterexample::EMPTY_RECORDS_EXTRACTOR:
-		plan.operation.records_extractor.clear();
+	case ResponsePlanCounterexample::EMPTY_RECORDS_EXTRACTOR: {
+		auto operation = plan.Operation().Rest();
+		operation.records_extractor.clear();
+		ReplaceRest(plan, std::move(operation));
 		break;
+	}
 	case ResponsePlanCounterexample::EMPTY_SCHEMA_NAME:
 		plan.output_columns.front().name.clear();
 		break;

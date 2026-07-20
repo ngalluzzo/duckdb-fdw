@@ -1,5 +1,6 @@
 #include "scan_planner_internal.hpp"
 
+#include "graphql_operation_planner.hpp"
 #include "predicate_classifier.hpp"
 
 #include <algorithm>
@@ -60,23 +61,23 @@ void ValidateSchema(const CompiledRelation &relation) {
 }
 
 void ValidateSourceShape(const CompiledOperation &operation, const CompiledResourceCeilings &ceilings) {
-	if (operation.response_source == CompiledResponseSource::JSON_PATH_MANY) {
-		if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY ||
-		    operation.records_extractor.empty() || operation.records_extractor == "$") {
+	const auto &rest = operation.Rest();
+	if (rest.response_source == CompiledResponseSource::JSON_PATH_MANY) {
+		if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY || rest.records_extractor.empty() ||
+		    rest.records_extractor == "$") {
 			throw std::logic_error("JSON-path response contains contradictory source cardinality or extraction");
 		}
 		return;
 	}
-	if (operation.response_source == CompiledResponseSource::ROOT_ARRAY) {
-		if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY || operation.records_extractor != "$") {
+	if (rest.response_source == CompiledResponseSource::ROOT_ARRAY) {
+		if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY || rest.records_extractor != "$") {
 			throw std::logic_error("root-array response contains contradictory cardinality or extraction");
 		}
 		return;
 	}
-	if (operation.response_source == CompiledResponseSource::ROOT_OBJECT) {
+	if (rest.response_source == CompiledResponseSource::ROOT_OBJECT) {
 		if (operation.cardinality != CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS ||
-		    operation.records_extractor != "$" || ceilings.MaxRecordsPerPage() != 1 ||
-		    ceilings.MaxRecordsPerScan() != 1) {
+		    rest.records_extractor != "$" || ceilings.MaxRecordsPerPage() != 1 || ceilings.MaxRecordsPerScan() != 1) {
 			throw std::logic_error("root-object response contains contradictory cardinality, extraction, or budget");
 		}
 		return;
@@ -86,7 +87,8 @@ void ValidateSourceShape(const CompiledOperation &operation, const CompiledResou
 
 void ValidatePagination(const CompiledOperation &operation, const CompiledResourceCeilings &ceilings,
                         const CompiledNetworkPolicy &network_policy) {
-	const auto &pagination = operation.pagination;
+	const auto &rest = operation.Rest();
+	const auto &pagination = rest.pagination;
 	if (pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
 		if (ceilings.MaxRecordsPerPage() != ceilings.MaxRecordsPerScan() ||
 		    (ceilings.HasResponseByteNarrowing() &&
@@ -100,10 +102,10 @@ void ValidatePagination(const CompiledOperation &operation, const CompiledResour
 	    PlanPageConsistency(pagination.Consistency()) != PlannedPageConsistency::MUTABLE ||
 	    PlanLinkRelation(pagination.LinkRelation()) != PlannedLinkRelation::NEXT ||
 	    PlanTargetScope(pagination.TargetScope()) != PlannedContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH ||
-	    pagination.SupportsTotal() || pagination.SupportsResume() || operation.retry_enabled ||
+	    pagination.SupportsTotal() || pagination.SupportsResume() || rest.retry_enabled ||
 	    operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY ||
-	    (operation.response_source != CompiledResponseSource::JSON_PATH_MANY &&
-	     operation.response_source != CompiledResponseSource::ROOT_ARRAY)) {
+	    (rest.response_source != CompiledResponseSource::JSON_PATH_MANY &&
+	     rest.response_source != CompiledResponseSource::ROOT_ARRAY)) {
 		throw std::logic_error("selected relation contains an unsupported pagination capability profile");
 	}
 	if (pagination.PageSizeParameter().empty() || pagination.PageNumberParameter().empty() ||
@@ -116,7 +118,7 @@ void ValidatePagination(const CompiledOperation &operation, const CompiledResour
 	// Connector supplies typed bindings. Comparing them to the structural request
 	// proves consistency; this planner never discovers pagination by parsing query
 	// text or parameter names.
-	const auto &query = operation.request.query_parameters;
+	const auto &query = rest.request.query_parameters;
 	if (query.size() != 2 || query[0].name != pagination.PageSizeParameter() ||
 	    query[0].encoded_value != std::to_string(pagination.PageSize()) ||
 	    query[1].name != pagination.PageNumberParameter() ||
@@ -190,24 +192,34 @@ bool IsControlledCompleteRootArray(const CompiledRelation &relation, const Compi
 void ValidateOperation(const CompiledRelation &relation, const CompiledOperation &operation,
                        const CompiledNetworkPolicy &network_policy) {
 	const auto &ceilings = relation.ResourceCeilings();
-	if (operation.name.empty() || operation.retry_enabled || operation.request.path.empty() ||
-	    operation.request.path.front() != '/' || ceilings.MaxRecordsPerPage() == 0 ||
-	    ceilings.MaxRecordsPerScan() == 0 || ceilings.MaxExtractedStringBytes() == 0) {
+	if (operation.name.empty() || ceilings.MaxRecordsPerPage() == 0 || ceilings.MaxRecordsPerScan() == 0 ||
+	    ceilings.MaxExtractedStringBytes() == 0) {
 		throw std::logic_error("selected relation contains an unsupported base operation or resource declaration");
 	}
-	if (operation.response_source == CompiledResponseSource::ROOT_ARRAY &&
-	    operation.pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
+	if (operation.Protocol() == CompiledProtocol::GRAPHQL) {
+		ValidateGraphqlOperationProfile(relation, operation, network_policy);
+		return;
+	}
+	if (operation.Protocol() != CompiledProtocol::REST) {
+		throw std::logic_error("selected relation contains an unknown protocol alternative");
+	}
+	const auto &rest = operation.Rest();
+	if (rest.retry_enabled || rest.request.path.empty() || rest.request.path.front() != '/') {
+		throw std::logic_error("selected REST operation contains an unsupported request or retry declaration");
+	}
+	if (rest.response_source == CompiledResponseSource::ROOT_ARRAY &&
+	    rest.pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
 		if (!IsControlledCompleteRootArray(relation, operation)) {
 			throw std::logic_error("root-array response requires an explicit supported pagination declaration");
 		}
 	}
-	(void)PlanProtocol(operation.protocol);
-	(void)PlanMethod(operation.method);
-	(void)PlanReplaySafety(operation.replay_safety);
+	(void)PlanProtocol(operation.Protocol());
+	(void)PlanMethod(rest.method);
+	(void)PlanReplaySafety(rest.replay_safety);
 	(void)PlanCardinality(operation.cardinality);
-	(void)PlanResponseSource(operation.response_source);
+	(void)PlanResponseSource(rest.response_source);
 	ValidateSourceShape(operation, ceilings);
-	ValidateExecutableOrigin(operation.request.origin, network_policy);
+	ValidateExecutableOrigin(rest.request.origin, network_policy);
 	ValidatePagination(operation, ceilings, network_policy);
 }
 
@@ -350,9 +362,13 @@ void ValidateAuthentication(const CompiledRelation &relation, const CompiledOper
 	if (requirement != CompiledCredentialRequirement::REQUIRED || authentication.LogicalCredential().empty() ||
 	    authentication.Authenticator() != CompiledAuthenticator::BEARER ||
 	    authentication.Placement() != CompiledCredentialPlacement::AUTHORIZATION_HEADER ||
-	    authentication.Destination() == nullptr ||
-	    !OriginsEqual(*authentication.Destination(), operation.request.origin)) {
+	    authentication.Destination() == nullptr) {
 		throw std::logic_error("authenticated relation contains a contradictory authentication policy");
+	}
+	const auto &origin = operation.Protocol() == CompiledProtocol::REST ? operation.Rest().request.origin
+	                                                                    : operation.Graphql().endpoint_origin;
+	if (!OriginsEqual(*authentication.Destination(), origin)) {
+		throw std::logic_error("authenticated relation credential destination differs from the selected operation");
 	}
 	if (!request.secret_reference.IsPresent()) {
 		throw std::logic_error("authenticated relation is missing its logical secret reference");

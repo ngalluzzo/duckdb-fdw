@@ -12,6 +12,8 @@ const char *ProtocolName(PlannedProtocol protocol) {
 	switch (protocol) {
 	case PlannedProtocol::REST:
 		return "REST";
+	case PlannedProtocol::GRAPHQL:
+		return "GRAPHQL";
 	}
 	throw std::logic_error("scan plan contains an unknown protocol");
 }
@@ -74,6 +76,8 @@ const char *BaseDomainName(BaseDomain domain) {
 		return "paginated_json_path_records";
 	case BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS:
 		return "paginated_root_array_records";
+	case BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES:
+		return "graphql_viewer_repository_occurrences";
 	case BaseDomain::SUCCESSFUL_ROOT_OBJECT:
 		return "successful_root_object";
 	}
@@ -92,6 +96,8 @@ const char *PredicateName(PlannedPredicate predicate, BaseDomain domain) {
 			return "TRUE@paginated_json_path_records";
 		case BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS:
 			return "TRUE@paginated_root_array_records";
+		case BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES:
+			return "TRUE@graphql_viewer_repository_occurrences";
 		case BaseDomain::SUCCESSFUL_ROOT_OBJECT:
 			return "TRUE@successful_root_object";
 		}
@@ -170,6 +176,8 @@ const char *PaginationStrategyName(PlannedPaginationStrategy strategy) {
 		return "disabled";
 	case PlannedPaginationStrategy::LINK_HEADER:
 		return "link_header";
+	case PlannedPaginationStrategy::GRAPHQL_CURSOR:
+		return "graphql_cursor";
 	}
 	throw std::logic_error("scan plan contains an unknown pagination strategy");
 }
@@ -321,6 +329,16 @@ void AppendPagination(std::ostringstream &result, const PaginationPlan &paginati
 	if (pagination.Strategy() == PlannedPaginationStrategy::DISABLED) {
 		return;
 	}
+	if (pagination.Strategy() == PlannedPaginationStrategy::GRAPHQL_CURSOR) {
+		const auto &cursor = pagination.GraphqlCursor();
+		result << "[direction:forward,dependency:sequential,consistency:mutable,total:none,resume:none,concurrency:"
+		       << cursor.max_concurrent_pages << ",page_size:" << cursor.page_size
+		       << ",max_pages:" << cursor.max_pages_per_scan << ",scan_budgets:";
+		AppendScanBudgets(result, pagination.ScanBudgets());
+		result << ",body_bytes_per_page:" << pagination.PageBudgets().serialized_request_body_bytes
+		       << ",body_bytes_per_scan:" << pagination.ScanBudgets().serialized_request_body_bytes << ']';
+		return;
+	}
 	const auto &target = pagination.Target();
 	result << "[relation:" << LinkRelationName(pagination.LinkRelation())
 	       << ",dependency:" << PageDependencyName(pagination.Dependency())
@@ -339,20 +357,33 @@ void AppendPagination(std::ostringstream &result, const PaginationPlan &paginati
 } // namespace
 
 std::string ScanPlan::Snapshot() const {
+	const auto &planned_operation = Operation();
 	std::ostringstream result;
 	result.imbue(std::locale::classic());
 	result << "connector=" << connector_name << ";version=" << connector_version << ";relation=" << relation_name
-	       << ";source_snapshot=[" << source_snapshot << "];domain=" << BaseDomainName(domain)
-	       << ";operation=" << operation.operation_name << ':' << CardinalityName(operation.cardinality) << ':'
-	       << ProtocolName(operation.protocol) << ':' << MethodName(operation.method) << ':'
-	       << ReplaySafetyName(operation.replay_safety) << ";request=origin:";
-	AppendOrigin(result, operation.origin);
-	result << ",path:" << operation.path << ",query:[";
-	AppendQuery(result, operation.query_parameters);
-	result << "],headers:[";
-	AppendHeaders(result, operation.headers);
-	result << "];response=source:" << ResponseSourceName(operation.response_source)
-	       << ",records:" << operation.records_extractor << ";projection=";
+	       << ";source_snapshot=[" << source_snapshot << "];domain=" << BaseDomainName(domain) << ";operation=";
+	if (planned_operation.Protocol() == PlannedProtocol::REST) {
+		const auto &rest = planned_operation.Rest();
+		result << rest.operation_name << ':' << CardinalityName(rest.cardinality) << ':'
+		       << ProtocolName(PlannedProtocol::REST) << ':' << MethodName(rest.method) << ':'
+		       << ReplaySafetyName(rest.replay_safety) << ";request=origin:";
+		AppendOrigin(result, rest.origin);
+		result << ",path:" << rest.path << ",query:[";
+		AppendQuery(result, rest.query_parameters);
+		result << "],headers:[";
+		AppendHeaders(result, rest.headers);
+		result << "];response=source:" << ResponseSourceName(rest.response_source)
+		       << ",records:" << rest.records_extractor;
+	} else {
+		const auto &graphql = planned_operation.Graphql();
+		result << graphql.operation_name << ':' << CardinalityName(graphql.cardinality) << ':'
+		       << ProtocolName(PlannedProtocol::GRAPHQL) << ":query:" << ReplaySafetyName(graphql.replay_safety)
+		       << ";request=origin:";
+		AppendOrigin(result, graphql.origin);
+		result << ",path:" << graphql.path << ",document_identity:github_viewer_repository_metrics_v1"
+		       << ";response=source:graphql_nodes,partial_data:fail_on_any_error";
+	}
+	result << ";projection=";
 	AppendColumns(result, output_columns);
 	result << ";remote_predicate=" << PredicateName(remote_predicate, domain)
 	       << ";remote_accuracy=" << AccuracyName(remote_accuracy)
@@ -401,7 +432,9 @@ std::string ScanPlan::Snapshot() const {
 	       << ",json_nesting:" << effective_budgets.json_nesting
 	       << ",decoded_memory_bytes:" << effective_budgets.decoded_memory_bytes
 	       << ",batch_rows:" << effective_budgets.batch_rows << ",wall_ms:" << effective_budgets.wall_milliseconds
-	       << ",concurrency:" << effective_budgets.concurrency << ";reason=" << classification_reason;
+	       << ",concurrency:" << effective_budgets.concurrency
+	       << ",serialized_request_body_bytes:" << effective_budgets.serialized_request_body_bytes
+	       << ";reason=" << classification_reason;
 	return result.str();
 }
 

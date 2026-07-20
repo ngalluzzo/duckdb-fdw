@@ -1,6 +1,7 @@
 #pragma once
 
 #include "semantics/support/scan_plan_test_fixtures.hpp"
+#include "semantics/support/graphql_scan_plan_test_fixtures.hpp"
 
 namespace duckdb_api_test {
 
@@ -9,6 +10,9 @@ namespace duckdb_api_test {
 // method below applies one named invalid state and accepts no arbitrary value.
 class ScanPlanTestAccess {
 public:
+	static void ReplaceRest(duckdb_api::ScanPlan &plan, duckdb_api::PlannedRestOperation operation);
+	static void ReplaceGraphql(duckdb_api::ScanPlan &plan, duckdb_api::PlannedGraphqlOperation operation);
+	static duckdb_api::ScanPlan Graphql(duckdb_api::ScanPlan plan, GraphqlPlanCounterexample counterexample);
 	static duckdb_api::ScanPlan Operation(duckdb_api::ScanPlan plan, OperationPlanCounterexample counterexample);
 	static duckdb_api::ScanPlan Authenticated(duckdb_api::ScanPlan plan,
 	                                          AuthenticatedPlanCounterexample counterexample);

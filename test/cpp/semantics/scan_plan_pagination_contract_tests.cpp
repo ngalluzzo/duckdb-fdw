@@ -111,20 +111,21 @@ void TestExplicitMetadataDefinesOneBag() {
 	            service_plan.ConnectorVersion() == linked_plan.ConnectorVersion() &&
 	            service_plan.RelationName() == linked_plan.RelationName() &&
 	            service_plan.Domain() == linked_plan.Domain() &&
-	            service_plan.Operation().path == linked_plan.Operation().path &&
+	            service_plan.Operation().Rest().path == linked_plan.Operation().Rest().path &&
 	            service_plan.OutputColumns().size() == linked_plan.OutputColumns().size() &&
 	            SameTarget(service_plan.Pagination().Target(), linked_plan.Pagination().Target()) &&
 	            SamePageBudgets(service_plan.Pagination().PageBudgets(), linked_plan.Pagination().PageBudgets()) &&
 	            SameScanBudgets(service_plan.Pagination().ScanBudgets(), linked_plan.Pagination().ScanBudgets()),
 	        "closed pagination fixture drifted from the planner-produced executable plan");
-	Require(
-	    decoy.Operation().request.query_parameters.size() == 2 &&
-	        linked.Operation().request.query_parameters.size() == 2 &&
-	        decoy.Operation().request.query_parameters[0].name == linked.Operation().request.query_parameters[0].name &&
-	        decoy.Operation().request.query_parameters[1].name == linked.Operation().request.query_parameters[1].name &&
-	        decoy_plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED &&
-	        decoy_plan.Domain() == duckdb_api::BaseDomain::JSON_PATH_RECORDS,
-	    "planner inferred pagination from page-shaped structural query fields");
+	Require(decoy.Operation().Rest().request.query_parameters.size() == 2 &&
+	            linked.Operation().Rest().request.query_parameters.size() == 2 &&
+	            decoy.Operation().Rest().request.query_parameters[0].name ==
+	                linked.Operation().Rest().request.query_parameters[0].name &&
+	            decoy.Operation().Rest().request.query_parameters[1].name ==
+	                linked.Operation().Rest().request.query_parameters[1].name &&
+	            decoy_plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED &&
+	            decoy_plan.Domain() == duckdb_api::BaseDomain::JSON_PATH_RECORDS,
+	        "planner inferred pagination from page-shaped structural query fields");
 	RequireDisabledPayloadInaccessible(decoy_plan.Pagination());
 
 	const auto &pagination = linked_plan.Pagination();
@@ -137,7 +138,7 @@ void TestExplicitMetadataDefinesOneBag() {
 	            pagination.TargetScope() ==
 	                duckdb_api::PlannedContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH &&
 	            !pagination.SupportsTotal() && !pagination.SupportsResume() &&
-	            target.path == linked_plan.Operation().path && target.page_size_parameter == "batch_size" &&
+	            target.path == linked_plan.Operation().Rest().path && target.page_size_parameter == "batch_size" &&
 	            target.page_size == 3 && target.page_number_parameter == "cursor_page" && target.first_page == 1 &&
 	            target.page_increment == 1,
 	        "explicit Link declaration lost its closed relational transition profile");
@@ -152,10 +153,10 @@ void TestExplicitMetadataDefinesOneBag() {
 void TestAuthenticatedRepositoriesProfile() {
 	const auto plan =
 	    duckdb_api_test::BuildValidAuthenticatedRepositoriesPlanFixture("authenticated_repositories_secret");
-	const auto &operation = plan.Operation();
+	const auto &operation = plan.Operation().Rest();
 	const auto &pagination = plan.Pagination();
 	const auto &target = pagination.Target();
-	Require(plan.ConnectorName() == "github" && plan.ConnectorVersion() == "0.6.0" &&
+	Require(plan.ConnectorName() == "github" && plan.ConnectorVersion() == "0.7.0" &&
 	            plan.RelationName() == "authenticated_repositories" &&
 	            operation.operation_name == "github_authenticated_repositories" &&
 	            operation.cardinality == duckdb_api::PlannedCardinality::ZERO_TO_MANY &&
@@ -230,7 +231,7 @@ void TestPaginationCounterexamplesAreIsolated() {
 		    duckdb_api_test::BuildPaginationPlanCounterexample("pagination_counterexample_secret", variant);
 		Require(plan.ConnectorName() == baseline.ConnectorName() && plan.RelationName() == baseline.RelationName() &&
 		            plan.SourceSnapshot() == baseline.SourceSnapshot() && plan.Domain() == baseline.Domain() &&
-		            plan.Operation().path == baseline.Operation().path &&
+		            plan.Operation().Rest().path == baseline.Operation().Rest().path &&
 		            plan.OutputColumns().size() == baseline.OutputColumns().size() &&
 		            plan.SecretReference().Name() == baseline.SecretReference().Name() &&
 		            plan.Providers() == baseline.Providers() && plan.Retry() == baseline.Retry() &&

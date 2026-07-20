@@ -113,7 +113,7 @@ void TestCandidateSpecificOperationSelectionAndFallback() {
 	const auto &winner_relation = FindRelation(winner_connector, duckdb_api_test::OPERATION_UNIQUE_WINNER_RELATION);
 	const auto winner = duckdb_api::BuildConservativeScanPlan(
 	    winner_connector, BuildVisibilityCandidateRequest(winner_connector, winner_relation));
-	Require(winner.Operation().operation_name == "controlled_exact_repositories" &&
+	Require(winner.Operation().Rest().operation_name == "controlled_exact_repositories" &&
 	            winner.PredicateCategory() == duckdb_api::PredicateDecisionCategory::EXACT &&
 	            winner.ConditionalInput() == duckdb_api::PlannedConditionalInput::VISIBILITY_PRIVATE,
 	        "candidate-specific visibility binding did not select and classify the unique non-fallback operation");
@@ -123,7 +123,7 @@ void TestCandidateSpecificOperationSelectionAndFallback() {
 	const auto fallback = duckdb_api::BuildConservativeScanPlan(
 	    fallback_connector, duckdb_api::BuildConservativeScanRequest(fallback_connector, fallback_relation.Name(),
 	                                                                 duckdb_api::LogicalSecretReference()));
-	Require(fallback.Operation().operation_name == "controlled_selector_fallback_repositories" &&
+	Require(fallback.Operation().Rest().operation_name == "controlled_selector_fallback_repositories" &&
 	            fallback.PredicateCategory() == duckdb_api::PredicateDecisionCategory::UNSUPPORTED &&
 	            fallback.PredicateReason() == duckdb_api::PredicateDecisionReason::NO_REMOTE_CANDIDATE &&
 	            fallback.ConditionalInput() == duckdb_api::PlannedConditionalInput::NONE,
@@ -132,7 +132,7 @@ void TestCandidateSpecificOperationSelectionAndFallback() {
 	auto unavailable_request = BuildVisibilityCandidateRequest(fallback_connector, fallback_relation);
 	unavailable_request.capabilities.retains_predicate = false;
 	const auto unavailable = duckdb_api::BuildConservativeScanPlan(fallback_connector, unavailable_request);
-	Require(unavailable.Operation().operation_name == "controlled_selector_fallback_repositories" &&
+	Require(unavailable.Operation().Rest().operation_name == "controlled_selector_fallback_repositories" &&
 	            unavailable.PredicateCategory() == duckdb_api::PredicateDecisionCategory::UNSUPPORTED &&
 	            unavailable.PredicateReason() == duckdb_api::PredicateDecisionReason::CAPABILITY_UNAVAILABLE &&
 	            unavailable.ConditionalInput() == duckdb_api::PlannedConditionalInput::NONE,
@@ -250,12 +250,12 @@ void TestResponseSourceCardinalityAndLimitAreIndependent() {
 	const auto one = duckdb_api::BuildConservativeScanPlan(
 	    connector, BuildAuthenticatedScanRequest(connector, authenticated.Name(), "cardinality_secret"));
 
-	Require(many.Operation().cardinality == duckdb_api::PlannedCardinality::ZERO_TO_MANY &&
-	            many.Operation().response_source == duckdb_api::PlannedResponseSource::JSON_PATH_MANY &&
+	Require(many.Operation().Rest().cardinality == duckdb_api::PlannedCardinality::ZERO_TO_MANY &&
+	            many.Operation().Rest().response_source == duckdb_api::PlannedResponseSource::JSON_PATH_MANY &&
 	            many.Domain() == duckdb_api::BaseDomain::JSON_PATH_RECORDS && many.Budgets().decoded_records == 4,
 	        "generic multi-record source retained the native three-row domain");
-	Require(one.Operation().cardinality == duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS &&
-	            one.Operation().response_source == duckdb_api::PlannedResponseSource::ROOT_OBJECT &&
+	Require(one.Operation().Rest().cardinality == duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS &&
+	            one.Operation().Rest().response_source == duckdb_api::PlannedResponseSource::ROOT_OBJECT &&
 	            one.Domain() == duckdb_api::BaseDomain::SUCCESSFUL_ROOT_OBJECT && one.Budgets().decoded_records == 1,
 	        "single-success source lost cardinality, response source, domain, or separate record ceiling");
 	for (const auto *plan : {&many, &one}) {
@@ -273,8 +273,9 @@ void TestFixedSourceInputsRemainNonRelational() {
 	const auto &anonymous = FindRelation(connector, "duckdb_login_search_page");
 	const auto plan =
 	    duckdb_api::BuildConservativeScanPlan(connector, BuildAnonymousScanRequest(connector, anonymous.Name()));
-	Require(plan.Operation().query_parameters.size() == anonymous.Operation().request.query_parameters.size() &&
-	            !plan.Operation().query_parameters.empty(),
+	Require(plan.Operation().Rest().query_parameters.size() ==
+	                anonymous.Operation().Rest().request.query_parameters.size() &&
+	            !plan.Operation().Rest().query_parameters.empty(),
 	        "fixed source query fields disappeared from the selected operation");
 	Require(plan.RemotePredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
 	            plan.ResidualPredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&

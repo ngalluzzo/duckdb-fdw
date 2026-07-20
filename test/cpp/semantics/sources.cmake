@@ -2,6 +2,7 @@
 # Runtime tests. Consumers link this boundary instead of compiling provider
 # internals into their targets.
 set(RELATIONAL_PLAN_TEST_SERVICE_SOURCES
+    test/cpp/semantics/support/graphql_scan_plan_test_fixtures.cpp
     test/cpp/semantics/support/scan_plan_test_fixtures.cpp
     test/cpp/semantics/support/scan_plan_operation_test_fixtures.cpp
     test/cpp/semantics/support/scan_plan_auth_test_fixtures.cpp
@@ -26,3 +27,9 @@ set(RELATIONAL_PLAN_TEST_CONTRACT_SOURCES
     test/cpp/semantics/scan_plan_feature_test_fixture_tests.cpp
     test/cpp/semantics/scan_plan_resource_test_fixture_tests.cpp
     test/cpp/semantics/scan_plan_fixture_consumer_boundary_tests.cpp)
+set(GRAPHQL_SEMANTICS_TEST_SOURCES
+    test/cpp/semantics/graphql_operation_plan_tests.cpp
+    test/cpp/semantics/graphql_base_domain_tests.cpp
+    test/cpp/semantics/graphql_cursor_resource_plan_tests.cpp
+    test/cpp/semantics/graphql_nullability_plan_tests.cpp
+    test/cpp/semantics/graphql_plan_fixture_tests.cpp)

@@ -54,11 +54,11 @@ void TestAuthenticationCounterexamples(const std::string &canary) {
 			        "destination-scheme counterexample retained HTTPS");
 			break;
 		case AuthenticatedPlanCounterexample::OTHER_DESTINATION_HOST:
-			Require(plan.AuthenticationObligation().Destination()->host != plan.Operation().origin.host,
+			Require(plan.AuthenticationObligation().Destination()->host != plan.Operation().Rest().origin.host,
 			        "destination-host counterexample retained the operation host");
 			break;
 		case AuthenticatedPlanCounterexample::OTHER_DESTINATION_PORT:
-			Require(plan.AuthenticationObligation().Destination()->port != plan.Operation().origin.port,
+			Require(plan.AuthenticationObligation().Destination()->port != plan.Operation().Rest().origin.port,
 			        "destination-port counterexample retained the operation port");
 			break;
 		case AuthenticatedPlanCounterexample::MISSING_SECRET_REFERENCE:

@@ -11,10 +11,10 @@ void RequireCanaryAbsent(const duckdb_api::ScanPlan &plan, const std::string &ca
 	            plan.RelationName().find(canary) == std::string::npos &&
 	            plan.SourceSnapshot().find(canary) == std::string::npos &&
 	            plan.ClassificationReason().find(canary) == std::string::npos &&
-	            plan.Operation().operation_name.find(canary) == std::string::npos &&
-	            plan.Operation().origin.host.find(canary) == std::string::npos &&
-	            plan.Operation().path.find(canary) == std::string::npos &&
-	            plan.Operation().records_extractor.find(canary) == std::string::npos &&
+	            plan.Operation().Rest().operation_name.find(canary) == std::string::npos &&
+	            plan.Operation().Rest().origin.host.find(canary) == std::string::npos &&
+	            plan.Operation().Rest().path.find(canary) == std::string::npos &&
+	            plan.Operation().Rest().records_extractor.find(canary) == std::string::npos &&
 	            plan.AuthenticationObligation().LogicalCredential().find(canary) == std::string::npos,
 	        "runtime-built credential canary entered scalar fixture plan state");
 	if (plan.SecretReference().IsPresent()) {
@@ -25,11 +25,11 @@ void RequireCanaryAbsent(const duckdb_api::ScanPlan &plan, const std::string &ca
 		Require(plan.AuthenticationObligation().Destination()->host.find(canary) == std::string::npos,
 		        "runtime-built credential canary entered fixture authorization destination");
 	}
-	for (const auto &query : plan.Operation().query_parameters) {
+	for (const auto &query : plan.Operation().Rest().query_parameters) {
 		Require(query.name.find(canary) == std::string::npos && query.encoded_value.find(canary) == std::string::npos,
 		        "runtime-built credential canary entered fixture query fields");
 	}
-	for (const auto &header : plan.Operation().headers) {
+	for (const auto &header : plan.Operation().Rest().headers) {
 		Require(header.name.find(canary) == std::string::npos && header.value.find(canary) == std::string::npos,
 		        "runtime-built credential canary entered fixture fixed headers");
 	}
