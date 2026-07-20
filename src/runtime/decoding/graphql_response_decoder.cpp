@@ -117,7 +117,7 @@ private:
 		Expect('}');
 		if (has_remote_errors) {
 			throw ExecutionError(ErrorStage::REMOTE_PROTOCOL, "errors",
-			                     "GraphQL endpoint reported an application error");
+			                     "remote protocol response reported application errors");
 		}
 	}
 

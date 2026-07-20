@@ -124,6 +124,7 @@ void TestRemoteErrorIsRedactedAndTerminal() {
 			throw std::runtime_error("GraphQL remote error must remain terminal");
 		} catch (const duckdb_api::ExecutionError &error) {
 			Require(error.Stage() == duckdb_api::ErrorStage::REMOTE_PROTOCOL && error.Field() == "errors" &&
+			            error.SafeMessage() == "remote protocol response reported application errors" &&
 			            error.SafeMessage().find(canary) == std::string::npos,
 			        "GraphQL remote failure stage, field, redaction, or terminal replay drifted");
 		}

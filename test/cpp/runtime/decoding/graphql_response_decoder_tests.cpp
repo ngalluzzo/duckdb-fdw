@@ -11,6 +11,8 @@
 
 namespace {
 
+const char *const APPLICATION_ERROR_MESSAGE = "remote protocol response reported application errors";
+
 class NeverCancelled final : public duckdb_api::ExecutionControl {
 public:
 	bool IsCancellationRequested() const noexcept override {
@@ -89,16 +91,21 @@ void TestEightColumnsAndNullableLanguage() {
 void TestErrorsPrecedeDataWithoutLeakingRemoteValues() {
 	auto profile = Profile();
 	NeverCancelled control;
-	const std::string canary = "remote-secret-message";
-	const std::string body =
-	    "{\"data\":null,\"errors\":[{\"message\":\"" + canary + "\",\"path\":[\"private-value\"]}]}";
+	const std::string data_canary = "remote-secret-data";
+	const std::string error_canary = "remote-secret-error";
+	const std::string path_canary = "remote-secret-path";
+	const std::string body = "{\"data\":{\"private\":\"" + data_canary + "\"},\"errors\":[{\"message\":\"" +
+	                         error_canary + "\",\"path\":[\"" + path_canary + "\"]}]}";
 	try {
 		(void)duckdb_api::internal::DecodeGraphqlResponse(body, *profile, Limits(), control);
 		throw std::runtime_error("nonempty errors must fail");
 	} catch (const duckdb_api::ExecutionError &error) {
 		Require(error.Stage() == duckdb_api::ErrorStage::REMOTE_PROTOCOL && error.Field() == "errors" &&
-		            error.SafeMessage().find(canary) == std::string::npos,
-		        "remote errors must win with a redacted protocol failure");
+		            error.SafeMessage() == APPLICATION_ERROR_MESSAGE &&
+		            error.SafeMessage().find(data_canary) == std::string::npos &&
+		            error.SafeMessage().find(error_canary) == std::string::npos &&
+		            error.SafeMessage().find(path_canary) == std::string::npos,
+		        "remote errors must win with the exact redacted protocol failure");
 	}
 	const std::string long_unknown_key(65, 'k');
 	const std::string long_key_body = "{\"" + long_unknown_key + "\":\"ignored\",\"errors\":[{}],\"data\":null}";
@@ -106,7 +113,8 @@ void TestErrorsPrecedeDataWithoutLeakingRemoteValues() {
 		(void)duckdb_api::internal::DecodeGraphqlResponse(long_key_body, *profile, Limits(), control);
 		throw std::runtime_error("errors after an overlong unknown key must fail");
 	} catch (const duckdb_api::ExecutionError &error) {
-		Require(error.Stage() == duckdb_api::ErrorStage::REMOTE_PROTOCOL && error.Field() == "errors",
+		Require(error.Stage() == duckdb_api::ErrorStage::REMOTE_PROTOCOL && error.Field() == "errors" &&
+		            error.SafeMessage() == APPLICATION_ERROR_MESSAGE,
 		        "allocation-free unknown-key skipping changed GraphQL errors precedence");
 	}
 }
