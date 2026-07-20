@@ -50,11 +50,23 @@ enum class CompiledResponseSource { JSON_PATH_MANY, ROOT_ARRAY, ROOT_OBJECT };
 // installed native catalog selects HTTPS exclusively.
 enum class CompiledUrlScheme { HTTP, HTTPS };
 
-// One already-encoded fixed REST query field. Ordering and encoded_value are
-// part of source identity, not DuckDB predicate or limit pushdown.
+enum class CompiledQueryValueSource { FIXED, RELATION_INPUT, CONDITIONAL_INPUT };
+
+// One ordered REST query field. Fixed values retain their canonical encoded
+// bytes; relation and operation-conditional sources retain a typed source ID
+// and exact omission behavior for Semantics. No caller can supply an encoded
+// target or reinterpret a fixed field as a binding.
 struct CompiledQueryParameter {
+	CompiledQueryParameter(std::string name, std::string encoded_value);
+	CompiledQueryParameter(std::string name, CompiledQueryValueSource source, std::string source_id,
+	                       bool omit_when_unbound, bool omit_when_null);
+
 	std::string name;
 	std::string encoded_value;
+	CompiledQueryValueSource source;
+	std::string source_id;
+	bool omit_when_unbound;
+	bool omit_when_null;
 };
 
 // One non-sensitive fixed HTTP header. Authorization is deliberately

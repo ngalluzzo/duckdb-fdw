@@ -8,6 +8,18 @@
 namespace duckdb_api {
 namespace internal {
 
+struct CompiledPackagePredicateIdentities {
+	std::string proof;
+	std::string base_domain;
+};
+
+// Derives unforgeable normalized identities from the exact package generation
+// and operation structure. The compiler calls this before mapping construction;
+// PackageGeneration recomputes it after all immutable values are assembled.
+CompiledPackagePredicateIdentities DerivePackagePredicateIdentities(const std::string &package_digest,
+                                                                    const std::string &relation_name,
+                                                                    const CompiledOperation &operation);
+
 // Validates a relation's mapping collection against its declared schema,
 // operations, fixed query fields, and pagination bindings. This is Connector
 // compilation logic; consumers receive only the validated public const values.

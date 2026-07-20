@@ -104,6 +104,18 @@ public:
 		    occurrence_preservation, encoding_capability);
 	}
 
+	static duckdb_api::CompiledPredicateMapping
+	PackagePredicateMapping(std::string column_name, duckdb_api::CompiledScalarValue literal,
+	                        std::string operation_name, std::string remote_input_name, std::string encoded_remote_value,
+	                        duckdb_api::CompiledPredicateAccuracy accuracy, std::string proof_identity,
+	                        std::string base_domain, std::string matching_fixture, std::string false_or_null_fixture,
+	                        std::string duplicates_fixture) {
+		return duckdb_api::CompiledPredicateMapping(
+		    std::move(column_name), std::move(literal), std::move(operation_name), std::move(remote_input_name),
+		    std::move(encoded_remote_value), accuracy, std::move(proof_identity), std::move(base_domain),
+		    std::move(matching_fixture), std::move(false_or_null_fixture), std::move(duplicates_fixture));
+	}
+
 	static duckdb_api::CompiledRelation
 	Relation(std::string name, std::vector<duckdb_api::CompiledColumn> columns, duckdb_api::CompiledOperation operation,
 	         duckdb_api::CompiledAuthenticationPolicy authentication,

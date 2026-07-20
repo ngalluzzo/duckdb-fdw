@@ -18,7 +18,10 @@ bool SameQuery(const std::vector<CompiledQueryParameter> &left, const std::vecto
 		return false;
 	}
 	for (std::size_t index = 0; index < left.size(); index++) {
-		if (left[index].name != right[index].name || left[index].encoded_value != right[index].encoded_value) {
+		if (left[index].name != right[index].name || left[index].encoded_value != right[index].encoded_value ||
+		    left[index].source != right[index].source || left[index].source_id != right[index].source_id ||
+		    left[index].omit_when_unbound != right[index].omit_when_unbound ||
+		    left[index].omit_when_null != right[index].omit_when_null) {
 			return false;
 		}
 	}
@@ -171,10 +174,15 @@ bool SameColumn(const CompiledColumn &left, const CompiledColumn &right) {
 
 bool SamePredicate(const CompiledPredicateMapping &left, const CompiledPredicateMapping &right) {
 	return left.ColumnName() == right.ColumnName() && left.Operator() == right.Operator() &&
-	       left.Literal() == right.Literal() && left.OperationName() == right.OperationName() &&
+	       left.Literal() == right.Literal() && SameScalar(left.TypedLiteral(), right.TypedLiteral()) &&
+	       left.OperationName() == right.OperationName() &&
 	       left.InputPlacement() == right.InputPlacement() && left.RemoteInputName() == right.RemoteInputName() &&
 	       left.EncodedRemoteValue() == right.EncodedRemoteValue() && left.Accuracy() == right.Accuracy() &&
-	       left.ProofIdentity() == right.ProofIdentity() && left.BaseDomain() == right.BaseDomain() &&
+	       left.ProofIdentity() == right.ProofIdentity() && left.ProofIdentityValue() == right.ProofIdentityValue() &&
+	       left.BaseDomain() == right.BaseDomain() && left.BaseDomainValue() == right.BaseDomainValue() &&
+	       left.MatchingFixture() == right.MatchingFixture() &&
+	       left.FalseOrNullFixture() == right.FalseOrNullFixture() &&
+	       left.DuplicatesFixture() == right.DuplicatesFixture() &&
 	       left.OccurrencePreservation() == right.OccurrencePreservation() &&
 	       left.EncodingCapability() == right.EncodingCapability();
 }

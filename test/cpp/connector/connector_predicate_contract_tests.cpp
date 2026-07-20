@@ -1,5 +1,7 @@
 #include "connector/support/catalog_test_access.hpp"
 #include "connector/support/predicate_contract.hpp"
+#include "duckdb_api/internal/connector/compiled_model_builder.hpp"
+#include "duckdb_api/internal/connector/predicate_declaration.hpp"
 #include "support/require.hpp"
 
 #include <stdexcept>
@@ -10,6 +12,8 @@
 
 namespace {
 
+using duckdb_api::internal::CompiledModelBuilder;
+using duckdb_api::internal::CompiledPackagePredicateIdentities;
 using duckdb_api_test::ConnectorCatalogTestAccess;
 using duckdb_api_test::Require;
 
@@ -104,6 +108,67 @@ Relation(std::vector<duckdb_api::CompiledColumn> columns, duckdb_api::CompiledOp
 
 std::vector<duckdb_api::CompiledColumn> Columns() {
 	return {{"id", "BIGINT", false, "$.id"}, {"visibility", "VARCHAR", false, "$.visibility"}};
+}
+
+const char PACKAGE_DIGEST[] = "sha256.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const char PACKAGE_RELATION[] = "package_predicates";
+
+duckdb_api::CompiledPredicateMapping PackageMapping(const std::string &literal, const std::string &encoded_value,
+                                                    const CompiledPackagePredicateIdentities &identities,
+                                                    const std::string &remote_input = "visibility",
+                                                    const std::string &matching_fixture = "private_match") {
+	return ConnectorCatalogTestAccess::PackagePredicateMapping(
+	    "visibility", CompiledModelBuilder::Varchar(literal), "package_predicate_operation", remote_input,
+	    encoded_value, duckdb_api::CompiledPredicateAccuracy::EXACT, identities.proof, identities.base_domain,
+	    matching_fixture, "private_false_or_null", "private_duplicates");
+}
+
+duckdb_api::CompiledOperation
+PackageOperation(bool second_conditional_input = false, const std::string &name = "package_predicate_operation",
+                 const std::string &path = "/fixtures/package-predicates",
+                 duckdb_api::CompiledPagination pagination = CompiledModelBuilder::DisabledPagination()) {
+	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledRestHost("predicate-proof.invalid"), 443};
+	std::vector<duckdb_api::CompiledQueryParameter> query;
+	query.push_back(duckdb_api::CompiledQueryParameter(
+	    "visibility", duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT, "visibility", true, false));
+	if (second_conditional_input) {
+		query.push_back(duckdb_api::CompiledQueryParameter(
+		    "state", duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT, "state", true, false));
+	}
+	return duckdb_api::CompiledOperation {
+	    name,
+	    false,
+	    duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	    duckdb_api::CompiledProtocol::REST,
+	    duckdb_api::CompiledHttpMethod::GET,
+	    duckdb_api::CompiledReplaySafety::SAFE,
+	    false,
+	    std::move(pagination),
+	    {origin, path, std::move(query), {{"X-Connector-Fixture", "package-predicates"}}},
+	    duckdb_api::CompiledResponseSource::ROOT_ARRAY,
+	    "$",
+	    CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::ConditionalInputReference("visibility")})};
+}
+
+duckdb_api::CompiledRelation PackageRelation(duckdb_api::CompiledOperation operation,
+                                             std::vector<duckdb_api::CompiledPredicateMapping> mappings) {
+	return ConnectorCatalogTestAccess::Relation(
+	    PACKAGE_RELATION, Columns(), std::move(operation), ConnectorCatalogTestAccess::Anonymous(),
+	    ConnectorCatalogTestAccess::UnpaginatedResources(8, 128), std::move(mappings));
+}
+
+duckdb_api::CompiledPackageGeneration PackageGeneration(const std::string &digest,
+                                                        duckdb_api::CompiledOperation operation,
+                                                        std::vector<duckdb_api::CompiledPredicateMapping> mappings) {
+	auto relation = PackageRelation(std::move(operation), std::move(mappings));
+	auto connector = CompiledModelBuilder::Connector(
+	    duckdb_api::CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA, "package_predicate_fixture", "1.0.0",
+	    {relation},
+	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"predicate-proof.invalid"}, false, false, false, false, 4096});
+	auto identity =
+	    CompiledModelBuilder::PackageIdentity("duckdb_api/v1", "package_predicate_fixture", "1.0.0", digest);
+	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
 }
 
 void TestClosedValueAndExplanation() {
@@ -210,6 +275,11 @@ void TestInvalidValuesAndBindings() {
 		        duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE, "github_authenticated_repositories",
 		        duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER, "visibility", "private&x=1");
 	});
+	RequireInvalid("legacy predicate mapping accepted an empty encoded value", []() {
+		Mapping("visibility", duckdb_api::CompiledPredicateOperator::EQUALS,
+		        duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE, "github_authenticated_repositories",
+		        duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER, "visibility", "");
+	});
 
 	RequireInvalid("relation accepted a predicate mapping without its column",
 	               []() { Relation({{"id", "BIGINT", false, "$.id"}}, Operation(), {Mapping()}); });
@@ -306,6 +376,118 @@ void TestProofIsBoundToCanonicalOperation() {
 	               []() { Relation(Columns(), Operation(), {Mapping()}, ConnectorCatalogTestAccess::Anonymous()); });
 }
 
+void TestPackageCandidateLocalPredicateConflicts() {
+	const auto operation = PackageOperation();
+	const auto identities =
+	    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
+	const auto relation = PackageRelation(
+	    operation, {PackageMapping("private", "private", identities), PackageMapping("public", "public", identities)});
+	Require(relation.PredicateMappings().size() == 2,
+	        "package relation lost distinct candidate-local conditional bindings");
+	Require(relation.PredicateMappings()[0].RemoteInputName() == relation.PredicateMappings()[1].RemoteInputName() &&
+	            relation.PredicateMappings()[0].TypedLiteral().Varchar() == "private" &&
+	            relation.PredicateMappings()[1].TypedLiteral().Varchar() == "public" &&
+	            relation.PredicateMappings()[0].EncodedRemoteValue() == "private" &&
+	            relation.PredicateMappings()[1].EncodedRemoteValue() == "public",
+	        "package conflict facts did not retain their distinct typed and encoded values");
+
+	RequireInvalid("package relation accepted duplicate conditional mappings", []() {
+		const auto operation = PackageOperation();
+		const auto identities =
+		    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
+		PackageRelation(operation, {PackageMapping("private", "private", identities),
+		                            PackageMapping("private", "private", identities)});
+	});
+	RequireInvalid("package relation accepted one typed value with contradictory encodings", []() {
+		const auto operation = PackageOperation();
+		const auto identities =
+		    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
+		PackageRelation(operation, {PackageMapping("private", "private", identities),
+		                            PackageMapping("private", "public", identities)});
+	});
+	RequireInvalid("package relation accepted distinct typed values with one encoded value", []() {
+		const auto operation = PackageOperation();
+		const auto identities =
+		    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
+		PackageRelation(operation, {PackageMapping("private", "private", identities),
+		                            PackageMapping("public", "private", identities)});
+	});
+	RequireInvalid("package operation accepted more than one conditional predicate input", []() {
+		const auto operation = PackageOperation(true);
+		const auto identities =
+		    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
+		PackageRelation(operation, {PackageMapping("private", "private", identities),
+		                            PackageMapping("public", "public", identities, "state")});
+	});
+
+	const auto empty_mapping_relation = PackageRelation(operation, {PackageMapping("", "", identities)});
+	Require(empty_mapping_relation.PredicateMappings()[0].EncodedRemoteValue().empty(),
+	        "package predicate lost its valid empty-string encoding");
+
+	const auto private_snapshot =
+	    PackageRelation(operation, {PackageMapping("private", "private", identities)}).Snapshot();
+	const auto public_snapshot =
+	    PackageRelation(operation, {PackageMapping("public", "public", identities)}).Snapshot();
+	const auto fixture_snapshot =
+	    PackageRelation(operation, {PackageMapping("private", "private", identities, "visibility", "other_match")})
+	        .Snapshot();
+	Require(private_snapshot.find("literal:package_typed_literal:varchar:hex:70726976617465") != std::string::npos &&
+	            private_snapshot.find("fixtures:[matching:private_match,false_or_null:private_false_or_null,") !=
+	                std::string::npos &&
+	            private_snapshot != public_snapshot && private_snapshot != fixture_snapshot,
+	        "package predicate snapshot lost typed-literal or occurrence-fixture identity");
+}
+
+void TestPackagePredicateGenerationBinding() {
+	const auto operation = PackageOperation();
+	const auto identities =
+	    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
+	const auto generation =
+	    PackageGeneration(PACKAGE_DIGEST, operation, {PackageMapping("private", "private", identities)});
+	Require(generation.Connector().FindRelation(PACKAGE_RELATION) != nullptr,
+	        "valid package predicate identity failed generation validation");
+
+	auto RejectInjectedIdentity = [&](const std::string &message, const std::string &digest,
+	                                  const std::string &relation_name,
+	                                  const duckdb_api::CompiledOperation &identity_operation) {
+		RequireInvalid(message, [&]() {
+			const auto injected =
+			    duckdb_api::internal::DerivePackagePredicateIdentities(digest, relation_name, identity_operation);
+			PackageGeneration(PACKAGE_DIGEST, operation, {PackageMapping("private", "private", injected)});
+		});
+	};
+	RejectInjectedIdentity("package generation accepted a predicate identity from another digest",
+	                       "sha256.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", PACKAGE_RELATION,
+	                       operation);
+	RejectInjectedIdentity("package generation accepted a predicate identity from another relation", PACKAGE_DIGEST,
+	                       "other_relation", operation);
+	RejectInjectedIdentity("package generation accepted a predicate identity from another operation", PACKAGE_DIGEST,
+	                       PACKAGE_RELATION, PackageOperation(false, "other_operation"));
+	RejectInjectedIdentity("package generation accepted a predicate identity from another request", PACKAGE_DIGEST,
+	                       PACKAGE_RELATION, PackageOperation(false, "package_predicate_operation", "/fixtures/other"));
+	RejectInjectedIdentity(
+	    "package generation accepted a predicate identity from another pagination profile", PACKAGE_DIGEST,
+	    PACKAGE_RELATION,
+	    PackageOperation(false, "package_predicate_operation", "/fixtures/package-predicates",
+	                     ConnectorCatalogTestAccess::SequentialLink("per_page", 100, "page", 1, 1, 2)));
+
+	RequireInvalid("package generation accepted a legacy predicate proof identity", []() {
+		const auto operation = Operation();
+		auto rest = operation.Rest();
+		auto package_operation = ConnectorCatalogTestAccess::RestOperation(
+		    operation, std::move(rest), CompiledModelBuilder::V1OperationSelector({}));
+		auto relation = Relation(Columns(), std::move(package_operation), {Mapping()});
+		auto connector = CompiledModelBuilder::Connector(
+		    duckdb_api::CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA, "legacy_predicate_package", "1.0.0",
+		    {relation},
+		    duckdb_api::CompiledNetworkPolicy {{"https"}, {"api.github.com"}, false, false, false, false, 4096});
+		auto identity = CompiledModelBuilder::PackageIdentity(
+		    "duckdb_api/v1", "legacy_predicate_package", "1.0.0",
+		    "sha256.cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+		CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
+	});
+}
+
 void TestAbsentMappingIsExplicit() {
 	const auto relation = Relation(Columns(), Operation(), {});
 	Require(relation.PredicateMappings().empty(),
@@ -322,6 +504,8 @@ void RunConnectorPredicateContractTests() {
 	TestClosedValueAndExplanation();
 	TestInvalidValuesAndBindings();
 	TestProofIsBoundToCanonicalOperation();
+	TestPackageCandidateLocalPredicateConflicts();
+	TestPackagePredicateGenerationBinding();
 	TestAbsentMappingIsExplicit();
 }
 

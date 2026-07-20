@@ -1,5 +1,6 @@
 #include "duckdb_api/compiled_package_generation.hpp"
 #include "duckdb_api/internal/connector/compiled_model_builder.hpp"
+#include "duckdb_api/internal/connector/predicate_declaration.hpp"
 #include "duckdb_api/package_semver.hpp"
 
 #include <stdexcept>
@@ -299,6 +300,27 @@ CompiledPackageGeneration CompiledModelBuilder::PackageGeneration(CompiledPackag
 		for (const auto &operation : relation.Operations()) {
 			if (operation.selector.legacy_compatibility_bridge) {
 				throw std::invalid_argument("compiled package generation contains a legacy operation selector");
+			}
+		}
+		for (const auto &mapping : relation.PredicateMappings()) {
+			if (mapping.ProofIdentity() != CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1) {
+				throw std::invalid_argument("compiled package generation contains a legacy predicate proof identity");
+			}
+			const CompiledOperation *operation = nullptr;
+			for (const auto &candidate : relation.Operations()) {
+				if (candidate.name == mapping.OperationName()) {
+					operation = &candidate;
+					break;
+				}
+			}
+			if (operation == nullptr) {
+				throw std::invalid_argument("compiled package predicate references an absent operation");
+			}
+			const auto expected =
+			    DerivePackagePredicateIdentities(identity.PackageDigest(), relation.Name(), *operation);
+			if (mapping.ProofIdentityValue() != expected.proof || mapping.BaseDomainValue() != expected.base_domain) {
+				throw std::invalid_argument(
+				    "compiled package predicate identity is not bound to its generation structure");
 			}
 		}
 	}

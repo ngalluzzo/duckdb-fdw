@@ -1,7 +1,13 @@
 #include "duckdb_api/internal/connector/predicate_declaration.hpp"
 #include "duckdb_api/internal/connector/predicate_proof_profile.hpp"
+#include "duckdb_api/internal/connector/protocol_operation_declaration.hpp"
 
+#include "duckdb_api/content_digest.hpp"
+
+#include <iomanip>
+#include <locale>
 #include <ostream>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -30,7 +36,55 @@ bool IsIdentifier(const std::string &value) {
 }
 
 bool IsSafeEncodedScalar(const std::string &value) {
-	return !value.empty() && value.find_first_of("&=?#\r\n") == std::string::npos;
+	return value.find_first_of("&=?#\r\n") == std::string::npos;
+}
+
+bool SameScalarValue(const CompiledScalarValue &left, const CompiledScalarValue &right) {
+	if (left.Type() != right.Type() || left.IsNull() != right.IsNull()) {
+		return false;
+	}
+	if (left.IsNull()) {
+		return true;
+	}
+	switch (left.Type()) {
+	case CompiledScalarType::BOOLEAN:
+		return left.Boolean() == right.Boolean();
+	case CompiledScalarType::BIGINT:
+		return left.Bigint() == right.Bigint();
+	case CompiledScalarType::VARCHAR:
+		return left.Varchar() == right.Varchar();
+	}
+	return false;
+}
+
+void AppendFrame(std::ostream &output, const std::string &value) {
+	output << value.size() << ':' << value;
+}
+
+void AppendSelectorIdentity(std::ostream &output, const CompiledOperationSelector &selector) {
+	for (const auto &reference : selector.RequiredInputReferences()) {
+		output << (reference.Kind() == CompiledRequiredInputKind::RELATION_INPUT ? "input" : "conditional") << ':';
+		AppendFrame(output, reference.Id());
+	}
+}
+
+void AppendTypedLiteral(std::ostream &output, const CompiledScalarValue &value) {
+	switch (value.Type()) {
+	case CompiledScalarType::BOOLEAN:
+		output << "boolean:" << (value.Boolean() ? "true" : "false");
+		return;
+	case CompiledScalarType::BIGINT:
+		output << "bigint:" << value.Bigint();
+		return;
+	case CompiledScalarType::VARCHAR:
+		output << "varchar:hex:" << std::hex << std::setfill('0');
+		for (const auto byte : value.Varchar()) {
+			output << std::setw(2) << static_cast<unsigned>(static_cast<unsigned char>(byte));
+		}
+		output << std::dec;
+		return;
+	}
+	throw std::logic_error("compiled predicate mapping contains an unknown typed literal");
 }
 
 const char *OperatorName(CompiledPredicateOperator value) {
@@ -45,6 +99,8 @@ const char *LiteralName(CompiledPredicateLiteral value) {
 	switch (value) {
 	case CompiledPredicateLiteral::VARCHAR_PRIVATE:
 		return "varchar:private";
+	case CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL:
+		return "package_typed_literal";
 	}
 	throw std::invalid_argument("compiled predicate mapping contains an unknown typed literal");
 }
@@ -81,7 +137,19 @@ bool HasFixedQueryField(const CompiledOperation &operation, const std::string &n
 		return false;
 	}
 	for (const auto &parameter : operation.Rest().request.query_parameters) {
-		if (parameter.name == name) {
+		if (parameter.name == name && parameter.source == CompiledQueryValueSource::FIXED) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool HasConditionalQueryBinding(const CompiledOperation &operation, const std::string &id) {
+	if (operation.Protocol() != CompiledProtocol::REST) {
+		return false;
+	}
+	for (const auto &parameter : operation.Rest().request.query_parameters) {
+		if (parameter.source == CompiledQueryValueSource::CONDITIONAL_INPUT && parameter.source_id == id) {
 			return true;
 		}
 	}
@@ -110,9 +178,12 @@ CompiledPredicateMapping::CompiledPredicateMapping(
       operation_name(std::move(operation_name_p)), input_placement(input_placement_p),
       remote_input_name(std::move(remote_input_name_p)), encoded_remote_value(std::move(encoded_remote_value_p)),
       accuracy(accuracy_p), proof_identity(proof_identity_p), base_domain(base_domain_p),
-      occurrence_preservation(occurrence_preservation_p), encoding_capability(encoding_capability_p) {
+      occurrence_preservation(occurrence_preservation_p), encoding_capability(encoding_capability_p),
+      typed_literal(new CompiledScalarValue(CompiledScalarType::VARCHAR, false, false, 0, "private")),
+      proof_identity_value(internal::PredicateProofIdentityName(proof_identity_p)),
+      base_domain_value(internal::PredicateBaseDomainName(base_domain_p)) {
 	if (!IsIdentifier(column_name) || !IsIdentifier(operation_name) || !IsIdentifier(remote_input_name) ||
-	    !IsSafeEncodedScalar(encoded_remote_value)) {
+	    encoded_remote_value.empty() || !IsSafeEncodedScalar(encoded_remote_value)) {
 		throw std::invalid_argument("compiled predicate mapping contains an invalid identifier or encoded value");
 	}
 	(void)OperatorName(predicate_operator);
@@ -125,6 +196,35 @@ CompiledPredicateMapping::CompiledPredicateMapping(
 	(void)internal::PredicateEncodingCapabilityName(encoding_capability);
 }
 
+CompiledPredicateMapping::CompiledPredicateMapping(std::string column_name_p, CompiledScalarValue literal_p,
+                                                   std::string operation_name_p, std::string remote_input_name_p,
+                                                   std::string encoded_remote_value_p,
+                                                   CompiledPredicateAccuracy accuracy_p, std::string proof_identity_p,
+                                                   std::string base_domain_p, std::string matching_fixture_p,
+                                                   std::string false_or_null_fixture_p,
+                                                   std::string duplicates_fixture_p)
+    : column_name(std::move(column_name_p)), predicate_operator(CompiledPredicateOperator::EQUALS),
+      literal(CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL), operation_name(std::move(operation_name_p)),
+      input_placement(CompiledPredicateInputPlacement::REST_QUERY_PARAMETER),
+      remote_input_name(std::move(remote_input_name_p)), encoded_remote_value(std::move(encoded_remote_value_p)),
+      accuracy(accuracy_p), proof_identity(CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1),
+      base_domain(CompiledPredicateBaseDomain::PACKAGE_DECLARED_OCCURRENCE_DOMAIN),
+      occurrence_preservation(accuracy == CompiledPredicateAccuracy::EXACT
+                                  ? CompiledPredicateOccurrencePreservation::PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES
+                                  : CompiledPredicateOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES),
+      encoding_capability(CompiledPredicateEncodingCapability::SINGLE_POSITIVE_REST_QUERY_INPUT),
+      typed_literal(new CompiledScalarValue(std::move(literal_p))), proof_identity_value(std::move(proof_identity_p)),
+      base_domain_value(std::move(base_domain_p)), matching_fixture(std::move(matching_fixture_p)),
+      false_or_null_fixture(std::move(false_or_null_fixture_p)), duplicates_fixture(std::move(duplicates_fixture_p)) {
+	if (!IsIdentifier(column_name) || !IsIdentifier(operation_name) || !IsIdentifier(remote_input_name) ||
+	    !IsIdentifier(matching_fixture) || !IsIdentifier(false_or_null_fixture) || !IsIdentifier(duplicates_fixture) ||
+	    !IsSafeEncodedScalar(encoded_remote_value) || proof_identity_value.empty() || base_domain_value.empty() ||
+	    !typed_literal || typed_literal->IsNull()) {
+		throw std::invalid_argument("compiled package predicate contains an invalid structural fact");
+	}
+	(void)AccuracyName(accuracy);
+}
+
 const std::string &CompiledPredicateMapping::ColumnName() const {
 	return column_name;
 }
@@ -135,6 +235,13 @@ CompiledPredicateOperator CompiledPredicateMapping::Operator() const {
 
 CompiledPredicateLiteral CompiledPredicateMapping::Literal() const {
 	return literal;
+}
+
+const CompiledScalarValue &CompiledPredicateMapping::TypedLiteral() const {
+	if (!typed_literal) {
+		throw std::logic_error("compiled predicate mapping has no typed literal");
+	}
+	return *typed_literal;
 }
 
 const std::string &CompiledPredicateMapping::OperationName() const {
@@ -161,12 +268,32 @@ CompiledPredicateProofIdentity CompiledPredicateMapping::ProofIdentity() const {
 	return proof_identity;
 }
 
+const std::string &CompiledPredicateMapping::ProofIdentityValue() const {
+	return proof_identity_value;
+}
+
 CompiledPredicateEvidence CompiledPredicateMapping::Evidence() const {
 	return ProofIdentity();
 }
 
 CompiledPredicateBaseDomain CompiledPredicateMapping::BaseDomain() const {
 	return base_domain;
+}
+
+const std::string &CompiledPredicateMapping::BaseDomainValue() const {
+	return base_domain_value;
+}
+
+const std::string &CompiledPredicateMapping::MatchingFixture() const {
+	return matching_fixture;
+}
+
+const std::string &CompiledPredicateMapping::FalseOrNullFixture() const {
+	return false_or_null_fixture;
+}
+
+const std::string &CompiledPredicateMapping::DuplicatesFixture() const {
+	return duplicates_fixture;
 }
 
 CompiledPredicateOccurrencePreservation CompiledPredicateMapping::OccurrencePreservation() const {
@@ -199,6 +326,24 @@ bool CompiledPredicateMapping::SupportsComplementEncoding() const {
 
 namespace internal {
 
+CompiledPackagePredicateIdentities DerivePackagePredicateIdentities(const std::string &package_digest,
+                                                                    const std::string &relation_name,
+                                                                    const CompiledOperation &operation) {
+	std::ostringstream structure;
+	structure.imbue(std::locale::classic());
+	AppendFrame(structure, "duckdb_api/v1/package-predicate-binding-v1");
+	AppendFrame(structure, package_digest);
+	AppendFrame(structure, relation_name);
+	AppendFrame(structure, operation.name);
+	structure << (operation.fallback ? "fallback" : "selected") << ':' << static_cast<int>(operation.cardinality)
+	          << ':';
+	AppendSelectorIdentity(structure, operation.selector);
+	structure << ':';
+	AppendProtocolOperation(structure, operation);
+	const auto binding_digest = ComputeSha256Hex(structure.str());
+	return {"proof.sha256." + binding_digest, "domain.sha256." + binding_digest};
+}
+
 void ValidatePredicateMappings(const std::string &relation_name, const std::vector<CompiledColumn> &columns,
                                const std::vector<CompiledOperation> &operations,
                                const CompiledAuthenticationPolicy &authentication,
@@ -207,8 +352,11 @@ void ValidatePredicateMappings(const std::string &relation_name, const std::vect
 		const auto &mapping = mappings[index];
 		const auto *operation = FindOperation(operations, mapping.OperationName());
 		const auto *column = FindColumn(columns, mapping.ColumnName());
-		if (column == nullptr || column->nullable || column->logical_type != "VARCHAR" ||
-		    column->extractor != "$.visibility") {
+		const bool package_mapping = mapping.ProofIdentity() == CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1;
+		const bool valid_column = column != nullptr && mapping.TypedLiteral().Type() == column->ScalarType() &&
+		                          (package_mapping || (!column->nullable && column->logical_type == "VARCHAR" &&
+		                                               column->extractor == "$.visibility"));
+		if (!valid_column) {
 			throw std::invalid_argument("compiled predicate mapping references an absent or incompatible column");
 		}
 		if (operation == nullptr) {
@@ -223,6 +371,9 @@ void ValidatePredicateMappings(const std::string &relation_name, const std::vect
 		if (operation->Protocol() != CompiledProtocol::REST) {
 			throw std::invalid_argument("compiled predicate mapping cannot target a GraphQL operation");
 		}
+		if (package_mapping && !HasConditionalQueryBinding(*operation, mapping.RemoteInputName())) {
+			throw std::invalid_argument("compiled package predicate lacks its conditional request binding");
+		}
 		const auto &pagination = operation->Rest().pagination;
 		const bool collides_with_pagination = pagination.Strategy() == CompiledPaginationStrategy::LINK_HEADER &&
 		                                      (mapping.RemoteInputName() == pagination.PageSizeParameter() ||
@@ -234,9 +385,22 @@ void ValidatePredicateMappings(const std::string &relation_name, const std::vect
 			throw std::invalid_argument("compiled visibility mapping conflicts with a fixed legacy type field");
 		}
 		for (std::size_t other = index + 1; other < mappings.size(); other++) {
-			if (mapping.OperationName() == mappings[other].OperationName() &&
-			    mapping.RemoteInputName() == mappings[other].RemoteInputName()) {
-				throw std::invalid_argument("compiled relation contains ambiguous predicate input bindings");
+			if (mapping.OperationName() == mappings[other].OperationName()) {
+				const bool both_package = package_mapping && mappings[other].ProofIdentity() ==
+				                                                 CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1;
+				if (both_package && mapping.RemoteInputName() != mappings[other].RemoteInputName()) {
+					throw std::invalid_argument(
+					    "compiled package operation contains more than one conditional predicate input");
+				}
+				if (mapping.RemoteInputName() != mappings[other].RemoteInputName()) {
+					continue;
+				}
+				const bool package_conflict =
+				    both_package && !SameScalarValue(mapping.TypedLiteral(), mappings[other].TypedLiteral()) &&
+				    mapping.EncodedRemoteValue() != mappings[other].EncodedRemoteValue();
+				if (!package_conflict) {
+					throw std::invalid_argument("compiled relation contains ambiguous predicate input bindings");
+				}
 			}
 		}
 		ValidatePredicateProofProfile(relation_name, *operation, authentication, mapping);
@@ -250,12 +414,21 @@ void AppendPredicateMappings(std::ostream &result, const std::vector<CompiledPre
 		}
 		const auto &mapping = mappings[index];
 		result << "{column:" << mapping.ColumnName() << ",operator:" << OperatorName(mapping.Operator())
-		       << ",literal:" << LiteralName(mapping.Literal()) << ",operation:" << mapping.OperationName()
-		       << ",input:" << PlacementName(mapping.InputPlacement()) << ':' << mapping.RemoteInputName() << '='
-		       << mapping.EncodedRemoteValue() << ",accuracy:" << AccuracyName(mapping.Accuracy())
-		       << ",proof:" << PredicateProofIdentityName(mapping.ProofIdentity())
-		       << ",base_domain:" << PredicateBaseDomainName(mapping.BaseDomain())
-		       << ",occurrences:" << PredicateOccurrencePreservationName(mapping.OccurrencePreservation())
+		       << ",literal:" << LiteralName(mapping.Literal());
+		if (mapping.Literal() == CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL) {
+			result << ':';
+			AppendTypedLiteral(result, mapping.TypedLiteral());
+		}
+		result << ",operation:" << mapping.OperationName() << ",input:" << PlacementName(mapping.InputPlacement())
+		       << ':' << mapping.RemoteInputName() << '=' << mapping.EncodedRemoteValue()
+		       << ",accuracy:" << AccuracyName(mapping.Accuracy()) << ",proof:" << mapping.ProofIdentityValue()
+		       << ",base_domain:" << mapping.BaseDomainValue();
+		if (mapping.Literal() == CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL) {
+			result << ",fixtures:[matching:" << mapping.MatchingFixture()
+			       << ",false_or_null:" << mapping.FalseOrNullFixture() << ",duplicates:" << mapping.DuplicatesFixture()
+			       << ']';
+		}
+		result << ",occurrences:" << PredicateOccurrencePreservationName(mapping.OccurrencePreservation())
 		       << ",encoding:" << PredicateEncodingCapabilityName(mapping.EncodingCapability())
 		       << "[max_inputs:" << mapping.MaximumConditionalInputs()
 		       << ",compound_and:" << (mapping.SupportsCompoundConjunctionEncoding() ? "supported" : "unsupported")

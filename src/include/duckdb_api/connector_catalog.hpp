@@ -50,6 +50,7 @@ public:
 
 private:
 	friend class internal::CompiledModelBuilder;
+	friend class CompiledPredicateMapping;
 
 	CompiledScalarValue(CompiledScalarType type, bool is_null, bool boolean_value, std::int64_t bigint_value,
 	                    std::string varchar_value);
@@ -148,7 +149,7 @@ private:
 // query input. Relational Semantics owns implication, classification use, and
 // residual ownership; Connector only supplies validated immutable source facts.
 enum class CompiledPredicateOperator { EQUALS };
-enum class CompiledPredicateLiteral { VARCHAR_PRIVATE };
+enum class CompiledPredicateLiteral { VARCHAR_PRIVATE, PACKAGE_TYPED_LITERAL };
 enum class CompiledPredicateInputPlacement { REST_QUERY_PARAMETER };
 enum class CompiledPredicateAccuracy { EXACT, SUPERSET };
 
@@ -159,7 +160,8 @@ enum class CompiledPredicateAccuracy { EXACT, SUPERSET };
 // fixtures; the installed native catalog publishes the GitHub profile alone.
 enum class CompiledPredicateProofIdentity {
 	GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY,
-	CONTROLLED_EXACT_DUPLICATE_REPOSITORY_VISIBILITY
+	CONTROLLED_EXACT_DUPLICATE_REPOSITORY_VISIBILITY,
+	PACKAGE_DECLARED_V1
 };
 
 // Compatibility spelling for existing pre-1.0 consumers. ProofIdentity() is
@@ -172,7 +174,8 @@ using CompiledPredicateEvidence = CompiledPredicateProofIdentity;
 // not interchangeable and cannot inherit a mapping's accuracy.
 enum class CompiledPredicateBaseDomain {
 	GITHUB_AUTHENTICATED_REPOSITORY_OCCURRENCES,
-	CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES
+	CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES,
+	PACKAGE_DECLARED_OCCURRENCE_DOMAIN
 };
 
 // Source-level occurrence guarantee supplied by Connector. Semantics still
@@ -204,14 +207,20 @@ public:
 	const std::string &ColumnName() const;
 	CompiledPredicateOperator Operator() const;
 	CompiledPredicateLiteral Literal() const;
+	const CompiledScalarValue &TypedLiteral() const;
 	const std::string &OperationName() const;
 	CompiledPredicateInputPlacement InputPlacement() const;
 	const std::string &RemoteInputName() const;
 	const std::string &EncodedRemoteValue() const;
 	CompiledPredicateAccuracy Accuracy() const;
 	CompiledPredicateProofIdentity ProofIdentity() const;
+	const std::string &ProofIdentityValue() const;
 	CompiledPredicateEvidence Evidence() const;
 	CompiledPredicateBaseDomain BaseDomain() const;
+	const std::string &BaseDomainValue() const;
+	const std::string &MatchingFixture() const;
+	const std::string &FalseOrNullFixture() const;
+	const std::string &DuplicatesFixture() const;
 	CompiledPredicateOccurrencePreservation OccurrencePreservation() const;
 	CompiledPredicateEncodingCapability EncodingCapability() const;
 	std::uint64_t MaximumConditionalInputs() const;
@@ -231,6 +240,11 @@ private:
 	                         CompiledPredicateProofIdentity proof_identity, CompiledPredicateBaseDomain base_domain,
 	                         CompiledPredicateOccurrencePreservation occurrence_preservation,
 	                         CompiledPredicateEncodingCapability encoding_capability);
+	CompiledPredicateMapping(std::string column_name, CompiledScalarValue literal, std::string operation_name,
+	                         std::string remote_input_name, std::string encoded_remote_value,
+	                         CompiledPredicateAccuracy accuracy, std::string proof_identity, std::string base_domain,
+	                         std::string matching_fixture, std::string false_or_null_fixture,
+	                         std::string duplicates_fixture);
 
 	std::string column_name;
 	CompiledPredicateOperator predicate_operator;
@@ -244,6 +258,12 @@ private:
 	CompiledPredicateBaseDomain base_domain;
 	CompiledPredicateOccurrencePreservation occurrence_preservation;
 	CompiledPredicateEncodingCapability encoding_capability;
+	std::shared_ptr<const CompiledScalarValue> typed_literal;
+	std::string proof_identity_value;
+	std::string base_domain_value;
+	std::string matching_fixture;
+	std::string false_or_null_fixture;
+	std::string duplicates_fixture;
 };
 
 // Connector policy only narrows host authority. Runtime intersects these facts

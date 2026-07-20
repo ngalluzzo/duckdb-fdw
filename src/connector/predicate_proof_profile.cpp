@@ -142,6 +142,8 @@ const char *PredicateProofIdentityName(CompiledPredicateProofIdentity value) {
 		return "github_rest_2022_11_28_repository_visibility";
 	case CompiledPredicateProofIdentity::CONTROLLED_EXACT_DUPLICATE_REPOSITORY_VISIBILITY:
 		return "controlled_exact_duplicate_repository_visibility";
+	case CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1:
+		return "package_declared_v1";
 	}
 	throw std::invalid_argument("compiled predicate mapping contains an unknown proof identity");
 }
@@ -152,6 +154,8 @@ const char *PredicateBaseDomainName(CompiledPredicateBaseDomain value) {
 		return "github_authenticated_repository_occurrences";
 	case CompiledPredicateBaseDomain::CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES:
 		return "controlled_duplicate_repository_occurrences";
+	case CompiledPredicateBaseDomain::PACKAGE_DECLARED_OCCURRENCE_DOMAIN:
+		return "package_declared_occurrence_domain";
 	}
 	throw std::invalid_argument("compiled predicate mapping contains an unknown base-domain identity");
 }
@@ -185,6 +189,15 @@ void ValidatePredicateProofProfile(const std::string &relation_name, const Compi
 		break;
 	case CompiledPredicateProofIdentity::CONTROLLED_EXACT_DUPLICATE_REPOSITORY_VISIBILITY:
 		if (HasControlledExactProfile(relation_name, operation, authentication, mapping)) {
+			return;
+		}
+		break;
+	case CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1:
+		if (mapping.Literal() == CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL &&
+		    mapping.BaseDomain() == CompiledPredicateBaseDomain::PACKAGE_DECLARED_OCCURRENCE_DOMAIN &&
+		    !mapping.ProofIdentityValue().empty() && !mapping.BaseDomainValue().empty() &&
+		    !mapping.MatchingFixture().empty() && !mapping.FalseOrNullFixture().empty() &&
+		    !mapping.DuplicatesFixture().empty()) {
 			return;
 		}
 		break;

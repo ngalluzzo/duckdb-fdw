@@ -97,9 +97,30 @@ const char *ResponseSourceName(CompiledResponseSource source) {
 void ValidateQueryParameters(const std::vector<CompiledQueryParameter> &parameters) {
 	for (std::size_t index = 0; index < parameters.size(); index++) {
 		const auto &parameter = parameters[index];
-		if (parameter.name.empty() || parameter.name.find_first_of("=&?#\r\n") != std::string::npos ||
-		    parameter.encoded_value.empty() || parameter.encoded_value.find_first_of("&=?#\r\n") != std::string::npos) {
-			throw std::invalid_argument("compiled REST request contains an invalid fixed query field");
+		if (parameter.name.empty() || parameter.name.find_first_of("=&?#\r\n") != std::string::npos) {
+			throw std::invalid_argument("compiled REST request contains an invalid query field name");
+		}
+		switch (parameter.source) {
+		case CompiledQueryValueSource::FIXED:
+			if (parameter.encoded_value.find_first_of("&=?#\r\n") != std::string::npos ||
+			    !parameter.source_id.empty() || parameter.omit_when_unbound || parameter.omit_when_null) {
+				throw std::invalid_argument("compiled REST fixed query field is contradictory");
+			}
+			break;
+		case CompiledQueryValueSource::RELATION_INPUT:
+			if (!parameter.encoded_value.empty() || parameter.source_id.empty() || !parameter.omit_when_unbound ||
+			    !parameter.omit_when_null) {
+				throw std::invalid_argument("compiled REST relation-input query field is contradictory");
+			}
+			break;
+		case CompiledQueryValueSource::CONDITIONAL_INPUT:
+			if (!parameter.encoded_value.empty() || parameter.source_id.empty() || !parameter.omit_when_unbound ||
+			    parameter.omit_when_null) {
+				throw std::invalid_argument("compiled REST conditional query field is contradictory");
+			}
+			break;
+		default:
+			throw std::invalid_argument("compiled REST query field has an unknown value source");
 		}
 		for (std::size_t other = index + 1; other < parameters.size(); other++) {
 			if (parameter.name == parameters[other].name) {
@@ -162,7 +183,19 @@ void ValidateRestOperation(const CompiledOperation &operation) {
 
 void AppendQuery(std::ostream &result, const std::vector<CompiledQueryParameter> &parameters) {
 	for (std::size_t index = 0; index < parameters.size(); index++) {
-		result << (index == 0 ? "" : ",") << parameters[index].name << '=' << parameters[index].encoded_value;
+		const auto &parameter = parameters[index];
+		result << (index == 0 ? "" : ",") << parameter.name << '=';
+		switch (parameter.source) {
+		case CompiledQueryValueSource::FIXED:
+			result << parameter.encoded_value;
+			break;
+		case CompiledQueryValueSource::RELATION_INPUT:
+			result << "input." << parameter.source_id << ":omit_unbound_null";
+			break;
+		case CompiledQueryValueSource::CONDITIONAL_INPUT:
+			result << "conditional." << parameter.source_id << ":omit_unbound";
+			break;
+		}
 	}
 }
 
@@ -188,6 +221,18 @@ void AppendOrigin(std::ostream &result, const CompiledHttpOrigin &origin) {
 }
 
 } // namespace
+
+CompiledQueryParameter::CompiledQueryParameter(std::string name_p, std::string encoded_value_p)
+    : name(std::move(name_p)), encoded_value(std::move(encoded_value_p)), source(CompiledQueryValueSource::FIXED),
+      source_id(), omit_when_unbound(false), omit_when_null(false) {
+}
+
+CompiledQueryParameter::CompiledQueryParameter(std::string name_p, CompiledQueryValueSource source_p,
+                                               std::string source_id_p, bool omit_when_unbound_p,
+                                               bool omit_when_null_p)
+    : name(std::move(name_p)), encoded_value(), source(source_p), source_id(std::move(source_id_p)),
+      omit_when_unbound(omit_when_unbound_p), omit_when_null(omit_when_null_p) {
+}
 
 CompiledHttpHost::CompiledHttpHost(std::string value_p) : value(std::move(value_p)) {
 	if (!IsCanonicalHost(value)) {
