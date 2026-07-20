@@ -110,6 +110,13 @@ For every subagent, provide:
 The lead agent owns integration and Git history. Do not allow shared-state
 coordination through stash, reset, broad checkout, or cleanup commands.
 
+Before offering a commit to another worktree or the lead for integration,
+verify its exact tree from a clean snapshot. Evidence from a writer worktree
+that also contains uncommitted files, later commits, or another stream's
+projected sources does not describe the offered commit and must be rejected.
+For a provider-interface change, compile the affected committed consumers in
+that snapshot in addition to running the provider's focused tests.
+
 ## Implement the behavior
 
 1. Use `$contract-change` when semantics cross documented layers.
@@ -144,6 +151,8 @@ focused review after fixes.
 ## Verify and commit
 
 1. Run targeted tests, then every relevant repository gate from `AGENTS.md`.
+   For cross-worktree handoffs, record the exact verified commit and confirm
+   that the verification snapshot was clean.
 2. Inspect the final diff for accidental files, weakened assertions, stale
    terminology, secrets, and unrelated changes.
 3. Compare the final source, include, build-target, and test dependencies with

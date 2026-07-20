@@ -124,6 +124,11 @@ and adversarial review.
 - Parallel writers require disjoint ownership or separate worktrees.
 - The lead agent owns integration and Git history unless a subagent is
   explicitly assigned a branch or worktree.
+- A commit offered for cross-worktree integration must be verified from that
+  exact committed tree in a clean snapshot. Uncommitted files, later commits,
+  or another stream's projected sources invalidate the evidence. When a
+  provider interface changes, the snapshot check must build the affected
+  committed consumers as well as the provider's focused tests.
 - Never let multiple agents use stash, reset, or broad cleanup commands to
   coordinate shared state.
 - Return distilled findings rather than raw logs to the lead context.
