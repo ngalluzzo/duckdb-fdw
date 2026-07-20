@@ -8,6 +8,8 @@ set(RELATIONAL_PLAN_VALUE_SOURCES
     src/semantics/scan_plan_explain.cpp)
 set(RELATIONAL_PLANNER_SOURCES
     src/semantics/graphql_operation_planner.cpp
+    src/semantics/input_resolution.cpp
+    src/semantics/operation_selection.cpp
     src/semantics/predicate_classifier.cpp
     src/semantics/scan_planner.cpp
     src/semantics/scan_planner_validation.cpp)

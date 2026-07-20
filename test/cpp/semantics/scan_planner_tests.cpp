@@ -10,6 +10,8 @@
 #include <string>
 
 void RunPredicateCompositionLawTests();
+void RunInputResolutionLawTests();
+void RunOperationSelectionLawTests();
 
 namespace {
 
@@ -394,6 +396,8 @@ int main() {
 		RunRelationalPredicateTests();
 		RunPredicatePlannerTests();
 		RunPredicateCompositionLawTests();
+		RunInputResolutionLawTests();
+		RunOperationSelectionLawTests();
 		TestExactSelectionHasNoFallback();
 		TestCandidateSpecificOperationSelectionAndFallback();
 		TestEqualRankedOperationSelectionFailsBeforePlanConstruction();

@@ -20,6 +20,8 @@ set(RELATIONAL_PLAN_TEST_SERVICE_SOURCES
 set(RELATIONAL_PLAN_PAGINATION_TEST_SERVICE_SOURCES
     test/cpp/semantics/support/scan_plan_pagination_test_fixtures.cpp)
 set(RELATIONAL_PREDICATE_PLANNER_TEST_SOURCES
+    test/cpp/semantics/input_resolution_law_tests.cpp
+    test/cpp/semantics/operation_selection_law_tests.cpp
     test/cpp/semantics/relational_predicate_tests.cpp
     test/cpp/semantics/predicate_planner_tests.cpp
     test/cpp/semantics/predicate_composition_law_tests.cpp)
