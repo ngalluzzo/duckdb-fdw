@@ -83,7 +83,10 @@ inline void RequireCanaryAbsent(const duckdb_api::ScanRequest &request, const st
 	            request.requested_predicate.Snapshot().find(canary) == std::string::npos,
 	        "credential canary entered scalar request identity or predicate");
 	for (const auto &value : request.explicit_inputs) {
-		Require(value.find(canary) == std::string::npos, "credential canary entered request explicit inputs");
+		Require(value.Identifier().find(canary) == std::string::npos &&
+		            (value.IsNull() || value.Kind() != duckdb_api::ExplicitInputValueKind::VARCHAR ||
+		             value.VarcharValue().find(canary) == std::string::npos),
+		        "credential canary entered request explicit inputs");
 	}
 	for (const auto &value : request.projected_columns) {
 		Require(value.find(canary) == std::string::npos, "credential canary entered request projection");

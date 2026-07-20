@@ -26,6 +26,103 @@ const char AUTHENTICATED_RELATION[] = "authenticated_user";
 const char REPOSITORY_RELATION[] = "authenticated_repositories";
 const char GRAPHQL_RELATION[] = "viewer_repository_metrics";
 
+void TestExplicitInputValues() {
+	const auto boolean = duckdb_api::ExplicitInput::Boolean("enabled", true);
+	const auto bigint = duckdb_api::ExplicitInput::BigInt("count", -42);
+	std::string identifier = "label;\n";
+	identifier.push_back(static_cast<char>(0xff));
+	std::string exact_varchar = "private;\n";
+	exact_varchar.push_back(static_cast<char>(0x01));
+	const auto varchar_value = duckdb_api::ExplicitInput::Varchar(identifier, exact_varchar);
+	const auto null_boolean =
+	    duckdb_api::ExplicitInput::Null("optional_enabled", duckdb_api::ExplicitInputValueKind::BOOLEAN);
+	const auto null_bigint =
+	    duckdb_api::ExplicitInput::Null("optional_count", duckdb_api::ExplicitInputValueKind::BIGINT);
+	const auto null_varchar =
+	    duckdb_api::ExplicitInput::Null("optional_label", duckdb_api::ExplicitInputValueKind::VARCHAR);
+	const auto bigint_copy = bigint;
+	auto varchar_move_source = varchar_value;
+	const auto varchar_moved = std::move(varchar_move_source);
+
+	Require(boolean.Identifier() == "enabled" && boolean.Kind() == duckdb_api::ExplicitInputValueKind::BOOLEAN &&
+	            !boolean.IsNull() && boolean.BooleanValue() &&
+	            boolean.Snapshot() == "input[id=hex:656e61626c6564,kind=boolean,value=true]",
+	        "BOOLEAN explicit input lost its exact structural value");
+	Require(bigint.Identifier() == "count" && bigint.Kind() == duckdb_api::ExplicitInputValueKind::BIGINT &&
+	            !bigint.IsNull() && bigint.BigIntValue() == -42 &&
+	            bigint.Snapshot() == "input[id=hex:636f756e74,kind=bigint,value=-42]",
+	        "BIGINT explicit input lost its exact structural value");
+	Require(varchar_value.Identifier() == identifier &&
+	            varchar_value.Kind() == duckdb_api::ExplicitInputValueKind::VARCHAR && !varchar_value.IsNull() &&
+	            varchar_value.VarcharValue() == exact_varchar &&
+	            varchar_value.Snapshot() ==
+	                "input[id=hex:6c6162656c3b0aff,kind=varchar,value=hex:707269766174653b0a01]",
+	        "VARCHAR explicit input was not byte exact or safely escaped");
+	Require(bigint_copy == bigint && bigint_copy.Snapshot() == bigint.Snapshot() && varchar_moved == varchar_value,
+	        "explicit input copy or move changed its structural value");
+	Require(null_boolean.IsNull() && null_boolean.Kind() == duckdb_api::ExplicitInputValueKind::BOOLEAN &&
+	            null_boolean.Snapshot() == "input[id=hex:6f7074696f6e616c5f656e61626c6564,kind=boolean,value=null]" &&
+	            null_bigint.IsNull() && null_bigint.Kind() == duckdb_api::ExplicitInputValueKind::BIGINT &&
+	            null_varchar.IsNull() && null_varchar.Kind() == duckdb_api::ExplicitInputValueKind::VARCHAR,
+	        "explicit NULL lost its present typed identity");
+
+	RequireThrows<std::logic_error>([&]() { (void)boolean.BigIntValue(); },
+	                                "BOOLEAN explicit input exposed a BIGINT payload");
+	RequireThrows<std::logic_error>([&]() { (void)null_boolean.BooleanValue(); },
+	                                "explicit NULL exposed a BOOLEAN payload");
+	RequireThrows<std::invalid_argument>([]() { (void)duckdb_api::ExplicitInput::Varchar("", "value"); },
+	                                     "empty explicit input identifier was accepted");
+	RequireThrows<std::logic_error>(
+	    []() {
+		    (void)duckdb_api::ExplicitInput::Null("invalid_kind", static_cast<duckdb_api::ExplicitInputValueKind>(99));
+	    },
+	    "unknown explicit input kind was accepted");
+	for (const auto &unsafe : {"label;", "private;", "\n"}) {
+		Require(varchar_value.Snapshot().find(unsafe) == std::string::npos,
+		        "explicit input snapshot exposed unescaped structural bytes");
+	}
+}
+
+void TestOrderedExplicitInputs() {
+	const duckdb_api::ExplicitInputs absent;
+	const duckdb_api::ExplicitInputs inputs(
+	    {duckdb_api::ExplicitInput::Varchar("first", "alpha"),
+	     duckdb_api::ExplicitInput::Null("second", duckdb_api::ExplicitInputValueKind::BIGINT),
+	     duckdb_api::ExplicitInput::Boolean("third", false), duckdb_api::ExplicitInput::BigInt("fourth", 0)});
+	const auto copy = inputs;
+	auto move_source = inputs;
+	const auto moved = std::move(move_source);
+
+	Require(absent.empty() && absent.size() == 0 && absent.begin() == absent.end() && absent.Snapshot() == "[]",
+	        "omission was not represented solely by input absence");
+	Require(inputs.size() == 4 && inputs.At(0).Identifier() == "first" && inputs.At(1).Identifier() == "second" &&
+	            inputs.At(2).Identifier() == "third" && inputs.At(3).Identifier() == "fourth",
+	        "explicit inputs did not preserve exact caller order");
+	Require(inputs.Find("second") == &inputs.At(1) && inputs.Find("Second") == nullptr &&
+	            inputs.Find("missing") == nullptr,
+	        "exact structural input lookup normalized or invented an identifier");
+	Require(copy == inputs && copy.Snapshot() == inputs.Snapshot() && moved == inputs,
+	        "explicit input copy or move changed value semantics");
+	Require(!move_source.Snapshot().empty(), "moved-from explicit inputs did not remain a valid object");
+	Require(inputs != duckdb_api::ExplicitInputs(
+	                      {duckdb_api::ExplicitInput::Boolean("third", false),
+	                       duckdb_api::ExplicitInput::Varchar("first", "alpha"),
+	                       duckdb_api::ExplicitInput::Null("second", duckdb_api::ExplicitInputValueKind::BIGINT),
+	                       duckdb_api::ExplicitInput::BigInt("fourth", 0)}),
+	        "explicit input equality ignored caller order");
+	Require(inputs.Snapshot() == "[input[id=hex:6669727374,kind=varchar,value=hex:616c706861],"
+	                             "input[id=hex:7365636f6e64,kind=bigint,value=null],"
+	                             "input[id=hex:7468697264,kind=boolean,value=false],"
+	                             "input[id=hex:666f75727468,kind=bigint,value=0]]",
+	        "ordered explicit input snapshot drifted");
+	RequireThrows<std::invalid_argument>(
+	    []() {
+		    (void)duckdb_api::ExplicitInputs({duckdb_api::ExplicitInput::Boolean("duplicate", true),
+		                                      duckdb_api::ExplicitInput::BigInt("duplicate", 1)});
+	    },
+	    "duplicate exact explicit input identifier was accepted");
+}
+
 void TestLogicalSecretReferenceContract() {
 	const duckdb_api::LogicalSecretReference absent;
 	Require(!absent.IsPresent() && absent.Snapshot() == "none", "default logical reference was not absent");
@@ -365,6 +462,8 @@ void TestEnvironmentIndependenceAndCredentialAbsence() {
 
 int main() {
 	try {
+		TestExplicitInputValues();
+		TestOrderedExplicitInputs();
 		TestLogicalSecretReferenceContract();
 		TestAcceptedAnonymousAndAuthenticatedRequests();
 		TestAuthenticatedRepositoryRequest();

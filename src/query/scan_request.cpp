@@ -1,5 +1,7 @@
 #include "duckdb_api/scan_request.hpp"
 
+#include <locale>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -7,6 +9,30 @@
 namespace duckdb_api {
 
 namespace {
+
+const char *ExplicitInputValueKindName(ExplicitInputValueKind kind) {
+	switch (kind) {
+	case ExplicitInputValueKind::BOOLEAN:
+		return "boolean";
+	case ExplicitInputValueKind::BIGINT:
+		return "bigint";
+	case ExplicitInputValueKind::VARCHAR:
+		return "varchar";
+	}
+	throw std::logic_error("explicit input contains an unknown value kind");
+}
+
+std::string HexEncode(const std::string &value) {
+	static const char HEX_DIGITS[] = "0123456789abcdef";
+	std::string result;
+	result.reserve(value.size() * 2);
+	for (const char character : value) {
+		const auto byte = static_cast<unsigned char>(character);
+		result.push_back(HEX_DIGITS[byte >> 4]);
+		result.push_back(HEX_DIGITS[byte & 0x0f]);
+	}
+	return result;
+}
 
 const char *RetainedPredicateScopeName(RetainedPredicateScope scope) {
 	switch (scope) {
@@ -21,6 +47,171 @@ const char *RetainedPredicateScopeName(RetainedPredicateScope scope) {
 }
 
 } // namespace
+
+ExplicitInput::ExplicitInput(std::string identifier_p, ExplicitInputValueKind kind_p, bool is_null_p,
+                             bool boolean_value_p, std::int64_t bigint_value_p, std::string varchar_value_p)
+    : identifier(std::move(identifier_p)), kind(kind_p), is_null(is_null_p), boolean_value(boolean_value_p),
+      bigint_value(bigint_value_p), varchar_value(std::move(varchar_value_p)) {
+	if (identifier.empty()) {
+		throw std::invalid_argument("explicit input identifier must not be empty");
+	}
+	(void)ExplicitInputValueKindName(kind);
+}
+
+ExplicitInput ExplicitInput::Null(std::string identifier, ExplicitInputValueKind kind) {
+	return ExplicitInput(std::move(identifier), kind, true, false, 0, std::string());
+}
+
+ExplicitInput ExplicitInput::Boolean(std::string identifier, bool value) {
+	return ExplicitInput(std::move(identifier), ExplicitInputValueKind::BOOLEAN, false, value, 0, std::string());
+}
+
+ExplicitInput ExplicitInput::BigInt(std::string identifier, std::int64_t value) {
+	return ExplicitInput(std::move(identifier), ExplicitInputValueKind::BIGINT, false, false, value, std::string());
+}
+
+ExplicitInput ExplicitInput::Varchar(std::string identifier, std::string value) {
+	return ExplicitInput(std::move(identifier), ExplicitInputValueKind::VARCHAR, false, false, 0, std::move(value));
+}
+
+const std::string &ExplicitInput::Identifier() const noexcept {
+	return identifier;
+}
+
+ExplicitInputValueKind ExplicitInput::Kind() const noexcept {
+	return kind;
+}
+
+bool ExplicitInput::IsNull() const noexcept {
+	return is_null;
+}
+
+bool ExplicitInput::BooleanValue() const {
+	if (is_null || kind != ExplicitInputValueKind::BOOLEAN) {
+		throw std::logic_error("explicit input does not contain a BOOLEAN value");
+	}
+	return boolean_value;
+}
+
+std::int64_t ExplicitInput::BigIntValue() const {
+	if (is_null || kind != ExplicitInputValueKind::BIGINT) {
+		throw std::logic_error("explicit input does not contain a BIGINT value");
+	}
+	return bigint_value;
+}
+
+const std::string &ExplicitInput::VarcharValue() const {
+	if (is_null || kind != ExplicitInputValueKind::VARCHAR) {
+		throw std::logic_error("explicit input does not contain a VARCHAR value");
+	}
+	return varchar_value;
+}
+
+bool ExplicitInput::operator==(const ExplicitInput &other) const noexcept {
+	return identifier == other.identifier && kind == other.kind && is_null == other.is_null &&
+	       boolean_value == other.boolean_value && bigint_value == other.bigint_value &&
+	       varchar_value == other.varchar_value;
+}
+
+bool ExplicitInput::operator!=(const ExplicitInput &other) const noexcept {
+	return !(*this == other);
+}
+
+std::string ExplicitInput::Snapshot() const {
+	std::ostringstream result;
+	result.imbue(std::locale::classic());
+	result << "input[id=hex:" << HexEncode(identifier) << ",kind=" << ExplicitInputValueKindName(kind) << ",value=";
+	if (is_null) {
+		result << "null";
+	} else {
+		switch (kind) {
+		case ExplicitInputValueKind::BOOLEAN:
+			result << (boolean_value ? "true" : "false");
+			break;
+		case ExplicitInputValueKind::BIGINT:
+			result << bigint_value;
+			break;
+		case ExplicitInputValueKind::VARCHAR:
+			result << "hex:" << HexEncode(varchar_value);
+			break;
+		}
+	}
+	result << ']';
+	return result.str();
+}
+
+ExplicitInputs::ExplicitInputs() : values() {
+}
+
+ExplicitInputs::ExplicitInputs(std::vector<ExplicitInput> values_p) : values(std::move(values_p)) {
+	std::set<std::string> identifiers;
+	for (const auto &value : values) {
+		if (value.Identifier().empty()) {
+			throw std::invalid_argument("explicit input identifier must not be empty");
+		}
+		if (!identifiers.insert(value.Identifier()).second) {
+			throw std::invalid_argument("explicit input identifiers must be unique");
+		}
+	}
+}
+
+ExplicitInputs::ExplicitInputs(std::initializer_list<ExplicitInput> values_p)
+    : ExplicitInputs(std::vector<ExplicitInput>(values_p)) {
+}
+
+bool ExplicitInputs::empty() const noexcept {
+	return values.empty();
+}
+
+std::size_t ExplicitInputs::size() const noexcept {
+	return values.size();
+}
+
+const ExplicitInput &ExplicitInputs::At(std::size_t index) const {
+	return values.at(index);
+}
+
+const ExplicitInput *ExplicitInputs::Find(const std::string &exact_identifier) const noexcept {
+	for (const auto &value : values) {
+		if (value.Identifier() == exact_identifier) {
+			return &value;
+		}
+	}
+	return nullptr;
+}
+
+const std::vector<ExplicitInput> &ExplicitInputs::Values() const noexcept {
+	return values;
+}
+
+ExplicitInputs::const_iterator ExplicitInputs::begin() const noexcept {
+	return values.begin();
+}
+
+ExplicitInputs::const_iterator ExplicitInputs::end() const noexcept {
+	return values.end();
+}
+
+bool ExplicitInputs::operator==(const ExplicitInputs &other) const noexcept {
+	return values == other.values;
+}
+
+bool ExplicitInputs::operator!=(const ExplicitInputs &other) const noexcept {
+	return !(*this == other);
+}
+
+std::string ExplicitInputs::Snapshot() const {
+	std::ostringstream result;
+	result << '[';
+	for (std::size_t index = 0; index < values.size(); index++) {
+		if (index > 0) {
+			result << ',';
+		}
+		result << values[index].Snapshot();
+	}
+	result << ']';
+	return result.str();
+}
 
 LogicalSecretReference::LogicalSecretReference() : exact_duckdb_secret_name() {
 }
@@ -70,7 +261,7 @@ bool AdapterCapabilities::HasConservativeRelationalProfile() const {
 std::string ScanRequest::Snapshot() const {
 	std::ostringstream result;
 	result << "connector=" << connector_name << ";relation=" << relation_name
-	       << ";inputs=" << (explicit_inputs.empty() ? "[]" : "unexpected") << ";projection=";
+	       << ";inputs=" << explicit_inputs.Snapshot() << ";projection=";
 	for (std::size_t index = 0; index < projected_columns.size(); index++) {
 		if (index > 0) {
 			result << ',';
@@ -115,7 +306,7 @@ ScanRequest BuildConservativeScanRequest(const CompiledConnector &connector, con
 	ScanRequest result;
 	result.connector_name = connector.ConnectorName();
 	result.relation_name = relation->Name();
-	result.explicit_inputs.clear();
+	result.explicit_inputs = ExplicitInputs();
 	result.projected_columns.reserve(relation->Columns().size());
 	for (const auto &column : relation->Columns()) {
 		result.projected_columns.push_back(column.name);
