@@ -274,6 +274,11 @@ private:
 // Connector policy only narrows host authority. Runtime intersects these facts
 // with host policy; the catalog does not grant network access.
 struct CompiledNetworkPolicy {
+	CompiledNetworkPolicy(std::vector<std::string> allowed_schemes, std::vector<std::string> allowed_hosts,
+	                      bool redirects_enabled, bool private_addresses_enabled, bool link_local_addresses_enabled,
+	                      bool loopback_addresses_enabled, std::uint64_t max_response_bytes);
+	CompiledNetworkPolicy(std::vector<CompiledHttpOrigin> allowed_origins, std::uint64_t max_response_bytes);
+
 	std::vector<std::string> allowed_schemes;
 	std::vector<std::string> allowed_hosts;
 	bool redirects_enabled;
@@ -281,6 +286,9 @@ struct CompiledNetworkPolicy {
 	bool link_local_addresses_enabled;
 	bool loopback_addresses_enabled;
 	uint64_t max_response_bytes;
+	// Package generations retain exact origin tuples. The legacy native profile
+	// leaves this empty and continues to use its bounded scheme/host sets.
+	std::vector<CompiledHttpOrigin> allowed_origins;
 };
 
 // Immutable relation-owned resource narrowings. Page and scan scopes are
@@ -328,9 +336,10 @@ private:
 
 // Closed logical credential policy. Its private Anonymous() state carries no
 // binding; its private RequiredBearer() state always carries logical `token`
-// and exact GitHub use policy but no DuckDB secret name, provider object,
-// handle, or credential bytes. Values are immutable after validated
-// construction and safe to retain with a snapshot.
+// and one or more exact HTTPS destinations but no DuckDB secret name, provider
+// object, handle, or credential bytes. The catalog later proves each
+// destination belongs to the package network policy. Values are immutable
+// after validated construction and safe to retain with a snapshot.
 class CompiledAuthenticationPolicy {
 public:
 	CompiledAuthenticationPolicy(const CompiledAuthenticationPolicy &) = default;
@@ -343,6 +352,7 @@ public:
 	CompiledAuthenticator Authenticator() const;
 	CompiledCredentialPlacement Placement() const;
 	const CompiledHttpOrigin *Destination() const;
+	const std::vector<CompiledHttpOrigin> &Destinations() const;
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
@@ -351,6 +361,8 @@ private:
 
 	static CompiledAuthenticationPolicy Anonymous();
 	static CompiledAuthenticationPolicy RequiredBearer();
+	static CompiledAuthenticationPolicy RequiredBearer(std::string logical_credential,
+	                                                   std::vector<CompiledHttpOrigin> destinations);
 
 	CompiledAuthenticationPolicy(CompiledCredentialRequirement requirement, std::string logical_credential,
 	                             CompiledAuthenticator authenticator, CompiledCredentialPlacement placement,

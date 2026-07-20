@@ -370,6 +370,20 @@ CompiledAuthenticationPolicy CompiledModelBuilder::AnonymousAuthentication() {
 	return CompiledAuthenticationPolicy::Anonymous();
 }
 
+CompiledAuthenticationPolicy CompiledModelBuilder::BearerAuthentication(std::string logical_credential,
+                                                                        std::vector<CompiledHttpOrigin> destinations) {
+	return CompiledAuthenticationPolicy::RequiredBearer(std::move(logical_credential), std::move(destinations));
+}
+
+CompiledResourceCeilings CompiledModelBuilder::Resources(std::uint64_t max_response_bytes_per_page,
+                                                         std::uint64_t max_response_bytes_per_scan,
+                                                         std::uint64_t max_records_per_page,
+                                                         std::uint64_t max_records_per_scan,
+                                                         std::uint64_t max_extracted_string_bytes) {
+	return CompiledResourceCeilings(max_response_bytes_per_page, max_response_bytes_per_scan, max_records_per_page,
+	                                max_records_per_scan, max_extracted_string_bytes);
+}
+
 CompiledResourceCeilings CompiledModelBuilder::UnpaginatedResources(std::uint64_t max_records,
                                                                     std::uint64_t max_extracted_string_bytes) {
 	return CompiledResourceCeilings(max_records, max_extracted_string_bytes);
@@ -382,6 +396,25 @@ CompiledOperation CompiledModelBuilder::RestOperation(
 	return CompiledOperation(std::move(name), fallback, cardinality, std::move(pagination), std::move(request),
 	                         response_source, std::move(records_extractor), std::move(records_extractor_segments),
 	                         std::move(selector));
+}
+
+CompiledOperation CompiledModelBuilder::GraphqlOperation(std::string name, bool fallback,
+                                                         CompiledGraphqlOperation operation,
+                                                         CompiledOperationSelector selector) {
+	return CompiledOperation(std::move(name), fallback, CompiledOperationCardinality::ZERO_TO_MANY,
+	                         std::move(operation), std::move(selector));
+}
+
+CompiledPredicateMapping
+CompiledModelBuilder::PackagePredicate(std::string column_name, CompiledScalarValue literal, std::string operation_name,
+                                       std::string remote_input_name, std::string encoded_remote_value,
+                                       CompiledPredicateAccuracy accuracy, std::string proof_identity,
+                                       std::string base_domain, std::string matching_fixture,
+                                       std::string false_or_null_fixture, std::string duplicates_fixture) {
+	return CompiledPredicateMapping(std::move(column_name), std::move(literal), std::move(operation_name),
+	                                std::move(remote_input_name), std::move(encoded_remote_value), accuracy,
+	                                std::move(proof_identity), std::move(base_domain), std::move(matching_fixture),
+	                                std::move(false_or_null_fixture), std::move(duplicates_fixture));
 }
 
 CompiledRelation CompiledModelBuilder::Relation(std::string name, std::vector<CompiledColumn> columns,

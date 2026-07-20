@@ -28,11 +28,9 @@ enum class CompiledProtocol { REST, GRAPHQL };
 enum class CompiledHttpMethod { GET };
 enum class CompiledReplaySafety { SAFE };
 
-// Closed identity for the one repository-owned GraphQL document admitted by
-// the 0.7 preview. Identity is not query-kind or replay authority by itself:
-// Connector validation requires the exact bytes and recomputed SHA-256 digest
-// to agree with this profile before the immutable catalog is published.
-enum class CompiledGraphqlDocumentIdentity { GITHUB_VIEWER_REPOSITORY_METRICS_V1 };
+// Explicit renderer identity. Native and package documents never infer their
+// profile from connector, relation, operation, or provenance spellings.
+enum class CompiledGraphqlDocumentIdentity { GITHUB_VIEWER_REPOSITORY_METRICS_V1, PACKAGE_QUERY_GENERATOR_V1 };
 enum class CompiledGraphqlDigestAlgorithm { SHA256 };
 enum class CompiledGraphqlVariableType { INT_NON_NULL, STRING_NULLABLE };
 enum class CompiledGraphqlVariableSource { FIXED_PAGE_SIZE, RUNTIME_CURSOR, CALLER_INPUT, LOGICAL_SECRET };
@@ -41,6 +39,158 @@ enum class CompiledGraphqlPartialDataPolicy { FAIL_ON_ANY_ERROR };
 enum class CompiledGraphqlCursorDirection { FORWARD };
 enum class CompiledGraphqlCursorDependency { SEQUENTIAL, INDEPENDENT };
 enum class CompiledGraphqlCursorConsistency { MUTABLE, STABLE_ORDERING, STABLE_SNAPSHOT };
+
+enum class CompiledGraphqlLiteralKind { NULL_VALUE, BOOLEAN, INTEGER, STRING, ENUM_VALUE, LIST, OBJECT };
+enum class CompiledGraphqlRecipeVariableRole { PAGE_SIZE, CURSOR };
+
+class CompiledGraphqlLiteral;
+
+// Immutable ordered object member in a fixed GraphQL literal. Construction is
+// Connector-owned; consumers can inspect but cannot replace its value.
+class CompiledGraphqlObjectField {
+public:
+	CompiledGraphqlObjectField(const CompiledGraphqlObjectField &) = default;
+	CompiledGraphqlObjectField(CompiledGraphqlObjectField &&) = default;
+	CompiledGraphqlObjectField &operator=(const CompiledGraphqlObjectField &) = delete;
+	CompiledGraphqlObjectField &operator=(CompiledGraphqlObjectField &&) = delete;
+
+	const std::string &Name() const;
+	const CompiledGraphqlLiteral &Value() const;
+
+private:
+	friend class internal::CompiledModelBuilder;
+	CompiledGraphqlObjectField(std::string name, std::shared_ptr<const CompiledGraphqlLiteral> value);
+
+	std::string name;
+	std::shared_ptr<const CompiledGraphqlLiteral> value;
+};
+
+// Closed recursive GraphQL literal. Scalar spelling is canonical decoded
+// authority; list and object children preserve source order and own immutable
+// values. No source text or variable interpolation can enter this type.
+class CompiledGraphqlLiteral {
+public:
+	CompiledGraphqlLiteral(const CompiledGraphqlLiteral &) = default;
+	CompiledGraphqlLiteral(CompiledGraphqlLiteral &&) = default;
+	CompiledGraphqlLiteral &operator=(const CompiledGraphqlLiteral &) = delete;
+	CompiledGraphqlLiteral &operator=(CompiledGraphqlLiteral &&) = delete;
+
+	CompiledGraphqlLiteralKind Kind() const;
+	const std::string &Scalar() const;
+	const std::vector<std::shared_ptr<const CompiledGraphqlLiteral>> &Items() const;
+	const std::vector<CompiledGraphqlObjectField> &Fields() const;
+
+private:
+	friend class internal::CompiledModelBuilder;
+	CompiledGraphqlLiteral(CompiledGraphqlLiteralKind kind, std::string scalar,
+	                       std::vector<std::shared_ptr<const CompiledGraphqlLiteral>> items,
+	                       std::vector<CompiledGraphqlObjectField> fields);
+
+	CompiledGraphqlLiteralKind kind;
+	std::string scalar;
+	std::vector<std::shared_ptr<const CompiledGraphqlLiteral>> items;
+	std::vector<CompiledGraphqlObjectField> fields;
+};
+
+class CompiledGraphqlFixedArgument {
+public:
+	CompiledGraphqlFixedArgument(const CompiledGraphqlFixedArgument &) = default;
+	CompiledGraphqlFixedArgument(CompiledGraphqlFixedArgument &&) = default;
+	CompiledGraphqlFixedArgument &operator=(const CompiledGraphqlFixedArgument &) = delete;
+	CompiledGraphqlFixedArgument &operator=(CompiledGraphqlFixedArgument &&) = delete;
+
+	const std::string &Name() const;
+	const CompiledGraphqlLiteral &Value() const;
+
+private:
+	friend class internal::CompiledModelBuilder;
+	CompiledGraphqlFixedArgument(std::string name, std::shared_ptr<const CompiledGraphqlLiteral> value);
+
+	std::string name;
+	std::shared_ptr<const CompiledGraphqlLiteral> value;
+};
+
+class CompiledGraphqlRecipeVariable {
+public:
+	CompiledGraphqlRecipeVariable(const CompiledGraphqlRecipeVariable &) = default;
+	CompiledGraphqlRecipeVariable(CompiledGraphqlRecipeVariable &&) = default;
+	CompiledGraphqlRecipeVariable &operator=(const CompiledGraphqlRecipeVariable &) = delete;
+	CompiledGraphqlRecipeVariable &operator=(CompiledGraphqlRecipeVariable &&) = delete;
+
+	const std::string &Name() const;
+	CompiledGraphqlVariableType Type() const;
+	CompiledGraphqlRecipeVariableRole Role() const;
+	const std::string &ArgumentName() const;
+
+private:
+	friend class internal::CompiledModelBuilder;
+	CompiledGraphqlRecipeVariable(std::string name, CompiledGraphqlVariableType type,
+	                              CompiledGraphqlRecipeVariableRole role, std::string argument_name);
+
+	std::string name;
+	CompiledGraphqlVariableType type;
+	CompiledGraphqlRecipeVariableRole role;
+	std::string argument_name;
+};
+
+class CompiledGraphqlSelection {
+public:
+	CompiledGraphqlSelection(const CompiledGraphqlSelection &) = default;
+	CompiledGraphqlSelection(CompiledGraphqlSelection &&) = default;
+	CompiledGraphqlSelection &operator=(const CompiledGraphqlSelection &) = delete;
+	CompiledGraphqlSelection &operator=(CompiledGraphqlSelection &&) = delete;
+
+	const std::string &ColumnName() const;
+	const std::vector<std::string> &FieldPath() const;
+
+private:
+	friend class internal::CompiledModelBuilder;
+	CompiledGraphqlSelection(std::string column_name, std::vector<std::string> field_path);
+
+	std::string column_name;
+	std::vector<std::string> field_path;
+};
+
+// Complete immutable input to `duckdb_api/graphql_relay_query_v1`. These facts
+// uniquely determine the generated bytes; document plus digest alone is never
+// membership proof. Runtime state, credentials, and response data are absent.
+class CompiledGraphqlQueryRecipe {
+public:
+	CompiledGraphqlQueryRecipe(const CompiledGraphqlQueryRecipe &) = default;
+	CompiledGraphqlQueryRecipe(CompiledGraphqlQueryRecipe &&) = default;
+	CompiledGraphqlQueryRecipe &operator=(const CompiledGraphqlQueryRecipe &) = delete;
+	CompiledGraphqlQueryRecipe &operator=(CompiledGraphqlQueryRecipe &&) = delete;
+
+	CompiledGraphqlDocumentIdentity Identity() const;
+	const std::string &OperationName() const;
+	const std::vector<CompiledGraphqlRecipeVariable> &Variables() const;
+	const std::vector<std::string> &RootPath() const;
+	const std::vector<CompiledGraphqlFixedArgument> &FixedArguments() const;
+	const std::string &NodesField() const;
+	const std::vector<CompiledGraphqlSelection> &Selections() const;
+	const std::string &PageInfoField() const;
+	const std::string &HasNextPageField() const;
+	const std::string &EndCursorField() const;
+
+private:
+	friend class internal::CompiledModelBuilder;
+	CompiledGraphqlQueryRecipe(CompiledGraphqlDocumentIdentity identity, std::string operation_name,
+	                           std::vector<CompiledGraphqlRecipeVariable> variables, std::vector<std::string> root_path,
+	                           std::vector<CompiledGraphqlFixedArgument> fixed_arguments, std::string nodes_field,
+	                           std::vector<CompiledGraphqlSelection> selections, std::string page_info_field,
+	                           std::string has_next_page_field, std::string end_cursor_field);
+
+	CompiledGraphqlDocumentIdentity identity;
+	std::string operation_name;
+	std::vector<CompiledGraphqlRecipeVariable> variables;
+	std::vector<std::string> root_path;
+	std::vector<CompiledGraphqlFixedArgument> fixed_arguments;
+	std::string nodes_field;
+	std::vector<CompiledGraphqlSelection> selections;
+	std::string page_info_field;
+	std::string has_next_page_field;
+	std::string end_cursor_field;
+};
 
 // Distinguishes a nested JSONPath collection, a root array, and a single root
 // object without asking a consumer to infer response shape from an extractor.
@@ -200,6 +350,9 @@ struct CompiledGraphqlOperation {
 	bool retry_enabled;
 	bool cache_enabled;
 	bool providers_enabled;
+	std::shared_ptr<const CompiledGraphqlQueryRecipe> query_recipe;
+
+	const CompiledGraphqlQueryRecipe &QueryRecipe() const;
 };
 
 // Bounded canonical-profile verifier for the Connector-to-Semantics handoff.

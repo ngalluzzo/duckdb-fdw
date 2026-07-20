@@ -114,6 +114,50 @@ void AppendAuthentication(std::ostringstream &result, const CompiledAuthenticati
 		AppendOrigin(result, *destination);
 	}
 	result << ",placement:" << PlacementName(authentication.Placement());
+	if (authentication.Destinations().size() > 1) {
+		result << ",destinations:[";
+		for (std::size_t index = 0; index < authentication.Destinations().size(); index++) {
+			if (index > 0) {
+				result << ',';
+			}
+			AppendOrigin(result, authentication.Destinations()[index]);
+		}
+		result << ']';
+	}
+}
+
+void AppendScalar(std::ostringstream &result, const CompiledScalarValue &value) {
+	if (value.IsNull()) {
+		result << "NULL";
+		return;
+	}
+	switch (value.Type()) {
+	case CompiledScalarType::BOOLEAN:
+		result << (value.Boolean() ? "TRUE" : "FALSE");
+		return;
+	case CompiledScalarType::BIGINT:
+		result << value.Bigint();
+		return;
+	case CompiledScalarType::VARCHAR:
+		result << "VARCHAR(" << value.Varchar().size() << " bytes)";
+		return;
+	}
+}
+
+void AppendInputs(std::ostringstream &result, const std::vector<CompiledRelationInput> &inputs) {
+	for (std::size_t index = 0; index < inputs.size(); index++) {
+		if (index > 0) {
+			result << ',';
+		}
+		const auto &input = inputs[index];
+		result << input.Name() << ':' << CompiledScalarTypeName(input.Type()) << (input.Nullable() ? '?' : '!')
+		       << ":default=";
+		if (!input.Default().HasDefault()) {
+			result << "none";
+		} else {
+			AppendScalar(result, input.Default().Value());
+		}
+	}
 }
 
 const char *RequiredInputKindName(CompiledRequiredInputKind kind) {
@@ -174,6 +218,11 @@ std::string CompiledRelation::Snapshot() const {
 	result.imbue(std::locale::classic());
 	result << "relation=" << Name() << ";schema=";
 	AppendSchema(result, Columns());
+	if (!Inputs().empty()) {
+		result << ";inputs=[";
+		AppendInputs(result, Inputs());
+		result << ']';
+	}
 	result << ";predicate_mappings=[";
 	internal::AppendPredicateMappings(result, PredicateMappings());
 	if (HasSingleOperation()) {
@@ -206,6 +255,15 @@ std::string CompiledConnector::Snapshot() const {
 	AppendStrings(result, NetworkPolicy().allowed_schemes);
 	result << "],hosts:[";
 	AppendStrings(result, NetworkPolicy().allowed_hosts);
+	if (!NetworkPolicy().allowed_origins.empty()) {
+		result << "],origins:[";
+		for (std::size_t index = 0; index < NetworkPolicy().allowed_origins.size(); index++) {
+			if (index > 0) {
+				result << ',';
+			}
+			AppendOrigin(result, NetworkPolicy().allowed_origins[index]);
+		}
+	}
 	result << "],redirects:" << AuthorityState(NetworkPolicy().redirects_enabled)
 	       << ",private:" << AuthorityState(NetworkPolicy().private_addresses_enabled)
 	       << ",link_local:" << AuthorityState(NetworkPolicy().link_local_addresses_enabled)

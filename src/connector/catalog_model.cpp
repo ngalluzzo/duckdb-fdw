@@ -97,6 +97,19 @@ bool Contains(const std::vector<std::string> &values, const std::string &expecte
 	return false;
 }
 
+bool ContainsOrigin(const CompiledNetworkPolicy &policy, const CompiledHttpOrigin &expected) {
+	if (policy.allowed_origins.empty()) {
+		return Contains(policy.allowed_schemes, UrlSchemeName(expected.scheme)) &&
+		       Contains(policy.allowed_hosts, expected.host.Value());
+	}
+	for (const auto &origin : policy.allowed_origins) {
+		if (OriginsEqual(origin, expected)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void ValidateColumn(const CompiledColumn &column) {
 	if (!IsIdentifier(column.name) || column.extractor.empty() ||
 	    column.extractor.size() > MAX_COMPILED_COLUMN_EXTRACTOR_BYTES || column.extractor.front() != '$') {
@@ -169,6 +182,19 @@ void ValidateNetworkPolicy(const CompiledNetworkPolicy &policy) {
 		for (std::size_t other = index + 1; other < policy.allowed_hosts.size(); other++) {
 			if (policy.allowed_hosts[index] == policy.allowed_hosts[other]) {
 				throw std::invalid_argument("compiled connector contains a duplicate network host");
+			}
+		}
+	}
+	for (std::size_t index = 0; index < policy.allowed_origins.size(); index++) {
+		const auto &origin = policy.allowed_origins[index];
+		if (origin.scheme != CompiledUrlScheme::HTTPS || origin.port == 0 ||
+		    !Contains(policy.allowed_schemes, UrlSchemeName(origin.scheme)) ||
+		    !Contains(policy.allowed_hosts, origin.host.Value())) {
+			throw std::invalid_argument("compiled connector contains an invalid exact network origin");
+		}
+		for (std::size_t other = index + 1; other < policy.allowed_origins.size(); other++) {
+			if (OriginsEqual(origin, policy.allowed_origins[other])) {
+				throw std::invalid_argument("compiled connector contains a duplicate exact network origin");
 			}
 		}
 	}
@@ -339,10 +365,18 @@ CompiledAuthenticationPolicy::CompiledAuthenticationPolicy(CompiledCredentialReq
 	}
 	if (requirement != CompiledCredentialRequirement::REQUIRED || logical_credential != "token" ||
 	    authenticator != CompiledAuthenticator::BEARER ||
-	    placement != CompiledCredentialPlacement::AUTHORIZATION_HEADER || destinations.size() != 1 ||
-	    destinations[0].scheme != CompiledUrlScheme::HTTPS || destinations[0].host.Value() != "api.github.com" ||
-	    destinations[0].port != 443) {
+	    placement != CompiledCredentialPlacement::AUTHORIZATION_HEADER || destinations.empty()) {
 		throw std::invalid_argument("required relation contains an unsupported credential policy");
+	}
+	for (std::size_t index = 0; index < destinations.size(); index++) {
+		if (destinations[index].scheme != CompiledUrlScheme::HTTPS || destinations[index].port == 0) {
+			throw std::invalid_argument("required relation contains an unsupported credential destination");
+		}
+		for (std::size_t other = index + 1; other < destinations.size(); other++) {
+			if (OriginsEqual(destinations[index], destinations[other])) {
+				throw std::invalid_argument("required relation contains a duplicate credential destination");
+			}
+		}
 	}
 }
 
@@ -355,6 +389,14 @@ CompiledAuthenticationPolicy CompiledAuthenticationPolicy::RequiredBearer() {
 	std::vector<CompiledHttpOrigin> destinations;
 	destinations.push_back({CompiledUrlScheme::HTTPS, CompiledHttpHost("api.github.com"), 443});
 	return CompiledAuthenticationPolicy(CompiledCredentialRequirement::REQUIRED, "token", CompiledAuthenticator::BEARER,
+	                                    CompiledCredentialPlacement::AUTHORIZATION_HEADER, std::move(destinations));
+}
+
+CompiledAuthenticationPolicy
+CompiledAuthenticationPolicy::RequiredBearer(std::string logical_credential,
+                                             std::vector<CompiledHttpOrigin> destinations) {
+	return CompiledAuthenticationPolicy(CompiledCredentialRequirement::REQUIRED, std::move(logical_credential),
+	                                    CompiledAuthenticator::BEARER,
 	                                    CompiledCredentialPlacement::AUTHORIZATION_HEADER, std::move(destinations));
 }
 
@@ -376,6 +418,33 @@ CompiledCredentialPlacement CompiledAuthenticationPolicy::Placement() const {
 
 const CompiledHttpOrigin *CompiledAuthenticationPolicy::Destination() const {
 	return destinations.empty() ? nullptr : &destinations[0];
+}
+
+const std::vector<CompiledHttpOrigin> &CompiledAuthenticationPolicy::Destinations() const {
+	return destinations;
+}
+
+CompiledNetworkPolicy::CompiledNetworkPolicy(std::vector<std::string> allowed_schemes_p,
+                                             std::vector<std::string> allowed_hosts_p, bool redirects_enabled_p,
+                                             bool private_addresses_enabled_p, bool link_local_addresses_enabled_p,
+                                             bool loopback_addresses_enabled_p, std::uint64_t max_response_bytes_p)
+    : allowed_schemes(std::move(allowed_schemes_p)), allowed_hosts(std::move(allowed_hosts_p)),
+      redirects_enabled(redirects_enabled_p), private_addresses_enabled(private_addresses_enabled_p),
+      link_local_addresses_enabled(link_local_addresses_enabled_p),
+      loopback_addresses_enabled(loopback_addresses_enabled_p), max_response_bytes(max_response_bytes_p),
+      allowed_origins() {
+}
+
+CompiledNetworkPolicy::CompiledNetworkPolicy(std::vector<CompiledHttpOrigin> allowed_origins_p,
+                                             std::uint64_t max_response_bytes_p)
+    : allowed_schemes({"https"}), allowed_hosts(), redirects_enabled(false), private_addresses_enabled(false),
+      link_local_addresses_enabled(false), loopback_addresses_enabled(false), max_response_bytes(max_response_bytes_p),
+      allowed_origins(std::move(allowed_origins_p)) {
+	for (const auto &origin : allowed_origins) {
+		if (!Contains(allowed_hosts, origin.host.Value())) {
+			allowed_hosts.push_back(origin.host.Value());
+		}
+	}
 }
 
 CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColumn> columns_p,
@@ -447,7 +516,9 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
 	}
 	for (const auto &operation : operations) {
 		if (operation.Protocol() == CompiledProtocol::GRAPHQL) {
-			if (operations.size() != 1) {
+			if (operation.Graphql().document_identity ==
+			        CompiledGraphqlDocumentIdentity::GITHUB_VIEWER_REPOSITORY_METRICS_V1 &&
+			    operations.size() != 1) {
 				throw std::invalid_argument("canonical GraphQL relation requires exactly one operation");
 			}
 			internal::ValidateCanonicalGraphqlRelation(name, columns, operation, authentication, resource_ceilings,
@@ -456,20 +527,15 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
 	}
 
 	if (authentication.Requirement() == CompiledCredentialRequirement::NONE) {
-		for (const auto &operation : operations) {
-			if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY) {
-				throw std::invalid_argument("native anonymous relation has unsupported source cardinality");
-			}
-		}
 		return;
 	}
-	const auto destination = authentication.Destination();
 	for (const auto &operation : operations) {
-		const bool exactly_one_query = operation.Protocol() == CompiledProtocol::REST &&
-		                               operation.cardinality == CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS &&
-		                               !operation.Rest().request.query_parameters.empty();
-		if (destination == nullptr || !OriginsEqual(*destination, internal::OperationOrigin(operation)) ||
-		    exactly_one_query) {
+		bool destination_matches = false;
+		for (const auto &destination : authentication.Destinations()) {
+			destination_matches =
+			    destination_matches || OriginsEqual(destination, internal::OperationOrigin(operation));
+		}
+		if (!destination_matches) {
 			throw std::invalid_argument("authenticated relation contains inconsistent operation and credential policy");
 		}
 	}
@@ -532,16 +598,14 @@ CompiledConnector::CompiledConnector(CompiledConnectorOrigin origin_p, std::stri
 		}
 		for (const auto &operation : relations[index].Operations()) {
 			const auto &origin_value = internal::OperationOrigin(operation);
-			if (!Contains(network_policy.allowed_schemes, UrlSchemeName(origin_value.scheme)) ||
-			    !Contains(network_policy.allowed_hosts, origin_value.host.Value())) {
+			if (!ContainsOrigin(network_policy, origin_value)) {
 				throw std::invalid_argument("compiled relation destination is outside connector network policy");
 			}
 		}
-		const auto credential_destination = relations[index].Authentication().Destination();
-		if (credential_destination != nullptr &&
-		    (!Contains(network_policy.allowed_schemes, UrlSchemeName(credential_destination->scheme)) ||
-		     !Contains(network_policy.allowed_hosts, credential_destination->host.Value()))) {
-			throw std::invalid_argument("compiled credential destination is outside connector network policy");
+		for (const auto &credential_destination : relations[index].Authentication().Destinations()) {
+			if (!ContainsOrigin(network_policy, credential_destination)) {
+				throw std::invalid_argument("compiled credential destination is outside connector network policy");
+			}
 		}
 		const auto &ceilings = relations[index].ResourceCeilings();
 		if (ceilings.HasResponseByteNarrowing() &&

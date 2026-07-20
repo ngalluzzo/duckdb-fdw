@@ -277,16 +277,20 @@ void TestClosedValidation() {
 		                                                    duckdb_api::CompiledRestHost("api.github.com"), 80};
 		ConnectorCatalogTestAccess::ValidateRequiredBearer("token", destination);
 	});
-	RequireInvalid("required bearer policy accepted an alternate port", []() {
+	const auto alternate_port = []() {
 		const duckdb_api::CompiledRestOrigin destination = {duckdb_api::CompiledUrlScheme::HTTPS,
 		                                                    duckdb_api::CompiledRestHost("api.github.com"), 444};
-		ConnectorCatalogTestAccess::ValidateRequiredBearer("token", destination);
-	});
-	RequireInvalid("required bearer policy accepted an alternate host", []() {
+		return ConnectorCatalogTestAccess::ValidateRequiredBearer("token", destination);
+	}();
+	const auto alternate_host = []() {
 		const duckdb_api::CompiledRestOrigin destination = {duckdb_api::CompiledUrlScheme::HTTPS,
 		                                                    duckdb_api::CompiledRestHost("other.example"), 443};
-		ConnectorCatalogTestAccess::ValidateRequiredBearer("token", destination);
-	});
+		return ConnectorCatalogTestAccess::ValidateRequiredBearer("token", destination);
+	}();
+	Require(alternate_port.Destinations().size() == 1 && alternate_port.Destinations()[0].port == 444 &&
+	            alternate_host.Destinations().size() == 1 &&
+	            alternate_host.Destinations()[0].host.Value() == "other.example",
+	        "required bearer policy lost exact package destination authority");
 
 	RequireInvalid("relation accepted a fixed Authorization header", [&authenticated]() {
 		auto operation = authenticated.Operation();

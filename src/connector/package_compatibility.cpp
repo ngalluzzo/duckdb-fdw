@@ -133,6 +133,67 @@ bool SameGraphqlCursor(const CompiledGraphqlCursorPagination &left, const Compil
 	       SamePath(left.end_cursor, right.end_cursor) && left.max_pages_per_scan == right.max_pages_per_scan;
 }
 
+bool SameGraphqlLiteral(const CompiledGraphqlLiteral &left, const CompiledGraphqlLiteral &right) {
+	if (left.Kind() != right.Kind() || left.Scalar() != right.Scalar() || left.Items().size() != right.Items().size() ||
+	    left.Fields().size() != right.Fields().size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.Items().size(); index++) {
+		if (!left.Items()[index] || !right.Items()[index] ||
+		    !SameGraphqlLiteral(*left.Items()[index], *right.Items()[index])) {
+			return false;
+		}
+	}
+	for (std::size_t index = 0; index < left.Fields().size(); index++) {
+		if (left.Fields()[index].Name() != right.Fields()[index].Name() ||
+		    !SameGraphqlLiteral(left.Fields()[index].Value(), right.Fields()[index].Value())) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool SameGraphqlRecipe(const CompiledGraphqlOperation &left, const CompiledGraphqlOperation &right) {
+	if (!left.query_recipe || !right.query_recipe) {
+		return !left.query_recipe && !right.query_recipe;
+	}
+	const auto &left_recipe = left.QueryRecipe();
+	const auto &right_recipe = right.QueryRecipe();
+	if (left_recipe.Identity() != right_recipe.Identity() ||
+	    left_recipe.OperationName() != right_recipe.OperationName() ||
+	    left_recipe.RootPath() != right_recipe.RootPath() || left_recipe.NodesField() != right_recipe.NodesField() ||
+	    left_recipe.PageInfoField() != right_recipe.PageInfoField() ||
+	    left_recipe.HasNextPageField() != right_recipe.HasNextPageField() ||
+	    left_recipe.EndCursorField() != right_recipe.EndCursorField() ||
+	    left_recipe.Variables().size() != right_recipe.Variables().size() ||
+	    left_recipe.FixedArguments().size() != right_recipe.FixedArguments().size() ||
+	    left_recipe.Selections().size() != right_recipe.Selections().size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left_recipe.Variables().size(); index++) {
+		const auto &left_value = left_recipe.Variables()[index];
+		const auto &right_value = right_recipe.Variables()[index];
+		if (left_value.Name() != right_value.Name() || left_value.Type() != right_value.Type() ||
+		    left_value.Role() != right_value.Role() || left_value.ArgumentName() != right_value.ArgumentName()) {
+			return false;
+		}
+	}
+	for (std::size_t index = 0; index < left_recipe.FixedArguments().size(); index++) {
+		if (left_recipe.FixedArguments()[index].Name() != right_recipe.FixedArguments()[index].Name() ||
+		    !SameGraphqlLiteral(left_recipe.FixedArguments()[index].Value(),
+		                        right_recipe.FixedArguments()[index].Value())) {
+			return false;
+		}
+	}
+	for (std::size_t index = 0; index < left_recipe.Selections().size(); index++) {
+		if (left_recipe.Selections()[index].ColumnName() != right_recipe.Selections()[index].ColumnName() ||
+		    left_recipe.Selections()[index].FieldPath() != right_recipe.Selections()[index].FieldPath()) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool SameGraphql(const CompiledGraphqlOperation &left, const CompiledGraphqlOperation &right) {
 	return left.document_identity == right.document_identity && left.document == right.document &&
 	       left.digest_algorithm == right.digest_algorithm && left.document_digest == right.document_digest &&
@@ -144,7 +205,7 @@ bool SameGraphql(const CompiledGraphqlOperation &left, const CompiledGraphqlOper
 	       left.max_serialized_request_body_bytes_per_request == right.max_serialized_request_body_bytes_per_request &&
 	       left.max_serialized_request_body_bytes_per_scan == right.max_serialized_request_body_bytes_per_scan &&
 	       left.retry_enabled == right.retry_enabled && left.cache_enabled == right.cache_enabled &&
-	       left.providers_enabled == right.providers_enabled;
+	       left.providers_enabled == right.providers_enabled && SameGraphqlRecipe(left, right);
 }
 
 bool SameOperation(const CompiledOperation &left, const CompiledOperation &right) {
@@ -195,12 +256,15 @@ bool SameAuthentication(const CompiledAuthenticationPolicy &left, const Compiled
 	    left.Authenticator() != right.Authenticator() || left.Placement() != right.Placement()) {
 		return false;
 	}
-	const auto *left_destination = left.Destination();
-	const auto *right_destination = right.Destination();
-	if ((left_destination == nullptr) != (right_destination == nullptr)) {
+	if (left.Destinations().size() != right.Destinations().size()) {
 		return false;
 	}
-	return left_destination == nullptr || SameOrigin(*left_destination, *right_destination);
+	for (std::size_t index = 0; index < left.Destinations().size(); index++) {
+		if (!SameOrigin(left.Destinations()[index], right.Destinations()[index])) {
+			return false;
+		}
+	}
+	return true;
 }
 
 bool SameResources(const CompiledResourceCeilings &left, const CompiledResourceCeilings &right) {
@@ -247,12 +311,21 @@ bool SameRelation(const CompiledRelation &left, const CompiledRelation &right) {
 }
 
 bool SameNetworkPolicy(const CompiledNetworkPolicy &left, const CompiledNetworkPolicy &right) {
-	return left.allowed_schemes == right.allowed_schemes && left.allowed_hosts == right.allowed_hosts &&
-	       left.redirects_enabled == right.redirects_enabled &&
-	       left.private_addresses_enabled == right.private_addresses_enabled &&
-	       left.link_local_addresses_enabled == right.link_local_addresses_enabled &&
-	       left.loopback_addresses_enabled == right.loopback_addresses_enabled &&
-	       left.max_response_bytes == right.max_response_bytes;
+	if (left.allowed_schemes != right.allowed_schemes || left.allowed_hosts != right.allowed_hosts ||
+	    left.redirects_enabled != right.redirects_enabled ||
+	    left.private_addresses_enabled != right.private_addresses_enabled ||
+	    left.link_local_addresses_enabled != right.link_local_addresses_enabled ||
+	    left.loopback_addresses_enabled != right.loopback_addresses_enabled ||
+	    left.max_response_bytes != right.max_response_bytes ||
+	    left.allowed_origins.size() != right.allowed_origins.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.allowed_origins.size(); index++) {
+		if (!SameOrigin(left.allowed_origins[index], right.allowed_origins[index])) {
+			return false;
+		}
+	}
+	return true;
 }
 
 bool SameDescriptor(const CompiledConnector &left, const CompiledConnector &right) {

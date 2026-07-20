@@ -37,6 +37,20 @@ bool IsAsciiDigit(char value) {
 	return value >= '0' && value <= '9';
 }
 
+bool IsFixedHeaderValue(const std::string &value) {
+	if (value.size() > 1024 || (!value.empty() && (value.front() == ' ' || value.front() == '\t' ||
+	                                               value.back() == ' ' || value.back() == '\t'))) {
+		return false;
+	}
+	for (const auto character : value) {
+		const auto byte = static_cast<unsigned char>(character);
+		if (byte != 0x09U && (byte < 0x20U || byte > 0x7eU)) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool IsAsciiLower(char value) {
 	return value >= 'a' && value <= 'z';
 }
@@ -313,8 +327,7 @@ void ValidateQueryParameters(const std::vector<CompiledQueryParameter> &paramete
 void ValidateHeaders(const std::vector<CompiledHttpHeader> &headers, const char *protocol_name) {
 	for (std::size_t index = 0; index < headers.size(); index++) {
 		const auto &header = headers[index];
-		if (!IsHeaderName(header.name) || header.value.empty() ||
-		    header.value.find_first_of("\r\n") != std::string::npos) {
+		if (!IsHeaderName(header.name) || !IsFixedHeaderValue(header.value)) {
 			throw std::invalid_argument(std::string("compiled ") + protocol_name +
 			                            " request contains an invalid fixed header");
 		}
