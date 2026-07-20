@@ -23,6 +23,22 @@ void TestFixtureBoundary() {
 	Require(fixture.SourceSnapshot() != production.SourceSnapshot() && fixture.Snapshot() == production.Snapshot(),
 	        "typed GraphQL fixture agreement improperly depends on Connector source prose");
 
+	const auto anonymous_fixture = BuildValidAnonymousGraphqlScanPlanFixture();
+	const auto &anonymous_obligation = anonymous_fixture.AuthenticationObligation();
+	Require(anonymous_fixture.Operation().Protocol() == duckdb_api::PlannedProtocol::GRAPHQL &&
+	            anonymous_fixture.Operation().Graphql().document_identity ==
+	                duckdb_api::PlannedGraphqlDocumentIdentity::GITHUB_VIEWER_REPOSITORY_METRICS_V1 &&
+	            anonymous_fixture.Authentication() == duckdb_api::FeatureState::DISABLED &&
+	            !anonymous_fixture.SecretReference().IsPresent() &&
+	            anonymous_obligation.Requirement() == duckdb_api::PlannedCredentialRequirement::NONE &&
+	            anonymous_obligation.LogicalCredential().empty() &&
+	            anonymous_obligation.Authenticator() == duckdb_api::PlannedAuthenticator::NONE &&
+	            anonymous_obligation.Placement() == duckdb_api::PlannedCredentialPlacement::NONE &&
+	            anonymous_obligation.Destination() == nullptr,
+	        "anonymous GraphQL fixture carried credential authority or lost the canonical native operation");
+	Require(CountGraphqlPlanDifferences(fixture, anonymous_fixture) == 7,
+	        "anonymous GraphQL fixture changed facts outside the closed authentication envelope");
+
 	const auto profile_count = static_cast<std::size_t>(GraphqlLocalResidualProfile::COUNT);
 	Require(profile_count == 4, "closed valid GraphQL local-residual catalog changed without self-test review");
 	for (std::size_t value = 0; value < profile_count; value++) {

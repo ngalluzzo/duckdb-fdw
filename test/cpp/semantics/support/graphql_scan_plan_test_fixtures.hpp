@@ -191,6 +191,13 @@ duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_l
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name,
                                                       GraphqlLocalResidualProfile profile);
 
+// Canonical native GraphQL plan with the same operation, schema, cursor,
+// resource, network, and relational authority as the authenticated fixture,
+// but no credential requirement or logical-secret selector. Runtime consumes
+// this immutable value to exercise anonymous admission without receiving
+// Semantics construction authority.
+duckdb_api::ScanPlan BuildValidAnonymousGraphqlScanPlanFixture();
+
 // Coherent positive plan with package-like connector, relation, operation, and
 // source-provenance labels. Its package document identity and generic Relay
 // connection-node domain deliberately differ from the native 0.7 bridge; all

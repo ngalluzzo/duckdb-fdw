@@ -71,7 +71,7 @@ public:
 	                                       bool complete_residual);
 	static duckdb_api::ScanPlan GenericPagination(const std::string &secret_name);
 	static duckdb_api::ScanPlan DistinctRestQueryPath(const std::string &secret_name);
-	static duckdb_api::ScanPlan Graphql(const std::string &secret_name, GraphqlLocalResidualProfile profile);
+	static duckdb_api::ScanPlan Graphql(const std::string *secret_name, GraphqlLocalResidualProfile profile);
 	static bool RejectsRestQueryBinding(RestQueryBindingConstructionCounterexample counterexample);
 	static bool RejectsPackagePredicateMaterialization(PackagePredicatePlanCounterexample counterexample);
 
@@ -518,7 +518,7 @@ bool ScanPlanFixtureBuilder::RejectsPackagePredicateMaterialization(PackagePredi
 	}
 }
 
-duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string &secret_name,
+duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string *secret_name,
                                                      GraphqlLocalResidualProfile profile) {
 	static const std::string DOCUMENT = "query DuckdbApiViewerRepositoryMetrics($pageSize: Int!, $cursor: String) {\n"
 	                                    "  viewer {\n"
@@ -610,7 +610,9 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string &secret_n
 	    32,    32, 64 * 1024 * 1024, 512 * 1024, 64 * 1024 * 1024, 3200, 512, 16, 2 * 1024 * 1024, 64,
 	    30000, 1,  256 * 1024};
 	plan.budgets = plan.pagination.page_budgets;
-	RequireBearer(plan, secret_name);
+	if (secret_name != nullptr) {
+		RequireBearer(plan, *secret_name);
+	}
 	const char *predicate_reason = nullptr;
 	switch (profile) {
 	case GraphqlLocalResidualProfile::UNRESTRICTED:
@@ -700,7 +702,11 @@ duckdb_api::ScanPlan BuildAmbiguousPredicateFallbackPlanFixture(const std::strin
 
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixtureImpl(const std::string &exact_logical_secret_name,
                                                           GraphqlLocalResidualProfile profile) {
-	return ScanPlanFixtureBuilder::Graphql(exact_logical_secret_name, profile);
+	return ScanPlanFixtureBuilder::Graphql(&exact_logical_secret_name, profile);
+}
+
+duckdb_api::ScanPlan BuildValidAnonymousGraphqlScanPlanFixtureImpl() {
+	return ScanPlanFixtureBuilder::Graphql(nullptr, GraphqlLocalResidualProfile::UNRESTRICTED);
 }
 
 } // namespace duckdb_api_test
