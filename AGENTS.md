@@ -185,6 +185,8 @@ Documentation and agent changes must pass:
 
 ```sh
 ruby scripts/validate-agent-assets.rb
+python3 -I -B scripts/verify-public-surface-inventory.py
+python3 -I -B test/python/public_surface_inventory_tests.py
 git diff --check
 git diff --cached --check
 ```

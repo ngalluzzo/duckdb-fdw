@@ -43,6 +43,17 @@ handoff, run `make verify`; it allocates a new root and executes the complete
 fresh product cell. The tagged release and sanitizer procedure remains the
 [0.1.0 evidence runbook](docs/releases/0.1.0.md).
 
+## Public compatibility changes
+
+Any project-owned SQL addition, deprecation, removal, or incompatible shape
+change must update the schema-backed
+[public surface inventory](release/public-surface/README.md). The inventory
+records the accepted RFC, content-addressed function shape, release
+classification, and exact active/removed release views; Query's independent
+contract pins the complete expected identity and transition set. Run the
+verifier and mutation tests before the native product gates. An accepted RFC
+authorizes a change but does not replace executable compatibility evidence.
+
 ## Documentation conventions
 
 - Keep architecture, connector syntax, and runtime contracts in their

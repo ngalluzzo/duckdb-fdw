@@ -218,6 +218,8 @@ print_paths() {
 
 run_tests() {
     local contract="${REPOSITORY_ROOT}/test/python/source_demo_contract.py"
+    python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-public-surface-inventory.py"
+    python3 -I -B "${REPOSITORY_ROOT}/test/python/public_surface_inventory_tests.py"
     python3 -I -B "${REPOSITORY_ROOT}/scripts/test-native-dependencies.py"
     "${NATIVE_TEST_ROOT}/duckdb_api_connector_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_connector_catalog_fixture_tests"

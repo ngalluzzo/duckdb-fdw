@@ -120,3 +120,20 @@ target_link_libraries(
           Threads::Threads)
 target_include_directories(duckdb_api_adapter_stream_contract_tests PRIVATE test/cpp)
 configure_duckdb_api_cpp_target(duckdb_api_adapter_stream_contract_tests)
+
+# RFC 0012 is accepted, but this opt-in executable remains bounded decision
+# evidence rather than product code or a release gate. Its sources stay outside
+# every production inventory.
+add_executable(
+  duckdb_api_rfc0012_native_coordinator_trial EXCLUDE_FROM_ALL
+  test/cpp/query/rfc0012/native_coordinator_trial.cpp
+  test/cpp/query/rfc0012/coordinator_trial_support.cpp)
+target_link_libraries(
+  duckdb_api_rfc0012_native_coordinator_trial
+  PRIVATE dummy_static_extension_loader
+          duckdb_static
+          Threads::Threads)
+target_include_directories(
+  duckdb_api_rfc0012_native_coordinator_trial
+  PRIVATE test/cpp)
+configure_duckdb_api_cpp_target(duckdb_api_rfc0012_native_coordinator_trial)
