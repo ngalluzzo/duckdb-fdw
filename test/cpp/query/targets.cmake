@@ -138,6 +138,7 @@ target_compile_definitions(
 target_link_libraries(
   duckdb_api_package_query_surface_tests
   PRIVATE duckdb_api_query_package_catalog_service
+          duckdb_api_package_compiler_fixture_service
           duckdb_api_package_generation_fixture_service
           duckdb_api_relational_planning_service
           dummy_static_extension_loader

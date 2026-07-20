@@ -8,6 +8,7 @@
 #include "duckdb_api/scan_planner.hpp"
 #include "package_lifecycle_sentry.hpp"
 #include "connector/support/package_generation_test_fixtures.hpp"
+#include "connector/support/package_compiler_test_fixtures.hpp"
 #include "support/require.hpp"
 
 #include <mutex>
@@ -67,6 +68,37 @@ public:
 private:
 	const std::shared_ptr<const duckdb_api::CompiledQueryRegistrationView> registration;
 	const std::shared_ptr<PackageQueryProbe> probe;
+};
+
+// Runtime owns this concrete capability in production. The test lease proves
+// that Query publishes a changed candidate only from DuckDB's commit callback
+// and contains every rejected or rolled-back candidate as an exact-once
+// discard.
+class PackagePublicationLease final : public duckdb_api::QueryPublicationLease {
+public:
+	explicit PackagePublicationLease(std::shared_ptr<PackageQueryProbe> probe_p)
+	    : probe(std::move(probe_p)), terminal(false) {
+	}
+
+	~PackagePublicationLease() noexcept override {
+		Discard();
+	}
+
+	void Commit() noexcept override {
+		if (!terminal.exchange(true, std::memory_order_acq_rel)) {
+			probe->publication_commits.fetch_add(1, std::memory_order_relaxed);
+		}
+	}
+
+	void Discard() noexcept override {
+		if (!terminal.exchange(true, std::memory_order_acq_rel)) {
+			probe->publication_discards.fetch_add(1, std::memory_order_relaxed);
+		}
+	}
+
+private:
+	const std::shared_ptr<PackageQueryProbe> probe;
+	std::atomic<bool> terminal;
 };
 
 class PackageRowStream final : public duckdb_api::BatchStream {
@@ -164,7 +196,7 @@ private:
 
 PackageQueryProbe::PackageQueryProbe()
     : load_stages(0), reload_stages(0), plans(0), streams_opened(0), streams_closed(0), rows(0),
-      generation_owners_destroyed(0) {
+      generation_owners_destroyed(0), publication_commits(0), publication_discards(0) {
 }
 
 PackageQueryStagingService::PackageQueryStagingService(
@@ -209,7 +241,9 @@ duckdb_api::QueryStagedGeneration PackageQueryStagingService::StageLoad(const st
 		throw duckdb_api::QueryStagingError("package_root", "compile", "connector.yaml", "package_root",
 		                                    "package root is not the controlled fixture");
 	}
-	return duckdb_api::QueryStagedGeneration(BuildPublished(initial_registration, initial_connector, "old"), true);
+	return duckdb_api::QueryStagedGeneration(
+	    BuildPublished(initial_registration, initial_connector, "old"), true,
+	    std::unique_ptr<duckdb_api::QueryPublicationLease>(new PackagePublicationLease(probe)));
 }
 
 duckdb_api::QueryStagedGeneration
@@ -228,8 +262,9 @@ PackageQueryStagingService::StageReload(const std::string &connector,
 		last_candidate = active;
 		return duckdb_api::QueryStagedGeneration(active, false);
 	}
-	return duckdb_api::QueryStagedGeneration(BuildPublished(replacement_registration, replacement_connector, "new"),
-	                                         true);
+	return duckdb_api::QueryStagedGeneration(
+	    BuildPublished(replacement_registration, replacement_connector, "new"), true,
+	    std::unique_ptr<duckdb_api::QueryPublicationLease>(new PackagePublicationLease(probe)));
 }
 
 void PackageQueryStagingService::SetReloadChanged(bool changed) noexcept {
@@ -249,6 +284,20 @@ BuildCompatibilityPackageQueryStaging(const std::string &absolute_root,
 	return std::shared_ptr<PackageQueryStagingService>(
 	    new PackageQueryStagingService(initial.QueryRegistration(), initial.Connector(),
 	                                   replacement.QueryRegistration(), replacement.Connector(), absolute_root, probe));
+}
+
+std::shared_ptr<PackageQueryStagingService>
+BuildGithubPackageQueryStaging(const std::string &absolute_repository_root,
+                               const std::shared_ptr<PackageQueryProbe> &probe) {
+	auto initial = CompileRepositoryGithubRegistrationFixture(absolute_repository_root);
+	auto replacement = CompileRepositoryGithubRegistrationFixture(absolute_repository_root);
+	// The Connector-owned fixture deliberately exposes only registration and
+	// opaque lifetime facts. Query's controlled planning double therefore uses
+	// the matching public native GitHub connector; it does not import compiler
+	// implementation data or construct registration descriptors.
+	return std::shared_ptr<PackageQueryStagingService>(new PackageQueryStagingService(
+	    std::move(initial), duckdb_api::BuildNativeGithubConnector(), std::move(replacement),
+	    duckdb_api::BuildNativeGithubConnector(), absolute_repository_root + "/docs/rfcs/evidence/0013/github", probe));
 }
 
 std::shared_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator>

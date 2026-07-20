@@ -38,6 +38,10 @@ struct OwnedFunctionExpectation final {
 
 class PackagePublicationContextState final : public ClientContextState {
 public:
+	~PackagePublicationContextState() override {
+		Discard();
+	}
+
 	void RecordBind(ClientContext &context) {
 		const auto active_query = context.transaction.GetActiveQuery();
 		if (query_id != active_query) {
@@ -51,29 +55,47 @@ public:
 	}
 
 	void Hold(std::shared_ptr<CatalogGenerationCoordinator> coordinator_p,
-	          std::unique_ptr<std::unique_lock<std::timed_mutex>> guard_p) {
-		if (guard) {
+	          std::unique_ptr<std::unique_lock<std::timed_mutex>> guard_p,
+	          std::unique_ptr<duckdb_api::QueryPublicationLease> lease_p) {
+		if (!lease_p) {
+			throw InternalException("duckdb_api publication requires a staged lease");
+		}
+		if (guard || lease) {
 			throw InternalException("duckdb_api publication guard is already held by this context");
 		}
 		coordinator = std::move(coordinator_p);
 		guard = std::move(guard_p);
+		lease = std::move(lease_p);
 	}
 
 	void TransactionCommit(MetaTransaction &, ClientContext &) override {
+		if (lease) {
+			lease->Commit();
+			lease.reset();
+		}
 		guard.reset();
 		coordinator.reset();
 	}
 
 	void TransactionRollback(MetaTransaction &, ClientContext &) override {
+		Discard();
+	}
+
+private:
+	void Discard() noexcept {
+		if (lease) {
+			lease->Discard();
+			lease.reset();
+		}
 		guard.reset();
 		coordinator.reset();
 	}
 
-private:
 	idx_t query_id = DConstants::INVALID_INDEX;
 	idx_t bind_count = 0;
 	std::shared_ptr<CatalogGenerationCoordinator> coordinator;
 	std::unique_ptr<std::unique_lock<std::timed_mutex>> guard;
+	std::unique_ptr<duckdb_api::QueryPublicationLease> lease;
 };
 
 std::vector<OwnedFunctionExpectation> ExpectedFunctions(const std::shared_ptr<const PackageCatalogSnapshot> &snapshot) {
@@ -197,14 +219,11 @@ void CatalogGenerationCoordinator::RecordManagementBind(ClientContext &context) 
 
 void CatalogGenerationCoordinator::Publish(ClientContext &context,
                                            const std::shared_ptr<const PackageCatalogSnapshot> &base,
-                                           const duckdb_api::QueryStagedGeneration &staged,
-                                           PackagePublicationIntent intent) {
+                                           duckdb_api::QueryStagedGeneration &staged, PackagePublicationIntent intent) {
 	if (!base) {
 		throw InternalException("duckdb_api publication is missing its base catalog snapshot");
 	}
 	auto guard = AcquirePublication(context, publication_mutex, closing);
-	auto context_state = context.registered_state->GetOrCreate<PackagePublicationContextState>(PUBLICATION_STATE_KEY);
-	context_state->Hold(shared_from_this(), std::move(guard));
 
 	const auto &candidate = staged.Generation();
 	std::shared_ptr<const PackageCatalogSnapshot> target;
@@ -239,6 +258,9 @@ void CatalogGenerationCoordinator::Publish(ClientContext &context,
 		}
 		return;
 	}
+	if (!staged.PublicationLease()) {
+		throw InvalidInputException("[duckdb_api][publication] changed generation has no publication lease");
+	}
 
 	PreflightMacros(context, *candidate);
 	std::vector<std::string> replaceable_names;
@@ -253,6 +275,8 @@ void CatalogGenerationCoordinator::Publish(ClientContext &context,
 			RequireVacant(set, transaction, name);
 		}
 	}
+	auto context_state = context.registered_state->GetOrCreate<PackagePublicationContextState>(PUBLICATION_STATE_KEY);
+	context_state->Hold(shared_from_this(), std::move(guard), staged.TakePublicationLease());
 
 	if (active) {
 		for (const auto &relation : active->Registration().Relations()) {

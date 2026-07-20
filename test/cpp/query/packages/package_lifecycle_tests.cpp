@@ -37,6 +37,9 @@ void TestCloseRejectsPublicationButAllowsPublishedScans() {
 	auto inventory = connection.Query("SELECT package_version FROM system.main.duckdb_api_loaded_connectors()");
 	Require(!inventory->HasError() && inventory->GetValue(0, 0).ToString() == "1.2.3",
 	        "closing publication changed the active generation");
+	Require(probe->publication_commits.load(std::memory_order_relaxed) == 1 &&
+	            probe->publication_discards.load(std::memory_order_relaxed) == 1,
+	        "closing publication did not discard only the rejected replacement candidate");
 }
 
 void TestFailedPublicationReleasesCandidateOwner() {
@@ -52,6 +55,9 @@ void TestFailedPublicationReleasesCandidateOwner() {
 	Require(staging->LastCandidate().expired(), "failed publication retained the staged Query generation");
 	Require(probe->generation_owners_destroyed.load(std::memory_order_relaxed) == 1,
 	        "failed publication did not release its opaque Runtime owner exactly once");
+	Require(probe->publication_commits.load(std::memory_order_relaxed) == 0 &&
+	            probe->publication_discards.load(std::memory_order_relaxed) == 1,
+	        "failed publication did not discard its Runtime candidate exactly once");
 }
 
 void TestDatabaseLifetimeSentryReleasesCoordinatorAndGeneration() {

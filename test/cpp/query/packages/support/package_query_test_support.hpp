@@ -29,6 +29,8 @@ struct PackageQueryProbe final {
 	std::atomic<std::uint64_t> streams_closed;
 	std::atomic<std::uint64_t> rows;
 	std::atomic<std::uint64_t> generation_owners_destroyed;
+	std::atomic<std::uint64_t> publication_commits;
+	std::atomic<std::uint64_t> publication_discards;
 };
 
 // Honest Query consumer double: callers supply complete immutable Connector
@@ -72,6 +74,9 @@ private:
 std::shared_ptr<PackageQueryStagingService>
 BuildCompatibilityPackageQueryStaging(const std::string &absolute_root,
                                       const std::shared_ptr<PackageQueryProbe> &probe);
+std::shared_ptr<PackageQueryStagingService>
+BuildGithubPackageQueryStaging(const std::string &absolute_repository_root,
+                               const std::shared_ptr<PackageQueryProbe> &probe);
 
 std::shared_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator>
 RegisterPackageQuerySurface(duckdb::DuckDB &database, const std::shared_ptr<const PackageQueryStagingService> &staging);

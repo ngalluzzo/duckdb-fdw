@@ -25,7 +25,7 @@ public:
 
 	void RecordManagementBind(ClientContext &context);
 	void Publish(ClientContext &context, const std::shared_ptr<const PackageCatalogSnapshot> &base,
-	             const duckdb_api::QueryStagedGeneration &staged, PackagePublicationIntent intent);
+	             duckdb_api::QueryStagedGeneration &staged, PackagePublicationIntent intent);
 
 	const std::shared_ptr<const duckdb_api::QueryPackageStagingService> &Staging() const noexcept;
 	void BeginClose() noexcept;

@@ -158,6 +158,9 @@ void TestCollisionRefusalIsAtomic() {
 	auto user_owned = connection.Query("SELECT status FROM fixture_package_distinct_status()");
 	Require(!user_owned->HasError() && user_owned->GetValue(0, 0).ToString() == "user-owned",
 	        "collision failure replaced the unrelated table macro");
+	Require(probe->publication_commits.load(std::memory_order_relaxed) == 0 &&
+	            probe->publication_discards.load(std::memory_order_relaxed) == 1,
+	        "collision failure did not discard its Runtime candidate exactly once");
 }
 
 } // namespace

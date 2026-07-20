@@ -4,8 +4,8 @@
 #include "duckdb_api/execution.hpp"
 #include "duckdb_api/scan_request.hpp"
 
-#include <memory>
 #include <exception>
+#include <memory>
 #include <string>
 
 namespace duckdb_api {
@@ -53,6 +53,19 @@ public:
 	virtual ~QueryGenerationOwner() noexcept;
 };
 
+// Opaque publication capability supplied by lead composition for a changed
+// Runtime candidate. Query retains it across DuckDB catalog mutation and calls
+// exactly one terminal method from the corresponding transaction callback.
+// Commit must be an infallible pointer-swap style publication; Discard is
+// idempotent. Concrete destruction must contain an uncommitted candidate as a
+// discard so exceptions before transaction ownership cannot leak staged state.
+class QueryPublicationLease {
+public:
+	virtual ~QueryPublicationLease() noexcept;
+	virtual void Commit() noexcept = 0;
+	virtual void Discard() noexcept = 0;
+};
+
 // Complete immutable value needed to publish and execute one package
 // generation. Lead-owned composition assembles the three provider services;
 // Query validates and consumes their narrow interfaces without parsing source,
@@ -87,14 +100,22 @@ private:
 // surrounding DuckDB catalog transaction commits.
 class QueryStagedGeneration {
 public:
-	QueryStagedGeneration(std::shared_ptr<const QueryPublishedGeneration> generation, bool changed);
+	QueryStagedGeneration(std::shared_ptr<const QueryPublishedGeneration> generation, bool changed,
+	                      std::unique_ptr<QueryPublicationLease> publication_lease = nullptr);
+	QueryStagedGeneration(QueryStagedGeneration &&) noexcept = default;
+	QueryStagedGeneration &operator=(QueryStagedGeneration &&) noexcept = default;
+	QueryStagedGeneration(const QueryStagedGeneration &) = delete;
+	QueryStagedGeneration &operator=(const QueryStagedGeneration &) = delete;
 
 	const std::shared_ptr<const QueryPublishedGeneration> &Generation() const noexcept;
 	bool Changed() const noexcept;
+	const QueryPublicationLease *PublicationLease() const noexcept;
+	std::unique_ptr<QueryPublicationLease> TakePublicationLease() noexcept;
 
 private:
 	std::shared_ptr<const QueryPublishedGeneration> generation;
 	bool changed;
+	std::unique_ptr<QueryPublicationLease> publication_lease;
 };
 
 // Lead-composition port used only by management execution. Connector owns

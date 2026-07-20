@@ -60,6 +60,9 @@ void TestLoadIsPrunableAndPublishesExactlyOnce() {
 	auto loaded = fixture.connection.Query(LoadCall());
 	RequireLoadRow(*loaded, "1.2.3", true, 3);
 	Require(fixture.probe->load_stages.load(std::memory_order_relaxed) == 1, "load did not stage exactly once");
+	Require(fixture.probe->publication_commits.load(std::memory_order_relaxed) == 1 &&
+	            fixture.probe->publication_discards.load(std::memory_order_relaxed) == 0,
+	        "committed load did not publish its Runtime candidate exactly once");
 	auto inventory = fixture.connection.Query("SELECT connector FROM system.main.duckdb_api_loaded_connectors()");
 	Require(!inventory->HasError() && inventory->RowCount() == 1 &&
 	            inventory->GetValue(0, 0).ToString() == "fixture_package",
@@ -75,6 +78,9 @@ void TestLoadRejectsDuplicatesAndTransactions() {
 	auto inventory = duplicate.connection.Query("SELECT count(*) FROM system.main.duckdb_api_loaded_connectors()");
 	Require(!inventory->HasError() && inventory->GetValue(0, 0).GetValue<std::int64_t>() == 1,
 	        "duplicate load changed the active inventory");
+	Require(duplicate.probe->publication_commits.load(std::memory_order_relaxed) == 1 &&
+	            duplicate.probe->publication_discards.load(std::memory_order_relaxed) == 1,
+	        "duplicate load did not discard only its rejected Runtime candidate");
 
 	PackageDatabase transaction;
 	RequirePackageQuerySuccess(transaction.connection, "BEGIN TRANSACTION");
@@ -84,6 +90,9 @@ void TestLoadRejectsDuplicatesAndTransactions() {
 	RequirePackageQuerySuccess(transaction.connection, "ROLLBACK");
 	Require(transaction.probe->load_stages.load(std::memory_order_relaxed) == 0,
 	        "transactional load entered staging before rejection");
+	Require(transaction.probe->publication_commits.load(std::memory_order_relaxed) == 0 &&
+	            transaction.probe->publication_discards.load(std::memory_order_relaxed) == 0,
+	        "transactional load acquired Runtime publication authority before rejection");
 }
 
 void TestOneManagementInvocationPerStatement() {
@@ -107,6 +116,9 @@ void TestReloadNoOpAndReplacement() {
 	RequireLoadRow(*no_op, "1.2.3", false, 3);
 	Require(fixture.probe->reload_stages.load(std::memory_order_relaxed) == 1,
 	        "no-op reload did not stage exactly once");
+	Require(fixture.probe->publication_commits.load(std::memory_order_relaxed) == 1 &&
+	            fixture.probe->publication_discards.load(std::memory_order_relaxed) == 0,
+	        "no-op reload acquired or terminated Runtime publication authority");
 
 	fixture.staging->SetReloadChanged(true);
 	auto changed = fixture.connection.Query(
@@ -114,6 +126,9 @@ void TestReloadNoOpAndReplacement() {
 	RequireLoadRow(*changed, "1.3.0", true, 4);
 	Require(fixture.probe->reload_stages.load(std::memory_order_relaxed) == 2,
 	        "changed reload did not stage exactly once");
+	Require(fixture.probe->publication_commits.load(std::memory_order_relaxed) == 2 &&
+	            fixture.probe->publication_discards.load(std::memory_order_relaxed) == 0,
+	        "changed reload did not commit exactly one replacement Runtime candidate");
 	auto inventory = fixture.connection.Query(
 	    "SELECT package_version, relation_count FROM system.main.duckdb_api_loaded_connectors()");
 	Require(!inventory->HasError() && inventory->RowCount() == 1 && inventory->GetValue(0, 0).ToString() == "1.3.0" &&
@@ -139,6 +154,9 @@ void TestUnknownReloadAndPreparedManagement() {
 	RequireLoadRow(*result, "1.2.3", true, 3);
 	Require(prepared.probe->load_stages.load(std::memory_order_relaxed) == 1,
 	        "prepared load did not execute staging exactly once");
+	Require(prepared.probe->publication_commits.load(std::memory_order_relaxed) == 1 &&
+	            prepared.probe->publication_discards.load(std::memory_order_relaxed) == 0,
+	        "prepared load did not publish at execution commit exactly once");
 }
 
 } // namespace

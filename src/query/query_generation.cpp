@@ -61,6 +61,7 @@ const std::string &QueryStagingError::SafeDetail() const noexcept {
 
 QueryScanPlanningService::~QueryScanPlanningService() noexcept = default;
 QueryGenerationOwner::~QueryGenerationOwner() noexcept = default;
+QueryPublicationLease::~QueryPublicationLease() noexcept = default;
 QueryPackageStagingService::~QueryPackageStagingService() noexcept = default;
 
 QueryPublishedGeneration::QueryPublishedGeneration(CompiledQueryRegistrationView registration_p,
@@ -100,10 +101,13 @@ const std::shared_ptr<const QueryGenerationOwner> &QueryPublishedGeneration::Own
 }
 
 QueryStagedGeneration::QueryStagedGeneration(std::shared_ptr<const QueryPublishedGeneration> generation_p,
-                                             bool changed_p)
-    : generation(std::move(generation_p)), changed(changed_p) {
+                                             bool changed_p, std::unique_ptr<QueryPublicationLease> publication_lease_p)
+    : generation(std::move(generation_p)), changed(changed_p), publication_lease(std::move(publication_lease_p)) {
 	if (!generation) {
 		throw std::invalid_argument("staged Query generation must not be empty");
+	}
+	if (changed != static_cast<bool>(publication_lease)) {
+		throw std::invalid_argument("changed Query generation requires exactly one publication lease");
 	}
 }
 
@@ -113,6 +117,14 @@ const std::shared_ptr<const QueryPublishedGeneration> &QueryStagedGeneration::Ge
 
 bool QueryStagedGeneration::Changed() const noexcept {
 	return changed;
+}
+
+const QueryPublicationLease *QueryStagedGeneration::PublicationLease() const noexcept {
+	return publication_lease.get();
+}
+
+std::unique_ptr<QueryPublicationLease> QueryStagedGeneration::TakePublicationLease() noexcept {
+	return std::move(publication_lease);
 }
 
 } // namespace duckdb_api
