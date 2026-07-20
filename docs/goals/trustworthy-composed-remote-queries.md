@@ -2,7 +2,7 @@
 
 Follow `docs/PRODUCT_DELIVERY.md`.
 
-Status: **Active as of 2026-07-19**. RFC 0010 is Accepted.
+Status: **Completed on 2026-07-19**. RFC 0010 is Accepted.
 
 ## PM brief
 
@@ -165,8 +165,58 @@ consumer.
 
 ## Completion record
 
-Implementation, permanent oracles, contract propagation, topology interaction
-exits, independent review, and cached product gates are complete. The active
-goal remains open only for the commit-bound fresh native product cell required
-by `AGENTS.md`; its command, result, and final commit identity will be appended
-here after the implementation commit.
+Delivered in implementation commit `9f0cb82` without changing the public SQL
+function, schemas, secret behavior, or sole installed
+`visibility = 'private'` Superset mapping.
+
+- **Product evidence:** the actual-DuckDB controlled product contract executes
+  identical mapping-present and forced-local SQL over one duplicate-preserving
+  bag. Its projection, selective `AND`, `OR`, `NOT`, total order, local
+  limit/offset, and row-level `TRUE`/`FALSE`/`NULL` cases pass with 122 requests,
+  including 29 composition requests. Early close, cancellation, scan pruning,
+  prepared copies, and failure recovery remain covered by their focused and
+  product oracles.
+- **Semantic evidence:** Connector-validated production planner inputs cover
+  Exact, Superset, Unsupported, Ambiguous, and invalid outcomes. The law oracle
+  derives remote `R` from the selected operation, input, mapping, and proof;
+  checks `D => R`, Exact three-valued equivalence, occurrence identity and
+  multiplicity; preserves opaque Boolean positions; and distinguishes lawful
+  Superset extras. Deterministic operation selection proves unique priority
+  winner, fallback after ineligibility, equal-rank failure, contradictory
+  selector rejection, and multiple-fallback rejection.
+- **Runtime evidence:** only the installed GitHub Superset plan admits the
+  selected typed request. Exact relabeling and contradictory fallback facts
+  fail before bearer materialization or transport. Selected and unrestricted
+  pagination, resource accounting, cancellation, close, curl, and recovery
+  suites pass without Runtime reclassifying Semantics.
+- **Explanation and ownership:** Query reports the bounded candidate, remote
+  predicate and accuracy, retained scope, complete projection closure,
+  capabilities, structured category/reason, and DuckDB owners. DuckDB retains
+  every offered filter and owns final projection, ordering, limit, and offset;
+  Runtime receives no remote ordering or bound authority.
+- **Interaction exits:** Connector facts and controlled catalogs are consumed
+  through `connector_catalog.hpp` and the Connector fixture service;
+  Semantics alone owns mapping, implication, composition, and selection.
+  Runtime production includes only public plan/runtime APIs and its tests use
+  the Semantics fixture service without planner-private construction. Query
+  consumes the public planner and Runtime services; only the named controlled
+  product composition links the whole graph. The final target/include audit
+  found no consumer compiling provider production sources or importing a
+  provider's private construction surface. All four workstream plans therefore
+  record X-as-a-Service exits.
+- **Independent review:** the first relational and Query/Runtime adversarial
+  passes objected to retained-scope coherence, incomplete operation selection,
+  law-oracle independence, false Exact Runtime fixtures, structured admission,
+  and product-differential coverage. Owning streams repaired every supported
+  finding. Final relational and Query/Runtime re-reviews approved with no
+  remaining P0-P3 findings.
+- **Verification:** `make build`, `make test`, `make demo`,
+  `scripts/verify-source-identities.py`,
+  `python3 -I -B scripts/test-native-dependencies.py`, agent-asset validation,
+  and staged/unstaged whitespace checks passed. The authoritative command
+  `scripts/run-native-product-tests.sh
+  "$PWD/.build/verify-0.6-composition-20260719-2" debug` archived committed
+  `HEAD`, performed a fresh 780-step DuckDB/extension build, passed every
+  private C++ contract, SQLLogicTest, artifact-inventory and controlled/direct-
+  load product oracle, and produced artifact SHA-256
+  `d0fb907d4d2c890ff6db538a1faf1dbc05b6ed1fa0c78c264ac9c60977f2d791`.
