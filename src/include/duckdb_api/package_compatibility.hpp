@@ -20,10 +20,14 @@ enum class PackageReloadClassification {
 	INCOMPATIBLE_RELOAD
 };
 
-// Immutable result of comparing an active and candidate generation. Connector
-// owns classification; publication remains a Query/Runtime responsibility.
-// Successful values have no diagnostic. Rejected values always report phase
-// `compatibility` and exactly one RFC 0013 code.
+// Immutable result of comparing one exact active/candidate generation pair.
+// Connector owns classification; publication remains a Query/Runtime
+// responsibility. The decision pins both opaque generation identities so a
+// consumer can reject replay against another pair without inspecting or
+// reclassifying Connector internals. Successful values have no diagnostic.
+// Rejected values always report phase `compatibility` and exactly one RFC 0013
+// code. Copies are safe for concurrent read-only use and release their pinned
+// generation ownership on destruction.
 class PackageReloadDecision {
 public:
 	PackageReloadDecision(const PackageReloadDecision &) = default;
@@ -38,15 +42,19 @@ public:
 	const char *DiagnosticCode() const;
 	const char *DiagnosticPhase() const;
 	const std::string &ConnectorId() const;
+	bool Matches(const CompiledGenerationHandle &active, const CompiledGenerationHandle &candidate) const;
 
 private:
 	friend PackageReloadDecision ClassifyPackageReload(const CompiledPackageGeneration &active,
 	                                                   const CompiledPackageGeneration &candidate);
 
-	PackageReloadDecision(PackageReloadClassification classification, std::string connector_id);
+	PackageReloadDecision(PackageReloadClassification classification, std::string connector_id,
+	                      CompiledGenerationHandle active, CompiledGenerationHandle candidate);
 
 	PackageReloadClassification classification;
 	std::string connector_id;
+	CompiledGenerationHandle active_generation;
+	CompiledGenerationHandle candidate_generation;
 };
 
 // Compares immutable normalized compiled descriptors and identity. Package

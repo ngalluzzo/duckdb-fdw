@@ -335,6 +335,55 @@ void TestCompatibleTransitions() {
 	Require(!no_op.Changed() && changed.Changed(), "reload changed flag disagreed with exact and published outcomes");
 }
 
+void RequireExactDecisionPair(const duckdb_api::CompiledPackageGeneration &active,
+                              const duckdb_api::CompiledPackageGeneration &candidate,
+                              PackageReloadClassification expected, const std::string &label) {
+	const auto decision = duckdb_api::ClassifyPackageReload(active, candidate);
+	const auto active_handle = active.OpaqueHandle();
+	const auto candidate_handle = candidate.OpaqueHandle();
+	Require(decision.Classification() == expected && decision.Matches(active_handle, candidate_handle),
+	        label + " decision did not match its exact classified generation pair");
+	Require(!decision.Matches(candidate_handle, active_handle),
+	        label + " decision accepted its generation pair swapped");
+
+	const auto same_active_identity = duckdb_api_test::BuildPackageCompatibilityFixture(
+	    PackageCompatibilityFixture::BASELINE, active.Identity().PackageVersion(), 'a');
+	const auto same_candidate_identity = duckdb_api_test::BuildPackageCompatibilityFixture(
+	    PackageCompatibilityFixture::BASELINE, candidate.Identity().PackageVersion(),
+	    candidate.Identity().PackageDigest().back());
+	const auto unrelated = duckdb_api_test::BuildPackageCompatibilityFixture(
+	    PackageCompatibilityFixture::CONNECTOR_ID_CHANGED, "1.3.0", 'f');
+	Require(!decision.Matches(same_active_identity.OpaqueHandle(), candidate_handle),
+	        label + " decision matched another active generation with the same package identity");
+	Require(!decision.Matches(active_handle, same_candidate_identity.OpaqueHandle()),
+	        label + " decision matched another candidate generation with the same connector/version identity");
+	Require(!decision.Matches(unrelated.OpaqueHandle(), candidate_handle) &&
+	            !decision.Matches(active_handle, unrelated.OpaqueHandle()),
+	        label + " decision matched an unrelated connector generation");
+	Require(decision.Matches(duckdb_api::CompiledGenerationHandle(active_handle),
+	                         duckdb_api::CompiledGenerationHandle(candidate_handle)),
+	        label + " decision rejected copied handles for its exact generation pair");
+}
+
+void TestReloadDecisionsBindExactGenerationPairs() {
+	static_assert(!std::is_default_constructible<duckdb_api::PackageReloadDecision>::value,
+	              "reload decisions must originate from Connector classification");
+	const auto active =
+	    duckdb_api_test::BuildPackageCompatibilityFixture(PackageCompatibilityFixture::BASELINE, "1.2.3", 'a');
+	const auto no_op_candidate =
+	    duckdb_api_test::BuildPackageCompatibilityFixture(PackageCompatibilityFixture::BASELINE, "1.2.3", 'a');
+	const auto compatible_candidate =
+	    duckdb_api_test::BuildPackageCompatibilityFixture(PackageCompatibilityFixture::BASELINE, "1.2.4", 'b');
+	const auto incompatible_candidate =
+	    duckdb_api_test::BuildPackageCompatibilityFixture(PackageCompatibilityFixture::OPERATION_CHANGED, "1.3.0", 'c');
+
+	RequireExactDecisionPair(active, no_op_candidate, PackageReloadClassification::EXACT_NO_OP, "no-op");
+	RequireExactDecisionPair(active, compatible_candidate, PackageReloadClassification::COMPATIBLE_PROVENANCE_PATCH,
+	                         "compatible");
+	RequireExactDecisionPair(active, incompatible_candidate, PackageReloadClassification::INCOMPATIBLE_RELOAD,
+	                         "incompatible");
+}
+
 void TestIdentityAndVersionRejections() {
 	const auto active =
 	    duckdb_api_test::BuildPackageCompatibilityFixture(PackageCompatibilityFixture::BASELINE, "1.2.3", 'a');
@@ -401,6 +450,7 @@ int main() {
 		TestPackageGenerationFixtureBoundary();
 		TestSelectorStructuralComparison();
 		TestCompatibleTransitions();
+		TestReloadDecisionsBindExactGenerationPairs();
 		TestIdentityAndVersionRejections();
 		TestStructuralRejections();
 		std::cout << "package compatibility contract tests passed" << std::endl;

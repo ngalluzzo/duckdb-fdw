@@ -371,8 +371,10 @@ bool IsSuccessful(PackageReloadClassification classification) {
 
 } // namespace
 
-PackageReloadDecision::PackageReloadDecision(PackageReloadClassification classification_p, std::string connector_id_p)
-    : classification(classification_p), connector_id(std::move(connector_id_p)) {
+PackageReloadDecision::PackageReloadDecision(PackageReloadClassification classification_p, std::string connector_id_p,
+                                             CompiledGenerationHandle active_p, CompiledGenerationHandle candidate_p)
+    : classification(classification_p), connector_id(std::move(connector_id_p)), active_generation(std::move(active_p)),
+      candidate_generation(std::move(candidate_p)) {
 }
 
 PackageReloadClassification PackageReloadDecision::Classification() const {
@@ -416,14 +418,19 @@ const std::string &PackageReloadDecision::ConnectorId() const {
 	return connector_id;
 }
 
+bool PackageReloadDecision::Matches(const CompiledGenerationHandle &active,
+                                    const CompiledGenerationHandle &candidate) const {
+	return active_generation.IsSameGeneration(active) && candidate_generation.IsSameGeneration(candidate);
+}
+
 PackageReloadDecision ClassifyPackageReload(const CompiledPackageGeneration &active,
                                             const CompiledPackageGeneration &candidate) {
 	const auto &active_identity = active.Identity();
 	const auto &candidate_identity = candidate.Identity();
 	if (active_identity.SpecIdentifier() != candidate_identity.SpecIdentifier() ||
 	    active_identity.ConnectorId() != candidate_identity.ConnectorId()) {
-		return PackageReloadDecision(PackageReloadClassification::INCOMPATIBLE_RELOAD,
-		                             candidate_identity.ConnectorId());
+		return PackageReloadDecision(PackageReloadClassification::INCOMPATIBLE_RELOAD, candidate_identity.ConnectorId(),
+		                             active.OpaqueHandle(), candidate.OpaqueHandle());
 	}
 
 	const auto active_version = PackageSemVer::Parse(active_identity.PackageVersion());
@@ -431,27 +438,31 @@ PackageReloadDecision ClassifyPackageReload(const CompiledPackageGeneration &act
 	const bool same_descriptor = SameDescriptor(active.Connector(), candidate.Connector());
 	if (active_version.Compare(candidate_version) == 0 &&
 	    active_identity.PackageDigest() == candidate_identity.PackageDigest() && same_descriptor) {
-		return PackageReloadDecision(PackageReloadClassification::EXACT_NO_OP, active_identity.ConnectorId());
+		return PackageReloadDecision(PackageReloadClassification::EXACT_NO_OP, active_identity.ConnectorId(),
+		                             active.OpaqueHandle(), candidate.OpaqueHandle());
 	}
 	if (candidate_version.Compare(active_version) <= 0) {
 		return PackageReloadDecision(PackageReloadClassification::REJECTED_PACKAGE_IDENTITY,
-		                             active_identity.ConnectorId());
+		                             active_identity.ConnectorId(), active.OpaqueHandle(), candidate.OpaqueHandle());
 	}
 	if (candidate_version.Major() != active_version.Major()) {
-		return PackageReloadDecision(PackageReloadClassification::INCOMPATIBLE_RELOAD, active_identity.ConnectorId());
+		return PackageReloadDecision(PackageReloadClassification::INCOMPATIBLE_RELOAD, active_identity.ConnectorId(),
+		                             active.OpaqueHandle(), candidate.OpaqueHandle());
 	}
 	if (same_descriptor) {
 		const auto classification = candidate_version.Minor() == active_version.Minor()
 		                                ? PackageReloadClassification::COMPATIBLE_PROVENANCE_PATCH
 		                                : PackageReloadClassification::COMPATIBLE_PROVENANCE_MINOR;
-		return PackageReloadDecision(classification, active_identity.ConnectorId());
+		return PackageReloadDecision(classification, active_identity.ConnectorId(), active.OpaqueHandle(),
+		                             candidate.OpaqueHandle());
 	}
 	if (candidate_version.Minor() > active_version.Minor() &&
 	    IsAppendOnlyDescriptor(active.Connector(), candidate.Connector())) {
 		return PackageReloadDecision(PackageReloadClassification::COMPATIBLE_APPEND_ONLY_MINOR,
-		                             active_identity.ConnectorId());
+		                             active_identity.ConnectorId(), active.OpaqueHandle(), candidate.OpaqueHandle());
 	}
-	return PackageReloadDecision(PackageReloadClassification::INCOMPATIBLE_RELOAD, active_identity.ConnectorId());
+	return PackageReloadDecision(PackageReloadClassification::INCOMPATIBLE_RELOAD, active_identity.ConnectorId(),
+	                             active.OpaqueHandle(), candidate.OpaqueHandle());
 }
 
 } // namespace duckdb_api
