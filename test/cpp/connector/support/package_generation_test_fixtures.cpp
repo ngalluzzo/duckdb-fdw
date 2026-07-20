@@ -73,6 +73,9 @@ std::vector<duckdb_api::CompiledRelationInput> TypedInputs(bool default_changed)
 	inputs.push_back(CompiledModelBuilder::Input(
 	    "cursor", CompiledScalarType::VARCHAR, true,
 	    CompiledModelBuilder::Default(CompiledModelBuilder::Null(CompiledScalarType::VARCHAR))));
+	inputs.push_back(CompiledModelBuilder::Input(
+	    "locale", CompiledScalarType::VARCHAR, true,
+	    CompiledModelBuilder::Default(CompiledModelBuilder::Varchar(default_changed ? "regional" : "global"))));
 	return inputs;
 }
 
@@ -142,13 +145,14 @@ duckdb_api::CompiledPredicateMapping ExactPredicateMapping(const std::string &re
 }
 
 CompiledRelation BuildPredicateRelation(bool changed) {
+	const std::string conditional_input = changed ? "repository_visibility" : "visibility";
 	std::vector<duckdb_api::CompiledColumn> columns;
 	columns.push_back(
 	    CompiledModelBuilder::Column("occurrence_id", CompiledScalarType::BIGINT, false, "$.occurrence_id"));
 	columns.push_back(CompiledModelBuilder::Column("visibility", CompiledScalarType::VARCHAR, false, "$.visibility"));
 	std::vector<CompiledOperation> operations;
 	operations.push_back(CompiledOperation {"controlled_exact_repositories",
-	                                        true,
+	                                        false,
 	                                        CompiledOperationCardinality::ZERO_TO_MANY,
 	                                        CompiledProtocol::REST,
 	                                        CompiledHttpMethod::GET,
@@ -161,12 +165,25 @@ CompiledRelation BuildPredicateRelation(bool changed) {
 	                                         {{"X-Connector-Fixture", "exact-duplicate-repositories"}}},
 	                                        CompiledResponseSource::ROOT_ARRAY,
 	                                        "$",
+	                                        CompiledModelBuilder::V1OperationSelector(
+	                                            {CompiledModelBuilder::ConditionalInputReference(conditional_input)})});
+	operations.push_back(CompiledOperation {"controlled_all_repositories",
+	                                        true,
+	                                        CompiledOperationCardinality::ZERO_TO_MANY,
+	                                        CompiledProtocol::REST,
+	                                        CompiledHttpMethod::GET,
+	                                        CompiledReplaySafety::SAFE,
+	                                        false,
+	                                        CompiledModelBuilder::DisabledPagination(),
+	                                        {Origin("predicate-proof.invalid"),
+	                                         "/fixtures/all-repositories",
+	                                         {},
+	                                         {{"X-Connector-Fixture", "all-repositories"}}},
+	                                        CompiledResponseSource::ROOT_ARRAY,
+	                                        "$",
 	                                        CompiledModelBuilder::V1OperationSelector({})});
 	std::vector<duckdb_api::CompiledPredicateMapping> mappings;
-	mappings.push_back(ExactPredicateMapping("visibility"));
-	if (changed) {
-		mappings.push_back(ExactPredicateMapping("repository_visibility"));
-	}
+	mappings.push_back(ExactPredicateMapping(conditional_input));
 	return ConnectorCatalogTestAccess::Relation(PACKAGE_PREDICATE_RELATION, std::move(columns), {},
 	                                            std::move(operations), ConnectorCatalogTestAccess::Anonymous(),
 	                                            ConnectorCatalogTestAccess::UnpaginatedResources(8, 128),

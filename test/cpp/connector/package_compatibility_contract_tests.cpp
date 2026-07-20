@@ -86,14 +86,16 @@ void TestPackageSemVer() {
 void TestPackageGenerationFixtureBoundary() {
 	const auto fallback = duckdb_api_test::BuildTypedFallbackPackageGenerationFixture();
 	const auto *typed = fallback.Connector().FindRelation(duckdb_api_test::PACKAGE_TYPED_RELATION);
-	Require(typed != nullptr && typed->Inputs().size() == 4 && typed->Operations().size() == 2,
+	Require(typed != nullptr && typed->Inputs().size() == 5 && typed->Operations().size() == 2,
 	        "typed package fixture lost its bounded relation shape");
 	Require(typed->Inputs()[0].Name() == "query" && !typed->Inputs()[0].Default().HasDefault() &&
 	            typed->Inputs()[1].Type() == duckdb_api::CompiledScalarType::BIGINT &&
 	            typed->Inputs()[1].Default().Value().Bigint() == 25 &&
 	            typed->Inputs()[2].Type() == duckdb_api::CompiledScalarType::BOOLEAN &&
 	            !typed->Inputs()[2].Default().Value().Boolean() && typed->Inputs()[3].Nullable() &&
-	            typed->Inputs()[3].Default().Value().IsNull(),
+	            typed->Inputs()[3].Default().Value().IsNull() && typed->Inputs()[4].Nullable() &&
+	            typed->Inputs()[4].Default().Value().Type() == duckdb_api::CompiledScalarType::VARCHAR &&
+	            typed->Inputs()[4].Default().Value().Varchar() == "global",
 	        "typed package fixture collapsed order, scalar types, defaults, or typed NULL");
 	const auto &required = typed->Operations()[0].selector.RequiredInputReferences();
 	Require(!typed->Operations()[0].fallback && required.size() == 1 &&
@@ -115,6 +117,17 @@ void TestPackageGenerationFixtureBoundary() {
 	        "package snapshot lost the structural tag or rendered excluded selector policy");
 	Require(fallback.Connector().FindRelation(duckdb_api_test::PACKAGE_DISTINCT_RELATION) != nullptr,
 	        "typed package fixture lost its structurally distinct relation");
+	const auto *conditional = fallback.Connector().FindRelation(duckdb_api_test::PACKAGE_PREDICATE_RELATION);
+	Require(conditional != nullptr && conditional->Operations().size() == 2 &&
+	            !conditional->Operations()[0].fallback && conditional->Operations()[1].fallback &&
+	            conditional->Operations()[0].selector.RequiredInputReferences().size() == 1 &&
+	            conditional->Operations()[0].selector.RequiredInputReferences()[0].Kind() ==
+	                duckdb_api::CompiledRequiredInputKind::CONDITIONAL_INPUT &&
+	            conditional->Operations()[0].selector.RequiredInputReferences()[0].Id() == "visibility" &&
+	            conditional->Operations()[1].selector.RequiredInputReferences().empty() &&
+	            conditional->PredicateMappings().size() == 1 &&
+	            conditional->PredicateMappings()[0].OperationName() == conditional->Operations()[0].name,
+	        "package fixture lost its conditional-selected operation or empty fallback containment shape");
 
 	const auto tie = duckdb_api_test::BuildTypedTiePackageGenerationFixture();
 	const auto *tied = tie.Connector().FindRelation(duckdb_api_test::PACKAGE_TYPED_RELATION);

@@ -32,9 +32,11 @@ enum class PackageCompatibilityFixture {
 };
 
 // Controlled package for future Semantics tests. The named relation carries
-// ordered BOOLEAN/BIGINT/VARCHAR inputs, an absent default, concrete defaults,
-// a typed NULL default, one input-selected operation, and one fallback. The
-// generation also contains a structurally distinct valid relation. Consumers
+// ordered BOOLEAN/BIGINT/VARCHAR inputs, an absent default, concrete defaults
+// on both non-nullable and nullable inputs, a typed NULL default, one input-
+// selected operation, and one fallback. The generation also contains a
+// structurally distinct valid relation and a conditional-selected relation
+// with an empty fallback. Consumers
 // link the package-generation fixture target and use only immutable public
 // Connector APIs; no internal builder or test construction access is exposed.
 duckdb_api::CompiledPackageGeneration
