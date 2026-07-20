@@ -41,6 +41,15 @@ bool ScanPlanTestAccess::MutateGraphqlOperationOrSchema(duckdb_api::ScanPlan &pl
 		replace_operation(
 		    [](duckdb_api::PlannedGraphqlOperation &operation) { operation.document.append("\n# other"); });
 		return true;
+	case GraphqlRuntimeAdmissionCounterexample::CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST:
+		replace_operation([](duckdb_api::PlannedGraphqlOperation &operation) {
+			operation.document.append("\n# other");
+			// The focused Semantics oracle independently recomputes this value.
+			// Keeping the closed literal here leaves the provider fixture service
+			// dependent only on the immutable plan-value service.
+			operation.document_digest = "3209537d6158a60a396fade683288a8f06af6cd67660a912cd5af4e5a8e97ee8";
+		});
+		return true;
 	case GraphqlRuntimeAdmissionCounterexample::UNKNOWN_DIGEST_ALGORITHM:
 		replace_operation([](duckdb_api::PlannedGraphqlOperation &operation) {
 			operation.digest_algorithm = static_cast<duckdb_api::PlannedGraphqlDigestAlgorithm>(127);

@@ -7,12 +7,14 @@
 namespace duckdb_api_test {
 
 // Closed Semantics provider API for focused Runtime admission consumers. Each
-// counterexample changes exactly one structured executable fact that Runtime
-// must reject before authorization or transport. Provenance prose and valid
-// logical-secret names are intentionally outside this rejection surface.
-// Factories expose immutable plans, never private builders, Connector catalogs,
-// ScanRequest values, Runtime types, or credential bytes. COUNT is an iteration
-// sentinel, not a plan candidate.
+// counterexample isolates one admission law that Runtime must enforce before
+// authorization or transport. Most change one structured executable field;
+// CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST changes the dependent document and
+// digest together so self-consistency cannot replace reviewed canonical-profile
+// membership. Provenance prose and valid logical-secret names are intentionally
+// outside this rejection surface. Factories expose immutable plans, never
+// private builders, Connector catalogs, ScanRequest values, Runtime types, or
+// credential bytes. COUNT is an iteration sentinel, not a plan candidate.
 enum class GraphqlRuntimeAdmissionCounterexample {
 	UNKNOWN_PROTOCOL,
 	GRAPHQL_CONTRADICTORY_PROTOCOL_PAYLOADS,
@@ -27,6 +29,7 @@ enum class GraphqlRuntimeAdmissionCounterexample {
 	UNKNOWN_OPERATION_KIND,
 	OTHER_DOCUMENT_IDENTITY,
 	OTHER_DOCUMENT,
+	CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST,
 	UNKNOWN_DIGEST_ALGORITHM,
 	OTHER_DOCUMENT_DIGEST,
 	HTTP_OPERATION_ORIGIN,

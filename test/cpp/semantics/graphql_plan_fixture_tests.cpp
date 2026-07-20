@@ -1,5 +1,6 @@
 #include "semantics/support/graphql_semantics_test_cases.hpp"
 
+#include "duckdb_api/content_digest.hpp"
 #include "semantics/support/graphql_plan_equality.hpp"
 #include "semantics/support/graphql_plan_test_variations.hpp"
 #include "semantics/support/graphql_protocol_test_inspection.hpp"
@@ -22,13 +23,24 @@ void TestFixtureBoundary() {
 	        "typed GraphQL fixture agreement improperly depends on Connector source prose");
 
 	const auto admission_count = static_cast<std::size_t>(GraphqlRuntimeAdmissionCounterexample::COUNT);
-	Require(admission_count == 142, "closed Runtime-facing GraphQL admission catalog changed without self-test review");
+	Require(admission_count == 143, "closed Runtime-facing GraphQL admission catalog changed without self-test review");
 	for (std::size_t value = 0; value < admission_count; value++) {
 		const auto counterexample = static_cast<GraphqlRuntimeAdmissionCounterexample>(value);
 		const auto candidate = BuildGraphqlRuntimeAdmissionCounterexample("graphql_semantics_secret", counterexample);
 		const auto differences = CountGraphqlPlanDifferences(fixture, candidate);
-		Require(differences == 1, "GraphQL Runtime admission counterexample " + std::to_string(value) + " changed " +
-		                              std::to_string(differences) + " structured facts instead of one");
+		const std::size_t expected_differences =
+		    counterexample == GraphqlRuntimeAdmissionCounterexample::CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST ? 2 : 1;
+		Require(differences == expected_differences, "GraphQL Runtime admission counterexample " +
+		                                                 std::to_string(value) + " changed " +
+		                                                 std::to_string(differences) + " structured facts instead of " +
+		                                                 std::to_string(expected_differences));
+		if (counterexample == GraphqlRuntimeAdmissionCounterexample::CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST) {
+			const auto &canonical = fixture.Operation().Graphql();
+			const auto &changed = candidate.Operation().Graphql();
+			Require(changed.document != canonical.document && changed.document_digest != canonical.document_digest &&
+			            changed.document_digest == duckdb_api::ComputeSha256Hex(changed.document),
+			        "changed GraphQL document fixture did not carry its correctly recomputed non-canonical digest");
+		}
 	}
 	bool sentinel_rejected = false;
 	try {

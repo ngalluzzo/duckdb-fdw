@@ -77,4 +77,5 @@ target_link_libraries(
   duckdb_api_graphql_semantics_tests
   PRIVATE duckdb_api_semantics_fixture_service
           duckdb_api_connector_fixture_service
+          duckdb_api_content_digest_service
           duckdb_api_relational_planning_service)
