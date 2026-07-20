@@ -1,0 +1,28 @@
+{
+  "manifest": "duckdb_api/rfc0013_evidence_v1",
+  "artifacts": {
+    "connector-package-v1.schema.json": "sha256.f094044c9f2e46d25ad379bf89b16730d1779090150cf0cc278ff5fcc4e1d0f6",
+    "fixture-coverage-v1.json": "sha256.8a19c50eaa87e3655ae8c5f2a5511bfc6d7cfa3499e9f14583af40c1c54f36f8",
+    "fixture-index-v1.schema.json": "sha256.3dd9ec84a5e0cbaddf23dba187e983d80aecfda83d8075c1109f6f032b0cf7c9",
+    "github/README.md": "sha256.7d2809249b5b7869df4df6a9d933118265ceec74cf0b1e7f828cc8a0522be6e8",
+    "github/connector.yaml": "sha256.49b031129fb99451238713a67bf929e35d62cedc4738d6d1bb88b34143b8924e",
+    "github/fixtures/index.yaml": "sha256.8e1fb810a1491047f5d54cd321879a0914b86482c3c8702f964c2d3327014a01",
+    "github/fixtures/private_visibility_duplicates.json": "sha256.460114dcac82970fff6af21748fd09b7a35f5c9a5d9c5b69dc3b00c9885a9b2b",
+    "github/fixtures/private_visibility_duplicates_base.json": "sha256.460114dcac82970fff6af21748fd09b7a35f5c9a5d9c5b69dc3b00c9885a9b2b",
+    "github/fixtures/private_visibility_false_or_null.json": "sha256.fe1965993a0614c463940ae5e7902a2a6a42f45465d8886f88bb37cb882729ed",
+    "github/fixtures/private_visibility_false_or_null_base.json": "sha256.fe1965993a0614c463940ae5e7902a2a6a42f45465d8886f88bb37cb882729ed",
+    "github/fixtures/private_visibility_matching.json": "sha256.e9ee3ae239000985833cceb2ecc364771ab609cf1446f787b89f7d0f595407a2",
+    "github/fixtures/private_visibility_matching_base.json": "sha256.59df23d4f900ffc0c1c962772211802a115529d0e621edc6fdd6ebcb29d4ce9f",
+    "github/fixtures/viewer_repository_metrics_page_1.json": "sha256.079256bdffbd68f1a2acb8040955fa6c21b4d0e933d968991ee2cc895bb9126a",
+    "github/fixtures/viewer_repository_metrics_page_2.json": "sha256.b61fb8ebc03b6b43772bcf782b6352e5fbb086aac5b240b94981acd31a1c1dcf",
+    "github/relations/authenticated_repositories.yaml": "sha256.dd607972539a3760010445c5bee39ea66d97733cf4f73103026321f1b6194404",
+    "github/relations/authenticated_user.yaml": "sha256.8bedd3acc58cb3864be3029a06d90a2d220afd3f7c3ee26b15a3c8bc9a56a99b",
+    "github/relations/duckdb_login_search_page.yaml": "sha256.8f02849174aac483903f1951f2b1439bd4dc34046550a59d12a02ee7fa208c6e",
+    "github/relations/viewer_repository_metrics.yaml": "sha256.d6a92f9bc3235711d193ec3c6ba29f490155718a9accac58865364be55f90e61",
+    "graphql-query-golden.yaml": "sha256.4bb6e4f3561d546bfaec9b312aaec91eff3926467beceda74de66808e9ebf399"
+  },
+  "verifier": {
+    "path": "scripts/verify-rfc-0013-evidence.rb",
+    "digest": "sha256.02fa2c2507b95c79682d42a72a34daa133039a8141ab42692add70bca4271dc4"
+  }
+}
