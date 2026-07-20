@@ -21,6 +21,18 @@ enum class GraphqlLocalResidualProfile {
 	COUNT
 };
 
+// Closed positive-admission probes supplied to Runtime. Each probe changes one
+// non-authority plan fact from the unrestricted profile while preserving the
+// complete executable remote, ownership, and delegation envelope. These
+// deliberately isolated values are admission probes, not coherent planner
+// outcomes or expression fixtures. COUNT is an iteration sentinel.
+enum class GraphqlRuntimeNonAuthorityVariation {
+	OTHER_RESIDUAL_PREDICATE,
+	OTHER_PREDICATE_CATEGORY,
+	OTHER_PREDICATE_REASON,
+	COUNT
+};
+
 // Closed Semantics provider API for focused Runtime admission consumers. Each
 // counterexample isolates one executable authority fact that Runtime must
 // enforce before authorization or transport. Most change one structured field;
@@ -177,6 +189,8 @@ enum class GraphqlRuntimeAdmissionCounterexample {
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name,
                                                       GraphqlLocalResidualProfile profile);
+duckdb_api::ScanPlan BuildGraphqlRuntimeNonAuthorityVariation(const std::string &exact_logical_secret_name,
+                                                              GraphqlRuntimeNonAuthorityVariation variation);
 duckdb_api::ScanPlan BuildGraphqlRuntimeAdmissionCounterexample(const std::string &exact_logical_secret_name,
                                                                 GraphqlRuntimeAdmissionCounterexample counterexample);
 

@@ -24,6 +24,24 @@ duckdb_api::ScanPlan ScanPlanTestAccess::Graphql(duckdb_api::ScanPlan plan,
 	return plan;
 }
 
+duckdb_api::ScanPlan ScanPlanTestAccess::GraphqlNonAuthorityVariation(duckdb_api::ScanPlan plan,
+                                                                      GraphqlRuntimeNonAuthorityVariation variation) {
+	switch (variation) {
+	case GraphqlRuntimeNonAuthorityVariation::OTHER_RESIDUAL_PREDICATE:
+		plan.residual_predicate = duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER;
+		break;
+	case GraphqlRuntimeNonAuthorityVariation::OTHER_PREDICATE_CATEGORY:
+		plan.predicate_category = duckdb_api::PredicateDecisionCategory::SUPERSET;
+		break;
+	case GraphqlRuntimeNonAuthorityVariation::OTHER_PREDICATE_REASON:
+		plan.predicate_reason = duckdb_api::PredicateDecisionReason::SELECTED_SUPERSET_MAPPING;
+		break;
+	default:
+		throw std::invalid_argument("unknown GraphQL Runtime non-authority variation");
+	}
+	return plan;
+}
+
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name) {
 	return BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, GraphqlLocalResidualProfile::UNRESTRICTED);
 }
@@ -31,6 +49,13 @@ duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_l
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name,
                                                       GraphqlLocalResidualProfile profile) {
 	return BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, profile);
+}
+
+duckdb_api::ScanPlan BuildGraphqlRuntimeNonAuthorityVariation(const std::string &exact_logical_secret_name,
+                                                              GraphqlRuntimeNonAuthorityVariation variation) {
+	return ScanPlanTestAccess::GraphqlNonAuthorityVariation(
+	    BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, GraphqlLocalResidualProfile::UNRESTRICTED),
+	    variation);
 }
 
 duckdb_api::ScanPlan BuildGraphqlRuntimeAdmissionCounterexample(const std::string &exact_logical_secret_name,

@@ -144,8 +144,63 @@ void TestFixtureBoundary() {
 		        "malformed protocol envelope exposed an executable payload through the public sum API");
 	}
 
+	const auto non_authority_count = static_cast<std::size_t>(GraphqlRuntimeNonAuthorityVariation::COUNT);
+	Require(non_authority_count == 3,
+	        "closed GraphQL Runtime non-authority variation catalog changed without self-test review");
+	std::vector<duckdb_api::ScanPlan> non_authority_candidates;
+	non_authority_candidates.reserve(non_authority_count);
+	for (std::size_t value = 0; value < non_authority_count; value++) {
+		const auto variation = static_cast<GraphqlRuntimeNonAuthorityVariation>(value);
+		const auto candidate = BuildGraphqlRuntimeNonAuthorityVariation("graphql_semantics_secret", variation);
+		Require(CountGraphqlPlanDifferences(fixture, candidate) == 1,
+		        "GraphQL Runtime non-authority variation did not isolate one structured fact");
+		Require(candidate.RemotePredicate() == fixture.RemotePredicate() &&
+		            candidate.RemoteAccuracy() == fixture.RemoteAccuracy() &&
+		            candidate.ResidualOwner() == fixture.ResidualOwner() &&
+		            candidate.ConditionalInput() == fixture.ConditionalInput() &&
+		            candidate.Ownership().filter == fixture.Ownership().filter &&
+		            candidate.Ownership().projection == fixture.Ownership().projection &&
+		            candidate.Ownership().ordering == fixture.Ownership().ordering &&
+		            candidate.Ownership().limit == fixture.Ownership().limit &&
+		            candidate.Ownership().offset == fixture.Ownership().offset &&
+		            candidate.RemoteOrdering() == fixture.RemoteOrdering() &&
+		            candidate.RuntimeOrdering() == fixture.RuntimeOrdering() &&
+		            candidate.RemoteLimit() == fixture.RemoteLimit() &&
+		            candidate.RemoteOffset() == fixture.RemoteOffset() &&
+		            candidate.RuntimeLimit() == fixture.RuntimeLimit() &&
+		            candidate.RuntimeOffset() == fixture.RuntimeOffset(),
+		        "GraphQL Runtime non-authority variation changed the executable relational envelope");
+		non_authority_candidates.push_back(candidate);
+	}
+	for (std::size_t left = 0; left < non_authority_candidates.size(); left++) {
+		for (std::size_t right = left + 1; right < non_authority_candidates.size(); right++) {
+			Require(CountGraphqlPlanDifferences(non_authority_candidates[left], non_authority_candidates[right]) > 0,
+			        "GraphQL Runtime non-authority variations " + std::to_string(left) + " and " +
+			            std::to_string(right) + " collapsed to the same structured plan");
+		}
+	}
+	Require(non_authority_candidates[static_cast<std::size_t>(
+	                                     GraphqlRuntimeNonAuthorityVariation::OTHER_RESIDUAL_PREDICATE)]
+	                    .ResidualPredicate() == duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER &&
+	            non_authority_candidates[static_cast<std::size_t>(
+	                                         GraphqlRuntimeNonAuthorityVariation::OTHER_PREDICATE_CATEGORY)]
+	                    .PredicateCategory() == duckdb_api::PredicateDecisionCategory::SUPERSET &&
+	            non_authority_candidates[static_cast<std::size_t>(
+	                                         GraphqlRuntimeNonAuthorityVariation::OTHER_PREDICATE_REASON)]
+	                    .PredicateReason() == duckdb_api::PredicateDecisionReason::SELECTED_SUPERSET_MAPPING,
+	        "GraphQL Runtime non-authority variations changed their named structured facts");
+	bool non_authority_sentinel_rejected = false;
+	try {
+		(void)BuildGraphqlRuntimeNonAuthorityVariation("graphql_semantics_secret",
+		                                               GraphqlRuntimeNonAuthorityVariation::COUNT);
+	} catch (const std::invalid_argument &) {
+		non_authority_sentinel_rejected = true;
+	}
+	Require(non_authority_sentinel_rejected,
+	        "GraphQL Runtime non-authority fixture accepted a value outside its closed enum");
+
 	const auto variation_count = static_cast<std::size_t>(GraphqlPlanVariation::COUNT);
-	Require(variation_count == 8, "internal GraphQL equality variation catalog changed without self-test review");
+	Require(variation_count == 5, "internal GraphQL equality variation catalog changed without self-test review");
 	std::vector<duckdb_api::ScanPlan> variation_candidates;
 	variation_candidates.reserve(variation_count);
 	for (std::size_t value = 0; value < variation_count; value++) {
@@ -162,17 +217,6 @@ void TestFixtureBoundary() {
 			            " collapsed to the same structured plan");
 		}
 	}
-	const auto other_residual =
-	    BuildGraphqlPlanVariation("graphql_semantics_secret", GraphqlPlanVariation::OTHER_RESIDUAL_PREDICATE);
-	const auto other_category =
-	    BuildGraphqlPlanVariation("graphql_semantics_secret", GraphqlPlanVariation::OTHER_PREDICATE_CATEGORY);
-	const auto other_reason =
-	    BuildGraphqlPlanVariation("graphql_semantics_secret", GraphqlPlanVariation::OTHER_PREDICATE_REASON);
-	Require(other_residual.ResidualPredicate() == duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER &&
-	            other_category.PredicateCategory() == duckdb_api::PredicateDecisionCategory::SUPERSET &&
-	            other_reason.PredicateReason() == duckdb_api::PredicateDecisionReason::SELECTED_SUPERSET_MAPPING,
-	        "migrated GraphQL equality variations changed their isolated Semantics facts");
-
 	const auto safe = fixture.Snapshot();
 	Require(safe.find(fixture.Operation().Graphql().document) == std::string::npos &&
 	            safe.find("graphql_semantics_secret") == std::string::npos,
