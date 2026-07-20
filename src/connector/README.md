@@ -20,6 +20,7 @@ residual ownership. Runtime receives only the resulting plan.
 | --- | --- | --- |
 | Add or change an installed GitHub relation | `native_github_composition.cpp`, `duckdb_api/connector.hpp` | `connector_contract_tests.cpp` |
 | Change catalog values, relation/catalog validation, or lookup | `catalog_model.cpp`, `duckdb_api/connector_catalog.hpp` | `connector_catalog_contract_tests.cpp` |
+| Change structural relation inputs, package identity, generation ownership, or Query registration projection | `compiled_package_generation.cpp`, `duckdb_api/compiled_package_generation.hpp`, `duckdb_api/internal/connector/compiled_model_builder.hpp` | `compiled_package_generation_contract_tests.cpp` |
 | Change the REST/GraphQL operation sum, HTTP authority, canonical GraphQL document, typed result mapping, cursor, or safe protocol snapshot | `protocol_operation_declaration.cpp`, `graphql_operation_declaration.cpp`, `duckdb_api/compiled_protocol_operation.hpp` | `connector_graphql_contract_tests.cpp`; existing REST contract tests |
 | Change protocol-neutral content digests | `content_digest.cpp`, `duckdb_api/content_digest.hpp` | GraphQL digest-vector and canonical-profile tests |
 | Change operation-selector normalization or declaration validation | `operation_selector.cpp` and its internal header | `connector_catalog_contract_tests.cpp`; fixture tests for controlled selection services |
@@ -36,7 +37,13 @@ Production sources are inventoried in `sources.cmake`; provider targets are in
 
 The supported consumer interfaces are
 [`connector.hpp`](../include/duckdb_api/connector.hpp) and
-[`connector_catalog.hpp`](../include/duckdb_api/connector_catalog.hpp). The
+[`connector_catalog.hpp`](../include/duckdb_api/connector_catalog.hpp). Package
+compilation additionally provides
+[`compiled_package_generation.hpp`](../include/duckdb_api/compiled_package_generation.hpp):
+Semantics may consume its generalized immutable connector, while Query receives
+only the structural registration projection and an opaque shared-lifetime
+handle. Query cannot recover extractors, operation selection, predicates,
+network policy, source text, or credentials from that view. The
 cohesive operation-level handoff lives in
 [`compiled_protocol_operation.hpp`](../include/duckdb_api/compiled_protocol_operation.hpp):
 it owns protocol alternatives, neutral HTTP authority, REST requests, GraphQL
@@ -75,6 +82,9 @@ same drift.
 
 - `duckdb_api_connector_tests` for catalog, REST/GraphQL protocol, schema,
   predicate, pagination, digest, and resource contracts;
+- `duckdb_api_compiled_package_generation_tests` for structural scalar/default
+  distinctions, package identity, ordered inputs, Query projection, and opaque
+  generation lifetime;
 - `duckdb_api_connector_catalog_fixture_tests` for the bounded fixture API.
 
 Run `make build` before invoking a focused binary from

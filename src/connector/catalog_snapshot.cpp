@@ -15,6 +15,8 @@ const char *OriginName(CompiledConnectorOrigin origin) {
 	switch (origin) {
 	case CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA:
 		return "native_product_metadata";
+	case CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA:
+		return "package_compiled_metadata";
 	}
 	throw std::logic_error("compiled connector contains an unknown origin");
 }

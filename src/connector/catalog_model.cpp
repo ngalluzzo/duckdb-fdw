@@ -26,7 +26,7 @@ bool IsAsciiLowerOrDigit(char value) {
 }
 
 bool IsIdentifier(const std::string &value) {
-	if (value.empty() || !IsAsciiLower(value.front())) {
+	if (value.empty() || value.size() > 63 || !IsAsciiLower(value.front())) {
 		return false;
 	}
 	for (const auto character : value) {
@@ -37,10 +37,35 @@ bool IsIdentifier(const std::string &value) {
 	return true;
 }
 
+void ValidateScalarType(CompiledScalarType type) {
+	switch (type) {
+	case CompiledScalarType::BOOLEAN:
+	case CompiledScalarType::BIGINT:
+	case CompiledScalarType::VARCHAR:
+		return;
+	}
+	throw std::invalid_argument("compiled value contains an unknown scalar type");
+}
+
+CompiledScalarType ScalarTypeFromName(const std::string &logical_type) {
+	if (logical_type == "BOOLEAN") {
+		return CompiledScalarType::BOOLEAN;
+	}
+	if (logical_type == "BIGINT") {
+		return CompiledScalarType::BIGINT;
+	}
+	if (logical_type == "VARCHAR") {
+		return CompiledScalarType::VARCHAR;
+	}
+	throw std::invalid_argument("compiled relation contains an unsupported logical type");
+}
+
 const char *OriginName(CompiledConnectorOrigin origin) {
 	switch (origin) {
 	case CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA:
 		return "native_product_metadata";
+	case CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA:
+		return "package_compiled_metadata";
 	}
 	throw std::logic_error("compiled connector contains an unknown origin");
 }
@@ -72,8 +97,8 @@ void ValidateColumn(const CompiledColumn &column) {
 	if (!IsIdentifier(column.name) || column.extractor.empty() || column.extractor.front() != '$') {
 		throw std::invalid_argument("compiled relation contains an invalid column declaration");
 	}
-	if (column.logical_type != "BIGINT" && column.logical_type != "VARCHAR" && column.logical_type != "BOOLEAN") {
-		throw std::invalid_argument("compiled relation contains an unsupported logical type");
+	if (column.logical_type != CompiledScalarTypeName(column.ScalarType())) {
+		throw std::invalid_argument("compiled relation column type spelling disagrees with structural authority");
 	}
 }
 
@@ -142,6 +167,130 @@ void ValidateNetworkPolicy(const CompiledNetworkPolicy &policy) {
 }
 
 } // namespace
+
+const char *CompiledScalarTypeName(CompiledScalarType type) {
+	switch (type) {
+	case CompiledScalarType::BOOLEAN:
+		return "BOOLEAN";
+	case CompiledScalarType::BIGINT:
+		return "BIGINT";
+	case CompiledScalarType::VARCHAR:
+		return "VARCHAR";
+	}
+	throw std::logic_error("compiled value contains an unknown scalar type");
+}
+
+CompiledScalarValue::CompiledScalarValue(CompiledScalarType type_p, bool is_null_p, bool boolean_value_p,
+                                         std::int64_t bigint_value_p, std::string varchar_value_p)
+    : type(type_p), is_null(is_null_p), boolean_value(boolean_value_p), bigint_value(bigint_value_p),
+      varchar_value(std::move(varchar_value_p)) {
+	ValidateScalarType(type);
+	if (is_null) {
+		if (boolean_value || bigint_value != 0 || !varchar_value.empty()) {
+			throw std::invalid_argument("compiled NULL scalar contains a concrete payload");
+		}
+		return;
+	}
+	if ((type != CompiledScalarType::BOOLEAN && boolean_value) ||
+	    (type != CompiledScalarType::BIGINT && bigint_value != 0) ||
+	    (type != CompiledScalarType::VARCHAR && !varchar_value.empty())) {
+		throw std::invalid_argument("compiled scalar contains a payload for another type");
+	}
+}
+
+CompiledScalarType CompiledScalarValue::Type() const {
+	return type;
+}
+
+bool CompiledScalarValue::IsNull() const {
+	return is_null;
+}
+
+bool CompiledScalarValue::Boolean() const {
+	if (is_null || type != CompiledScalarType::BOOLEAN) {
+		throw std::logic_error("compiled scalar is not a concrete BOOLEAN");
+	}
+	return boolean_value;
+}
+
+std::int64_t CompiledScalarValue::Bigint() const {
+	if (is_null || type != CompiledScalarType::BIGINT) {
+		throw std::logic_error("compiled scalar is not a concrete BIGINT");
+	}
+	return bigint_value;
+}
+
+const std::string &CompiledScalarValue::Varchar() const {
+	if (is_null || type != CompiledScalarType::VARCHAR) {
+		throw std::logic_error("compiled scalar is not a concrete VARCHAR");
+	}
+	return varchar_value;
+}
+
+CompiledInputDefault::CompiledInputDefault() : has_default(false), value() {
+}
+
+CompiledInputDefault::CompiledInputDefault(CompiledScalarValue value_p)
+    : has_default(true), value(new CompiledScalarValue(std::move(value_p))) {
+}
+
+bool CompiledInputDefault::HasDefault() const {
+	return has_default;
+}
+
+const CompiledScalarValue &CompiledInputDefault::Value() const {
+	if (!has_default || !value) {
+		throw std::logic_error("compiled input has no default");
+	}
+	return *value;
+}
+
+CompiledRelationInput::CompiledRelationInput(std::string name_p, CompiledScalarType type_p, bool nullable_p,
+                                             CompiledInputDefault default_value_p)
+    : name(std::move(name_p)), type(type_p), nullable(nullable_p), default_value(std::move(default_value_p)) {
+	if (!IsIdentifier(name) || name == "secret") {
+		throw std::invalid_argument("compiled relation contains an invalid or reserved input identifier");
+	}
+	ValidateScalarType(type);
+	if (!default_value.HasDefault()) {
+		return;
+	}
+	const auto &value = default_value.Value();
+	if (value.Type() != type || (value.IsNull() && !nullable)) {
+		throw std::invalid_argument("compiled relation input default disagrees with its type or nullability");
+	}
+}
+
+const std::string &CompiledRelationInput::Name() const {
+	return name;
+}
+
+CompiledScalarType CompiledRelationInput::Type() const {
+	return type;
+}
+
+bool CompiledRelationInput::Nullable() const {
+	return nullable;
+}
+
+const CompiledInputDefault &CompiledRelationInput::Default() const {
+	return default_value;
+}
+
+CompiledColumn::CompiledColumn(std::string name_p, std::string logical_type_p, bool nullable_p, std::string extractor_p)
+    : name(std::move(name_p)), logical_type(std::move(logical_type_p)), nullable(nullable_p),
+      extractor(std::move(extractor_p)), scalar_type(ScalarTypeFromName(logical_type)) {
+}
+
+CompiledColumn::CompiledColumn(std::string name_p, CompiledScalarType type_p, bool nullable_p, std::string extractor_p)
+    : name(std::move(name_p)), logical_type(CompiledScalarTypeName(type_p)), nullable(nullable_p),
+      extractor(std::move(extractor_p)), scalar_type(type_p) {
+	ValidateScalarType(scalar_type);
+}
+
+CompiledScalarType CompiledColumn::ScalarType() const {
+	return scalar_type;
+}
 
 CompiledAuthenticationPolicy::CompiledAuthenticationPolicy(CompiledCredentialRequirement requirement_p,
                                                            std::string logical_credential_p,
@@ -212,9 +361,19 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
                                    std::vector<CompiledOperation> operations_p,
                                    CompiledAuthenticationPolicy authentication_p,
                                    CompiledResourceCeilings resource_ceilings_p)
-    : name(std::move(name_p)), columns(std::move(columns_p)), predicate_mappings(std::move(predicate_mappings_p)),
-      operations(std::move(operations_p)), authentication(std::move(authentication_p)),
-      resource_ceilings(std::move(resource_ceilings_p)) {
+    : CompiledRelation(std::move(name_p), std::move(columns_p), {}, std::move(predicate_mappings_p),
+                       std::move(operations_p), std::move(authentication_p), std::move(resource_ceilings_p)) {
+}
+
+CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColumn> columns_p,
+                                   std::vector<CompiledRelationInput> inputs_p,
+                                   std::vector<CompiledPredicateMapping> predicate_mappings_p,
+                                   std::vector<CompiledOperation> operations_p,
+                                   CompiledAuthenticationPolicy authentication_p,
+                                   CompiledResourceCeilings resource_ceilings_p)
+    : name(std::move(name_p)), columns(std::move(columns_p)), inputs(std::move(inputs_p)),
+      predicate_mappings(std::move(predicate_mappings_p)), operations(std::move(operations_p)),
+      authentication(std::move(authentication_p)), resource_ceilings(std::move(resource_ceilings_p)) {
 	if (!IsIdentifier(name) || columns.empty() || operations.empty()) {
 		throw std::invalid_argument("compiled relation contains incomplete identity, schema, or operation catalog");
 	}
@@ -223,6 +382,13 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
 		for (std::size_t other = index + 1; other < columns.size(); other++) {
 			if (columns[index].name == columns[other].name) {
 				throw std::invalid_argument("compiled relation contains a duplicate column");
+			}
+		}
+	}
+	for (std::size_t index = 0; index < inputs.size(); index++) {
+		for (std::size_t other = index + 1; other < inputs.size(); other++) {
+			if (inputs[index].Name() == inputs[other].Name()) {
+				throw std::invalid_argument("compiled relation contains a duplicate input identifier");
 			}
 		}
 	}
@@ -284,6 +450,10 @@ const std::string &CompiledRelation::Name() const {
 
 const std::vector<CompiledColumn> &CompiledRelation::Columns() const {
 	return columns;
+}
+
+const std::vector<CompiledRelationInput> &CompiledRelation::Inputs() const {
+	return inputs;
 }
 
 const std::vector<CompiledPredicateMapping> &CompiledRelation::PredicateMappings() const {

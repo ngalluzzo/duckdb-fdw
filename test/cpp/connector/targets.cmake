@@ -29,6 +29,17 @@ target_link_libraries(
   PRIVATE duckdb_api_connector_metadata_service)
 
 add_executable(
+  duckdb_api_compiled_package_generation_tests
+  test/cpp/connector/compiled_package_generation_contract_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_compiled_package_generation_tests)
+target_include_directories(
+  duckdb_api_compiled_package_generation_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_compiled_package_generation_tests
+  PRIVATE duckdb_api_connector_metadata_service)
+
+add_executable(
   duckdb_api_connector_catalog_fixture_tests
   test/cpp/connector/connector_catalog_test_fixtures_tests.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_connector_catalog_fixture_tests)

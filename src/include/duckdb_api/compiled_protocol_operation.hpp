@@ -11,6 +11,10 @@ class ConnectorCatalogTestAccess;
 
 namespace duckdb_api {
 
+namespace internal {
+class CompiledModelBuilder;
+}
+
 class CompiledConnector;
 CompiledConnector BuildNativeGithubConnector();
 
@@ -201,6 +205,7 @@ public:
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
+	friend class internal::CompiledModelBuilder;
 	friend class CompiledOperation;
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 

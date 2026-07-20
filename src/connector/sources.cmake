@@ -3,6 +3,7 @@
 set(CONNECTOR_CATALOG_SOURCES
     src/connector/catalog_model.cpp
     src/connector/catalog_snapshot.cpp
+    src/connector/compiled_package_generation.cpp
     src/connector/graphql_operation_declaration.cpp
     src/connector/operation_selector.cpp
     src/connector/pagination_declaration.cpp

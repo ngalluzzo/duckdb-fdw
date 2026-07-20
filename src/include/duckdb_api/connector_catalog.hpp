@@ -3,6 +3,7 @@
 #include "duckdb_api/compiled_protocol_operation.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -12,13 +13,101 @@ class ConnectorCatalogTestAccess;
 
 namespace duckdb_api {
 
+namespace internal {
+class CompiledModelBuilder;
+}
+
 class CompiledConnector;
 CompiledConnector BuildNativeGithubConnector();
 
 // Identifies how immutable metadata entered the product. The 0.7.0 native
 // catalog is repository-owned product metadata, not compiled package syntax,
 // package provenance, or a public connector-authoring/native ABI commitment.
-enum class CompiledConnectorOrigin { NATIVE_PRODUCT_METADATA };
+enum class CompiledConnectorOrigin { NATIVE_PRODUCT_METADATA, PACKAGE_COMPILED_METADATA };
+
+// Closed scalar vocabulary shared by package-declared columns, relation
+// inputs, typed defaults, and consumer projections. Consumers switch on this
+// enum; they never parse YAML or logical-type strings to recover authority.
+enum class CompiledScalarType { BOOLEAN, BIGINT, VARCHAR };
+
+const char *CompiledScalarTypeName(CompiledScalarType type);
+
+// Immutable typed scalar. NULL retains its declared scalar type so an absent
+// default, a typed NULL default, and a concrete value remain three distinct
+// states after package source has been discarded.
+class CompiledScalarValue {
+public:
+	CompiledScalarValue(const CompiledScalarValue &) = default;
+	CompiledScalarValue(CompiledScalarValue &&) = default;
+	CompiledScalarValue &operator=(const CompiledScalarValue &) = delete;
+	CompiledScalarValue &operator=(CompiledScalarValue &&) = delete;
+
+	CompiledScalarType Type() const;
+	bool IsNull() const;
+	bool Boolean() const;
+	std::int64_t Bigint() const;
+	const std::string &Varchar() const;
+
+private:
+	friend class internal::CompiledModelBuilder;
+
+	CompiledScalarValue(CompiledScalarType type, bool is_null, bool boolean_value, std::int64_t bigint_value,
+	                    std::string varchar_value);
+
+	CompiledScalarType type;
+	bool is_null;
+	bool boolean_value;
+	std::int64_t bigint_value;
+	std::string varchar_value;
+};
+
+// Default presence is structural. HasDefault() false never aliases a present
+// typed NULL, and consumers may not mutate or replace the retained value.
+class CompiledInputDefault {
+public:
+	CompiledInputDefault(const CompiledInputDefault &) = default;
+	CompiledInputDefault(CompiledInputDefault &&) = default;
+	CompiledInputDefault &operator=(const CompiledInputDefault &) = delete;
+	CompiledInputDefault &operator=(CompiledInputDefault &&) = delete;
+
+	bool HasDefault() const;
+	const CompiledScalarValue &Value() const;
+
+private:
+	friend class internal::CompiledModelBuilder;
+
+	CompiledInputDefault();
+	explicit CompiledInputDefault(CompiledScalarValue value);
+
+	bool has_default;
+	std::shared_ptr<const CompiledScalarValue> value;
+};
+
+// One ordered relation-origin SQL argument. Nullable controls explicit SQL
+// NULL acceptance; it does not make the argument binder-required. Semantics,
+// not Query, applies the retained default only to an omitted input.
+class CompiledRelationInput {
+public:
+	CompiledRelationInput(const CompiledRelationInput &) = default;
+	CompiledRelationInput(CompiledRelationInput &&) = default;
+	CompiledRelationInput &operator=(const CompiledRelationInput &) = delete;
+	CompiledRelationInput &operator=(CompiledRelationInput &&) = delete;
+
+	const std::string &Name() const;
+	CompiledScalarType Type() const;
+	bool Nullable() const;
+	const CompiledInputDefault &Default() const;
+
+private:
+	friend class internal::CompiledModelBuilder;
+
+	CompiledRelationInput(std::string name, CompiledScalarType type, bool nullable, CompiledInputDefault default_value);
+
+	std::string name;
+	CompiledScalarType type;
+	bool nullable;
+	CompiledInputDefault default_value;
+};
 
 enum class CompiledCredentialRequirement { NONE, REQUIRED };
 
@@ -32,10 +121,25 @@ enum class CompiledCredentialPlacement { NONE, AUTHORIZATION_HEADER };
 // by the response source. A non-nullable declaration makes missing or JSON-null
 // extraction fail; it does not claim DuckDB-visible NOT NULL metadata.
 struct CompiledColumn {
+	// Native 0.7 compatibility construction. Package compilation uses the
+	// Connector-private structural constructor so the enum, not this spelling,
+	// is authoritative.
+	CompiledColumn(std::string name, std::string logical_type, bool nullable, std::string extractor);
+
 	std::string name;
 	std::string logical_type;
 	bool nullable;
 	std::string extractor;
+
+	// Returns retained structural authority without parsing logical_type.
+	CompiledScalarType ScalarType() const;
+
+private:
+	friend class internal::CompiledModelBuilder;
+
+	CompiledColumn(std::string name, CompiledScalarType type, bool nullable, std::string extractor);
+
+	CompiledScalarType scalar_type;
 };
 
 // Closed native predicate vocabulary. This first private pre-1.0 service is
@@ -117,6 +221,7 @@ public:
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
+	friend class internal::CompiledModelBuilder;
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 
 	CompiledPredicateMapping(std::string column_name, CompiledPredicateOperator predicate_operator,
@@ -176,6 +281,7 @@ public:
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
+	friend class internal::CompiledModelBuilder;
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 
 	// An unpaginated declaration may inherit the connector response ceiling and
@@ -215,6 +321,7 @@ public:
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
+	friend class internal::CompiledModelBuilder;
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 
 	static CompiledAuthenticationPolicy Anonymous();
@@ -244,6 +351,7 @@ public:
 
 	const std::string &Name() const;
 	const std::vector<CompiledColumn> &Columns() const;
+	const std::vector<CompiledRelationInput> &Inputs() const;
 	const std::vector<CompiledPredicateMapping> &PredicateMappings() const;
 	const std::vector<CompiledOperation> &Operations() const;
 	bool HasSingleOperation() const;
@@ -262,6 +370,7 @@ public:
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
+	friend class internal::CompiledModelBuilder;
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 
 	CompiledRelation(std::string name, std::vector<CompiledColumn> columns,
@@ -271,9 +380,14 @@ private:
 	                 std::vector<CompiledPredicateMapping> predicate_mappings,
 	                 std::vector<CompiledOperation> operations, CompiledAuthenticationPolicy authentication,
 	                 CompiledResourceCeilings resource_ceilings);
+	CompiledRelation(std::string name, std::vector<CompiledColumn> columns, std::vector<CompiledRelationInput> inputs,
+	                 std::vector<CompiledPredicateMapping> predicate_mappings,
+	                 std::vector<CompiledOperation> operations, CompiledAuthenticationPolicy authentication,
+	                 CompiledResourceCeilings resource_ceilings);
 
 	std::string name;
 	std::vector<CompiledColumn> columns;
+	std::vector<CompiledRelationInput> inputs;
 	std::vector<CompiledPredicateMapping> predicate_mappings;
 	std::vector<CompiledOperation> operations;
 	CompiledAuthenticationPolicy authentication;
@@ -307,6 +421,7 @@ public:
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
+	friend class internal::CompiledModelBuilder;
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 
 	CompiledConnector(CompiledConnectorOrigin origin, std::string connector_name, std::string version,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "duckdb_api/compiled_package_generation.hpp"
 #include "duckdb_api/connector_catalog.hpp"
 
 namespace duckdb_api {
