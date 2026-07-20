@@ -82,6 +82,11 @@ bool ScanPlanTestAccess::MutateGraphqlOperationOrSchema(duckdb_api::ScanPlan &pl
 		replace_operation(
 		    [](duckdb_api::PlannedGraphqlOperation &operation) { operation.headers.at(0).value = "other"; });
 		return true;
+	case GraphqlPlanCounterexample::EXTRA_OPERATION_HEADER:
+		replace_operation([](duckdb_api::PlannedGraphqlOperation &operation) {
+			operation.headers.push_back({"X-Extra-Fixture", "other"});
+		});
+		return true;
 	case GraphqlPlanCounterexample::OTHER_VARIABLE_NAME:
 		replace_operation(
 		    [](duckdb_api::PlannedGraphqlOperation &operation) { operation.variables.at(0).name = "other"; });
@@ -100,6 +105,12 @@ bool ScanPlanTestAccess::MutateGraphqlOperationOrSchema(duckdb_api::ScanPlan &pl
 		replace_operation(
 		    [](duckdb_api::PlannedGraphqlOperation &operation) { operation.variables.at(0).integer_value++; });
 		return true;
+	case GraphqlPlanCounterexample::EXTRA_OPERATION_VARIABLE:
+		replace_operation([](duckdb_api::PlannedGraphqlOperation &operation) {
+			operation.variables.push_back({"extra", duckdb_api::PlannedGraphqlVariableType::INT_NON_NULL,
+			                               duckdb_api::PlannedGraphqlVariableSource::FIXED_PAGE_SIZE, 1});
+		});
+		return true;
 	case GraphqlPlanCounterexample::OTHER_RESULT_NAME:
 		replace_operation(
 		    [](duckdb_api::PlannedGraphqlOperation &operation) { operation.result_columns.at(0).name = "other"; });
@@ -117,6 +128,12 @@ bool ScanPlanTestAccess::MutateGraphqlOperationOrSchema(duckdb_api::ScanPlan &pl
 	case GraphqlPlanCounterexample::OTHER_RESULT_PATH:
 		replace_operation([](duckdb_api::PlannedGraphqlOperation &operation) {
 			operation.result_columns.at(0).response_path.segments.at(0) = "other";
+		});
+		return true;
+	case GraphqlPlanCounterexample::EXTRA_OPERATION_RESULT_COLUMN:
+		replace_operation([](duckdb_api::PlannedGraphqlOperation &operation) {
+			operation.result_columns.push_back(
+			    {"extra", duckdb_api::PlannedGraphqlScalarKind::STRING, true, {{"extra"}}});
 		});
 		return true;
 	case GraphqlPlanCounterexample::OTHER_RESPONSE_NODES_PATH:
@@ -214,6 +231,9 @@ bool ScanPlanTestAccess::MutateGraphqlOperationOrSchema(duckdb_api::ScanPlan &pl
 		return true;
 	case GraphqlPlanCounterexample::OTHER_OUTPUT_EXTRACTOR:
 		plan.output_columns.at(0).extractor = "$.other";
+		return true;
+	case GraphqlPlanCounterexample::EXTRA_OUTPUT_COLUMN:
+		plan.output_columns.push_back({"extra", "VARCHAR", true, "$.extra"});
 		return true;
 	default:
 		return false;

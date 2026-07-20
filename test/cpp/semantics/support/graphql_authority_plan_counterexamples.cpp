@@ -77,6 +77,9 @@ bool ScanPlanTestAccess::MutateGraphqlRelationalOrAuthority(duckdb_api::ScanPlan
 	case GraphqlPlanCounterexample::OTHER_SECRET_REFERENCE:
 		plan.secret_reference = duckdb_api::PlannedSecretReference("other_secret");
 		return true;
+	case GraphqlPlanCounterexample::SECRET_REFERENCE_ABSENT:
+		plan.secret_reference = duckdb_api::PlannedSecretReference();
+		return true;
 	case GraphqlPlanCounterexample::OTHER_AUTH_REQUIREMENT:
 		plan.authentication_obligation.requirement = duckdb_api::PlannedCredentialRequirement::NONE;
 		return true;
@@ -106,6 +109,12 @@ bool ScanPlanTestAccess::MutateGraphqlRelationalOrAuthority(duckdb_api::ScanPlan
 		return true;
 	case GraphqlPlanCounterexample::OTHER_NETWORK_HOST:
 		plan.network.allowed_hosts.at(0) = "other.example";
+		return true;
+	case GraphqlPlanCounterexample::EXTRA_NETWORK_SCHEME:
+		plan.network.allowed_schemes.push_back("http");
+		return true;
+	case GraphqlPlanCounterexample::EXTRA_NETWORK_HOST:
+		plan.network.allowed_hosts.push_back("other.example");
 		return true;
 	case GraphqlPlanCounterexample::REDIRECTS_ENABLED:
 		plan.network.redirects_enabled = true;
