@@ -56,6 +56,10 @@ bool IsKnownBaseDomain(CompiledPredicateBaseDomain domain) {
 	case CompiledPredicateBaseDomain::GITHUB_AUTHENTICATED_REPOSITORY_OCCURRENCES:
 	case CompiledPredicateBaseDomain::CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES:
 		return true;
+	case CompiledPredicateBaseDomain::PACKAGE_DECLARED_OCCURRENCE_DOMAIN:
+		// Package proof validation belongs to the package-selection slice. Keep
+		// the existing planner closed to that authority until it lands.
+		return false;
 	}
 	return false;
 }
