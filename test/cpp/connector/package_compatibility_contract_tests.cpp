@@ -277,6 +277,31 @@ void TestPackageGenerationFixtureBoundary() {
 	                .empty(),
 	        "typed predicate fixture lost its BOOLEAN, BIGINT, or empty VARCHAR values");
 
+	const auto residual_predicate = duckdb_api_test::BuildResidualPredicatePackageGenerationFixture();
+	const auto *residual_relation =
+	    residual_predicate.Connector().FindRelation(duckdb_api_test::PACKAGE_RESIDUAL_PREDICATE_RELATION);
+	Require(residual_relation != nullptr && residual_relation->Inputs().empty() &&
+	            residual_relation->Authentication().Requirement() == duckdb_api::CompiledCredentialRequirement::NONE &&
+	            residual_relation->Operations().size() == 1 && residual_relation->Operations()[0].fallback &&
+	            residual_relation->Operations()[0].selector.RequiredInputReferences().empty() &&
+	            residual_relation->PredicateMappings().size() == 1,
+	        "residual predicate fixture lost its independently eligible anonymous operation");
+	const auto &residual_operation = residual_relation->Operations()[0];
+	const auto &residual_query = residual_operation.Rest().request.query_parameters;
+	const auto &residual_mapping = residual_relation->PredicateMappings()[0];
+	Require(residual_query.size() == 1 &&
+	            residual_query[0].source == duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT &&
+	            residual_query[0].name == "rank_filter" && residual_query[0].source_id == "rank" &&
+	            residual_query[0].omit_when_unbound && !residual_query[0].omit_when_null &&
+	            residual_mapping.ColumnName() == "rank" &&
+	            residual_mapping.TypedLiteral().Type() == duckdb_api::CompiledScalarType::BIGINT &&
+	            residual_mapping.TypedLiteral().Bigint() == 42 && residual_mapping.EncodedRemoteValue() == "42" &&
+	            residual_mapping.OperationName() == residual_operation.name &&
+	            residual_mapping.RemoteInputName() == residual_query[0].source_id &&
+	            residual_mapping.Accuracy() == duckdb_api::CompiledPredicateAccuracy::EXACT &&
+	            residual_mapping.ProofIdentity() == duckdb_api::CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1,
+	        "residual predicate fixture lost its optional BIGINT package mapping");
+
 	const auto tie = duckdb_api_test::BuildTypedTiePackageGenerationFixture();
 	const auto *tied = tie.Connector().FindRelation(duckdb_api_test::PACKAGE_TYPED_RELATION);
 	Require(tied != nullptr && tied->Operations().size() == 2 && !tied->Operations()[0].fallback &&

@@ -12,6 +12,7 @@ namespace duckdb_api_test {
 const char PACKAGE_TYPED_RELATION[] = "typed_records";
 const char PACKAGE_DISTINCT_RELATION[] = "distinct_status";
 const char PACKAGE_PREDICATE_RELATION[] = "controlled_exact_repositories";
+const char PACKAGE_RESIDUAL_PREDICATE_RELATION[] = "residual_predicates";
 const char PACKAGE_REST_MATERIALIZATION_RELATION[] = "materialized_records";
 
 namespace {
@@ -340,6 +341,48 @@ duckdb_api::CompiledPackageGeneration BuildTypedPredicateGeneration(const std::s
 	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
 }
 
+duckdb_api::CompiledPackageGeneration BuildResidualPredicateGeneration(const std::string &version, char digest_fill) {
+	const auto digest = Digest(digest_fill);
+	const std::string operation_name = "residual_predicates_default";
+	std::vector<duckdb_api::CompiledColumn> columns;
+	columns.push_back(
+	    CompiledModelBuilder::Column("occurrence_id", CompiledScalarType::BIGINT, false, "$.occurrence_id"));
+	columns.push_back(CompiledModelBuilder::Column("rank", CompiledScalarType::BIGINT, false, "$.rank"));
+	std::vector<CompiledOperation> operations;
+	operations.push_back(
+	    CompiledOperation {operation_name,
+	                       true,
+	                       CompiledOperationCardinality::ZERO_TO_MANY,
+	                       CompiledProtocol::REST,
+	                       CompiledHttpMethod::GET,
+	                       CompiledReplaySafety::SAFE,
+	                       false,
+	                       CompiledModelBuilder::DisabledPagination(),
+	                       {Origin("predicate-proof.invalid"),
+	                        "/fixtures/residual-predicates",
+	                        {CompiledModelBuilder::ConditionalInputQueryParameter("rank_filter", "rank")},
+	                        {{"X-Connector-Fixture", "residual-predicates"}}},
+	                       CompiledResponseSource::JSON_PATH_MANY,
+	                       "$.records[*]",
+	                       CompiledModelBuilder::V1OperationSelector({})});
+	const auto identities = duckdb_api::internal::DerivePackagePredicateIdentities(
+	    digest, PACKAGE_RESIDUAL_PREDICATE_RELATION, operations.front());
+	std::vector<duckdb_api::CompiledPredicateMapping> mappings;
+	mappings.push_back(PackagePredicateMapping("rank", CompiledModelBuilder::Bigint(42), operation_name, "rank", "42",
+	                                           identities, "residual_rank"));
+	std::vector<CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    PACKAGE_RESIDUAL_PREDICATE_RELATION, std::move(columns), {}, std::move(operations),
+	    ConnectorCatalogTestAccess::Anonymous(), ConnectorCatalogTestAccess::UnpaginatedResources(8, 128),
+	    std::move(mappings)));
+	auto identity =
+	    CompiledModelBuilder::PackageIdentity("duckdb_api/v1", "residual_predicate_package", version, digest);
+	auto connector = CompiledModelBuilder::Connector(CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA,
+	                                                 "residual_predicate_package", version, std::move(relations),
+	                                                 NetworkPolicy(false));
+	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
+}
+
 duckdb_api::CompiledPackageGeneration BuildRestMaterializationGeneration(const std::string &version, char digest_fill) {
 	std::vector<duckdb_api::CompiledColumn> columns;
 	columns.push_back(CompiledModelBuilder::Column("record_id", CompiledScalarType::BIGINT, false,
@@ -396,6 +439,11 @@ duckdb_api::CompiledPackageGeneration BuildPredicateConflictPackageGenerationFix
 duckdb_api::CompiledPackageGeneration BuildTypedPredicatePackageGenerationFixture(const std::string &package_version,
                                                                                   char digest_fill) {
 	return BuildTypedPredicateGeneration(package_version, digest_fill);
+}
+
+duckdb_api::CompiledPackageGeneration BuildResidualPredicatePackageGenerationFixture(const std::string &package_version,
+                                                                                     char digest_fill) {
+	return BuildResidualPredicateGeneration(package_version, digest_fill);
 }
 
 duckdb_api::CompiledPackageGeneration

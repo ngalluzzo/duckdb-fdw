@@ -9,6 +9,7 @@ namespace duckdb_api_test {
 extern const char PACKAGE_TYPED_RELATION[];
 extern const char PACKAGE_DISTINCT_RELATION[];
 extern const char PACKAGE_PREDICATE_RELATION[];
+extern const char PACKAGE_RESIDUAL_PREDICATE_RELATION[];
 extern const char PACKAGE_REST_MATERIALIZATION_RELATION[];
 
 // Closed structural variants used to prove every RFC 0013 reload category.
@@ -66,13 +67,20 @@ BuildPredicateConflictPackageGenerationFixture(const std::string &package_versio
 duckdb_api::CompiledPackageGeneration
 BuildTypedPredicatePackageGenerationFixture(const std::string &package_version = "1.2.3", char digest_fill = 'f');
 
+// One anonymous REST relation whose fallback operation is eligible without a
+// predicate capability while still carrying one optional conditional query
+// binding and one exact BIGINT equality mapping. Semantics can therefore prove
+// that an unavailable remote predicate capability retains the typed residual
+// and omits the conditional input without changing operation selection.
+duckdb_api::CompiledPackageGeneration
+BuildResidualPredicatePackageGenerationFixture(const std::string &package_version = "1.2.3", char digest_fill = '8');
+
 // One anonymous, predicate-free REST relation for the public planning and
 // materialization boundary. Its operation preserves ordered fixed,
 // relation-input, page-size, and page-number bindings plus nested structural
 // records and result paths. Consumers use only immutable Connector APIs.
 duckdb_api::CompiledPackageGeneration
-BuildRestMaterializationPackageGenerationFixture(const std::string &package_version = "1.2.3",
-                                                  char digest_fill = '7');
+BuildRestMaterializationPackageGenerationFixture(const std::string &package_version = "1.2.3", char digest_fill = '7');
 
 // One-relation valid package whose name, schema, input shape, and response
 // structure differ from the typed fixture relation.
