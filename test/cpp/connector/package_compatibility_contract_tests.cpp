@@ -118,18 +118,24 @@ void TestPackageGenerationFixtureBoundary() {
 	Require(fallback.Connector().FindRelation(duckdb_api_test::PACKAGE_DISTINCT_RELATION) != nullptr,
 	        "typed package fixture lost its structurally distinct relation");
 	const auto *conditional = fallback.Connector().FindRelation(duckdb_api_test::PACKAGE_PREDICATE_RELATION);
-	Require(conditional != nullptr && conditional->Operations().size() == 2 && !conditional->Operations()[0].fallback &&
-	            conditional->Operations()[1].fallback &&
-	            conditional->Operations()[0].selector.RequiredInputReferences().size() == 1 &&
-	            conditional->Operations()[0].selector.RequiredInputReferences()[0].Kind() ==
-	                duckdb_api::CompiledRequiredInputKind::CONDITIONAL_INPUT &&
-	            conditional->Operations()[0].selector.RequiredInputReferences()[0].Id() == "visibility" &&
-	            conditional->Operations()[1].selector.RequiredInputReferences().empty() &&
-	            conditional->PredicateMappings().size() == 1 &&
-	            conditional->PredicateMappings()[0].OperationName() == conditional->Operations()[0].name &&
-	            conditional->PredicateMappings()[0].ProofIdentity() ==
-	                duckdb_api::CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1,
-	        "package fixture lost its conditional-selected operation or empty fallback containment shape");
+	Require(
+	    conditional != nullptr && conditional->Operations().size() == 2 && !conditional->Operations()[0].fallback &&
+	        conditional->Operations()[1].fallback &&
+	        conditional->Operations()[0].Rest().response_source == duckdb_api::CompiledResponseSource::JSON_PATH_MANY &&
+	        conditional->Operations()[0].Rest().records_extractor == "$.records[*]" &&
+	        conditional->Operations()[0].Rest().records_extractor_segments == std::vector<std::string>({"records"}) &&
+	        conditional->Operations()[1].Rest().response_source == duckdb_api::CompiledResponseSource::JSON_PATH_MANY &&
+	        conditional->Operations()[1].Rest().records_extractor_segments == std::vector<std::string>({"records"}) &&
+	        conditional->Operations()[0].selector.RequiredInputReferences().size() == 1 &&
+	        conditional->Operations()[0].selector.RequiredInputReferences()[0].Kind() ==
+	            duckdb_api::CompiledRequiredInputKind::CONDITIONAL_INPUT &&
+	        conditional->Operations()[0].selector.RequiredInputReferences()[0].Id() == "visibility" &&
+	        conditional->Operations()[1].selector.RequiredInputReferences().empty() &&
+	        conditional->PredicateMappings().size() == 1 &&
+	        conditional->PredicateMappings()[0].OperationName() == conditional->Operations()[0].name &&
+	        conditional->PredicateMappings()[0].ProofIdentity() ==
+	            duckdb_api::CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1,
+	    "package fixture lost its conditional-selected operation or empty fallback containment shape");
 
 	const auto predicate_conflict = duckdb_api_test::BuildPredicateConflictPackageGenerationFixture();
 	const auto *conflict = predicate_conflict.Connector().FindRelation(duckdb_api_test::PACKAGE_PREDICATE_RELATION);
@@ -158,14 +164,22 @@ void TestPackageGenerationFixtureBoundary() {
 	        "typed predicate fixture relation inventory drifted");
 	for (std::size_t index = 0; index < typed_relation_names.size(); index++) {
 		const auto *relation = typed_predicates.Connector().FindRelation(typed_relation_names[index]);
-		Require(relation != nullptr && relation->Columns().size() == 2 &&
-		            relation->Columns()[1].ScalarType() == typed_relation_types[index] &&
-		            relation->Operations().size() == 2 && !relation->Operations()[0].fallback &&
-		            relation->Operations()[1].fallback && relation->PredicateMappings().size() == 1 &&
-		            relation->PredicateMappings()[0].TypedLiteral().Type() == typed_relation_types[index] &&
-		            relation->PredicateMappings()[0].ProofIdentity() ==
-		                duckdb_api::CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1,
-		        "typed predicate fixture lost an independent package equality mapping or fallback");
+		Require(
+		    relation != nullptr && relation->Columns().size() == 2 &&
+		        relation->Columns()[1].ScalarType() == typed_relation_types[index] &&
+		        relation->Operations().size() == 2 && !relation->Operations()[0].fallback &&
+		        relation->Operations()[1].fallback &&
+		        relation->Operations()[0].Rest().response_source ==
+		            duckdb_api::CompiledResponseSource::JSON_PATH_MANY &&
+		        relation->Operations()[0].Rest().records_extractor_segments == std::vector<std::string>({"records"}) &&
+		        relation->Operations()[1].Rest().response_source ==
+		            duckdb_api::CompiledResponseSource::JSON_PATH_MANY &&
+		        relation->Operations()[1].Rest().records_extractor_segments == std::vector<std::string>({"records"}) &&
+		        relation->PredicateMappings().size() == 1 &&
+		        relation->PredicateMappings()[0].TypedLiteral().Type() == typed_relation_types[index] &&
+		        relation->PredicateMappings()[0].ProofIdentity() ==
+		            duckdb_api::CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1,
+		    "typed predicate fixture lost an independent package equality mapping or fallback");
 	}
 	Require(typed_predicates.Connector()
 	                .FindRelation("boolean_predicates")
