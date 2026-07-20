@@ -228,8 +228,7 @@ CompiledQueryParameter::CompiledQueryParameter(std::string name_p, std::string e
 }
 
 CompiledQueryParameter::CompiledQueryParameter(std::string name_p, CompiledQueryValueSource source_p,
-                                               std::string source_id_p, bool omit_when_unbound_p,
-                                               bool omit_when_null_p)
+                                               std::string source_id_p, bool omit_when_unbound_p, bool omit_when_null_p)
     : name(std::move(name_p)), encoded_value(), source(source_p), source_id(std::move(source_id_p)),
       omit_when_unbound(omit_when_unbound_p), omit_when_null(omit_when_null_p) {
 }

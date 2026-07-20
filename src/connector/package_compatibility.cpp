@@ -175,11 +175,10 @@ bool SameColumn(const CompiledColumn &left, const CompiledColumn &right) {
 bool SamePredicate(const CompiledPredicateMapping &left, const CompiledPredicateMapping &right) {
 	return left.ColumnName() == right.ColumnName() && left.Operator() == right.Operator() &&
 	       left.Literal() == right.Literal() && SameScalar(left.TypedLiteral(), right.TypedLiteral()) &&
-	       left.OperationName() == right.OperationName() &&
-	       left.InputPlacement() == right.InputPlacement() && left.RemoteInputName() == right.RemoteInputName() &&
+	       left.OperationName() == right.OperationName() && left.InputPlacement() == right.InputPlacement() &&
+	       left.RemoteInputName() == right.RemoteInputName() &&
 	       left.EncodedRemoteValue() == right.EncodedRemoteValue() && left.Accuracy() == right.Accuracy() &&
-	       left.ProofIdentity() == right.ProofIdentity() && left.ProofIdentityValue() == right.ProofIdentityValue() &&
-	       left.BaseDomain() == right.BaseDomain() && left.BaseDomainValue() == right.BaseDomainValue() &&
+	       left.ProofIdentity() == right.ProofIdentity() && left.BaseDomain() == right.BaseDomain() &&
 	       left.MatchingFixture() == right.MatchingFixture() &&
 	       left.FalseOrNullFixture() == right.FalseOrNullFixture() &&
 	       left.DuplicatesFixture() == right.DuplicatesFixture() &&

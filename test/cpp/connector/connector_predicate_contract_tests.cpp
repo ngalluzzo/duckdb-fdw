@@ -2,6 +2,7 @@
 #include "connector/support/predicate_contract.hpp"
 #include "duckdb_api/internal/connector/compiled_model_builder.hpp"
 #include "duckdb_api/internal/connector/predicate_declaration.hpp"
+#include "duckdb_api/package_compatibility.hpp"
 #include "support/require.hpp"
 
 #include <stdexcept>
@@ -160,14 +161,15 @@ duckdb_api::CompiledRelation PackageRelation(duckdb_api::CompiledOperation opera
 
 duckdb_api::CompiledPackageGeneration PackageGeneration(const std::string &digest,
                                                         duckdb_api::CompiledOperation operation,
-                                                        std::vector<duckdb_api::CompiledPredicateMapping> mappings) {
+                                                        std::vector<duckdb_api::CompiledPredicateMapping> mappings,
+                                                        const std::string &version = "1.0.0") {
 	auto relation = PackageRelation(std::move(operation), std::move(mappings));
 	auto connector = CompiledModelBuilder::Connector(
-	    duckdb_api::CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA, "package_predicate_fixture", "1.0.0",
+	    duckdb_api::CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA, "package_predicate_fixture", version,
 	    {relation},
 	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"predicate-proof.invalid"}, false, false, false, false, 4096});
 	auto identity =
-	    CompiledModelBuilder::PackageIdentity("duckdb_api/v1", "package_predicate_fixture", "1.0.0", digest);
+	    CompiledModelBuilder::PackageIdentity("duckdb_api/v1", "package_predicate_fixture", version, digest);
 	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
 }
 
@@ -447,6 +449,24 @@ void TestPackagePredicateGenerationBinding() {
 	Require(generation.Connector().FindRelation(PACKAGE_RELATION) != nullptr,
 	        "valid package predicate identity failed generation validation");
 
+	const auto patch_operation = PackageOperation();
+	const std::string patch_digest = "sha256.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+	const auto patch_identities =
+	    duckdb_api::internal::DerivePackagePredicateIdentities(patch_digest, PACKAGE_RELATION, patch_operation);
+	const auto patch = PackageGeneration(patch_digest, patch_operation,
+	                                     {PackageMapping("private", "private", patch_identities)}, "1.0.1");
+	const auto minor_operation = PackageOperation();
+	const std::string minor_digest = "sha256.cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+	const auto minor_identities =
+	    duckdb_api::internal::DerivePackagePredicateIdentities(minor_digest, PACKAGE_RELATION, minor_operation);
+	const auto minor = PackageGeneration(minor_digest, minor_operation,
+	                                     {PackageMapping("private", "private", minor_identities)}, "1.1.0");
+	Require(duckdb_api::ClassifyPackageReload(generation, patch).Classification() ==
+	                duckdb_api::PackageReloadClassification::COMPATIBLE_PROVENANCE_PATCH &&
+	            duckdb_api::ClassifyPackageReload(generation, minor).Classification() ==
+	                duckdb_api::PackageReloadClassification::COMPATIBLE_PROVENANCE_MINOR,
+	        "derived proof identities leaked package digest into normalized reload compatibility");
+
 	auto RejectInjectedIdentity = [&](const std::string &message, const std::string &digest,
 	                                  const std::string &relation_name,
 	                                  const duckdb_api::CompiledOperation &identity_operation) {
@@ -483,7 +503,7 @@ void TestPackagePredicateGenerationBinding() {
 		    duckdb_api::CompiledNetworkPolicy {{"https"}, {"api.github.com"}, false, false, false, false, 4096});
 		auto identity = CompiledModelBuilder::PackageIdentity(
 		    "duckdb_api/v1", "legacy_predicate_package", "1.0.0",
-		    "sha256.cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+		    "sha256.dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
 		CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
 	});
 }
