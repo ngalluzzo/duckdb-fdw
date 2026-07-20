@@ -14,20 +14,11 @@ bool ScanPlanTestAccess::MutateGraphqlRelationalOrAuthority(duckdb_api::ScanPlan
 	case GraphqlRuntimeAdmissionCounterexample::OTHER_REMOTE_ACCURACY:
 		plan.remote_accuracy = duckdb_api::RemotePredicateAccuracy::SUPERSET;
 		return true;
-	case GraphqlRuntimeAdmissionCounterexample::OTHER_RESIDUAL_PREDICATE:
-		plan.residual_predicate = duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER;
-		return true;
 	case GraphqlRuntimeAdmissionCounterexample::OTHER_RESIDUAL_OWNER:
 		plan.residual_owner = static_cast<duckdb_api::RelationalOwner>(127);
 		return true;
 	case GraphqlRuntimeAdmissionCounterexample::OTHER_CONDITIONAL_INPUT:
 		plan.conditional_input = duckdb_api::PlannedConditionalInput::VISIBILITY_PRIVATE;
-		return true;
-	case GraphqlRuntimeAdmissionCounterexample::OTHER_PREDICATE_CATEGORY:
-		plan.predicate_category = duckdb_api::PredicateDecisionCategory::SUPERSET;
-		return true;
-	case GraphqlRuntimeAdmissionCounterexample::OTHER_PREDICATE_REASON:
-		plan.predicate_reason = duckdb_api::PredicateDecisionReason::SELECTED_SUPERSET_MAPPING;
 		return true;
 	case GraphqlRuntimeAdmissionCounterexample::OTHER_FILTER_OWNER:
 		plan.ownership.filter = static_cast<duckdb_api::RelationalOwner>(127);

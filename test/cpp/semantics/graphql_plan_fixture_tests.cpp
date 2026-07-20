@@ -58,7 +58,7 @@ void TestFixtureBoundary() {
 	Require(profile_sentinel_rejected, "GraphQL fixture accepted a local-residual profile outside its closed enum");
 
 	const auto admission_count = static_cast<std::size_t>(GraphqlRuntimeAdmissionCounterexample::COUNT);
-	Require(admission_count == 143, "closed Runtime-facing GraphQL admission catalog changed without self-test review");
+	Require(admission_count == 140, "closed Runtime-facing GraphQL admission catalog changed without self-test review");
 	std::vector<duckdb_api::ScanPlan> admission_candidates;
 	admission_candidates.reserve(admission_count);
 	for (std::size_t value = 0; value < admission_count; value++) {
@@ -145,13 +145,33 @@ void TestFixtureBoundary() {
 	}
 
 	const auto variation_count = static_cast<std::size_t>(GraphqlPlanVariation::COUNT);
-	Require(variation_count == 5, "internal GraphQL equality variation catalog changed without self-test review");
+	Require(variation_count == 8, "internal GraphQL equality variation catalog changed without self-test review");
+	std::vector<duckdb_api::ScanPlan> variation_candidates;
+	variation_candidates.reserve(variation_count);
 	for (std::size_t value = 0; value < variation_count; value++) {
 		const auto variation = static_cast<GraphqlPlanVariation>(value);
 		const auto candidate = BuildGraphqlPlanVariation("graphql_semantics_secret", variation);
 		Require(CountGraphqlPlanDifferences(fixture, candidate) == 1,
 		        "internal GraphQL equality variation did not isolate one non-admission fact");
+		variation_candidates.push_back(candidate);
 	}
+	for (std::size_t left = 0; left < variation_candidates.size(); left++) {
+		for (std::size_t right = left + 1; right < variation_candidates.size(); right++) {
+			Require(CountGraphqlPlanDifferences(variation_candidates[left], variation_candidates[right]) > 0,
+			        "internal GraphQL equality variations " + std::to_string(left) + " and " + std::to_string(right) +
+			            " collapsed to the same structured plan");
+		}
+	}
+	const auto other_residual =
+	    BuildGraphqlPlanVariation("graphql_semantics_secret", GraphqlPlanVariation::OTHER_RESIDUAL_PREDICATE);
+	const auto other_category =
+	    BuildGraphqlPlanVariation("graphql_semantics_secret", GraphqlPlanVariation::OTHER_PREDICATE_CATEGORY);
+	const auto other_reason =
+	    BuildGraphqlPlanVariation("graphql_semantics_secret", GraphqlPlanVariation::OTHER_PREDICATE_REASON);
+	Require(other_residual.ResidualPredicate() == duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER &&
+	            other_category.PredicateCategory() == duckdb_api::PredicateDecisionCategory::SUPERSET &&
+	            other_reason.PredicateReason() == duckdb_api::PredicateDecisionReason::SELECTED_SUPERSET_MAPPING,
+	        "migrated GraphQL equality variations changed their isolated Semantics facts");
 
 	const auto safe = fixture.Snapshot();
 	Require(safe.find(fixture.Operation().Graphql().document) == std::string::npos &&

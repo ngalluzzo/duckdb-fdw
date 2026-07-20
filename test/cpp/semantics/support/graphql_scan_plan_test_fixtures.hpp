@@ -22,8 +22,8 @@ enum class GraphqlLocalResidualProfile {
 };
 
 // Closed Semantics provider API for focused Runtime admission consumers. Each
-// counterexample isolates one admission law that Runtime must enforce before
-// authorization or transport. Most change one structured executable field;
+// counterexample isolates one executable authority fact that Runtime must
+// enforce before authorization or transport. Most change one structured field;
 // CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST changes the dependent document and
 // digest together so self-consistency cannot replace reviewed canonical-profile
 // membership. Provenance prose and valid logical-secret names are intentionally
@@ -99,11 +99,8 @@ enum class GraphqlRuntimeAdmissionCounterexample {
 	OTHER_DOMAIN,
 	OTHER_REMOTE_PREDICATE,
 	OTHER_REMOTE_ACCURACY,
-	OTHER_RESIDUAL_PREDICATE,
 	OTHER_RESIDUAL_OWNER,
 	OTHER_CONDITIONAL_INPUT,
-	OTHER_PREDICATE_CATEGORY,
-	OTHER_PREDICATE_REASON,
 	OTHER_FILTER_OWNER,
 	OTHER_PROJECTION_OWNER,
 	OTHER_ORDERING_OWNER,

@@ -23,6 +23,15 @@ duckdb_api::ScanPlan ScanPlanTestAccess::GraphqlVariation(duckdb_api::ScanPlan p
 	case GraphqlPlanVariation::OTHER_CLASSIFICATION_REASON:
 		plan.classification_reason = "other safe explanation";
 		break;
+	case GraphqlPlanVariation::OTHER_RESIDUAL_PREDICATE:
+		plan.residual_predicate = duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER;
+		break;
+	case GraphqlPlanVariation::OTHER_PREDICATE_CATEGORY:
+		plan.predicate_category = duckdb_api::PredicateDecisionCategory::SUPERSET;
+		break;
+	case GraphqlPlanVariation::OTHER_PREDICATE_REASON:
+		plan.predicate_reason = duckdb_api::PredicateDecisionReason::SELECTED_SUPERSET_MAPPING;
+		break;
 	default:
 		throw std::invalid_argument("unknown internal GraphQL plan variation");
 	}

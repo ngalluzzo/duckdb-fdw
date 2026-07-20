@@ -6,14 +6,18 @@
 
 namespace duckdb_api_test {
 
-// Semantics-internal equality probes. These values may legitimately vary and
-// are not executable rejection authority for Runtime consumers.
+// Semantics-internal equality probes. Each probe mutates one plan fact and need
+// not describe a coherent executable plan. These are not rejection authority
+// for Runtime consumers.
 enum class GraphqlPlanVariation {
 	OTHER_CONNECTOR_NAME,
 	OTHER_CONNECTOR_VERSION,
 	OTHER_RELATION_NAME,
 	OTHER_SECRET_REFERENCE,
 	OTHER_CLASSIFICATION_REASON,
+	OTHER_RESIDUAL_PREDICATE,
+	OTHER_PREDICATE_CATEGORY,
+	OTHER_PREDICATE_REASON,
 	COUNT
 };
 
