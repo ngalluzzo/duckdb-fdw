@@ -93,9 +93,10 @@ tests link that target and cannot reach `CompiledModelBuilder` or
 Package generations use structural selector references tagged as relation
 inputs or operation-local conditional inputs. Connector validates each tag
 against its exact declaration namespace, canonicalizes the tagged references,
-and compares both tag and identifier for reload compatibility. The v1 package
-model has no author priority, alternative-input sets, forbidden-input sets, or
-string-prefix interpretation.
+and compares both tag and identifier for reload compatibility. A selected v1
+operation has 1–128 required references; the sole fallback has none. The v1
+package model has no author priority, alternative-input sets, forbidden-input
+sets, or string-prefix interpretation.
 
 One temporary compatibility bridge remains while Semantics migrates its
 controlled fixtures: `ConnectorCatalogTestAccess::OperationSelector` can build

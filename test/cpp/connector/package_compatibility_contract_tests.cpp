@@ -1,4 +1,6 @@
 #include "connector/support/package_generation_test_fixtures.hpp"
+#include "duckdb_api/internal/connector/compiled_model_builder.hpp"
+#include "duckdb_api/internal/connector/operation_selector_declaration.hpp"
 #include "duckdb_api/package_compatibility.hpp"
 #include "support/require.hpp"
 
@@ -13,6 +15,7 @@
 namespace {
 
 using duckdb_api::PackageReloadClassification;
+using duckdb_api::internal::CompiledModelBuilder;
 using duckdb_api_test::PackageCompatibilityFixture;
 using duckdb_api_test::Require;
 
@@ -133,6 +136,21 @@ void TestPackageGenerationFixtureBoundary() {
 	        "distinct package fixture exposed the controlled relation or private construction surface");
 }
 
+void TestSelectorStructuralComparison() {
+	const auto relation_query =
+	    CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::RelationInputReference("query")});
+	const auto conditional_query =
+	    CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::ConditionalInputReference("query")});
+	const auto relation_cursor =
+	    CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::RelationInputReference("cursor")});
+	Require(!duckdb_api::internal::SameOperationSelectorStructure(relation_query, conditional_query),
+	        "reload compatibility collapsed relation and conditional tags with the same identifier");
+	Require(!duckdb_api::internal::SameOperationSelectorStructure(relation_query, relation_cursor),
+	        "reload compatibility collapsed distinct exact required-input identifiers");
+	Require(duckdb_api::internal::SameOperationSelectorStructure(relation_query, relation_query),
+	        "reload compatibility rejected equal structural selector facts");
+}
+
 void TestCompatibleTransitions() {
 	const auto active =
 	    duckdb_api_test::BuildPackageCompatibilityFixture(PackageCompatibilityFixture::BASELINE, "1.2.3", 'a');
@@ -211,6 +229,7 @@ int main() {
 	try {
 		TestPackageSemVer();
 		TestPackageGenerationFixtureBoundary();
+		TestSelectorStructuralComparison();
 		TestCompatibleTransitions();
 		TestIdentityAndVersionRejections();
 		TestStructuralRejections();

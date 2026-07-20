@@ -1,5 +1,7 @@
 #include "duckdb_api/package_compatibility.hpp"
 
+#include "duckdb_api/internal/connector/operation_selector_declaration.hpp"
+
 #include <cstddef>
 #include <utility>
 
@@ -120,29 +122,10 @@ bool SameGraphql(const CompiledGraphqlOperation &left, const CompiledGraphqlOper
 	       left.providers_enabled == right.providers_enabled;
 }
 
-bool SameRequiredReferences(const std::vector<CompiledRequiredInputReference> &left,
-                            const std::vector<CompiledRequiredInputReference> &right) {
-	if (left.size() != right.size()) {
-		return false;
-	}
-	for (std::size_t index = 0; index < left.size(); index++) {
-		if (left[index].Kind() != right[index].Kind() || left[index].Id() != right[index].Id()) {
-			return false;
-		}
-	}
-	return true;
-}
-
-bool SameSelector(const CompiledOperationSelector &left, const CompiledOperationSelector &right) {
-	return SameRequiredReferences(left.RequiredInputReferences(), right.RequiredInputReferences()) &&
-	       left.IsLegacyCompatibilityBridge() == right.IsLegacyCompatibilityBridge() &&
-	       left.RequiredInputs() == right.RequiredInputs() && left.AnyInputSets() == right.AnyInputSets() &&
-	       left.ForbiddenInputs() == right.ForbiddenInputs() && left.Priority() == right.Priority();
-}
-
 bool SameOperation(const CompiledOperation &left, const CompiledOperation &right) {
 	if (left.name != right.name || left.fallback != right.fallback || left.cardinality != right.cardinality ||
-	    left.Protocol() != right.Protocol() || !SameSelector(left.selector, right.selector)) {
+	    left.Protocol() != right.Protocol() ||
+	    !internal::SameOperationSelectorStructure(left.selector, right.selector)) {
 		return false;
 	}
 	switch (left.Protocol()) {

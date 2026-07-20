@@ -1,6 +1,7 @@
 #include "duckdb_api/compiled_package_generation.hpp"
 #include "duckdb_api/connector.hpp"
 #include "duckdb_api/internal/connector/compiled_model_builder.hpp"
+#include "connector/support/catalog_test_access.hpp"
 #include "support/require.hpp"
 
 #include <cstdlib>
@@ -200,11 +201,12 @@ void TestInputValidationAndOrdering() {
 	        "compiled relation lost default presence, value, or nullability");
 }
 
-duckdb_api::CompiledOperation SelectorTestOperation(duckdb_api::CompiledOperationSelector selector) {
+duckdb_api::CompiledOperation SelectorTestOperation(duckdb_api::CompiledOperationSelector selector,
+                                                    bool fallback = false) {
 	const duckdb_api::CompiledHttpOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
 	                                               duckdb_api::CompiledHttpHost("service.example"), 443};
 	return duckdb_api::CompiledOperation {"selected_rows",
-	                                      false,
+	                                      fallback,
 	                                      duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
 	                                      duckdb_api::CompiledProtocol::REST,
 	                                      duckdb_api::CompiledHttpMethod::GET,
@@ -215,6 +217,24 @@ duckdb_api::CompiledOperation SelectorTestOperation(duckdb_api::CompiledOperatio
 	                                      duckdb_api::CompiledResponseSource::ROOT_ARRAY,
 	                                      "$",
 	                                      std::move(selector)};
+}
+
+duckdb_api::CompiledOperation ControlledExactOperation(duckdb_api::CompiledOperationSelector selector) {
+	const duckdb_api::CompiledHttpOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledHttpHost("predicate-proof.invalid"), 443};
+	return duckdb_api::CompiledOperation {
+	    "controlled_exact_repositories",
+	    false,
+	    duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	    duckdb_api::CompiledProtocol::REST,
+	    duckdb_api::CompiledHttpMethod::GET,
+	    duckdb_api::CompiledReplaySafety::SAFE,
+	    false,
+	    CompiledModelBuilder::DisabledPagination(),
+	    {origin, "/fixtures/exact-repositories", {}, {{"X-Connector-Fixture", "exact-duplicate-repositories"}}},
+	    duckdb_api::CompiledResponseSource::ROOT_ARRAY,
+	    "$",
+	    std::move(selector)};
 }
 
 void TestTaggedRequiredInputReferences() {
@@ -252,14 +272,14 @@ void TestTaggedRequiredInputReferences() {
 	        canonical.AnyInputSets().empty() && canonical.ForbiddenInputs().empty() && canonical.Priority() == 0,
 	    "v1 selector failed canonical tagged ordering or exposed legacy policy");
 
-	const auto make_relation = [](duckdb_api::CompiledOperationSelector selector) {
+	const auto make_relation = [](duckdb_api::CompiledOperationSelector selector, bool fallback = false) {
 		std::vector<duckdb_api::CompiledColumn> columns;
 		columns.push_back(CompiledModelBuilder::Column("id", CompiledScalarType::BIGINT, false, "$.id"));
 		std::vector<duckdb_api::CompiledRelationInput> inputs;
 		inputs.push_back(CompiledModelBuilder::Input("query", CompiledScalarType::VARCHAR, false,
 		                                             CompiledModelBuilder::NoDefault()));
 		std::vector<duckdb_api::CompiledOperation> operations;
-		operations.push_back(SelectorTestOperation(std::move(selector)));
+		operations.push_back(SelectorTestOperation(std::move(selector), fallback));
 		return CompiledModelBuilder::Relation("selected", std::move(columns), std::move(inputs), {},
 		                                      std::move(operations), CompiledModelBuilder::AnonymousAuthentication(),
 		                                      CompiledModelBuilder::UnpaginatedResources(8, 64));
@@ -280,6 +300,65 @@ void TestTaggedRequiredInputReferences() {
 		        CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::RelationInputReference("missing")}));
 	    },
 	    "missing tagged relation input escaped validation");
+	RequireThrows<std::invalid_argument>([&]() { (void)make_relation(CompiledModelBuilder::V1OperationSelector({})); },
+	                                     "selected v1 operation accepted an absent when.required_inputs declaration");
+	RequireThrows<std::invalid_argument>(
+	    [&]() {
+		    (void)make_relation(
+		        CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::RelationInputReference("query")}),
+		        true);
+	    },
+	    "fallback v1 operation accepted a when.required_inputs declaration");
+	RequireThrows<std::invalid_argument>(
+	    []() {
+		    std::vector<duckdb_api::CompiledRelationInput> inputs;
+		    std::vector<duckdb_api::CompiledRequiredInputReference> references;
+		    for (std::size_t index = 0; index < 129; index++) {
+			    const auto id = "input_" + std::to_string(index);
+			    inputs.push_back(CompiledModelBuilder::Input(id, CompiledScalarType::VARCHAR, false,
+			                                                 CompiledModelBuilder::NoDefault()));
+			    references.push_back(CompiledModelBuilder::RelationInputReference(id));
+		    }
+		    std::vector<duckdb_api::CompiledColumn> columns;
+		    columns.push_back(CompiledModelBuilder::Column("id", CompiledScalarType::BIGINT, false, "$.id"));
+		    std::vector<duckdb_api::CompiledOperation> operations;
+		    operations.push_back(
+		        SelectorTestOperation(CompiledModelBuilder::V1OperationSelector(std::move(references))));
+		    (void)CompiledModelBuilder::Relation("selected", std::move(columns), std::move(inputs), {},
+		                                         std::move(operations), CompiledModelBuilder::AnonymousAuthentication(),
+		                                         CompiledModelBuilder::UnpaginatedResources(8, 64));
+	    },
+	    "v1 selector accepted more than 128 required-input references");
+
+	std::vector<duckdb_api::CompiledColumn> conditional_columns;
+	conditional_columns.push_back(
+	    CompiledModelBuilder::Column("occurrence_id", CompiledScalarType::BIGINT, false, "$.occurrence_id"));
+	conditional_columns.push_back(
+	    CompiledModelBuilder::Column("visibility", CompiledScalarType::VARCHAR, false, "$.visibility"));
+	std::vector<duckdb_api::CompiledRelationInput> colliding_inputs;
+	colliding_inputs.push_back(CompiledModelBuilder::Input("visibility", CompiledScalarType::VARCHAR, false,
+	                                                       CompiledModelBuilder::NoDefault()));
+	std::vector<duckdb_api::CompiledPredicateMapping> mappings;
+	mappings.push_back(duckdb_api_test::ConnectorCatalogTestAccess::PredicateMapping(
+	    "visibility", duckdb_api::CompiledPredicateOperator::EQUALS,
+	    duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE, "controlled_exact_repositories",
+	    duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER, "visibility", "private",
+	    duckdb_api::CompiledPredicateAccuracy::EXACT,
+	    duckdb_api::CompiledPredicateProofIdentity::CONTROLLED_EXACT_DUPLICATE_REPOSITORY_VISIBILITY,
+	    duckdb_api::CompiledPredicateBaseDomain::CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES,
+	    duckdb_api::CompiledPredicateOccurrencePreservation::PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES,
+	    duckdb_api::CompiledPredicateEncodingCapability::SINGLE_POSITIVE_REST_QUERY_INPUT));
+	std::vector<duckdb_api::CompiledOperation> conditional_operations;
+	conditional_operations.push_back(ControlledExactOperation(
+	    CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::ConditionalInputReference("visibility")})));
+	const auto conditional_relation = CompiledModelBuilder::Relation(
+	    "controlled_exact_repositories", std::move(conditional_columns), std::move(colliding_inputs),
+	    std::move(mappings), std::move(conditional_operations), CompiledModelBuilder::AnonymousAuthentication(),
+	    CompiledModelBuilder::UnpaginatedResources(8, 128));
+	Require(conditional_relation.Operations()[0].selector.RequiredInputReferences()[0].Kind() ==
+	            duckdb_api::CompiledRequiredInputKind::CONDITIONAL_INPUT,
+	        "exact conditional tag did not validate against its operation-local mapping when the relation namespace "
+	        "collided");
 
 	RequireThrows<std::invalid_argument>(
 	    []() {

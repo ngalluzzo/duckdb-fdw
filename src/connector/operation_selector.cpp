@@ -40,6 +40,9 @@ bool ReferenceLess(const CompiledRequiredInputReference &left, const CompiledReq
 
 std::vector<CompiledRequiredInputReference>
 NormalizeRequiredReferences(const std::vector<CompiledRequiredInputReference> &references) {
+	if (references.size() > 128) {
+		throw std::invalid_argument("compiled v1 operation selector exceeds the required-input limit");
+	}
 	std::vector<CompiledRequiredInputReference> normalized;
 	normalized.reserve(references.size());
 	std::vector<bool> emitted(references.size(), false);
@@ -192,7 +195,12 @@ namespace internal {
 void ValidateOperationSelectorReferences(const CompiledOperation &operation,
                                          const std::vector<CompiledRelationInput> &relation_inputs,
                                          const std::vector<CompiledPredicateMapping> &mappings) {
-	for (const auto &reference : operation.selector.RequiredInputReferences()) {
+	const auto &references = operation.selector.RequiredInputReferences();
+	if (!operation.selector.IsLegacyCompatibilityBridge() &&
+	    (references.size() > 128 || operation.fallback != references.empty())) {
+		throw std::invalid_argument("compiled v1 operation selector disagrees with fallback/when shape");
+	}
+	for (const auto &reference : references) {
 		const bool represented = reference.Kind() == CompiledRequiredInputKind::RELATION_INPUT
 		                             ? HasRelationInput(relation_inputs, reference.Id())
 		                             : HasConditionalInput(operation, mappings, reference.Id());
@@ -217,6 +225,23 @@ void ValidateOperationSelectorReferences(const CompiledOperation &operation,
 		validate(alternative);
 	}
 	validate(operation.selector.ForbiddenInputs());
+}
+
+bool SameOperationSelectorStructure(const CompiledOperationSelector &left, const CompiledOperationSelector &right) {
+	const auto &left_references = left.RequiredInputReferences();
+	const auto &right_references = right.RequiredInputReferences();
+	if (left_references.size() != right_references.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left_references.size(); index++) {
+		if (left_references[index].Kind() != right_references[index].Kind() ||
+		    left_references[index].Id() != right_references[index].Id()) {
+			return false;
+		}
+	}
+	return left.IsLegacyCompatibilityBridge() == right.IsLegacyCompatibilityBridge() &&
+	       left.RequiredInputs() == right.RequiredInputs() && left.AnyInputSets() == right.AnyInputSets() &&
+	       left.ForbiddenInputs() == right.ForbiddenInputs() && left.Priority() == right.Priority();
 }
 
 } // namespace internal
