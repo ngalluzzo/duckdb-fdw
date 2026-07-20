@@ -153,26 +153,39 @@ CompiledRelation BuildPredicateRelation(bool changed, const std::string &package
 	    CompiledModelBuilder::Column("occurrence_id", CompiledScalarType::BIGINT, false, "$.occurrence_id"));
 	columns.push_back(CompiledModelBuilder::Column("visibility", CompiledScalarType::VARCHAR, false, "$.visibility"));
 	std::vector<CompiledOperation> operations;
-	operations.push_back(CompiledModelBuilder::RestOperation(
-	    "controlled_exact_repositories", false, CompiledOperationCardinality::ZERO_TO_MANY,
+	operations.push_back(CompiledOperation {
+	    "controlled_exact_repositories",
+	    false,
+	    CompiledOperationCardinality::ZERO_TO_MANY,
+	    CompiledProtocol::REST,
+	    CompiledHttpMethod::GET,
+	    CompiledReplaySafety::SAFE,
+	    false,
 	    CompiledModelBuilder::DisabledPagination(),
 	    {Origin("predicate-proof.invalid"),
 	     "/fixtures/exact-repositories",
 	     {duckdb_api::CompiledQueryParameter(conditional_input, duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT,
 	                                         conditional_input, true, false)},
 	     {{"X-Connector-Fixture", "exact-duplicate-repositories"}}},
-	    CompiledResponseSource::JSON_PATH_MANY, "$.records[*]", {"records"},
+	    CompiledResponseSource::JSON_PATH_MANY,
+	    "$.records[*]",
 	    CompiledModelBuilder::V1OperationSelector(
-	        {CompiledModelBuilder::ConditionalInputReference(conditional_input)})));
-	operations.push_back(CompiledModelBuilder::RestOperation(
-	    "controlled_all_repositories", true, CompiledOperationCardinality::ZERO_TO_MANY,
-	    CompiledModelBuilder::DisabledPagination(),
-	    {Origin("predicate-proof.invalid"),
-	     "/fixtures/all-repositories",
-	     {},
-	     {{"X-Connector-Fixture", "all-repositories"}}},
-	    CompiledResponseSource::JSON_PATH_MANY, "$.records[*]", {"records"},
-	    CompiledModelBuilder::V1OperationSelector({})));
+	        {CompiledModelBuilder::ConditionalInputReference(conditional_input)})});
+	operations.push_back(CompiledOperation {"controlled_all_repositories",
+	                                        true,
+	                                        CompiledOperationCardinality::ZERO_TO_MANY,
+	                                        CompiledProtocol::REST,
+	                                        CompiledHttpMethod::GET,
+	                                        CompiledReplaySafety::SAFE,
+	                                        false,
+	                                        CompiledModelBuilder::DisabledPagination(),
+	                                        {Origin("predicate-proof.invalid"),
+	                                         "/fixtures/all-repositories",
+	                                         {},
+	                                         {{"X-Connector-Fixture", "all-repositories"}}},
+	                                        CompiledResponseSource::JSON_PATH_MANY,
+	                                        "$.records[*]",
+	                                        CompiledModelBuilder::V1OperationSelector({})});
 	const auto identities = duckdb_api::internal::DerivePackagePredicateIdentities(
 	    package_digest, PACKAGE_PREDICATE_RELATION, operations.front());
 	std::vector<duckdb_api::CompiledPredicateMapping> mappings;
@@ -200,24 +213,38 @@ CompiledRelation BuildScalarPredicateRelation(const std::string &package_digest,
 	    CompiledModelBuilder::Column("occurrence_id", CompiledScalarType::BIGINT, false, "$.occurrence_id"));
 	columns.push_back(CompiledModelBuilder::Column(column_name, type, false, "$." + column_name));
 	std::vector<CompiledOperation> operations;
-	operations.push_back(CompiledModelBuilder::RestOperation(
-	    operation_name, false, CompiledOperationCardinality::ZERO_TO_MANY, CompiledModelBuilder::DisabledPagination(),
+	operations.push_back(CompiledOperation {
+	    operation_name,
+	    false,
+	    CompiledOperationCardinality::ZERO_TO_MANY,
+	    CompiledProtocol::REST,
+	    CompiledHttpMethod::GET,
+	    CompiledReplaySafety::SAFE,
+	    false,
+	    CompiledModelBuilder::DisabledPagination(),
 	    {Origin("predicate-proof.invalid"),
 	     "/fixtures/" + relation_name + "/restricted",
 	     {duckdb_api::CompiledQueryParameter(column_name, duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT,
 	                                         column_name, true, false)},
 	     {{"X-Connector-Fixture", relation_name}}},
-	    CompiledResponseSource::JSON_PATH_MANY, "$.records[*]", {"records"},
-	    CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::ConditionalInputReference(column_name)})));
-	operations.push_back(CompiledModelBuilder::RestOperation(
-	    relation_name + "_fallback", true, CompiledOperationCardinality::ZERO_TO_MANY,
-	    CompiledModelBuilder::DisabledPagination(),
-	    {Origin("predicate-proof.invalid"),
-	     "/fixtures/" + relation_name + "/all",
-	     {},
-	     {{"X-Connector-Fixture", relation_name + "-fallback"}}},
-	    CompiledResponseSource::JSON_PATH_MANY, "$.records[*]", {"records"},
-	    CompiledModelBuilder::V1OperationSelector({})));
+	    CompiledResponseSource::JSON_PATH_MANY,
+	    "$.records[*]",
+	    CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::ConditionalInputReference(column_name)})});
+	operations.push_back(CompiledOperation {relation_name + "_fallback",
+	                                        true,
+	                                        CompiledOperationCardinality::ZERO_TO_MANY,
+	                                        CompiledProtocol::REST,
+	                                        CompiledHttpMethod::GET,
+	                                        CompiledReplaySafety::SAFE,
+	                                        false,
+	                                        CompiledModelBuilder::DisabledPagination(),
+	                                        {Origin("predicate-proof.invalid"),
+	                                         "/fixtures/" + relation_name + "/all",
+	                                         {},
+	                                         {{"X-Connector-Fixture", relation_name + "-fallback"}}},
+	                                        CompiledResponseSource::JSON_PATH_MANY,
+	                                        "$.records[*]",
+	                                        CompiledModelBuilder::V1OperationSelector({})});
 	const auto identities =
 	    duckdb_api::internal::DerivePackagePredicateIdentities(package_digest, relation_name, operations.front());
 	std::vector<duckdb_api::CompiledPredicateMapping> mappings;
