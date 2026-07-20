@@ -14,41 +14,9 @@ void ScanPlanTestAccess::ReplaceGraphql(duckdb_api::ScanPlan &plan, duckdb_api::
 }
 
 duckdb_api::ScanPlan ScanPlanTestAccess::Graphql(duckdb_api::ScanPlan plan, GraphqlPlanCounterexample counterexample) {
-	switch (counterexample) {
-	case GraphqlPlanCounterexample::OTHER_DOCUMENT_IDENTITY: {
-		auto operation = plan.Operation().Graphql();
-		operation.document_identity = static_cast<duckdb_api::PlannedGraphqlDocumentIdentity>(127);
-		ReplaceGraphql(plan, std::move(operation));
-		break;
-	}
-	case GraphqlPlanCounterexample::OTHER_DOCUMENT_DIGEST: {
-		auto operation = plan.Operation().Graphql();
-		operation.document_digest = "other-digest";
-		ReplaceGraphql(plan, std::move(operation));
-		break;
-	}
-	case GraphqlPlanCounterexample::OTHER_DOMAIN:
-		plan.domain = duckdb_api::BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS;
-		break;
-	case GraphqlPlanCounterexample::UNKNOWN_REPLAY_SAFETY: {
-		auto operation = plan.Operation().Graphql();
-		operation.replay_safety = static_cast<duckdb_api::PlannedReplaySafety>(127);
-		ReplaceGraphql(plan, std::move(operation));
-		break;
-	}
-	case GraphqlPlanCounterexample::OTHER_CURSOR_PAGE_SIZE:
-		plan.pagination.graphql_cursor.page_size = 99;
-		break;
-	case GraphqlPlanCounterexample::ZERO_PAGE_BODY_BUDGET:
-		plan.pagination.page_budgets.serialized_request_body_bytes = 0;
-		break;
-	case GraphqlPlanCounterexample::RUNTIME_ORDERING_DELEGATED:
-		plan.runtime_ordering = static_cast<duckdb_api::RelationalDelegation>(127);
-		break;
-	case GraphqlPlanCounterexample::PRIMARY_LANGUAGE_REQUIRED:
-		plan.output_columns[4].nullable = false;
-		break;
-	default:
+	if (!MutateGraphqlOperationOrSchema(plan, counterexample) &&
+	    !MutateGraphqlRelationalOrAuthority(plan, counterexample) && !MutateGraphqlCursor(plan, counterexample) &&
+	    !MutateGraphqlResources(plan, counterexample)) {
 		throw std::invalid_argument("unknown closed GraphQL plan counterexample");
 	}
 	return plan;

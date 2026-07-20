@@ -13,6 +13,11 @@ public:
 	static void ReplaceRest(duckdb_api::ScanPlan &plan, duckdb_api::PlannedRestOperation operation);
 	static void ReplaceGraphql(duckdb_api::ScanPlan &plan, duckdb_api::PlannedGraphqlOperation operation);
 	static duckdb_api::ScanPlan Graphql(duckdb_api::ScanPlan plan, GraphqlPlanCounterexample counterexample);
+	static bool MutateGraphqlOperationOrSchema(duckdb_api::ScanPlan &plan, GraphqlPlanCounterexample counterexample);
+	static bool MutateGraphqlRelationalOrAuthority(duckdb_api::ScanPlan &plan,
+	                                               GraphqlPlanCounterexample counterexample);
+	static bool MutateGraphqlCursor(duckdb_api::ScanPlan &plan, GraphqlPlanCounterexample counterexample);
+	static bool MutateGraphqlResources(duckdb_api::ScanPlan &plan, GraphqlPlanCounterexample counterexample);
 	static duckdb_api::ScanPlan Operation(duckdb_api::ScanPlan plan, OperationPlanCounterexample counterexample);
 	static duckdb_api::ScanPlan Authenticated(duckdb_api::ScanPlan plan,
 	                                          AuthenticatedPlanCounterexample counterexample);

@@ -44,6 +44,14 @@ const char *ReplaySafetyName(PlannedReplaySafety replay_safety) {
 	throw std::logic_error("scan plan contains an unknown replay-safety classification");
 }
 
+const char *GraphqlDocumentIdentityName(PlannedGraphqlDocumentIdentity identity) {
+	switch (identity) {
+	case PlannedGraphqlDocumentIdentity::GITHUB_VIEWER_REPOSITORY_METRICS_V1:
+		return "github_viewer_repository_metrics_v1";
+	}
+	throw std::logic_error("scan plan contains an unknown GraphQL document identity");
+}
+
 const char *UrlSchemeName(PlannedUrlScheme scheme) {
 	switch (scheme) {
 	case PlannedUrlScheme::HTTP:
@@ -360,8 +368,17 @@ std::string ScanPlan::Snapshot() const {
 	const auto &planned_operation = Operation();
 	std::ostringstream result;
 	result.imbue(std::locale::classic());
-	result << "connector=" << connector_name << ";version=" << connector_version << ";relation=" << relation_name
-	       << ";source_snapshot=[" << source_snapshot << "];domain=" << BaseDomainName(domain) << ";operation=";
+	result << "connector=" << connector_name << ";version=" << connector_version << ";relation=" << relation_name;
+	if (planned_operation.Protocol() == PlannedProtocol::REST) {
+		// REST explanation retains the accepted source snapshot contract. The
+		// GraphQL branch below deliberately uses typed provenance because its
+		// Connector snapshot names document variables and cursor bindings.
+		result << ";source_snapshot=[" << source_snapshot << ']';
+	} else {
+		result << ";source_provenance=[canonical_graphql_profile:"
+		       << GraphqlDocumentIdentityName(planned_operation.Graphql().document_identity) << ']';
+	}
+	result << ";domain=" << BaseDomainName(domain) << ";operation=";
 	if (planned_operation.Protocol() == PlannedProtocol::REST) {
 		const auto &rest = planned_operation.Rest();
 		result << rest.operation_name << ':' << CardinalityName(rest.cardinality) << ':'
@@ -380,7 +397,8 @@ std::string ScanPlan::Snapshot() const {
 		       << ProtocolName(PlannedProtocol::GRAPHQL) << ":query:" << ReplaySafetyName(graphql.replay_safety)
 		       << ";request=origin:";
 		AppendOrigin(result, graphql.origin);
-		result << ",path:" << graphql.path << ",document_identity:github_viewer_repository_metrics_v1"
+		result << ",path:" << graphql.path
+		       << ",document_identity:" << GraphqlDocumentIdentityName(graphql.document_identity)
 		       << ";response=source:graphql_nodes,partial_data:fail_on_any_error";
 	}
 	result << ";projection=";

@@ -311,7 +311,7 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string &secret_n
 	                                    "    }\n"
 	                                    "  }\n"
 	                                    "}";
-	auto plan = Common("canonical_graphql_fixture", "test-graphql-v1", "fixture_viewer_repository_metrics",
+	auto plan = Common("canonical_graphql_fixture", "test-graphql-v1", "viewer_repository_metrics",
 	                   "fixture:canonical-graphql-viewer-repository-metrics");
 	plan.domain = duckdb_api::BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES;
 	duckdb_api::PlannedGraphqlOperation operation {
@@ -380,8 +380,10 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string &secret_n
 	plan.budgets = plan.pagination.page_budgets;
 	RequireBearer(plan, secret_name);
 	plan.classification_reason =
-	    "canonical GraphQL query defines duplicate-preserving viewer repository occurrences; DuckDB owns all "
-	    "relational operators";
+	    "no structured remote candidate was offered; the complete base-domain traversal remains authoritative; "
+	    "canonical viewer.repositories traversal defines a duplicate-preserving mutable occurrence bag; fixed "
+	    "UPDATED_AT DESC enumerates cursors but grants no DuckDB ordering or snapshot; body and row ceilings grant "
+	    "no limit or truncation authority; DuckDB retains every relational operator";
 	return plan;
 }
 

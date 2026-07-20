@@ -247,6 +247,8 @@ void TestNativeGoldenPlans() {
 
 	RequireAnonymousPlan(anonymous_plan, connector, anonymous);
 	RequireAuthenticatedPlan(authenticated_plan, connector, authenticated, "github_default");
+	Require(anonymous_plan.Snapshot().find(anonymous_plan.SourceSnapshot()) != std::string::npos,
+	        "REST explanation stopped preserving the accepted Connector source snapshot");
 	Require(anonymous_plan.ConnectorName() == "github" && anonymous_plan.ConnectorVersion() == "0.7.0" &&
 	            anonymous_plan.RelationName() == "duckdb_login_search_page" &&
 	            anonymous_plan.Operation().Rest().operation_name == "github_search_duckdb_login_page" &&

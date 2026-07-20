@@ -12,6 +12,41 @@
 namespace duckdb_api_test {
 namespace graphql_semantics {
 
+namespace {
+
+std::string RejectedMessage(InvalidGraphqlCatalogCandidate candidate) {
+	const auto connector = BuildInvalidGraphqlConnectorCatalogCandidate(candidate);
+	const auto request = BuildAuthenticatedScanRequest(connector, GRAPHQL_VIEWER_REPOSITORY_METRICS_RELATION,
+	                                                   "graphql_semantics_secret");
+	try {
+		(void)duckdb_api::BuildConservativeScanPlan(connector, request);
+	} catch (const duckdb_api::PlanningError &error) {
+		Require(error.Code() == duckdb_api::PlanningErrorCode::INVALID_CONTRACT,
+		        "invalid Connector GraphQL candidate used the wrong planning error category");
+		return error.what();
+	}
+	throw std::runtime_error("invalid Connector GraphQL candidate produced a partial plan");
+}
+
+void TestInvalidProviderCandidates() {
+	using Candidate = InvalidGraphqlCatalogCandidate;
+	const Candidate candidates[] = {
+	    Candidate::UNKNOWN_DOCUMENT_IDENTITY, Candidate::CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST,
+	    Candidate::DOCUMENT_DIGEST_MISMATCH,  Candidate::VARIABLE_PROFILE_DRIFT,
+	    Candidate::RESPONSE_NODES_PATH_DRIFT, Candidate::RESPONSE_ERRORS_PATH_DRIFT,
+	    Candidate::PARTIAL_DATA_POLICY_DRIFT, Candidate::CURSOR_PROFILE_DRIFT,
+	    Candidate::BODY_BUDGET_DRIFT,         Candidate::SCHEMA_TYPE_DRIFT,
+	    Candidate::SCHEMA_NULLABILITY_DRIFT};
+	for (const auto candidate : candidates) {
+		const auto first = RejectedMessage(candidate);
+		const auto second = RejectedMessage(candidate);
+		Require(first == second && !first.empty(),
+		        "invalid Connector GraphQL candidate did not fail deterministically");
+	}
+}
+
+} // namespace
+
 duckdb_api::ScanPlan BuildProductionPlan() {
 	const auto connector = BuildCanonicalGraphqlConnectorCatalogFixture();
 	const auto request = BuildAuthenticatedScanRequest(connector, GRAPHQL_VIEWER_REPOSITORY_METRICS_RELATION,
@@ -47,10 +82,17 @@ void TestOperationPlan() {
 	Require(wrong_variant_failed, "GraphQL plan exposed an inactive REST payload");
 
 	const auto snapshot = plan.Snapshot();
+	Require(plan.SourceSnapshot().find("pageSize") != std::string::npos &&
+	            plan.SourceSnapshot().find("cursor") != std::string::npos,
+	        "GraphQL explanation canary no longer probes raw Connector variable declarations");
 	Require(snapshot.find(operation.document) == std::string::npos &&
 	            snapshot.find("graphql_semantics_secret") == std::string::npos &&
-	            snapshot.find("$cursor") == std::string::npos && snapshot.find("query:") != std::string::npos,
+	            snapshot.find("pageSize") == std::string::npos &&
+	            snapshot.find("cursor_variable") == std::string::npos &&
+	            snapshot.find("cursor:") == std::string::npos && snapshot.find("query:") != std::string::npos &&
+	            snapshot.find("canonical_graphql_profile:github_viewer_repository_metrics_v1") != std::string::npos,
 	        "safe explanation exposed document, variable, or secret bytes, or omitted query-only classification");
+	TestInvalidProviderCandidates();
 }
 
 } // namespace graphql_semantics
