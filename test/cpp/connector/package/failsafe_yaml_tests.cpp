@@ -69,10 +69,14 @@ void TestFlowAndFailsafeScalarBehavior() {
 	Require(values->SequenceValue(0).Scalar() == "true" && values->SequenceValue(1).Scalar() == "+443" &&
 	            values->SequenceValue(2).Scalar() == "01",
 	        "failsafe plain scalars underwent implicit typing");
+	Require(values->SequenceValue(0).Style() == FailsafeYamlNode::ScalarStyle::PLAIN,
+	        "failsafe YAML did not retain plain scalar spelling");
 	const auto &mapping = values->SequenceValue(3);
 	Require(mapping.Find("kind")->Scalar() == "null", "plain null did not remain text");
 	Require(mapping.Find("text")->Scalar() == std::string("A\n\xf0\x9f\x98\x80"),
 	        "JSON escapes were not decoded as UTF-8");
+	Require(mapping.Find("text")->Style() == FailsafeYamlNode::ScalarStyle::DOUBLE_QUOTED,
+	        "failsafe YAML did not retain double-quoted scalar spelling");
 }
 
 void TestForbiddenSyntaxAndEncoding() {

@@ -92,8 +92,8 @@ public:
 		FailsafeYamlParserAccess::ConsumeNode(budget, file, span);
 	}
 
-	FailsafeYamlNode Scalar(std::string value, SourceSpan span) {
-		return FailsafeYamlParserAccess::Scalar(std::move(value), span, budget, file);
+	FailsafeYamlNode Scalar(std::string value, SourceSpan span, FailsafeYamlNode::ScalarStyle style) {
+		return FailsafeYamlParserAccess::Scalar(std::move(value), span, style, budget, file);
 	}
 
 	FailsafeYamlNode Mapping(std::vector<FailsafeYamlParserAccess::MappingItem> entries, SourceSpan span) {
@@ -454,10 +454,10 @@ FailsafeYamlNode InlineParser::ParseValue(std::uint64_t depth) {
 	}
 	if (line.text[cursor] == '"') {
 		auto value = ParseDoubleQuoted();
-		return owner.Scalar(std::move(value.first), value.second);
+		return owner.Scalar(std::move(value.first), value.second, FailsafeYamlNode::ScalarStyle::DOUBLE_QUOTED);
 	}
 	auto value = ParsePlain(false);
-	return owner.Scalar(std::move(value.first), value.second);
+	return owner.Scalar(std::move(value.first), value.second, FailsafeYamlNode::ScalarStyle::PLAIN);
 }
 
 bool InlineParser::AtEndOrComment() {

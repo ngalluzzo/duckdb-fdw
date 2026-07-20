@@ -22,6 +22,8 @@ residual ownership. Runtime receives only the resulting plan.
 | Change catalog values, relation/catalog validation, or lookup | `catalog_model.cpp`, `duckdb_api/connector_catalog.hpp` | `connector_catalog_contract_tests.cpp` |
 | Change structural relation inputs, package identity, generation ownership, or Query registration projection | `compiled_package_generation.cpp`, `duckdb_api/compiled_package_generation.hpp`, `duckdb_api/internal/connector/compiled_model_builder.hpp` | `compiled_package_generation_contract_tests.cpp` |
 | Change package SemVer or normalized reload compatibility | `package_semver.cpp`, `package_compatibility.cpp`, and their public headers | `package_compatibility_contract_tests.cpp` |
+| Change local package acquisition, YAML decoding, schema validation, or compilation | `package/package_source*.cpp`, `package/failsafe_yaml*.cpp`, the responsibility-named `package/package_*_schema.cpp` and `package/package_*_compiler.cpp` units | `package_source_tests.cpp`, `failsafe_yaml_tests.cpp`, and the focused package schema/compiler suites |
+| Change the construction-closed GraphQL recipe or canonical rendering | `graphql_query_recipe.cpp`, `package/package_graphql_renderer.cpp`, and `duckdb_api/internal/connector/graphql_query_recipe.hpp` | `package_graphql_renderer_tests.cpp`; GraphQL catalog contract tests |
 | Change the REST/GraphQL operation sum, HTTP authority, canonical GraphQL document, typed result mapping, cursor, or safe protocol snapshot | `protocol_operation_declaration.cpp`, `graphql_operation_declaration.cpp`, `duckdb_api/compiled_protocol_operation.hpp` | `connector_graphql_contract_tests.cpp`; existing REST contract tests |
 | Change protocol-neutral content digests | `content_digest.cpp`, `duckdb_api/content_digest.hpp` | GraphQL digest-vector and canonical-profile tests |
 | Change operation-selector normalization or declaration validation | `operation_selector.cpp` and its internal header | `connector_catalog_contract_tests.cpp`; fixture tests for controlled selection services |
@@ -46,6 +48,11 @@ Semantics may consume its generalized immutable connector, while Query receives
 only the structural registration projection and an opaque shared-lifetime
 handle. Query cannot recover extractors, operation selection, predicates,
 network policy, source text, or credentials from that view. The
+internal [`package_compiler.hpp`](../include/duckdb_api/internal/connector/package/package_compiler.hpp)
+is Connector's production entry point for an absolute canonical local root. It
+acquires bounded source, compiles a complete immutable generation, and returns
+ordered safe diagnostics; it neither registers DuckDB objects nor stages
+Runtime work. The
 [`package_semver.hpp`](../include/duckdb_api/package_semver.hpp) and
 [`package_compatibility.hpp`](../include/duckdb_api/package_compatibility.hpp)
 services parse canonical package identity and compare normalized compiled
@@ -117,6 +124,8 @@ fixture uses together after Semantics consumes `RequiredInputReferences()`.
 - `duckdb_api_package_compatibility_tests` for canonical SemVer, the complete
   reload matrix, compatibility diagnostics, and the bounded package fixture
   service;
+- the focused package source, YAML, schema, compiler, GraphQL-renderer, and
+  predicate-compiler executables for the author-to-generation boundary;
 - `duckdb_api_connector_catalog_fixture_tests` for the bounded fixture API.
 
 Run `make build` before invoking a focused binary from

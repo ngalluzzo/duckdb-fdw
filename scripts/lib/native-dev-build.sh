@@ -231,6 +231,12 @@ run_tests() {
         "${NATIVE_TEST_ROOT}/duckdb_api_failsafe_yaml_tests"
         "${NATIVE_TEST_ROOT}/duckdb_api_package_digest_tests"
         "${NATIVE_TEST_ROOT}/duckdb_api_package_source_tests"
+        "${NATIVE_TEST_ROOT}/duckdb_api_compiled_package_generation_tests"
+        "${NATIVE_TEST_ROOT}/duckdb_api_package_compatibility_tests"
+        "${NATIVE_TEST_ROOT}/duckdb_api_package_compiler_contract_tests"
+        "${NATIVE_TEST_ROOT}/duckdb_api_package_graphql_renderer_tests"
+        "${NATIVE_TEST_ROOT}/duckdb_api_package_predicate_compiler_tests"
+        "${NATIVE_TEST_ROOT}/duckdb_api_package_schema_contract_tests"
     )
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_typed_value_adapter_tests"

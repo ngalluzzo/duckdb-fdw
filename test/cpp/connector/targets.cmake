@@ -107,3 +107,20 @@ target_include_directories(
 target_link_libraries(
   duckdb_api_connector_catalog_fixture_tests
   PRIVATE duckdb_api_connector_fixture_service)
+
+foreach(package_test
+    package_compiler_contract
+    package_graphql_renderer
+    package_predicate_compiler
+    package_schema_contract)
+  add_executable(
+    duckdb_api_${package_test}_tests
+    test/cpp/connector/package/${package_test}_tests.cpp)
+  configure_duckdb_api_cpp_target(duckdb_api_${package_test}_tests)
+  target_include_directories(
+    duckdb_api_${package_test}_tests
+    PRIVATE test/cpp)
+  target_link_libraries(
+    duckdb_api_${package_test}_tests
+    PRIVATE duckdb_api_package_compiler_service)
+endforeach()

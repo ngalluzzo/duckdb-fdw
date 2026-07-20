@@ -18,12 +18,13 @@ public:
 		FailsafeYamlNode value;
 	};
 
-	Data(Kind kind_p, SourceSpan span_p) : kind(kind_p), span(span_p) {
+	Data(Kind kind_p, SourceSpan span_p) : kind(kind_p), span(span_p), scalar_style(ScalarStyle::PLAIN) {
 	}
 
 	Kind kind;
 	SourceSpan span;
 	std::string scalar;
+	ScalarStyle scalar_style;
 	std::vector<MappingEntry> mapping;
 	std::vector<FailsafeYamlNode> sequence;
 };
@@ -40,11 +41,13 @@ void FailsafeYamlParserAccess::ConsumeKey(FailsafeYamlBudget &budget, const std:
 	ConsumeNode(budget, file, span);
 }
 
-FailsafeYamlNode FailsafeYamlParserAccess::Scalar(std::string value, SourceSpan span, FailsafeYamlBudget &budget,
+FailsafeYamlNode FailsafeYamlParserAccess::Scalar(std::string value, SourceSpan span,
+                                                  FailsafeYamlNode::ScalarStyle style, FailsafeYamlBudget &budget,
                                                   const std::string &file) {
 	ConsumeNode(budget, file, span);
 	auto data = std::make_shared<FailsafeYamlNode::Data>(FailsafeYamlNode::Kind::SCALAR, span);
 	data->scalar = std::move(value);
+	data->scalar_style = style;
 	return FailsafeYamlNode(std::move(data));
 }
 
@@ -137,6 +140,13 @@ const std::string &FailsafeYamlNode::Scalar() const {
 		throw std::logic_error("YAML node is not a scalar");
 	}
 	return data->scalar;
+}
+
+FailsafeYamlNode::ScalarStyle FailsafeYamlNode::Style() const {
+	if (!data || data->kind != Kind::SCALAR) {
+		throw std::logic_error("YAML node is not a scalar");
+	}
+	return data->scalar_style;
 }
 
 std::size_t FailsafeYamlNode::Size() const {

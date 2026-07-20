@@ -23,8 +23,8 @@ public:
 
 	static void ConsumeNode(FailsafeYamlBudget &budget, const std::string &file, const SourceSpan &span);
 	static void ConsumeKey(FailsafeYamlBudget &budget, const std::string &file, const SourceSpan &span);
-	static FailsafeYamlNode Scalar(std::string value, SourceSpan span, FailsafeYamlBudget &budget,
-	                               const std::string &file);
+	static FailsafeYamlNode Scalar(std::string value, SourceSpan span, FailsafeYamlNode::ScalarStyle style,
+	                               FailsafeYamlBudget &budget, const std::string &file);
 	static FailsafeYamlNode Mapping(std::vector<MappingItem> entries, SourceSpan span);
 	static FailsafeYamlNode Sequence(std::vector<FailsafeYamlNode> values, SourceSpan span);
 };

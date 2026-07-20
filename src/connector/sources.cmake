@@ -24,6 +24,25 @@ set(CONNECTOR_PACKAGE_SOURCE_SOURCES
     src/connector/package/package_digest.cpp
     src/connector/package/package_source.cpp
     src/connector/package/package_source_filesystem.cpp)
+set(CONNECTOR_PACKAGE_COMPILER_SOURCES
+    src/connector/package/package_compile_helpers.cpp
+    src/connector/package/package_compiler.cpp
+    src/connector/package/package_diagnostics.cpp
+    src/connector/package/package_graphql_renderer.cpp
+    src/connector/package/package_graphql_schema.cpp
+    src/connector/package/package_http_schema.cpp
+    src/connector/package/package_manifest_schema.cpp
+    src/connector/package/package_model_compiler.cpp
+    src/connector/package/package_operation_compiler.cpp
+    src/connector/package/package_operation_schema.cpp
+    src/connector/package/package_predicate_compiler.cpp
+    src/connector/package/package_predicate_schema.cpp
+    src/connector/package/package_relation_compiler.cpp
+    src/connector/package/package_relation_schema.cpp
+    src/connector/package/package_rest_schema.cpp
+    src/connector/package/package_schema_asset.cpp
+    src/connector/package/package_schema_helpers.cpp
+    src/connector/package/package_schema_reader.cpp)
 set(CONNECTOR_NATIVE_PROFILE_SOURCES
     src/connector/native_github_composition.cpp)
 set(CONNECTOR_METADATA_IMPLEMENTATION_SOURCES

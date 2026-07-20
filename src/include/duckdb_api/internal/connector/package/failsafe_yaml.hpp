@@ -84,11 +84,13 @@ private:
 class FailsafeYamlNode {
 public:
 	enum class Kind : std::uint8_t { SCALAR, MAPPING, SEQUENCE };
+	enum class ScalarStyle : std::uint8_t { PLAIN, DOUBLE_QUOTED };
 
 	FailsafeYamlNode();
 	Kind Type() const;
 	const SourceSpan &Span() const;
 	const std::string &Scalar() const;
+	ScalarStyle Style() const;
 	std::size_t Size() const;
 	const std::string &MappingKey(std::size_t index) const;
 	const SourceSpan &MappingKeySpan(std::size_t index) const;

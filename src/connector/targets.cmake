@@ -26,3 +26,15 @@ configure_duckdb_api_cpp_target(duckdb_api_package_source_service)
 target_link_libraries(
   duckdb_api_package_source_service
   PRIVATE duckdb_api_content_digest_service)
+
+# Connector's compiler consumes a complete source snapshot and publishes one
+# immutable generation. Source custody and metadata remain bounded services;
+# consumers link this target instead of compiling implementation files.
+add_library(
+  duckdb_api_package_compiler_service STATIC
+  ${CONNECTOR_PACKAGE_COMPILER_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_package_compiler_service)
+target_link_libraries(
+  duckdb_api_package_compiler_service
+  PUBLIC duckdb_api_package_source_service
+         duckdb_api_connector_metadata_service)
