@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace duckdb_api_test {
 namespace graphql_semantics {
@@ -22,8 +23,44 @@ void TestFixtureBoundary() {
 	Require(fixture.SourceSnapshot() != production.SourceSnapshot() && fixture.Snapshot() == production.Snapshot(),
 	        "typed GraphQL fixture agreement improperly depends on Connector source prose");
 
+	const auto profile_count = static_cast<std::size_t>(GraphqlLocalResidualProfile::COUNT);
+	Require(profile_count == 4, "closed valid GraphQL local-residual catalog changed without self-test review");
+	for (std::size_t value = 0; value < profile_count; value++) {
+		const auto profile = static_cast<GraphqlLocalResidualProfile>(value);
+		const auto profiled_fixture = BuildValidGraphqlScanPlanFixture("graphql_semantics_secret", profile);
+		const auto profiled_production = BuildProductionPlan(profile);
+		Require(CountGraphqlPlanDifferences(profiled_fixture, profiled_production) == 0,
+		        "valid GraphQL local-residual fixture " + std::to_string(value) +
+		            " drifted from its production planner result");
+		Require(profiled_fixture.RemotePredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
+		            profiled_fixture.RemoteAccuracy() == duckdb_api::RemotePredicateAccuracy::UNSUPPORTED &&
+		            profiled_fixture.ResidualOwner() == duckdb_api::RelationalOwner::DUCKDB &&
+		            profiled_fixture.ConditionalInput() == duckdb_api::PlannedConditionalInput::NONE &&
+		            profiled_fixture.Ownership().filter == duckdb_api::RelationalOwner::DUCKDB &&
+		            profiled_fixture.Ownership().projection == duckdb_api::RelationalOwner::DUCKDB &&
+		            profiled_fixture.Ownership().ordering == duckdb_api::RelationalOwner::DUCKDB &&
+		            profiled_fixture.Ownership().limit == duckdb_api::RelationalOwner::DUCKDB &&
+		            profiled_fixture.Ownership().offset == duckdb_api::RelationalOwner::DUCKDB &&
+		            profiled_fixture.RemoteOrdering() == duckdb_api::RelationalDelegation::NONE &&
+		            profiled_fixture.RuntimeOrdering() == duckdb_api::RelationalDelegation::NONE &&
+		            profiled_fixture.RemoteLimit() == duckdb_api::RelationalDelegation::NONE &&
+		            profiled_fixture.RemoteOffset() == duckdb_api::RelationalDelegation::NONE &&
+		            profiled_fixture.RuntimeLimit() == duckdb_api::RelationalDelegation::NONE &&
+		            profiled_fixture.RuntimeOffset() == duckdb_api::RelationalDelegation::NONE,
+		        "valid GraphQL local-residual fixture conferred executable remote or Runtime authority");
+	}
+	bool profile_sentinel_rejected = false;
+	try {
+		(void)BuildValidGraphqlScanPlanFixture("graphql_semantics_secret", GraphqlLocalResidualProfile::COUNT);
+	} catch (const std::invalid_argument &) {
+		profile_sentinel_rejected = true;
+	}
+	Require(profile_sentinel_rejected, "GraphQL fixture accepted a local-residual profile outside its closed enum");
+
 	const auto admission_count = static_cast<std::size_t>(GraphqlRuntimeAdmissionCounterexample::COUNT);
 	Require(admission_count == 143, "closed Runtime-facing GraphQL admission catalog changed without self-test review");
+	std::vector<duckdb_api::ScanPlan> admission_candidates;
+	admission_candidates.reserve(admission_count);
 	for (std::size_t value = 0; value < admission_count; value++) {
 		const auto counterexample = static_cast<GraphqlRuntimeAdmissionCounterexample>(value);
 		const auto candidate = BuildGraphqlRuntimeAdmissionCounterexample("graphql_semantics_secret", counterexample);
@@ -40,6 +77,19 @@ void TestFixtureBoundary() {
 			Require(changed.document != canonical.document && changed.document_digest != canonical.document_digest &&
 			            changed.document_digest == duckdb_api::ComputeSha256Hex(changed.document),
 			        "changed GraphQL document fixture did not carry its correctly recomputed non-canonical digest");
+		}
+		admission_candidates.push_back(candidate);
+	}
+	for (std::size_t left = 0; left < admission_candidates.size(); left++) {
+		for (std::size_t right = left + 1; right < admission_candidates.size(); right++) {
+			const auto left_shape = InspectGraphqlProtocolEnvelope(admission_candidates[left]);
+			const auto right_shape = InspectGraphqlProtocolEnvelope(admission_candidates[right]);
+			const bool distinct =
+			    CountGraphqlPlanDifferences(admission_candidates[left], admission_candidates[right]) > 0 ||
+			    left_shape.protocol != right_shape.protocol || left_shape.rest_present != right_shape.rest_present ||
+			    left_shape.graphql_present != right_shape.graphql_present;
+			Require(distinct, "GraphQL Runtime admission counterexamples " + std::to_string(left) + " and " +
+			                      std::to_string(right) + " collapsed to the same structured plan");
 		}
 	}
 	bool sentinel_rejected = false;

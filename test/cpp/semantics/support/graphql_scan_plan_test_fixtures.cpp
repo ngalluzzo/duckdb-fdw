@@ -6,7 +6,8 @@
 
 namespace duckdb_api_test {
 
-duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixtureImpl(const std::string &exact_logical_secret_name);
+duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixtureImpl(const std::string &exact_logical_secret_name,
+                                                          GraphqlLocalResidualProfile profile);
 
 void ScanPlanTestAccess::ReplaceGraphql(duckdb_api::ScanPlan &plan, duckdb_api::PlannedGraphqlOperation operation) {
 	plan.operation = std::make_shared<const duckdb_api::PlannedProtocolOperation>(
@@ -24,12 +25,19 @@ duckdb_api::ScanPlan ScanPlanTestAccess::Graphql(duckdb_api::ScanPlan plan,
 }
 
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name) {
-	return BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name);
+	return BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, GraphqlLocalResidualProfile::UNRESTRICTED);
+}
+
+duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name,
+                                                      GraphqlLocalResidualProfile profile) {
+	return BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, profile);
 }
 
 duckdb_api::ScanPlan BuildGraphqlRuntimeAdmissionCounterexample(const std::string &exact_logical_secret_name,
                                                                 GraphqlRuntimeAdmissionCounterexample counterexample) {
-	return ScanPlanTestAccess::Graphql(BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name), counterexample);
+	return ScanPlanTestAccess::Graphql(
+	    BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, GraphqlLocalResidualProfile::UNRESTRICTED),
+	    counterexample);
 }
 
 } // namespace duckdb_api_test

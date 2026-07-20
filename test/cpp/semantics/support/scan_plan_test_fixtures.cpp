@@ -2,6 +2,7 @@
 #include "semantics/support/graphql_scan_plan_test_fixtures.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 #include <utility>
 
 namespace duckdb_api_test {
@@ -68,7 +69,7 @@ public:
 	                                       duckdb_api::PredicateDecisionCategory predicate_category,
 	                                       bool complete_residual);
 	static duckdb_api::ScanPlan GenericPagination(const std::string &secret_name);
-	static duckdb_api::ScanPlan Graphql(const std::string &secret_name);
+	static duckdb_api::ScanPlan Graphql(const std::string &secret_name, GraphqlLocalResidualProfile profile);
 
 private:
 	static duckdb_api::ScanPlan Common(std::string connector, std::string version, std::string relation,
@@ -287,7 +288,8 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::GenericPagination(const std::string
 	return plan;
 }
 
-duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string &secret_name) {
+duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string &secret_name,
+                                                     GraphqlLocalResidualProfile profile) {
 	static const std::string DOCUMENT = "query DuckdbApiViewerRepositoryMetrics($pageSize: Int!, $cursor: String) {\n"
 	                                    "  viewer {\n"
 	                                    "    repositories(\n"
@@ -379,9 +381,39 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string &secret_n
 	    30000, 1,  256 * 1024};
 	plan.budgets = plan.pagination.page_budgets;
 	RequireBearer(plan, secret_name);
+	const char *predicate_reason = nullptr;
+	switch (profile) {
+	case GraphqlLocalResidualProfile::UNRESTRICTED:
+		predicate_reason =
+		    "no structured remote candidate was offered; the complete base-domain traversal remains authoritative";
+		break;
+	case GraphqlLocalResidualProfile::MAPPING_UNAVAILABLE:
+		plan.residual_predicate = duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER;
+		plan.predicate_reason = duckdb_api::PredicateDecisionReason::MAPPING_UNAVAILABLE;
+		predicate_reason =
+		    "no validated mapping matches the typed candidate on the selected operation; remote TRUE preserves "
+		    "correctness";
+		break;
+	case GraphqlLocalResidualProfile::STRUCTURE_UNSUPPORTED:
+		plan.residual_predicate = duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER;
+		plan.predicate_reason = duckdb_api::PredicateDecisionReason::STRUCTURE_UNSUPPORTED;
+		predicate_reason =
+		    "the offered predicate structure has no complete executable remote proof; remote TRUE preserves the "
+		    "base domain and DuckDB remains authoritative";
+		break;
+	case GraphqlLocalResidualProfile::CAPABILITY_UNAVAILABLE:
+		plan.residual_predicate = duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER;
+		plan.predicate_reason = duckdb_api::PredicateDecisionReason::CAPABILITY_UNAVAILABLE;
+		predicate_reason =
+		    "structured inspection or DuckDB residual-retention capability is unavailable; remote TRUE preserves "
+		    "correctness";
+		break;
+	case GraphqlLocalResidualProfile::COUNT:
+		throw std::invalid_argument("unknown closed GraphQL local-residual profile");
+	}
 	plan.classification_reason =
-	    "no structured remote candidate was offered; the complete base-domain traversal remains authoritative; "
-	    "canonical viewer.repositories traversal defines a duplicate-preserving mutable occurrence bag; fixed "
+	    std::string(predicate_reason) +
+	    "; canonical viewer.repositories traversal defines a duplicate-preserving mutable occurrence bag; fixed "
 	    "UPDATED_AT DESC enumerates cursors but grants no DuckDB ordering or snapshot; body and row ceilings grant "
 	    "no limit or truncation authority; DuckDB retains every relational operator";
 	return plan;
@@ -424,8 +456,9 @@ duckdb_api::ScanPlan BuildAmbiguousPredicateFallbackPlanFixture(const std::strin
 	                                          duckdb_api::PredicateDecisionCategory::AMBIGUOUS, true);
 }
 
-duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixtureImpl(const std::string &exact_logical_secret_name) {
-	return ScanPlanFixtureBuilder::Graphql(exact_logical_secret_name);
+duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixtureImpl(const std::string &exact_logical_secret_name,
+                                                          GraphqlLocalResidualProfile profile) {
+	return ScanPlanFixtureBuilder::Graphql(exact_logical_secret_name, profile);
 }
 
 } // namespace duckdb_api_test

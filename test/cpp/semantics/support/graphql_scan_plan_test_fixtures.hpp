@@ -6,6 +6,21 @@
 
 namespace duckdb_api_test {
 
+// Closed valid local-residual profiles supplied by Relational Semantics to
+// focused Runtime admission tests. These cases differ only in the conservative
+// predicate classification produced from Query's retained local filter. Every
+// profile keeps remote TRUE, grants no conditional input, leaves every
+// relational operator with DuckDB, and grants no remote or Runtime delegation.
+// Runtime may admit these complete profiles but must not infer the local
+// expression from the enum, explanation, or COMPLETE_DUCKDB_FILTER marker.
+enum class GraphqlLocalResidualProfile {
+	UNRESTRICTED,
+	MAPPING_UNAVAILABLE,
+	STRUCTURE_UNSUPPORTED,
+	CAPABILITY_UNAVAILABLE,
+	COUNT
+};
+
 // Closed Semantics provider API for focused Runtime admission consumers. Each
 // counterexample isolates one admission law that Runtime must enforce before
 // authorization or transport. Most change one structured executable field;
@@ -163,6 +178,8 @@ enum class GraphqlRuntimeAdmissionCounterexample {
 };
 
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name);
+duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name,
+                                                      GraphqlLocalResidualProfile profile);
 duckdb_api::ScanPlan BuildGraphqlRuntimeAdmissionCounterexample(const std::string &exact_logical_secret_name,
                                                                 GraphqlRuntimeAdmissionCounterexample counterexample);
 

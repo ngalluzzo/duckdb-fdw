@@ -48,9 +48,42 @@ void TestInvalidProviderCandidates() {
 } // namespace
 
 duckdb_api::ScanPlan BuildProductionPlan() {
+	return BuildProductionPlan(GraphqlLocalResidualProfile::UNRESTRICTED);
+}
+
+duckdb_api::ScanPlan BuildProductionPlan(GraphqlLocalResidualProfile profile) {
 	const auto connector = BuildCanonicalGraphqlConnectorCatalogFixture();
-	const auto request = BuildAuthenticatedScanRequest(connector, GRAPHQL_VIEWER_REPOSITORY_METRICS_RELATION,
-	                                                   "graphql_semantics_secret");
+	auto request = BuildAuthenticatedScanRequest(connector, GRAPHQL_VIEWER_REPOSITORY_METRICS_RELATION,
+	                                             "graphql_semantics_secret");
+	const auto archived_equals_false = []() {
+		return duckdb_api::RequestedPredicate::Comparison(6, duckdb_api::RequestedPredicateValueKind::BOOLEAN,
+		                                                  duckdb_api::RequestedPredicateComparisonOperator::EQUALS,
+		                                                  duckdb_api::RequestedPredicateValue::Boolean(false));
+	};
+	switch (profile) {
+	case GraphqlLocalResidualProfile::UNRESTRICTED:
+		break;
+	case GraphqlLocalResidualProfile::MAPPING_UNAVAILABLE:
+		request.requested_predicate = archived_equals_false();
+		request.retained_predicate_scope = duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE;
+		request.capabilities.selective_predicate = true;
+		request.capabilities.retains_predicate = true;
+		break;
+	case GraphqlLocalResidualProfile::STRUCTURE_UNSUPPORTED:
+		request.requested_predicate = duckdb_api::RequestedPredicate::Unsupported(0);
+		request.retained_predicate_scope = duckdb_api::RetainedPredicateScope::COMPLETE_DUCKDB_FILTER;
+		request.capabilities.selective_predicate = true;
+		request.capabilities.retains_predicate = true;
+		break;
+	case GraphqlLocalResidualProfile::CAPABILITY_UNAVAILABLE:
+		request.requested_predicate = archived_equals_false();
+		request.retained_predicate_scope = duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE;
+		request.capabilities.selective_predicate = false;
+		request.capabilities.retains_predicate = true;
+		break;
+	case GraphqlLocalResidualProfile::COUNT:
+		throw std::invalid_argument("unknown GraphQL local-residual production profile");
+	}
 	return duckdb_api::BuildConservativeScanPlan(connector, request);
 }
 
