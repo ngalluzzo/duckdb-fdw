@@ -2,8 +2,10 @@
 
 > Internal semantic contracts for compiling declarative connector packages,
 > planning relational scans, executing remote operations, enriching rows, and
-> producing DuckDB vectors. Rust is the intended portable implementation; the
-> accepted native preview maps a strict subset into private C++ types.
+> producing DuckDB vectors. RFC 0009 selects the permanent native C++
+> table-function lineage for v1. Rust-like declarations are language-neutral
+> design notation and may inform a future portable implementation; the current
+> native product maps its accepted subset into private C++ types.
 >
 > Companion to [ARCHITECTURE.md](ARCHITECTURE.md) and
 > [CONNECTOR_SPECIFICATIONS.md](CONNECTOR_SPECIFICATIONS.md).
@@ -20,9 +22,10 @@ connector system.
 It does **not** define the YAML connector language. The YAML format is specified
 separately in [CONNECTOR_SPECIFICATIONS.md](CONNECTOR_SPECIFICATIONS.md).
 
-It also does **not** define a stable public binary plugin ABI. The Rust types and
-traits in this document are implementation contracts within the extension and
-may evolve while the specification remains a design proposal.
+It also does **not** define a stable public binary plugin ABI. The types and
+traits in this document are internal semantic notation and may evolve while the
+specification remains a design proposal. Neither their Rust-like spelling nor
+the private native C++ mapping creates a public ABI.
 
 The system has five major responsibilities:
 
@@ -72,14 +75,30 @@ The runtime contracts do not require:
 - Deep optimizer integration through DuckDB internal C++ APIs.
 - Columnar remote-source batches.
 
+RFC 0009 narrows the intended v1 runtime obligation to the permanent native
+C++ table-function product and the package capabilities proven before freeze.
+The stable candidate includes REST/JSON, static schemas, strict extraction,
+exact or superset predicates with conservative fallback, safe projection/order/
+limit declarations, one bounded sequential pagination strategy, anonymous and
+capability-scoped bearer authentication, host-narrowing policies and budgets,
+immutable compilation, explicit local loading, and bounded pull execution.
+
+GraphQL is conditional on the `0.7.0` user-visible gate. Providers, partitions,
+automatic retry or rate-limit waiting, cache/single-flight controls, broader
+authenticators, custom code or ABIs, dynamic schemas, metrics, and progress are
+post-v1 design areas unless a later accepted RFC and pre-freeze evidence add
+them. Their internal contracts remain useful design constraints; their presence
+here is not a v1 product promise.
+
 ### 1.2 Current native `0.6.0` mapping
 
 RFCs 0005 through 0008 define the bounded live REST, authenticated capability,
 sequential repository-traversal, and one predicate-selective subset mapped into
-private native C++ types. Those types are neither a public ABI nor a
-replacement for the intended portable Rust runtime. The `0.6.0` identity names
-the current unreleased source; it does not claim that every roadmap gate for
-the eventual release is complete.
+private native C++ types. Those types are neither a public ABI nor frozen by
+v1, but RFC 0009 selects this permanent implementation lineage rather than a
+Rust/stable-C-API replatform as the v1 product profile. The `0.6.0` identity
+names the current unreleased source; it does not claim that every roadmap gate
+for the eventual release is complete.
 
 | Semantic artifact | Native preview mapping |
 |---|---|
@@ -790,8 +809,9 @@ Partition discovery is distinct from schema discovery.
 
 ## 6. DuckDB Lifecycle Mapping
 
-The portable integration profile uses DuckDB table functions. The exact C API
-or Rust wrapper may vary, but the runtime lifecycle remains:
+The v1 native integration and any future portable integration use DuckDB table
+functions. The exact host API or language wrapper may vary by separately
+accepted profile, but the runtime lifecycle remains:
 
 | DuckDB phase | Runtime action |
 |---|---|
@@ -911,19 +931,30 @@ dependent DuckDB operator or reject the scan rather than apply it prematurely.
 
 ### 6.4 Registration, reload, and shutdown
 
-Generated SQL names are unique across the loaded connector registry, not only
-within a package. Registration fails on a collision with another connector or
-existing DuckDB function unless the user supplies an explicit non-conflicting
-name.
+Generated SQL names are unique across the bounded in-process registry of
+explicitly loaded local packages, not only within a package. Registration fails
+on a collision with another connector or existing DuckDB function unless the
+accepted SQL contract permits the user to supply an explicit non-conflicting
+name. The v1 registry does not discover or fetch packages, resolve
+dependencies, select remote versions, maintain lockfiles, or establish
+publisher trust.
 
 Connector reload is atomic. Existing scans retain an `Arc` to the immutable
 compiled package and policy snapshot they started with; new scans observe the
 new package only after successful compilation and registration.
 
+Initial multi-relation publication and replacement are all-or-nothing. A late
+validation or registration failure, including a collision after earlier names
+were tentatively prepared, publishes no partial package and leaves every
+existing registry entry and new-scan view unchanged.
+
 The async runtime is owned by the DuckDB database/extension state, not by an
 individual scan. Extension shutdown cancels scans, closes transports, drains
-bounded queues, and joins worker threads. Panics are caught at every FFI
-callback and converted to internal errors; unwinding never crosses the C ABI.
+bounded queues, and joins worker threads. Every DuckDB-facing entrypoint and
+callback catches all implementation exceptions or panics, performs bounded
+cleanup and cancellation, translates the failure into a safe DuckDB error, and
+never unwinds across the extension boundary. Failure-path evidence is required
+on every supported compatibility row.
 
 The native `0.6.0` profile has no async worker. Before any version inspection,
 its process owner calls `curl_global_init(CURL_GLOBAL_DEFAULT)`, then verifies
@@ -2868,7 +2899,7 @@ Live tests are opt-in and validate:
 
 ---
 
-## 39. Unresolved Design Questions
+## 39. Unresolved Post-v1 Design Questions
 
 ### 39.1 Tier 3 native handlers
 
@@ -2931,8 +2962,9 @@ An optional C++ shell may add:
 - Scan-order reporting.
 - Custom storage behavior.
 
-The C++ shell and portable table-function adapter share the Rust connector core
-but expose independent DuckDB capability profiles.
+A future C++ shell and portable table-function adapter may share a connector
+core but expose independent DuckDB capability profiles. Neither is required by
+the native v1 decision.
 
 ---
 
@@ -2952,6 +2984,11 @@ Shared protocol handlers and runtime services execute the plan.
 The design intentionally avoids a single connector trait because connector
 packages primarily describe data and capabilities. The runtime owns relational
 semantics, transport behavior, provider scheduling, and DuckDB integration.
+
+For v1, only the RFC 0009 candidate subset and capabilities proven before the
+API freeze become public behavior. The remaining contracts describe safe
+extension points for later product decisions rather than implicit release
+scope.
 
 That separation gives the system a stable center:
 

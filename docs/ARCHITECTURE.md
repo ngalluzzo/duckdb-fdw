@@ -7,11 +7,11 @@
 **Status:** Design proposal, revision 0.6; predicate-selective repository scans
 are accepted by RFC 0008, the bounded repository-traversal native profile by
 RFC 0007, its authenticated capability base by RFC 0006, its live REST base by
-RFC 0005, and the distribution policy by RFC 0004
+RFC 0005, and the distribution and native v1 boundary by RFC 0009.
 
-**Integration profiles:** A source-built native C++ preview, portable C
-Extension API table functions, and an optional deep DuckDB catalog/optimizer
-shell over the same semantic core
+**Integration profiles:** The native C++ table-function product selected for
+v1, a possible future portable C Extension API implementation, and an optional
+future deep DuckDB catalog/optimizer shell over the same semantic contracts
 
 ---
 
@@ -52,10 +52,11 @@ The current unreleased `0.6.0` source uses a native C++ table function to query
 one anonymous fixed HTTPS relation, one fixed authenticated identity, and one
 bounded sequential authenticated repository relation on one exact DuckDB and
 platform-dependency cell. It adds one safe predicate-selective path to the
-published `0.5.0` traversal while DuckDB remains the residual owner.
-The intended portable profile uses a Rust table-function extension. A custom
-attached catalog and logical-plan optimizer are an optional integration
-profile, not a requirement of the connector contract.
+published `0.5.0` traversal while DuckDB remains the residual owner. RFC 0009
+selects that permanent native C++ table-function lineage for v1 on an exact
+tested compatibility matrix. A Rust/stable-C-API implementation and a custom
+attached catalog or logical-plan optimizer are optional future profiles, not
+v1 requirements or public ABI commitments.
 
 ---
 
@@ -99,6 +100,11 @@ The product should not promise “every API with no code.” The defensible clai
 
 > A declarative relational adapter for well-structured HTTP APIs, with
 > protocol-specific compilers and a custom-code escape hatch.
+
+The v1 claim is narrower: local declarative, read-only, static-schema packages
+over the protocol set proven before freeze. The custom-code escape hatch,
+dynamic schemas, and other capabilities outside RFC 0009's accepted candidate
+subset remain post-v1 design directions.
 
 ---
 
@@ -171,28 +177,28 @@ execution runtime does not decide relational correctness.
 
 ## 5. DuckDB Integration Strategy
 
-The architecture has one accepted preview profile and two intended integration
-levels. They should not be conflated.
+The architecture has one selected v1 product profile and two possible future
+integration levels. They should not be conflated.
 
 ```mermaid
 flowchart TB
-    CORE[Intended portable Rust connector core]
+    CORE[Possible future portable Rust connector core]
 
-    subgraph P[Accepted native preview]
+    subgraph P[Selected native v1 lineage]
         NATIVE[DuckDB native C++ extension]
         DISPATCH[duckdb_api_scan dispatcher]
         LIVE[Fixed GitHub REST relation]
         NATIVE --> DISPATCH --> LIVE
     end
 
-    subgraph A[Profile A — portable table functions]
+    subgraph A[Future Profile A — portable table functions]
         CAPI[DuckDB C Extension API]
         TF[Table functions]
         VIEW[Optional generated views or macros]
         CAPI --> TF --> VIEW
     end
 
-    subgraph B[Profile B — deep integration]
+    subgraph B[Future Profile B — deep integration]
         CPP[Thin C++ extension shell]
         CAT[StorageExtension and catalog]
         OPT[OptimizerExtension]
@@ -391,29 +397,51 @@ native ABI compatibility follows from this profile.
 
 #### 5.0.1 Accepted distribution and support policy
 
-RFC 0004 selects DuckDB Community Extensions as the ordinary-user distribution
-and trust channel. Source build remains the contributor path. A verified
+RFC 0009 supersedes RFC 0004 as the current decision while carrying forward
+DuckDB Community Extensions as the ordinary-user distribution and trust
+channel. Source build remains the contributor path. A verified
 unsigned artifact may be used only for controlled preview and diagnostic work;
 it is not ordinary-user guidance because enabling unsigned extensions weakens
 signature policy for the whole DuckDB process.
 
-For `0.2.0`, the supported compatibility matrix contains only the latest stable
-DuckDB release at release time and the exact Community CI platform rows that
-pass the complete clean-install, restart, load-by-name, version, and accepted
-query oracle. Release evidence records the DuckDB commit and every claimed row.
+RFC 0009 removes Community publication from the completed `0.2.0` gate so
+product learning can continue, but publication evidence remains mandatory
+before ordinary-user guidance and `1.0.0`. The initial stable compatibility
+matrix contains the latest stable DuckDB release at release time and only the
+exact Community CI platform rows that pass the complete clean-install,
+restart, load-by-name, version, and accepted-query oracle. Release evidence
+records the DuckDB commit and every claimed row.
 Failed, excluded, untested, older, nightly, non-Community, or absent rows remain
 unclaimed even when they happen to work.
 
 Project versions, Git tags, and descriptor source refs are immutable; a fix
 uses a new SemVer. Before `1.0`, the project makes no backport commitment.
 DuckDB governs the Community endpoint, signing pipeline, served artifacts, and
-local-cache behavior, so `0.2.0` guarantees neither Community rollback,
+local-cache behavior, so the project guarantees neither Community rollback,
 historical-version selection, nor continued upstream availability. Project
 support is best-effort through GitHub Issues with no service-level commitment.
-These are policy boundaries, not evidence that `0.2.0` has shipped; ordinary
-installation guidance requires the RFC's delivery gates to pass.
+These are policy boundaries, not publication evidence; ordinary installation
+guidance requires the current RFC's delivery gates to pass.
 
-### 5.1 Profile A: portable Rust table-function extension
+#### 5.0.2 Accepted v1 integration direction
+
+RFC 0009 makes the permanent native C++ table-function extension the intended
+`1.0.0` product profile. V1 supports only the exact DuckDB, platform,
+architecture, toolchain, and installation rows that pass the complete release
+oracle. This decision publishes no C++ ABI and does not make DuckDB internal
+headers a connector-author interface.
+
+The current fixed relations and `duckdb_api_scan` spelling remain pre-v1
+preview surfaces. Query Experience must decide their v1 disposition and
+migration before package registration depends on SQL naming. The native lineage
+may evolve substantially behind that reviewed public boundary without a
+language migration.
+
+### 5.1 Future Profile A: portable Rust table-function extension
+
+This is a possible later compatibility profile, not a v1 gate. It requires its
+own RFC, permanent implementation, parity evidence, and support matrix before
+it may share or replace any native product claim.
 
 Responsibilities:
 
@@ -454,7 +482,7 @@ FROM api.github_repository(full_name := 'duckdb/duckdb');
 
 That syntax is convenience, not a requirement of the connector contract.
 
-### 5.2 Profile B: catalog and optimizer integration
+### 5.2 Future Profile B: catalog and optimizer integration
 
 A thin C++ shell may expose capabilities that are not available through the
 portable table-function surface:
@@ -479,8 +507,9 @@ FROM github.repository
 WHERE full_name = 'duckdb/duckdb';
 ```
 
-The C++ layer must remain thin. HTTP, auth, connector specifications, planning,
-and execution should remain in the Rust core behind a small FFI boundary.
+If implemented, the C++ layer must remain thin. HTTP, auth, connector
+specifications, planning, and execution should remain in a shared core behind a
+small explicitly versioned boundary.
 
 ### 5.3 DuckDB capability contract
 
@@ -508,7 +537,7 @@ pub enum PushdownMetadataCapability {
 }
 ```
 
-The portable documented baseline assumes named parameters, schema binding,
+The future portable baseline assumes named parameters, schema binding,
 cardinality hints, projection IDs, and data-chunk production. Filters,
 ordering, limits, offsets, progress, cancellation signals, and secret-manager
 access are used only when the active DuckDB API exposes them.
@@ -542,10 +571,12 @@ it early.
 
 ### 5.4 Why the split matters
 
-The pure-Rust C Extension API and DuckDB’s C++ storage/optimizer internals are
-not the same compatibility surface. Making the catalog and optimizer mandatory
-would turn DuckDB version coupling into the primary project risk. The portable
-path lets the connector abstraction prove itself independently.
+The native table-function profile, a pure-Rust C Extension API implementation,
+and DuckDB's C++ storage/optimizer internals are different compatibility
+surfaces. V1 chooses the already proven first path and an evidence-derived
+matrix. A future portable path can reduce internal-version coupling; the deep
+catalog path remains optional because making it mandatory would make DuckDB
+optimizer coupling the primary project risk.
 
 ---
 
@@ -927,7 +958,7 @@ relations:
 The example above illustrates the intended concepts. The companion connector
 specification is authoritative for syntax and validation.
 
-### 9.2 Tier 2: transforms
+### 9.2 Tier 2: transforms (post-v1 candidate)
 
 Tier 2 adds constrained transforms for response envelopes and column extraction:
 
@@ -939,7 +970,7 @@ Tier 2 adds constrained transforms for response envelopes and column extraction:
 Transforms should be pure and resource-bounded. They do not receive unrestricted
 network or secret access.
 
-### 9.3 Tier 3: custom code
+### 9.3 Tier 3: custom code (post-v1 candidate)
 
 Complex APIs may require custom logic for:
 
@@ -1471,7 +1502,7 @@ An API scan must be diagnosable without exposing secrets.
 
 ### 18.1 Plan explanation
 
-Provide an explain helper in the portable implementation:
+Provide an explain helper in the table-function product:
 
 ```sql
 SELECT *
@@ -1765,9 +1796,9 @@ Reuse as a concrete source of API patterns:
 
 | Area                       | Decision                                                               |
 | -------------------------- | ---------------------------------------------------------------------- |
-| Native preview             | Unreleased `duckdb_api` 0.6.0 source: the three fixed GitHub relations plus one retained, superset `visibility = 'private'` repository restriction on one exact source-built cell |
-| Portable integration       | Pure-Rust C Extension API table functions                              |
-| Deep integration           | Optional thin C++ catalog/optimizer shell                              |
+| Native product             | V1 lineage: C++ table-function extension on an exact evidence-derived matrix; current unreleased `0.6.0` source has three fixed GitHub relations and one retained, superset `visibility = 'private'` restriction |
+| Portable integration       | Possible post-v1 Rust C Extension API profile requiring its own RFC and parity evidence |
+| Deep integration           | Possible post-v1 thin C++ catalog/optimizer shell                      |
 | Core abstraction           | `ScanRequest` → explicit `ScanPlan` → `BatchStream`                    |
 | DuckDB metadata            | Capability-profiled; unavailable metadata uses conservative defaults  |
 | Pushdown                   | Exact, superset, or unsupported with residual work                     |
@@ -1775,13 +1806,13 @@ Reuse as a concrete source of API patterns:
 | SQL inputs                 | Separate named inputs from returned columns                            |
 | Execution                  | Pull-oriented at DuckDB boundary; bounded async internally             |
 | Pagination                 | Sequential generic runtime; parallel only by declared proof            |
-| Enrichment                 | Cardinality-preserving column providers with DAG dependencies          |
+| Enrichment                 | Cardinality-preserving column providers with DAG dependencies; outside the accepted v1 package subset unless separately proven |
 | REST vs GraphQL            | Separate protocol compilers over a shared runtime                      |
 | Auth                       | DuckDB secrets plus capability-scoped providers                        |
 | Security                   | Host allowlists, redirect policy, private-IP blocking, size limits     |
 | Resource safety            | Host-enforced request, page, row, byte, time, provider, and concurrency budgets |
-| Retry                      | Per replay unit; never after that unit commits output                  |
-| Cache                      | HTTP validation, exact request cache, single-flight, query memoization |
+| Retry                      | Per replay unit; never after commitment; author-configurable retry is outside the accepted v1 subset unless separately proven |
+| Cache                      | Exact-only design; author-configurable cache and single-flight are outside the accepted v1 subset unless separately proven |
 | Schema drift               | Versioned static schema; explicit refresh for dynamic schema           |
 | Declarative spec           | Ground abstractions in multiple independently implemented connectors  |
 | Materialization            | Native DuckDB CTAS or explicit Parquet export                          |

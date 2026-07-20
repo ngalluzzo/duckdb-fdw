@@ -3,7 +3,7 @@
 ```yaml
 rfc: "0004"
 title: "Select the repeatable installation and trust path"
-status: "Accepted"
+status: "Superseded"
 rfc_type: "Product"
 sponsor_team: "Query Experience"
 technical_decision_owner: "Lead agent"
@@ -33,6 +33,17 @@ project releases are immutable; Community rollback and historical availability
 are not guaranteed; and project support is best-effort through GitHub Issues.
 Ordinary-user guidance remains unpublished until the external delivery gates
 prove those claims.
+
+## Supersession
+
+RFC 0009 supersedes this RFC as the current distribution and compatibility
+decision. It removes Community build, sign, publish, and install evidence from
+the completed `0.2.0` delivery gate so intervening product releases can proceed,
+while keeping that evidence mandatory before ordinary-user guidance and
+`1.0.0`. RFC 0009 carries forward MIT licensing, Community Extensions as the
+ordinary-user channel, source build as the contributor path, immutable project
+releases, the latest-stable DuckDB requirement for the initial stable release,
+exact passing Community rows, and best-effort GitHub Issues support.
 
 ## Sponsorship and context
 
@@ -372,7 +383,7 @@ they do not reopen the accepted product policy.
 - **Material objections:** None remain for the decision. Community
   build/sign/publish/install, exact matrix, dependency audit, hosted custody,
   user guidance, and the facilitation exit remain open delivery gates.
-- **Superseded by:** Not applicable.
+- **Superseded by:** RFC 0009.
 
 ## Follow-on goals
 

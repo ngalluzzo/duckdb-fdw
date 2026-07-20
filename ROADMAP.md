@@ -151,61 +151,86 @@ redaction, recovery, and a privacy-safe live compatibility check. Retries,
 rate-limit waiting, parallel page requests, resume state, caller-selected page
 inputs, and cache remain outside this release.
 
-### `0.6.0` — relational trust
+### `0.6.0` — semantic trust and explainable optimization
 
 DuckDB users can apply projections, supported predicates, ordering, and limits
 without changing query meaning. Pushdown distinguishes exact, superset, and
 unsupported behavior; every residual has exactly one owner; unavailable
 adapter capabilities fall back conservatively; and explain output truthfully
-describes remote and local work.
+describes remote and local work. Correct local execution satisfies this release
+when remote optimization is unavailable; remote projection, ordering, and
+limit pushdown are not required outcomes.
 
-Release evidence includes DuckDB-equivalence and property tests, strict schema
-and value conversion, operation-selection oracles, residual ownership checks,
-safe ordering and limit behavior, and capability-profile fallbacks.
+Release evidence includes a protocol-neutral planner matrix for exact,
+superset, unsupported, ambiguous, and failure classifications; composition and
+`NULL` behavior; projection closure; filtering and required ordering before
+limits; DuckDB-equivalence and property tests; strict schema and value
+conversion; residual ownership; deterministic explanation; and
+capability-profile fallbacks.
 
 Current unreleased evidence proves the first predicate-selective slice:
 `github.authenticated_repositories.visibility = 'private'` narrows every remote
 page while DuckDB retains the residual, and unsupported shapes fall back to the
-complete traversal. Projection, ordering, and limit evidence remain before the
-milestone can be released.
+complete traversal. The general semantic-law, projection-closure, ordering,
+limit, and fallback evidence remains before the milestone can be released. That
+evidence may prove safe DuckDB ownership rather than adding a remote
+optimization.
 
-### `0.7.0` — protocol breadth
+### `0.7.0` — reusable protocol product path
 
-The declarative connector model supports the retained product claim across
-REST and GraphQL without bypassing the shared planning, policy, lifecycle, or
-runtime boundaries. If evidence shows that this cannot provide a coherent
-product experience, the product claim is narrowed explicitly before release.
+A DuckDB user can query a second representative API shape through the same
+permanent connector, relational-planning, runtime, and Query interfaces as the
+existing REST product. Internal protocol machinery is not a release outcome by
+itself.
 
-Release evidence includes representative REST and GraphQL connectors, a
-deterministic corpus of protocol and error variations, consistent diagnostics,
-and proof that neither protocol requires bespoke authority or lifecycle paths.
+REST and GraphQL remain in the v1 claim only if one representative GraphQL
+relation passes the same user-visible SQL, semantic, network-policy, resource,
+cancellation, diagnostic, and lifecycle oracles. Otherwise the product claim
+is narrowed to REST before this release. Evidence includes a deterministic
+corpus of protocol and error variations and proof that retained protocols
+require no bespoke authority or lifecycle path.
 
-### `0.8.0` — production-shaped workflows
+### `0.8.0` — local package lifecycle and analytical workflows
 
-Users can employ remote relations in ordinary analytical workflows such as
-joins, materialization, export, and repeated scans. Operators can register and
-reload connectors without changing in-flight snapshots, and extension
-lifecycle paths terminate cleanly under success, cancellation, and failure.
+Before this release begins, accepted product RFCs choose the intended SQL and
+naming surface and the stable successor to `duckdb_api/draft`, including its
+relationship to project and connector-package versions. The complete proposed
+v1 package subset—not a throwaway or partial compiler—then uses the permanent
+validation, compilation, explanation, fixture, loading, registration, and
+reload path through repository-owned packages.
 
-Release evidence covers analytical workflow narratives, registration
-collisions, atomic reload, immutable in-flight plans, queue draining, worker
-joining, shutdown, FFI panic containment, and leak and resource-exhaustion
-checks across the declared compatibility matrix.
+Users employ those relations in joins, materialization, export, prepared and
+repeated scans. Operators reload packages without changing in-flight snapshots.
+Release evidence covers every retained author declaration, package identity and
+migration from bounded package previews produced under the accepted successor
+contract, analytical workflow narratives, registration collisions,
+all-or-nothing initial multi-relation publication and replacement reload,
+rollback after late validation, registration, or collision failure, zero
+partial visibility, unchanged prior registry state, immutable in-flight plans,
+queue draining, worker joining where introduced, shutdown and exception
+containment, and leak and resource-exhaustion checks across the declared
+compatibility matrix.
 
 ### `0.9.0` — public connector authoring and API candidate
 
 A connector author can validate, compile, explain, fixture-test, and load a
-versioned declarative connector package against the product mechanisms proven
-in earlier releases. Equivalent inputs produce equivalent compiled output and
-diagnostics. Unsupported connector-spec versions or extractor dialects fail
-explicitly rather than being silently reinterpreted.
+versioned declarative connector package using the complete subset already
+implemented and exercised in `0.8.0`. Multiple independently authored packages
+and migration fixtures prove that equivalent inputs produce equivalent compiled
+output and diagnostics. Unsupported connector-spec versions or extractor
+dialects fail explicitly rather than being silently reinterpreted.
 
-At the same time, the intended `1.0.0` public contract is enumerated and frozen
-for compatibility testing. It includes normative SQL and extension naming,
-configuration, diagnostics, explain and version surfaces, a stable
-connector-spec candidate, migration and deprecation rules, supported
-compatibility cells, the chosen distribution path, and explicit exclusions.
-No intentional public break remains planned.
+The intended `1.0.0` public contract is enumerated and frozen for compatibility
+testing. It includes normative SQL and extension naming, configuration,
+diagnostics, explain and version surfaces, a stable connector-spec candidate,
+migration and deprecation rules, supported compatibility cells, the chosen
+distribution path, and explicit exclusions. No intentional public break remains
+planned.
+
+No public declaration, SQL behavior, lifecycle mechanism, or compatibility
+surface is first implemented in this release. If another coherent preview is
+needed, the roadmap adds `0.10.0` or later rather than turning the API candidate
+or release candidate into feasibility work.
 
 Release evidence includes a schema-backed validator, source-located
 diagnostics, deterministic compile and explain oracles, offline fixtures,
@@ -229,15 +254,18 @@ compatibility-matrix row passes the complete release gate, unsupported
 combinations fail clearly, and installable artifacts, release notes, migration
 guidance, checksums, and provenance are reproducible and immutable.
 
-The intended stable boundary is:
+RFC 0009 sets the intended stable boundary:
 
-- the portable DuckDB integration profile using the proven stable C Extension
-  API subset;
+- the permanent native C++ DuckDB table-function extension on an exact tested
+  DuckDB, platform, architecture, toolchain, and installation matrix, without a
+  public C++ ABI;
 - documented SQL functions, arguments, relation schemas, configuration,
   connection and secret behavior, diagnostics, explain, version
   introspection, and cancellation semantics;
-- a non-draft static-schema connector specification with explicit validation
-  and compatibility rules;
+- a local, explicit, declarative, read-only, static-schema connector
+  specification whose accepted subset was completely implemented in `0.8.0`,
+  with deterministic validation, compilation, explanation, fixtures, loading,
+  package identity, and compatibility rules;
 - REST and GraphQL support if the product claim survives `0.7.0` evidence;
 - observable relational, security, resource, replay, and lifecycle guarantees;
   and
@@ -246,14 +274,22 @@ The intended stable boundary is:
 
 Unless separately accepted and proven, the `1.0.0` guarantee excludes:
 
-- the deep C++ catalog and optimizer integration profile;
+- the deep native catalog and optimizer integration profile and any Rust or
+  stable-C-API replatform;
 - public Rust, native plugin, WASM, custom-protocol, custom-pagination, or
   columnar binary ABIs;
 - internal types and traits such as `CompiledConnector`, `ScanRequest`,
   `ScanPlan`, `BatchStream`, protocol service interfaces, runtime queues, and
   cache layout;
-- connector registries, dependency resolution, lockfiles, package signing, and
-  package trust infrastructure;
+- central connector discovery or distribution registries, Git fetching,
+  dependency resolution, lockfiles, package signing, and connector-package
+  trust infrastructure; the bounded registry of explicitly loaded local
+  packages is included;
+- Tier 2 JQ-compatible transforms, Tier 3 code, column providers, partitions,
+  automatic retry or rate-limit waiting, author-configurable cache or
+  single-flight behavior, importers, and authenticators beyond anonymous and
+  capability-scoped bearer behavior unless a later accepted RFC and pre-freeze
+  evidence add them;
 - dynamic schemas, write-back, transactions, and continuous streams; and
 - compatibility with arbitrary upstream API drift.
 
@@ -279,26 +315,40 @@ Release automation must reject a moving or reused tag, conflicting version
 sources, replacement of an existing artifact, an unsupported matrix claim, or
 missing compatibility and migration evidence.
 
-## Decisions resolved through the release-governance RFC
+## Release-governance decision and remaining gates
 
-Before the roadmap can establish compatibility policy rather than planning
-intent, the release-governance RFC must decide:
+Accepted RFC 0009 chooses the native v1 profile, the categories governed by
+project SemVer, the narrow candidate package boundary, the local-versus-central
+registry distinction, and the dependency-ordered release progression. It
+supersedes RFC 0004's requirement to complete Community publication as a
+`0.2.0` gate while carrying forward its durable choices: the project remains
+MIT licensed, DuckDB Community Extensions remains the ordinary-user
+distribution and trust path, source build remains the contributor path,
+releases remain immutable, the initial stable release must include the latest
+stable DuckDB release and only passing Community rows, and support remains
+best-effort through GitHub Issues. Publication evidence remains mandatory
+before ordinary-user guidance and `1.0.0`.
 
-- the exact inventory of public surfaces governed by project SemVer;
-- the stable successor to `duckdb_api/draft` and its relationship to project
-  and connector-package versions;
-- the rolling DuckDB release, integration-profile, platform, architecture, and
-  minimum-Rust-version support policy;
-- which support removals are incompatible and which follow a published rolling
-  window;
-- the distribution, signing, trust, licensing, and update path;
-- the deprecation, migration, security-response, maintenance, and backport
-  policies; and
-- the final `1.0.0` inclusions and experimental exclusions.
+The following decisions and evidence must precede the release that consumes
+them:
 
-Engineering Enablement sponsors that non-product RFC. Connector Experience,
-Query Experience, and Remote Runtime review their affected surfaces.
-Relational Semantics supplies correctness arguments and release oracles when a
-release changes query behavior. Product-manager approval is required for the
-public compatibility boundary, support promise, distribution direction, and
-licensing choices.
+- Before `0.8.0`, Query Experience accepts the exact SQL, naming, collision,
+  preview-relation, and migration contract in a product RFC.
+- Before `0.8.0`, Connector Experience accepts the stable successor to
+  `duckdb_api/draft`, its compatibility and migration rules, and its
+  relationship to project and package SemVer in a product RFC.
+- Before `0.8.0`, Engineering Enablement establishes a schema-backed public
+  inventory and change-classification gate; every domain team must maintain its
+  entries independently before `0.9.0`.
+- Before `0.9.0`, an Engineering Enablement release-and-support-policy RFC with
+  product-manager approval decides support windows and removals, deprecation,
+  migration, security response, maintenance, and backport policy.
+- `0.9.0` derives the exact supported DuckDB/profile/platform/architecture/
+  installation rows from passing evidence, including the latest stable DuckDB
+  release at release time, and freezes the final inclusions and experimental
+  exclusions.
+
+Connector Experience, Query Experience, and Remote Runtime review their public
+surfaces. Relational Semantics supplies correctness arguments and release
+oracles. Product-manager approval remains required for every reserved public
+compatibility, support, distribution, licensing, or exclusion choice.

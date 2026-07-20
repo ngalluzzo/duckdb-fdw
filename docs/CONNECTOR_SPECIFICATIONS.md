@@ -3,7 +3,8 @@
 > Declaratively describe typed DuckDB relations backed by well-structured HTTP
 > and GraphQL APIs.
 
-**Status:** Design proposal
+**Status:** Design proposal; RFC 0009 defines the intended narrow v1 candidate
+boundary but does not activate or freeze author syntax
 
 **Spec identifier:** `duckdb_api/draft`
 
@@ -156,6 +157,51 @@ The preview's `duckdb_api_scan` dispatcher is likewise not a general mapping
 from connector packages to SQL names. Package loading, registration, reload,
 validation, and distribution remain specification capabilities that require
 their own accepted product contract and executable authoring evidence.
+
+### 1.5 Intended v1 candidate boundary
+
+RFC 0009 separates the intended v1 authoring candidate from the broader design
+space in this document. The candidate is local, explicit, declarative,
+read-only, and static-schema. It includes:
+
+- a versioned manifest, stable connector and relation identifiers, package
+  digest identity, and explicit local loading;
+- typed static columns, separate typed inputs, named base-row operations,
+  strict JSON extraction and conversion, and deterministic operation selection;
+- REST/JSON, exact or superset predicate declarations, conservative fallback,
+  projection closure, safe ordering and limit declarations, and at least one
+  bounded sequential pagination strategy;
+- anonymous and capability-scoped bearer authentication, mandatory network and
+  secret-placement policy, and connector budgets that only narrow host
+  authority; and
+- schema-backed validation, source-located diagnostics, deterministic compile
+  and explain output, offline fixtures, atomic load, and migration fixtures.
+
+GraphQL remains conditional on the `0.7.0` user-visible evidence gate. If that
+gate fails, v1 narrows to REST rather than freezing an unproved GraphQL author
+surface.
+
+The following sections remain post-v1 design proposals unless a later accepted
+RFC and pre-freeze product evidence add them to the candidate: dynamic schemas;
+JQ-compatible Tier 2 transforms; Tier 3 native or WASM code; custom protocols
+or pagination ABIs; column providers; partitions; automatic retry or rate-limit
+waiting; cache and single-flight controls; OpenAPI or GraphQL importers; OAuth,
+SigV4, GitHub App, or caller-defined authenticators; central connector
+distribution or discovery; dependency resolution and lockfiles; and package
+signing or trust infrastructure. A v1 validator rejects unaccepted syntax; an
+implementation cannot silently accept a design example as stable behavior.
+
+Before `0.8.0`, a Connector Experience product RFC must choose the stable
+successor to `duckdb_api/draft`, define compatibility and migration, and state
+its relationship to project SemVer and independent connector-package SemVer.
+Every declaration retained in that candidate must be implemented and exercised
+in `0.8.0`; `0.9.0` supplies independent-author and migration breadth before
+freeze, not first implementation.
+
+The inactive `duckdb_api/draft` authoring surface is not an accepted migration
+source and creates no compatibility promise. Validators must reject it
+explicitly. Package migration fixtures begin with bounded previews produced
+under the accepted successor identifier and version contract.
 
 ---
 
@@ -557,6 +603,10 @@ auth:
 | `oauth2_refresh`            | token endpoint, client id, refresh token | Refresh-token lifecycle.             |
 | `aws_sigv4`                 | access key, secret key, region, service  | Signs each request.                  |
 | `github_app`                | app id, installation id, private key     | JWT to installation-token exchange.  |
+
+This table is the design catalog. The intended v1 candidate includes only
+`none` and capability-scoped `bearer`; every other provider remains post-v1
+unless separately accepted and proven before freeze.
 
 Example:
 
@@ -2974,21 +3024,22 @@ Custom code is not permission to bypass host security policy.
 
 ## 33. Distribution
 
-Package loading is intended to be local and explicit when this draft becomes
-an implemented authoring contract. The native preview embeds one exact
-repository-owned `CompiledConnector` catalog containing the three fixed native
-relations and does not implement the loading behavior below.
+Package loading in the intended v1 candidate is local and explicit. The native
+preview embeds one exact repository-owned `CompiledConnector` catalog
+containing the three fixed native relations and does not implement the loading
+behavior below.
 
 ### 33.1 Local packages
 
-Runtimes should support connector directories from explicit paths and a default
-user connector directory such as:
+V1 runtimes load connector directories only from explicit paths. Automatic
+discovery from a default user directory such as the path below is a possible
+future convenience, not part of the accepted candidate:
 
 ```text
 ~/.duckdb/api/connectors/github/
 ```
 
-### 33.2 Registry-based distribution
+### 33.2 Central registry-based distribution
 
 This contract does not define:
 
@@ -2999,8 +3050,11 @@ This contract does not define:
 - native extension trust;
 - dependency resolution.
 
-The `id`, `publisher`, and `version` fields allow registry-based distribution
-without changing package identity.
+The `id`, `publisher`, and `version` fields allow future registry-based
+distribution without changing package identity. This central distribution
+concept is distinct from the bounded in-process registry of packages the user
+explicitly loaded; v1 requires the latter for deterministic naming, collision
+refusal, atomic reload, and immutable in-flight snapshots.
 
 ---
 
