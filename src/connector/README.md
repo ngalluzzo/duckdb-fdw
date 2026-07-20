@@ -52,7 +52,9 @@ internal [`package_compiler.hpp`](../include/duckdb_api/internal/connector/packa
 is Connector's production entry point for an absolute canonical local root. It
 acquires bounded source, compiles a complete immutable generation, and returns
 ordered safe diagnostics; it neither registers DuckDB objects nor stages
-Runtime work. The
+Runtime work. Query tests that need a real package use the Connector-owned
+`package_compiler_test_fixtures.hpp` service and receive only the same public
+registration projection and opaque lifetime handle. The
 [`package_semver.hpp`](../include/duckdb_api/package_semver.hpp) and
 [`package_compatibility.hpp`](../include/duckdb_api/package_compatibility.hpp)
 services parse canonical package identity and compare normalized compiled
@@ -126,6 +128,8 @@ fixture uses together after Semantics consumes `RequiredInputReferences()`.
   service;
 - the focused package source, YAML, schema, compiler, GraphQL-renderer, and
   predicate-compiler executables for the author-to-generation boundary;
+- `duckdb_api_package_compiler_fixture_tests` for the real repository GitHub
+  package projected through the bounded Query-consumer fixture service;
 - `duckdb_api_connector_catalog_fixture_tests` for the bounded fixture API.
 
 Run `make build` before invoking a focused binary from

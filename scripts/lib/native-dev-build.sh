@@ -237,6 +237,7 @@ run_tests() {
         "${NATIVE_TEST_ROOT}/duckdb_api_package_graphql_renderer_tests"
         "${NATIVE_TEST_ROOT}/duckdb_api_package_predicate_compiler_tests"
         "${NATIVE_TEST_ROOT}/duckdb_api_package_schema_contract_tests"
+        "${NATIVE_TEST_ROOT}/duckdb_api_package_compiler_fixture_tests" "${REPOSITORY_ROOT}"
     )
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_typed_value_adapter_tests"
