@@ -2,7 +2,7 @@
 
 ## Outcome, authority, and boundary
 
-Status: **Planned; X-as-a-Service interaction remains Open**.
+Status: **Complete; interactions are Satisfied as X-as-a-Service**.
 
 Relational Semantics supports Query Experience's accountable `0.7.0` outcome
 by turning Connector Experience's immutable canonical GraphQL relation and
@@ -187,8 +187,9 @@ propagation, integration review, and Git history.
 
 ## Observable X-as-a-Service exit
 
-All exits remain **Open** until the final audit inspects actual declarations,
-includes, source inventories, target links, fixture headers, and tests.
+All exits are **Satisfied**. The 2026-07-19 final audit inspected declarations,
+includes, source inventories, target links, fixture headers, and tests and
+confirmed the following boundaries:
 
 - **Connector -> Semantics:** `duckdb_api_relational_planning_service` consumes
   only `duckdb_api/connector_catalog.hpp` through
@@ -214,9 +215,12 @@ includes, source inventories, target links, fixture headers, and tests.
   Runtime sources; no focused consumer target directly compiles provider
   production files.
 
-If a consumer routinely needs provider-private construction, document parsing,
-planner internals, or coordinated edits outside the value and fixture APIs,
-the interaction remains Open.
+No consumer needs provider-private construction, document parsing, planner
+internals, or coordinated edits outside the value and fixture APIs. The scan
+plan service remains independent, Runtime consumes only the immutable plan and
+Semantics fixture service, and Query calls the public relational planning
+service without acquiring base-domain, replay, cursor, budget, or nullability
+authority.
 
 ## Acceptance evidence and sequencing
 

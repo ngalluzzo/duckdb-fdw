@@ -2,7 +2,7 @@
 
 ## Outcome, authority, and topology
 
-Status: **Planned; Collaboration-to-X-as-a-Service exit remains Open**.
+Status: **Complete; Collaboration-to-X-as-a-Service exit is Satisfied**.
 
 Remote Runtime supports Query Experience's accountable `0.7.0` outcome by
 admitting Relational Semantics' complete immutable GraphQL `ScanPlan`, executing
@@ -203,7 +203,8 @@ release notes, and product diagnostics remain outside Runtime ownership.
 
 ## Observable Collaboration to X-as-a-Service exit
 
-The exit becomes **Satisfied; X-as-a-Service** only when the final tree proves:
+The exit is **Satisfied; X-as-a-Service**. The 2026-07-19 final tree audit
+proved:
 
 1. `duckdb_api_runtime_executor_service` links only
    `duckdb_api_runtime_interface_service`, `duckdb_api_scan_plan_service`, and

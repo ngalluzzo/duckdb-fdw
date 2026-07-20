@@ -2,7 +2,7 @@
 
 ## Outcome, authority, and topology
 
-Status: **Planned; accountable outcome and provider interactions remain Open**.
+Status: **Complete; accountable outcome and provider interactions are Satisfied**.
 
 Query Experience owns the `0.7.0` DuckDB-user outcome: an authenticated user
 can bind, inspect, prepare, and query `github.viewer_repository_metrics`,
@@ -222,8 +222,8 @@ resources, cancellation, terminal failure, and lifecycle behavior.
 
 ## Observable interaction exits
 
-All interactions remain **Open** until final source, include, target, and test
-audits establish the following:
+All interactions are **Satisfied**. The 2026-07-19 final source, include,
+target, and test audits established the following:
 
 - `duckdb_api_query_request_service` links
   `duckdb_api_connector_metadata_service` and the public relational predicate
@@ -236,12 +236,14 @@ audits establish the following:
   `duckdb_api_connector_fixture_service` for catalog lookup and the public
   planner/runtime interfaces; it uses no Connector private access, Semantics
   fixture builder, Runtime protocol fixture, or direct provider source list.
-- `duckdb_api_controlled_loadable_extension` is the only whole-graph
-  composition target. The current
-  `QUERY_CONTROLLED_COMPOSITION_SOURCES` direct listing of
-  `test/cpp/runtime/support/loopback_curl_runtime.cpp` is removed: controlled
-  composition links a bounded Runtime test service and Query retains only its
-  integration entry/composition sources.
+- `duckdb_api_controlled_loadable_extension` is the sole private, controlled,
+  direct-source integration composition; it is excluded from installation and
+  is not a product or release artifact. `QUERY_CONTROLLED_COMPOSITION_SOURCES`
+  retains only Query's integration entry and composition sources; Runtime owns
+  `REMOTE_RUNTIME_LOOPBACK_PRODUCT_SOURCES`, and that lead-owned root target
+  assembles the two explicit inventories without hiding a Runtime source in a
+  Query-owned list. The ordinary static and loadable products compose only
+  their declared production inventories.
 - Production Query receives the native catalog from Connector, builds only a
   protocol-neutral request, receives the immutable plan from Semantics, moves
   authorization to the executor, and consumes only `BatchStream`, typed rows,
@@ -253,7 +255,8 @@ audits establish the following:
   product test is the only place that composes their behavior into actual
   DuckDB SQL.
 
-An interaction stays Open if a target name hides direct provider sources, a
-Query fixture constructs provider-private state, nullable authority is inferred
-from runtime values instead of the plan, or routine GraphQL changes still
-require Query to understand Connector, Semantics, or Runtime internals.
+No target hides direct provider production sources, Query fixtures do not
+construct provider-private state, nullable authority comes from the immutable
+plan, and the actual DuckDB product target composes the public planning and
+controlled Runtime services. Query retains only protocol-neutral request,
+adapter, typed-row, error, and DuckDB SQL responsibilities.

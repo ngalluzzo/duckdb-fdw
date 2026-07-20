@@ -430,12 +430,12 @@ or an anonymous request.
 | Question or claim | Evidence required | Method or fixture | Result and limitations |
 | --- | --- | --- | --- |
 | The upstream API provides the accepted query, fields, bearer placement, and cursor contract | Primary-source API evidence | GitHub GraphQL call, repository-schema, and pagination documentation linked above | Confirmed for GitHub.com; live compatibility remains release evidence, not the correctness oracle |
-| The current architecture does not already provide a GraphQL operation or nullable value handoff | Source inventory | Inspect `connector_catalog.hpp`, `scan_plan.hpp`, `execution.hpp`, transport request, and Runtime admission | Confirmed: installed operation is REST `GET`, pagination is `Link`, request has no planned GraphQL body, and `TypedValue` is non-null |
-| A GraphQL relation can use the permanent team APIs without relation-specific Query or Runtime entry points | Low-coupling source and target evidence | Connector fixture -> Semantics plan -> generic Runtime executor -> Query adapter controlled-service test | Pending implementation evidence; acceptance of the direction does not claim delivery |
-| Every team agrees on the same relational base domain without parsing the document | Exact Connector-to-Semantics source-domain oracle | Assert canonical root invocation and omitted-filter profile, zero-to-many cardinality, zero conditional inputs, unsupported remote predicate, duplicate-preserving GraphQL repository-occurrence domain, and unchanged immutable plan snapshot | Pending implementation evidence; required before delivery completion |
-| Only the reviewed read-only operation can reach transport | Canonical authority and negative admission evidence | Exact identity/bytes/digest oracle plus query-labeled mutation, subscription, extra-operation, changed-selection, and digest-mismatch fixtures | Pending implementation evidence; every negative case must fail before authorization or I/O |
-| Cursor and error variations fail without partial-looking success | Deterministic protocol corpus | Controlled HTTPS-compatible service with zero, one, and multiple pages; nullable data; top-level errors; data plus errors; missing pageInfo; empty/repeated/oversized cursor; malformed types; oversized document and serialized-body overflow; cancellation and exhausted budgets | Pending implementation evidence; required for the `0.7.0` goal, not RFC acceptance |
-| Existing REST behavior is unchanged | Regression and differential evidence | Existing native C++, SQLLogicTest, controlled-service, and clean-host direct-load gates | Pending implementation evidence; required before goal completion |
+| The pre-delivery architecture did not provide a GraphQL operation or nullable value handoff | Acceptance-time source inventory | Inspect the pre-implementation `connector_catalog.hpp`, `scan_plan.hpp`, `execution.hpp`, transport request, and Runtime admission | Confirmed at RFC acceptance: the installed operation was REST `GET`, pagination was `Link`, requests had no planned GraphQL body, and `TypedValue` was non-null; the delivered rows below supersede that baseline |
+| A GraphQL relation can use the permanent team APIs without relation-specific Query or Runtime entry points | Low-coupling source and target evidence | Connector fixture -> Semantics plan -> generic Runtime executor -> Query adapter controlled-service test | Delivered: the actual-DuckDB product target composes the provider services through the existing scan, executor, and stream APIs; the final target audit found no consumer-compiled provider production source |
+| Every team agrees on the same relational base domain without parsing the document | Exact Connector-to-Semantics source-domain oracle | Assert canonical root invocation and omitted-filter profile, zero-to-many cardinality, zero conditional inputs, unsupported remote predicate, duplicate-preserving GraphQL repository-occurrence domain, and unchanged immutable plan snapshot | Delivered: focused Semantics profiles and variation/counterexample tests prove the immutable occurrence-bag domain without granting consumers document authority |
+| Only the reviewed read-only operation can reach transport | Canonical authority and negative admission evidence | Exact identity/bytes/digest oracle plus query-labeled mutation, subscription, extra-operation, changed-selection, and digest-mismatch fixtures | Delivered: Connector validation and Runtime admission reject the negative authority corpus before authorization placement or I/O |
+| Cursor and error variations fail without partial-looking success | Deterministic protocol corpus | Controlled HTTPS-compatible service with zero, one, and multiple pages; nullable data; top-level errors; data plus errors; missing pageInfo; empty/repeated/oversized cursor; malformed types; oversized document and serialized-body overflow; cancellation and exhausted budgets | Delivered: the bounded Runtime corpus and product-level error/cancellation paths are terminal, redacted, and retain no partial-looking success |
+| Existing REST behavior is unchanged | Regression and differential evidence | Existing native C++, SQLLogicTest, controlled-service, and clean-host direct-load gates | Delivered: retained 20-, 20-, and 122-request product suites, 159 SQL assertions, `make test`, `make demo`, and the fresh native cell passed |
 
 No bounded throwaway implementation is required to decide the contract. The
 first executable slice after acceptance will be permanent source code and will
@@ -553,12 +553,12 @@ notes must identify that compatibility status instead of implying stability.
 
 | Source of truth or artifact | Impact | Required update | Completion evidence |
 | --- | --- | --- | --- |
-| `docs/ARCHITECTURE.md` | Affected | Mark the closed prewritten native GraphQL profile and nullable row handoff as implemented while retaining generated mode as design | Pending delivery |
-| `docs/CONNECTOR_SPECIFICATIONS.md` | Affected | Distinguish the implemented native metadata subset from future author-facing GraphQL syntax and record fail-only partial data | Pending delivery |
-| `docs/RUNTIME_CONTRACTS.md` | Affected | Specify canonical document admission, replay derivation, the executable GraphQL operation, cursor transition, error policy, nullable values, request/response budgets, and lifecycle | Pending delivery |
-| `docs/TEAM_TOPOLOGY.md` and active charters | Not affected | Accountability and team APIs already cover this interaction; audit exits against implementation | Pending audit |
+| `docs/ARCHITECTURE.md` | Affected | Mark the closed prewritten native GraphQL profile and nullable row handoff as implemented while retaining generated mode as design | Complete in the `0.7.0` contract propagation commit |
+| `docs/CONNECTOR_SPECIFICATIONS.md` | Affected | Distinguish the implemented native metadata subset from future author-facing GraphQL syntax and record fail-only partial data | Complete in the `0.7.0` contract propagation commit |
+| `docs/RUNTIME_CONTRACTS.md` | Affected | Specify canonical document admission, replay derivation, the executable GraphQL operation, cursor transition, error policy, nullable values, request/response budgets, and lifecycle | Complete in the `0.7.0` contract propagation commit |
+| `docs/TEAM_TOPOLOGY.md` and active charters | Not affected | Accountability and team APIs already cover this interaction; audit exits against implementation | Complete; each workstream plan records a Satisfied X-as-a-Service exit |
 | `docs/PRODUCT_DELIVERY.md`, `AGENTS.md`, and skills | Not affected | Existing goal, RFC, contract-change, delivery, and review workflows apply | Current validation |
-| README, changelog, release notes, examples, diagnostics, fixtures, and tests | Affected | Document and prove the user-visible relation, preview compatibility, GraphQL failure behavior, and retained REST behavior | Pending delivery |
+| README, changelog, release notes, examples, diagnostics, fixtures, and tests | Affected | Document and prove the user-visible relation, preview compatibility, GraphQL failure behavior, and retained REST behavior | Complete; the `0.7.0` release integration records the synchronized product evidence |
 
 The implementation must apply `$contract-change` so architecture, connector,
 runtime, examples, diagnostics, and tests agree in the same delivery.
@@ -578,10 +578,10 @@ runtime, examples, diagnostics, and tests agree in the same delivery.
 
 | Required reviewer | Team | Result | Evidence or objection | Disposition by decision owner |
 | --- | --- | --- | --- | --- |
-| `graphql_query_review` | Query Experience | Approved | Re-review confirmed the corrected rollback classification and the documented `CompiledConnector -> ScanRequest -> ScanPlan -> BatchStream` dependency; delivery interaction remains Open | Initial objections accepted and both passages corrected before approval |
-| `graphql_connector_review` | Connector Experience | Approved | The closed immutable operation profile matches Connector's provider API without exposing package syntax; delivery interaction remains Open | Approved; require final provider-fixture and dependency audit |
-| `graphql_runtime_review` | Remote Runtime | Approved | Re-review confirmed canonical identity/bytes/digest admission, derived replay safety, and serialized-body budgets before bearer placement or I/O; delivery interaction remains Open | Initial authority and body-budget objections accepted and the contract corrected before approval |
-| `graphql_semantics_review` | Relational Semantics | Approved | Re-review confirmed the exact root invocation, omitted-filter semantics, duplicate-preserving base domain, cardinality, zero inputs, unsupported predicate, and immutable plan oracle; delivery interaction remains Open | Initial missing-evidence finding accepted and the source-domain contract corrected before approval |
+| `graphql_query_review` | Query Experience | Approved | Re-review confirmed the corrected rollback classification and the documented `CompiledConnector -> ScanRequest -> ScanPlan -> BatchStream` dependency; final delivery audit satisfied the interaction | Initial objections accepted and both passages corrected before approval |
+| `graphql_connector_review` | Connector Experience | Approved | The closed immutable operation profile matches Connector's provider API without exposing package syntax; final provider-fixture and dependency audit satisfied the interaction | Approved with the required final audit completed |
+| `graphql_runtime_review` | Remote Runtime | Approved | Re-review confirmed canonical identity/bytes/digest admission, derived replay safety, and serialized-body budgets before bearer placement or I/O; final delivery audit satisfied the interaction | Initial authority and body-budget objections accepted and the contract corrected before approval |
+| `graphql_semantics_review` | Relational Semantics | Approved | Re-review confirmed the exact root invocation, omitted-filter semantics, duplicate-preserving base domain, cardinality, zero inputs, unsupported predicate, and immutable plan oracle; final delivery audit satisfied the interaction | Initial missing-evidence finding accepted and the source-domain contract corrected before approval |
 
 ## Decision and rationale
 
@@ -606,7 +606,9 @@ runtime, examples, diagnostics, and tests agree in the same delivery.
   Connector-to-Semantics oracle. No material objection remains.
 - **Superseded by:** Not applicable.
 
-Acceptance is not implementation completion.
+RFC acceptance alone was not implementation completion. The linked goal now
+records the completed implementation, verification, interaction exits, and
+decision to retain GraphQL in the intended v1 surface.
 
 ## Follow-on goals
 

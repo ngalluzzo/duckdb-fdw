@@ -2,7 +2,7 @@
 
 ## Outcome, authority, and topology
 
-Status: **Planned; provider interaction remains in Collaboration**.
+Status: **Complete; provider interaction is Satisfied as X-as-a-Service**.
 
 Connector Experience supplies RFC 0011's immutable source facts for
 `github.viewer_repository_metrics`: one closed canonical GraphQL operation,
@@ -221,13 +221,21 @@ git diff --check
 git diff --cached --check
 ```
 
-Future implementation runs focused Connector executables, `make build`,
-`make test`, `make demo`, identity checks, and a fresh native product cell.
-The lead adds required sanitizer evidence and stages before the cached check.
+Delivery ran the focused Connector executables, `make build`, `make test`,
+`make demo`, identity checks, and a fresh native product cell. The lead also
+ran the required staged and unstaged whitespace gates.
 
 ## Observable Collaboration to X-as-a-Service exit
 
-Current state: **Open; Collaboration**.
+Current state: **Satisfied; X-as-a-Service**.
+
+The 2026-07-19 final audit found Connector production listed once behind
+`duckdb_api_connector_metadata_service`; Query and Semantics consume its public
+facade, the stable Connector fixture is the only test provider of the canonical
+catalog, and Runtime has no Connector metadata or fixture dependency. The
+complete GraphQL operation, schema, nullability, validation, identity, digest,
+and immutable snapshots are therefore maintained inside the bounded provider
+API.
 
 The interaction becomes **Satisfied; X-as-a-Service** only when the final tree
 shows all of the following, in addition to passing provider and product tests:

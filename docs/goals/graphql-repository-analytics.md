@@ -2,8 +2,8 @@
 
 Follow `docs/PRODUCT_DELIVERY.md`.
 
-Status: **Active**. [RFC 0011](../rfcs/0011-add-graphql-repository-analytics.md)
-is Accepted.
+Status: **Complete**. [RFC 0011](../rfcs/0011-add-graphql-repository-analytics.md)
+is Accepted and its delivery evidence is recorded below.
 
 ## PM brief
 
@@ -147,4 +147,37 @@ duplicates provider production source in a consumer target.
 
 ## Completion record
 
-Pending delivery.
+Completed on 2026-07-19. The product decision is to **retain GraphQL in the
+intended v1 surface**: the permanent native `viewer_repository_metrics`
+relation proves that the existing Connector, Semantics, Runtime, and Query
+boundaries can carry a second protocol without a relation-specific executor or
+protocol-specific SQL. Generated GraphQL and package authoring remain outside
+this goal and do not become the next priority merely because the protocol was
+retained.
+
+The delivered relation has the RFC's exact eight-column schema, traverses the
+canonical GitHub `viewer.repositories` cursor connection sequentially, maps a
+missing primary language to SQL `NULL`, rejects any GraphQL error, and retains
+DuckDB ownership of filtering, ordering, limits, joins, preparation, and
+repeated execution. Connector publishes the closed operation and immutable
+fixture, Semantics publishes the complete plan and base-domain facts, Runtime
+uses the standard executor and `BatchStream`, and Query exposes the unchanged
+`duckdb_api_scan` entry point.
+
+Acceptance evidence includes focused provider and consumer targets, 159
+SQLLogicTest assertions, actual-DuckDB duplicate/null/join/prepare/repeat and
+relational-composition cases, the retained REST controlled-service suites,
+`make build`, `make test`, `make demo`, source and dependency identity checks,
+and a clean fresh native product cell at
+`.build/verify-0.7-graphql-final-2`. A privacy-safe live GitHub compatibility
+probe confirmed the canonical operation and fixed schema without emitting
+repository values, row counts, documents, variables, cursors, remote errors,
+or credentials. The deterministic fixtures remain the correctness oracle.
+
+The final target/include/source audit marks every workstream interaction
+**Satisfied; X-as-a-Service**. Consumers link bounded provider services rather
+than compiling another team's production sources; Runtime imports no Connector
+metadata, Query code, or Semantics planner internals; Query consumes the public
+catalog, planner, executor, stream, authorization, typed-value, and structured
+error APIs. Independent relational and security/lifecycle review found no
+unresolved evidence-backed defect after the recorded corrections.
