@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb_api/connector.hpp"
+#include "duckdb_api/compiled_package_generation.hpp"
 #include "duckdb_api/relational_predicate.hpp"
 
 #include <cstddef>
@@ -163,5 +164,14 @@ struct ScanRequest {
 // read environment/files, perform I/O, or plan relational/auth behavior.
 ScanRequest BuildConservativeScanRequest(const CompiledConnector &connector, const std::string &relation_name,
                                          LogicalSecretReference secret_reference);
+
+// Builds the same protocol-neutral boundary for a generated package function
+// from Connector's deliberately narrow registration descriptor. Query passes
+// only explicit typed arguments and full output closure. Defaults,
+// nullability, eligibility, operation selection, and protocol meaning remain
+// Relational Semantics responsibilities behind QueryScanPlanningService.
+ScanRequest BuildPackageScanRequest(const CompiledPackageIdentity &identity,
+                                    const CompiledRegistrationRelation &relation, ExplicitInputs explicit_inputs,
+                                    LogicalSecretReference secret_reference);
 
 } // namespace duckdb_api

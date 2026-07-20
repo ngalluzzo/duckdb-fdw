@@ -2,8 +2,8 @@
 
 This package is the DuckDB-facing edge of the extension. It translates a SQL
 call into a protocol-neutral request, assembles the installed services, manages
-DuckDB secret and scan state, pulls typed runtime batches, and writes
-`DataChunk` output.
+DuckDB secret and scan state, publishes package-generated table functions,
+pulls typed runtime batches, and writes `DataChunk` output.
 
 Connector compilation, relational classification, and remote execution stay
 behind their public interfaces; do not reproduce those rules in the adapter.
@@ -40,11 +40,25 @@ behind their public interfaces; do not reproduce those rules in the adapter.
 8. The adapter translates provider failures at the DuckDB exception boundary;
    providers retain ownership of their structured, redacted errors.
 
+Package publication follows a separate catalog lifecycle. Lead composition
+implements `QueryPackageStagingService` by composing Connector compilation and
+Runtime staging. Query receives one immutable registration/planning/execution
+generation, validates catalog ownership and collisions, and changes all
+generated, management, and introspection functions in one `system.main`
+catalog transaction. Catalog, bind, prepared-plan, and scan state retain the
+opaque generation owner; Query never parses package source or inspects a
+Runtime registry.
+
 ## Start here
 
 | Change | Production code | Focused evidence |
 | --- | --- | --- |
 | `ScanRequest` values or DuckDB capability reporting | `scan_request.cpp`, `duckdb_api/scan_request.hpp` | `duckdb_api_scan_request_tests` |
+| Package staging consumer port and retained generation ownership | `query_generation.cpp`, `duckdb_api/query_generation.hpp` | `duckdb_api_package_query_surface_tests` |
+| Atomic load/reload publication, ownership/collision checks, and close admission | `duckdb/catalog_generation_coordinator.*`, `duckdb/package_lifecycle_sentry.*` | management and lifecycle files in `duckdb_api_package_query_surface_tests` |
+| Generated package function signatures and bind/planning handoff | `duckdb/generated_relation_adapter.*`, `duckdb/package_catalog_snapshot.*` | `generated_relation_tests.cpp` in `duckdb_api_package_query_surface_tests` |
+| Package management and catalog introspection functions | `duckdb/package_management_functions.*`, `duckdb/package_introspection_functions.*` | management and introspection files in `duckdb_api_package_query_surface_tests` |
+| Shared dispatcher/generated stream lifecycle | `duckdb/relation_execution.*` | `duckdb_api_adapter_stream_contract_tests`, `duckdb_api_package_query_surface_tests` |
 | Pinned structured-expression translation | `duckdb/complex_filter_adapter.*` | `predicate_candidate_translation_tests.cpp` and `complex_filter_adapter_tests.cpp` in `duckdb_api_adapter_tests` |
 | Typed selected-plan explanation | `duckdb/scan_plan_explanation.*` | `complex_filter_adapter_tests.cpp` in `duckdb_api_adapter_tests` |
 | Planned scalar/nullability enforcement and DuckDB vector writes | `duckdb/typed_value_adapter.*` | `duckdb_api_typed_value_adapter_tests` |
@@ -60,7 +74,8 @@ behind their public interfaces; do not reproduce those rules in the adapter.
 Production and test inventories are in `src/query/{sources,targets}.cmake` and
 `test/cpp/query/{sources,targets}.cmake`. Shared test helpers live under
 `test/cpp/query/support/`; controlled product composition belongs under
-`test/cpp/query/integration/`.
+`test/cpp/query/integration/`. Package catalog tests and their bounded consumer
+doubles live under `test/cpp/query/packages/`.
 
 ## Product evidence boundary
 

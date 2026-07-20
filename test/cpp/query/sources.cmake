@@ -8,6 +8,14 @@ set(QUERY_AUTH_ADAPTER_TEST_SUPPORT_SOURCES
     test/cpp/query/support/duckdb_adapter_auth_test_support.cpp)
 set(QUERY_SECRET_TEST_SUPPORT_SOURCES
     test/cpp/query/support/duckdb_secret_test_support.cpp)
+set(QUERY_PACKAGE_TEST_SUPPORT_SOURCES
+    test/cpp/query/packages/support/package_query_test_support.cpp)
+set(QUERY_PACKAGE_TEST_SOURCES
+    test/cpp/query/packages/package_query_surface_tests.cpp
+    test/cpp/query/packages/package_management_tests.cpp
+    test/cpp/query/packages/package_introspection_tests.cpp
+    test/cpp/query/packages/generated_relation_tests.cpp
+    test/cpp/query/packages/package_lifecycle_tests.cpp)
 set(QUERY_CONTROLLED_COMPOSITION_SOURCES
     ${QUERY_DUCKDB_ADAPTER_SUPPORT_SOURCES}
     test/cpp/query/integration/support/controlled_product_composition.cpp

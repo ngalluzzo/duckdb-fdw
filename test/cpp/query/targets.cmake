@@ -121,6 +121,29 @@ target_link_libraries(
 target_include_directories(duckdb_api_adapter_stream_contract_tests PRIVATE test/cpp)
 configure_duckdb_api_cpp_target(duckdb_api_adapter_stream_contract_tests)
 
+# Query's package surface oracle uses real DuckDB catalog transactions and
+# only bounded public provider fixtures. Production catalog sources arrive
+# through Query's service target, never through a consumer-side source list.
+add_executable(
+  duckdb_api_package_query_surface_tests
+  ${QUERY_PACKAGE_TEST_SOURCES}
+  ${QUERY_PACKAGE_TEST_SUPPORT_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_package_query_surface_tests)
+target_include_directories(
+  duckdb_api_package_query_surface_tests
+  PRIVATE test/cpp src/query/duckdb)
+target_compile_definitions(
+  duckdb_api_package_query_surface_tests
+  PRIVATE DUCKDB_API_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(
+  duckdb_api_package_query_surface_tests
+  PRIVATE duckdb_api_query_package_catalog_service
+          duckdb_api_package_generation_fixture_service
+          duckdb_api_relational_planning_service
+          dummy_static_extension_loader
+          duckdb_static
+          Threads::Threads)
+
 # RFC 0012 is accepted, but this opt-in executable remains bounded decision
 # evidence rather than product code or a release gate. Its sources stay outside
 # every production inventory.

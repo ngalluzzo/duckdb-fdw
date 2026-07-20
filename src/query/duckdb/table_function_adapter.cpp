@@ -1,6 +1,7 @@
 #include "duckdb_api_extension.hpp"
 
 #include "complex_filter_adapter.hpp"
+#include "relation_execution.hpp"
 #include "scan_plan_explanation.hpp"
 #include "table_function_bind_data.hpp"
 #include "table_function_plan_state.hpp"
@@ -23,26 +24,6 @@ namespace duckdb {
 namespace {
 
 using duckdb_api_query_internal::DuckdbApiBindData;
-using duckdb_api_query_internal::PlannedValueColumn;
-
-// Call-scoped DuckDB coupling. Runtime receives only this non-owning control
-// interface and cannot retain ClientContext or throw a DuckDB exception.
-class DuckdbExecutionControl : public duckdb_api::ExecutionControl {
-public:
-	explicit DuckdbExecutionControl(ClientContext &context_p) : context(context_p) {
-	}
-
-	bool IsCancellationRequested() const noexcept override {
-		try {
-			return context.IsInterrupted();
-		} catch (...) {
-			return true;
-		}
-	}
-
-private:
-	ClientContext &context;
-};
 
 // Registration state retains only immutable provider APIs. Product and private
 // controlled composition both enter through this boundary.
@@ -98,40 +79,6 @@ void DuckdbApiPushdownComplexFilter(ClientContext &, LogicalGet &get, FunctionDa
 	}
 }
 
-// One DuckDB source task exclusively owns one mutable stream. Destruction is a
-// non-throwing finalizer for success, failure, early close, and connection
-// teardown; unfinished streams receive cancellation before close.
-struct DuckdbApiGlobalState : public GlobalTableFunctionState {
-	DuckdbApiGlobalState(std::unique_ptr<duckdb_api::BatchStream> stream_p,
-	                     std::vector<PlannedValueColumn> expected_columns_p, uint64_t max_batch_rows_p,
-	                     std::string connector_name_p, std::string relation_name_p)
-	    : stream(std::move(stream_p)), expected_columns(std::move(expected_columns_p)),
-	      max_batch_rows(max_batch_rows_p), connector_name(std::move(connector_name_p)),
-	      relation_name(std::move(relation_name_p)), finished(false) {
-	}
-
-	~DuckdbApiGlobalState() override {
-		if (!stream) {
-			return;
-		}
-		if (!finished) {
-			stream->Cancel();
-		}
-		stream->Close();
-	}
-
-	idx_t MaxThreads() const override {
-		return 1;
-	}
-
-	std::unique_ptr<duckdb_api::BatchStream> stream;
-	const std::vector<PlannedValueColumn> expected_columns;
-	const uint64_t max_batch_rows;
-	const std::string connector_name;
-	const std::string relation_name;
-	bool finished;
-};
-
 std::string RequiredNamedString(TableFunctionBindInput &input, const std::string &name) {
 	const auto entry = input.named_parameters.find(name);
 	if (entry == input.named_parameters.end() || entry->second.IsNull()) {
@@ -178,53 +125,6 @@ duckdb_api::LogicalSecretReference BindSecretReference(TableFunctionBindInput &i
 	return duckdb_api::LogicalSecretReference::Named(logical_name);
 }
 
-const char *ErrorStageName(duckdb_api::ErrorStage stage) {
-	switch (stage) {
-	case duckdb_api::ErrorStage::TRANSPORT:
-		return "transport";
-	case duckdb_api::ErrorStage::HTTP_STATUS:
-		return "http_status";
-	case duckdb_api::ErrorStage::DECODE:
-		return "decode";
-	case duckdb_api::ErrorStage::SCHEMA:
-		return "schema";
-	case duckdb_api::ErrorStage::POLICY:
-		return "policy";
-	case duckdb_api::ErrorStage::RESOURCE:
-		return "resource";
-	case duckdb_api::ErrorStage::INTERNAL:
-		return "internal";
-	case duckdb_api::ErrorStage::AUTHENTICATION:
-		return "authentication";
-	case duckdb_api::ErrorStage::AUTHORIZATION:
-		return "authorization";
-	case duckdb_api::ErrorStage::REMOTE_PROTOCOL:
-		return "remote_protocol";
-	}
-	return "internal";
-}
-
-[[noreturn]] void ThrowExecutionError(const duckdb_api::ExecutionError &error, const std::string &connector_name,
-                                      const std::string &relation_name) {
-	if (error.Stage() == duckdb_api::ErrorStage::INTERNAL) {
-		throw InvalidInputException("[duckdb_api][internal] connector=%s relation=%s: unexpected execution failure",
-		                            connector_name, relation_name);
-	}
-	if (error.Field().empty()) {
-		throw InvalidInputException("[duckdb_api][%s] connector=%s relation=%s: %s", ErrorStageName(error.Stage()),
-		                            connector_name, relation_name, error.SafeMessage());
-	}
-	throw InvalidInputException("[duckdb_api][%s] connector=%s relation=%s field=%s: %s", ErrorStageName(error.Stage()),
-	                            connector_name, relation_name, error.Field(), error.SafeMessage());
-}
-
-[[noreturn]] void ThrowCancellation(duckdb_api::BatchStream *stream) {
-	if (stream) {
-		stream->Cancel();
-	}
-	throw InterruptException();
-}
-
 unique_ptr<FunctionData> DuckdbApiBind(ClientContext &, TableFunctionBindInput &input,
                                        vector<LogicalType> &return_types, vector<string> &names) {
 	const auto connector_name = RequiredNamedString(input, "connector");
@@ -259,94 +159,14 @@ unique_ptr<FunctionData> DuckdbApiBind(ClientContext &, TableFunctionBindInput &
 	return make_uniq<DuckdbApiBindData>(std::move(request), std::move(plan), function_info.executor);
 }
 
-std::unique_ptr<duckdb_api::BatchStream> OpenAuthorizedStream(const DuckdbApiBindData &bind_data,
-                                                              ClientContext &context, DuckdbExecutionControl &control) {
-	// Every global initialization resolves a fresh execution-scoped capability.
-	// Query never reads its token alternative: it moves the closed authorization
-	// directly into Runtime, which owns validation, use, and destruction.
-	if (control.IsCancellationRequested()) {
-		throw duckdb_api::ExecutionCancelled();
-	}
-	const auto &plan = bind_data.plan_state.SelectedPlan();
-	if (plan.Authentication() == duckdb_api::FeatureState::ENABLED) {
-		const auto &reference = plan.SecretReference();
-		if (!reference.IsPresent()) {
-			throw std::logic_error("authenticated scan plan has no logical secret reference");
-		}
-		auto authorization = ResolveDuckdbApiSecret(context, reference.Name());
-		return bind_data.executor->OpenWithAuthorization(plan, std::move(authorization), control);
-	}
-	if (plan.Authentication() != duckdb_api::FeatureState::DISABLED) {
-		throw std::logic_error("scan plan has an unknown authentication state");
-	}
-	return bind_data.executor->OpenWithAuthorization(plan, duckdb_api::ScanAuthorization::Anonymous(), control);
-}
-
 unique_ptr<GlobalTableFunctionState> DuckdbApiInit(ClientContext &context, TableFunctionInitInput &input) {
 	auto &bind_data = input.bind_data->Cast<DuckdbApiBindData>();
-	try {
-		DuckdbExecutionControl control(context);
-		auto stream = OpenAuthorizedStream(bind_data, context, control);
-		const auto &plan = bind_data.plan_state.SelectedPlan();
-		if (!stream) {
-			throw std::logic_error("scan executor returned no stream");
-		}
-		return make_uniq<DuckdbApiGlobalState>(std::move(stream), duckdb_api_query_internal::PlannedValueColumns(plan),
-		                                       plan.Budgets().batch_rows, plan.ConnectorName(), plan.RelationName());
-	} catch (const duckdb_api::ExecutionCancelled &) {
-		ThrowCancellation(nullptr);
-	} catch (const duckdb_api::ExecutionError &error) {
-		const auto &plan = bind_data.plan_state.SelectedPlan();
-		ThrowExecutionError(error, plan.ConnectorName(), plan.RelationName());
-	} catch (const std::exception &) {
-		const auto &plan = bind_data.plan_state.SelectedPlan();
-		throw InvalidInputException("[duckdb_api][internal] connector=%s relation=%s: unexpected execution failure",
-		                            plan.ConnectorName(), plan.RelationName());
-	} catch (...) {
-		const auto &plan = bind_data.plan_state.SelectedPlan();
-		throw InvalidInputException("[duckdb_api][internal] connector=%s relation=%s: unexpected execution failure",
-		                            plan.ConnectorName(), plan.RelationName());
-	}
+	return duckdb_api_query_internal::InitializeRelationExecution(context, bind_data.plan_state.SelectedPlan(),
+	                                                              bind_data.executor);
 }
 
 void DuckdbApiScan(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
-	auto &state = input.global_state->Cast<DuckdbApiGlobalState>();
-	duckdb_api::TypedBatch batch;
-	try {
-		DuckdbExecutionControl control(context);
-		const auto produced = state.stream->Next(control, batch);
-		if (!produced) {
-			if (!batch.rows.empty()) {
-				throw std::logic_error("batch stream returned rows with clean exhaustion");
-			}
-			state.finished = true;
-			return;
-		}
-		// DuckDB treats a zero-cardinality table-function output as source
-		// exhaustion and will not pull again. Runtime therefore owns crossing an
-		// empty nonterminal source page inside the active Next call; a successful
-		// empty batch is a provider-contract violation, not clean exhaustion.
-		for (idx_t row_index = 0; row_index < batch.rows.size(); row_index++) {
-			if (control.IsCancellationRequested()) {
-				throw duckdb_api::ExecutionCancelled();
-			}
-		}
-		duckdb_api_query_internal::WriteTypedBatch(output, batch, state.expected_columns, state.max_batch_rows);
-	} catch (const duckdb_api::ExecutionCancelled &) {
-		ThrowCancellation(state.stream.get());
-	} catch (const InterruptException &) {
-		ThrowCancellation(state.stream.get());
-	} catch (const duckdb_api::ExecutionError &error) {
-		ThrowExecutionError(error, state.connector_name, state.relation_name);
-	} catch (const std::exception &) {
-		state.stream->Cancel();
-		throw InvalidInputException("[duckdb_api][internal] connector=%s relation=%s: unexpected execution failure",
-		                            state.connector_name, state.relation_name);
-	} catch (...) {
-		state.stream->Cancel();
-		throw InvalidInputException("[duckdb_api][internal] connector=%s relation=%s: unexpected execution failure",
-		                            state.connector_name, state.relation_name);
-	}
+	duckdb_api_query_internal::ScanRelationExecution(context, input, output);
 }
 
 } // namespace

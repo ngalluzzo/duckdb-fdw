@@ -321,4 +321,38 @@ ScanRequest BuildConservativeScanRequest(const CompiledConnector &connector, con
 	return result;
 }
 
+ScanRequest BuildPackageScanRequest(const CompiledPackageIdentity &identity,
+                                    const CompiledRegistrationRelation &relation, ExplicitInputs explicit_inputs,
+                                    LogicalSecretReference secret_reference) {
+	const auto authentication = relation.Authentication();
+	if (authentication == CompiledRegistrationAuthentication::ANONYMOUS && secret_reference.IsPresent()) {
+		throw std::invalid_argument("anonymous relation does not accept a logical secret reference");
+	}
+	if (authentication == CompiledRegistrationAuthentication::LOGICAL_SECRET_REQUIRED &&
+	    !secret_reference.IsPresent()) {
+		throw std::invalid_argument("authenticated relation requires a logical secret reference");
+	}
+	if (authentication != CompiledRegistrationAuthentication::ANONYMOUS &&
+	    authentication != CompiledRegistrationAuthentication::LOGICAL_SECRET_REQUIRED) {
+		throw std::invalid_argument("selected relation has an unsupported authentication shape");
+	}
+
+	ScanRequest result;
+	result.connector_name = identity.ConnectorId();
+	result.relation_name = relation.Name();
+	result.explicit_inputs = std::move(explicit_inputs);
+	result.projected_columns.reserve(relation.Columns().size());
+	for (const auto &column : relation.Columns()) {
+		result.projected_columns.push_back(column.Name());
+	}
+	result.requested_predicate = RequestedPredicate::Unrestricted();
+	result.retained_predicate_scope = RetainedPredicateScope::UNRESTRICTED;
+	result.orderings.clear();
+	result.has_limit = false;
+	result.has_offset = false;
+	result.capabilities = {false, false, false, false, false, false, false, false, true, true};
+	result.secret_reference = std::move(secret_reference);
+	return result;
+}
+
 } // namespace duckdb_api

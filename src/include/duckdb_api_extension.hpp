@@ -3,6 +3,7 @@
 #include "duckdb.hpp"
 #include "duckdb_api/connector.hpp"
 #include "duckdb_api/execution.hpp"
+#include "duckdb_api/query_generation.hpp"
 
 #include <memory>
 
@@ -22,5 +23,12 @@ public:
 // still leave no scan function whose prerequisite registration failed.
 void RegisterDuckdbApi(ExtensionLoader &loader, duckdb_api::CompiledConnector connector,
                        std::shared_ptr<const duckdb_api::ScanExecutor> executor);
+
+// Registers the Query-owned local-package management, introspection, catalog
+// coordinator, and DatabaseInstance lifecycle surface. Lead composition
+// supplies the local Connector/Runtime staging port; ordinary relation bind
+// and execution never call it or read package source.
+void RegisterDuckdbApiPackageSurface(ExtensionLoader &loader,
+                                     std::shared_ptr<const duckdb_api::QueryPackageStagingService> staging);
 
 } // namespace duckdb
