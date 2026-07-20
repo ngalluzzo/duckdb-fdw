@@ -124,17 +124,18 @@ void RequireInvalid(const std::string &message, Callable callback) {
 
 duckdb_api::CompiledOperation WithSelector(duckdb_api::CompiledOperation operation, bool fallback,
                                            duckdb_api::CompiledOperationSelector selector) {
+	const auto rest = operation.Rest();
 	return duckdb_api::CompiledOperation {std::move(operation.name),
 	                                      fallback,
 	                                      operation.cardinality,
-	                                      operation.protocol,
-	                                      operation.method,
-	                                      operation.replay_safety,
-	                                      operation.retry_enabled,
-	                                      std::move(operation.pagination),
-	                                      std::move(operation.request),
-	                                      operation.response_source,
-	                                      std::move(operation.records_extractor),
+	                                      duckdb_api::CompiledProtocol::REST,
+	                                      rest.method,
+	                                      rest.replay_safety,
+	                                      rest.retry_enabled,
+	                                      rest.pagination,
+	                                      rest.request,
+	                                      rest.response_source,
+	                                      rest.records_extractor,
 	                                      std::move(selector)};
 }
 
@@ -288,36 +289,46 @@ void TestClosedValidation() {
 
 	RequireInvalid("relation accepted a fixed Authorization header", [&authenticated]() {
 		auto operation = authenticated.Operation();
-		operation.request.headers.push_back({"authorization", "x"});
-		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(operation),
+		auto rest = operation.Rest();
+		rest.request.headers.push_back({"authorization", "x"});
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(changed),
 		                                     authenticated.Authentication(), authenticated.ResourceCeilings());
 	});
 	RequireInvalid("relation accepted root-object shape with zero-to-many cardinality", [&anonymous]() {
 		auto operation = anonymous.Operation();
-		operation.response_source = duckdb_api::CompiledResponseSource::ROOT_OBJECT;
-		operation.records_extractor = "$";
-		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operation),
+		auto rest = operation.Rest();
+		rest.response_source = duckdb_api::CompiledResponseSource::ROOT_OBJECT;
+		rest.records_extractor = "$";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(changed),
 		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
 	});
 	RequireInvalid("relation accepted multi-record shape with exactly-one cardinality", [&authenticated]() {
 		auto operation = authenticated.Operation();
-		operation.response_source = duckdb_api::CompiledResponseSource::JSON_PATH_MANY;
-		operation.records_extractor = "$.items[*]";
-		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(operation),
+		auto rest = operation.Rest();
+		rest.response_source = duckdb_api::CompiledResponseSource::JSON_PATH_MANY;
+		rest.records_extractor = "$.items[*]";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(changed),
 		                                     authenticated.Authentication(), authenticated.ResourceCeilings());
 	});
 	RequireInvalid("relation accepted root-array shape with exactly-one cardinality", [&authenticated]() {
 		auto operation = authenticated.Operation();
-		operation.response_source = duckdb_api::CompiledResponseSource::ROOT_ARRAY;
-		operation.records_extractor = "$";
-		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(operation),
+		auto rest = operation.Rest();
+		rest.response_source = duckdb_api::CompiledResponseSource::ROOT_ARRAY;
+		rest.records_extractor = "$";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(changed),
 		                                     authenticated.Authentication(), authenticated.ResourceCeilings());
 	});
 	RequireInvalid("relation inferred a root array from an extractor", [&anonymous]() {
 		auto operation = anonymous.Operation();
-		operation.response_source = duckdb_api::CompiledResponseSource::ROOT_ARRAY;
-		operation.records_extractor = "$[*]";
-		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operation),
+		auto rest = operation.Rest();
+		rest.response_source = duckdb_api::CompiledResponseSource::ROOT_ARRAY;
+		rest.records_extractor = "$[*]";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(changed),
 		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
 	});
 	RequireInvalid("exactly-one relation accepted a wider record ceiling", [&authenticated]() {
@@ -327,14 +338,18 @@ void TestClosedValidation() {
 	});
 	RequireInvalid("authenticated relation accepted a query-bearing request", [&authenticated]() {
 		auto operation = authenticated.Operation();
-		operation.request.query_parameters.push_back({"page", "1"});
-		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(operation),
+		auto rest = operation.Rest();
+		rest.request.query_parameters.push_back({"page", "1"});
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(changed),
 		                                     authenticated.Authentication(), authenticated.ResourceCeilings());
 	});
 	RequireInvalid("authenticated relation accepted a mismatched credential destination", [&authenticated]() {
 		auto operation = authenticated.Operation();
-		operation.request.origin.host = duckdb_api::CompiledRestHost("other.example");
-		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(operation),
+		auto rest = operation.Rest();
+		rest.request.origin.host = duckdb_api::CompiledRestHost("other.example");
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ConnectorCatalogTestAccess::Relation(authenticated.Name(), authenticated.Columns(), std::move(changed),
 		                                     ConnectorCatalogTestAccess::RequiredBearer(),
 		                                     authenticated.ResourceCeilings());
 	});
@@ -346,20 +361,26 @@ void TestClosedValidation() {
 	});
 	RequireInvalid("relation accepted an invalid request path", [&anonymous]() {
 		auto operation = anonymous.Operation();
-		operation.request.path = "/rows?escape=1";
-		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operation),
+		auto rest = operation.Rest();
+		rest.request.path = "/rows?escape=1";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(changed),
 		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
 	});
 	RequireInvalid("relation accepted header injection", [&anonymous]() {
 		auto operation = anonymous.Operation();
-		operation.request.headers[0].value = "value\r\ninjected";
-		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operation),
+		auto rest = operation.Rest();
+		rest.request.headers[0].value = "value\r\ninjected";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(changed),
 		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
 	});
 	RequireInvalid("relation accepted query injection", [&anonymous]() {
 		auto operation = anonymous.Operation();
-		operation.request.query_parameters.push_back({"page", "value&injected=1"});
-		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operation),
+		auto rest = operation.Rest();
+		rest.request.query_parameters.push_back({"page", "value&injected=1"});
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(changed),
 		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
 	});
 	RequireInvalid("catalog accepted duplicate relation identifiers", [&catalog]() {
@@ -379,8 +400,11 @@ void TestClosedValidation() {
 		                                     anonymous.ResourceCeilings());
 	});
 	RequireInvalid("relation accepted duplicate operation identifiers", [&anonymous]() {
-		std::vector<duckdb_api::CompiledOperation> operations = {anonymous.Operation(), anonymous.Operation()};
-		operations[1].request.path = "/other-rows";
+		auto second = anonymous.Operation();
+		auto rest = second.Rest();
+		rest.request.path = "/other-rows";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(second, std::move(rest), second.selector);
+		std::vector<duckdb_api::CompiledOperation> operations = {anonymous.Operation(), std::move(changed)};
 		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operations),
 		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
 	});
@@ -388,8 +412,10 @@ void TestClosedValidation() {
 		auto second = anonymous.Operation();
 		second.name = "fixture_other_rows";
 		second.fallback = false;
-		second.request.origin.host = duckdb_api::CompiledRestHost("other.example");
-		std::vector<duckdb_api::CompiledOperation> operations = {anonymous.Operation(), std::move(second)};
+		auto rest = second.Rest();
+		rest.request.origin.host = duckdb_api::CompiledRestHost("other.example");
+		auto changed = ConnectorCatalogTestAccess::RestOperation(second, std::move(rest), second.selector);
+		std::vector<duckdb_api::CompiledOperation> operations = {anonymous.Operation(), std::move(changed)};
 		std::vector<duckdb_api::CompiledRelation> relations;
 		relations.push_back(ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(),
 		                                                         std::move(operations), anonymous.Authentication(),

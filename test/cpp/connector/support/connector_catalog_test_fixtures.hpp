@@ -18,6 +18,7 @@ extern const char PREDICATE_EQUAL_RANKED_OPERATIONS_RELATION[];
 extern const char PREDICATE_AMBIGUOUS_MAPPINGS_RELATION[];
 extern const char OPERATION_UNIQUE_WINNER_RELATION[];
 extern const char OPERATION_FALLBACK_RELATION[];
+extern const char GRAPHQL_VIEWER_REPOSITORY_METRICS_RELATION[];
 
 // Returns a deterministic immutable catalog whose two relations deliberately
 // differ in name, schema width, column names/types, response shape, and
@@ -91,5 +92,13 @@ duckdb_api::CompiledConnector BuildAmbiguousPredicateMappingsCatalogFixture();
 // and forbids the same input, and one relation declares two fallbacks.
 duckdb_api::CompiledConnector BuildContradictorySelectorCatalogFixture();
 duckdb_api::CompiledConnector BuildMultipleFallbackOperationsCatalogFixture();
+
+// Non-installable canonical GraphQL provider fixture. It exposes one stable
+// relation identifier and an immutable factory result through the public
+// Connector facade only. Construction reuses production canonical document
+// facts and validators, performs no I/O, and carries no secret name, credential,
+// cursor value, request body, response row, or runtime state. Consumers must
+// not import catalog_test_access.hpp or Connector implementation files.
+duckdb_api::CompiledConnector BuildCanonicalGraphqlConnectorCatalogFixture();
 
 } // namespace duckdb_api_test

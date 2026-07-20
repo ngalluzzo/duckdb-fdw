@@ -77,7 +77,10 @@ const CompiledColumn *FindColumn(const std::vector<CompiledColumn> &columns, con
 }
 
 bool HasFixedQueryField(const CompiledOperation &operation, const std::string &name) {
-	for (const auto &parameter : operation.request.query_parameters) {
+	if (operation.Protocol() != CompiledProtocol::REST) {
+		return false;
+	}
+	for (const auto &parameter : operation.Rest().request.query_parameters) {
 		if (parameter.name == name) {
 			return true;
 		}
@@ -217,10 +220,13 @@ void ValidatePredicateMappings(const std::string &relation_name, const std::vect
 		    mapping.SupportsDisjunctionEncoding() || mapping.SupportsComplementEncoding()) {
 			throw std::invalid_argument("compiled predicate mapping contains an unsupported encoding capability");
 		}
-		const bool collides_with_pagination =
-		    operation->pagination.Strategy() == CompiledPaginationStrategy::LINK_HEADER &&
-		    (mapping.RemoteInputName() == operation->pagination.PageSizeParameter() ||
-		     mapping.RemoteInputName() == operation->pagination.PageNumberParameter());
+		if (operation->Protocol() != CompiledProtocol::REST) {
+			throw std::invalid_argument("compiled predicate mapping cannot target a GraphQL operation");
+		}
+		const auto &pagination = operation->Rest().pagination;
+		const bool collides_with_pagination = pagination.Strategy() == CompiledPaginationStrategy::LINK_HEADER &&
+		                                      (mapping.RemoteInputName() == pagination.PageSizeParameter() ||
+		                                       mapping.RemoteInputName() == pagination.PageNumberParameter());
 		if (HasFixedQueryField(*operation, mapping.RemoteInputName()) || collides_with_pagination) {
 			throw std::invalid_argument("compiled predicate mapping conflicts with a fixed or pagination query field");
 		}

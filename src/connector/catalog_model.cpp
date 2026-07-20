@@ -1,7 +1,8 @@
 #include "duckdb_api/connector_catalog.hpp"
+#include "duckdb_api/internal/connector/graphql_operation_declaration.hpp"
 #include "duckdb_api/internal/connector/operation_selector_declaration.hpp"
-#include "duckdb_api/internal/connector/pagination_declaration.hpp"
 #include "duckdb_api/internal/connector/predicate_declaration.hpp"
+#include "duckdb_api/internal/connector/protocol_operation_declaration.hpp"
 #include "duckdb_api/internal/connector/resource_ceiling_declaration.hpp"
 
 #include <limits>
@@ -24,61 +25,12 @@ bool IsAsciiLowerOrDigit(char value) {
 	return IsAsciiLower(value) || IsAsciiDigit(value);
 }
 
-char AsciiLower(char value) {
-	if (value >= 'A' && value <= 'Z') {
-		return static_cast<char>(value - 'A' + 'a');
-	}
-	return value;
-}
-
-bool EqualsAsciiIgnoreCase(const std::string &left, const std::string &right) {
-	if (left.size() != right.size()) {
-		return false;
-	}
-	for (std::size_t index = 0; index < left.size(); index++) {
-		if (AsciiLower(left[index]) != AsciiLower(right[index])) {
-			return false;
-		}
-	}
-	return true;
-}
-
 bool IsIdentifier(const std::string &value) {
 	if (value.empty() || !IsAsciiLower(value.front())) {
 		return false;
 	}
 	for (const auto character : value) {
 		if (!IsAsciiLowerOrDigit(character) && character != '_') {
-			return false;
-		}
-	}
-	return true;
-}
-
-bool IsCanonicalHost(const std::string &host) {
-	if (host.empty() || !IsAsciiLowerOrDigit(host.front()) || !IsAsciiLowerOrDigit(host.back())) {
-		return false;
-	}
-	for (std::size_t index = 0; index < host.size(); index++) {
-		const auto value = host[index];
-		if (!IsAsciiLowerOrDigit(value) && value != '-' && value != '.') {
-			return false;
-		}
-		if (value == '.' && (index == 0 || index + 1 == host.size() || host[index - 1] == '.' ||
-		                     host[index - 1] == '-' || host[index + 1] == '-')) {
-			return false;
-		}
-	}
-	return true;
-}
-
-bool IsHeaderName(const std::string &value) {
-	if (value.empty()) {
-		return false;
-	}
-	for (const auto character : value) {
-		const bool letter = (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z');
-		if (!letter && !IsAsciiDigit(character) && character != '-') {
 			return false;
 		}
 	}
@@ -93,30 +45,6 @@ const char *OriginName(CompiledConnectorOrigin origin) {
 	throw std::logic_error("compiled connector contains an unknown origin");
 }
 
-const char *ProtocolName(CompiledProtocol protocol) {
-	switch (protocol) {
-	case CompiledProtocol::REST:
-		return "REST";
-	}
-	throw std::logic_error("compiled connector contains an unknown protocol");
-}
-
-const char *MethodName(CompiledHttpMethod method) {
-	switch (method) {
-	case CompiledHttpMethod::GET:
-		return "GET";
-	}
-	throw std::logic_error("compiled connector contains an unknown HTTP method");
-}
-
-const char *ReplaySafetyName(CompiledReplaySafety replay_safety) {
-	switch (replay_safety) {
-	case CompiledReplaySafety::SAFE:
-		return "replay_safe";
-	}
-	throw std::logic_error("compiled connector contains an unknown replay-safety declaration");
-}
-
 const char *UrlSchemeName(CompiledUrlScheme scheme) {
 	switch (scheme) {
 	case CompiledUrlScheme::HTTP:
@@ -127,7 +55,7 @@ const char *UrlSchemeName(CompiledUrlScheme scheme) {
 	throw std::logic_error("compiled connector contains an unknown URL scheme");
 }
 
-bool OriginsEqual(const CompiledRestOrigin &left, const CompiledRestOrigin &right) {
+bool OriginsEqual(const CompiledHttpOrigin &left, const CompiledHttpOrigin &right) {
 	return left.scheme == right.scheme && left.host.Value() == right.host.Value() && left.port == right.port;
 }
 
@@ -149,78 +77,18 @@ void ValidateColumn(const CompiledColumn &column) {
 	}
 }
 
-void ValidateQueryParameters(const std::vector<CompiledQueryParameter> &parameters) {
-	for (std::size_t index = 0; index < parameters.size(); index++) {
-		const auto &parameter = parameters[index];
-		if (parameter.name.empty() || parameter.name.find_first_of("=&?#\r\n") != std::string::npos ||
-		    parameter.encoded_value.empty() || parameter.encoded_value.find_first_of("&=?#\r\n") != std::string::npos) {
-			throw std::invalid_argument("compiled REST request contains an invalid fixed query field");
-		}
-		for (std::size_t other = index + 1; other < parameters.size(); other++) {
-			if (parameter.name == parameters[other].name) {
-				throw std::invalid_argument("compiled REST request contains a duplicate fixed query field");
-			}
-		}
-	}
-}
-
-void ValidateHeaders(const std::vector<CompiledHttpHeader> &headers) {
-	for (std::size_t index = 0; index < headers.size(); index++) {
-		const auto &header = headers[index];
-		if (!IsHeaderName(header.name) || header.value.empty() ||
-		    header.value.find_first_of("\r\n") != std::string::npos) {
-			throw std::invalid_argument("compiled REST request contains an invalid fixed header");
-		}
-		if (EqualsAsciiIgnoreCase(header.name, "Authorization")) {
-			throw std::invalid_argument("compiled REST request cannot contain a credential-bearing fixed header");
-		}
-		for (std::size_t other = index + 1; other < headers.size(); other++) {
-			if (EqualsAsciiIgnoreCase(header.name, headers[other].name)) {
-				throw std::invalid_argument("compiled REST request contains a duplicate fixed header");
-			}
-		}
-	}
-}
-
 void ValidateOperation(const CompiledOperation &operation) {
-	if (!IsIdentifier(operation.name) || operation.retry_enabled) {
-		throw std::invalid_argument("compiled relation contains an unsupported base operation");
+	if (!IsIdentifier(operation.name)) {
+		throw std::invalid_argument("compiled relation contains an invalid base operation identifier");
 	}
-	(void)ProtocolName(operation.protocol);
-	(void)MethodName(operation.method);
-	(void)ReplaySafetyName(operation.replay_safety);
-	(void)UrlSchemeName(operation.request.origin.scheme);
-	if (operation.request.origin.port == 0 || operation.request.path.empty() || operation.request.path.front() != '/' ||
-	    operation.request.path.find_first_of("?#\r\n") != std::string::npos) {
-		throw std::invalid_argument("compiled REST request contains invalid structural authority or path");
-	}
-	ValidateQueryParameters(operation.request.query_parameters);
-	ValidateHeaders(operation.request.headers);
-
-	if (operation.response_source == CompiledResponseSource::JSON_PATH_MANY) {
-		if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY ||
-		    operation.records_extractor.empty() || operation.records_extractor == "$") {
-			throw std::invalid_argument("multi-record response source has contradictory cardinality or extraction");
-		}
-	} else if (operation.response_source == CompiledResponseSource::ROOT_ARRAY) {
-		if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY || operation.records_extractor != "$") {
-			throw std::invalid_argument("root-array response source has contradictory cardinality or extraction");
-		}
-	} else if (operation.response_source == CompiledResponseSource::ROOT_OBJECT) {
-		if (operation.cardinality != CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS ||
-		    operation.records_extractor != "$") {
-			throw std::invalid_argument("root-object response source has contradictory cardinality or extraction");
-		}
-	} else {
-		throw std::invalid_argument("compiled relation contains an unknown response source");
-	}
-	internal::ValidatePagination(operation);
+	internal::ValidateProtocolOperation(operation);
 }
 
 void ValidateResourceCeilings(const CompiledOperation &operation, const CompiledResourceCeilings &ceilings) {
 	internal::ValidateResourceCeilingsValue(ceilings);
 
-	if (operation.pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
+	if (operation.Protocol() == CompiledProtocol::REST &&
+	    operation.Rest().pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
 		if (ceilings.MaxRecordsPerScan() != ceilings.MaxRecordsPerPage() ||
 		    (ceilings.HasResponseByteNarrowing() &&
 		     ceilings.MaxResponseBytesPerScan() != ceilings.MaxResponseBytesPerPage())) {
@@ -229,10 +97,14 @@ void ValidateResourceCeilings(const CompiledOperation &operation, const Compiled
 		return;
 	}
 
-	if (!ceilings.HasResponseByteNarrowing() || operation.pagination.PageSize() > ceilings.MaxRecordsPerPage()) {
+	const auto page_size = operation.Protocol() == CompiledProtocol::REST ? operation.Rest().pagination.PageSize()
+	                                                                      : operation.Graphql().cursor.page_size;
+	const auto max_pages = operation.Protocol() == CompiledProtocol::REST
+	                           ? operation.Rest().pagination.MaxPagesPerScan()
+	                           : operation.Graphql().cursor.max_pages_per_scan;
+	if (!ceilings.HasResponseByteNarrowing() || page_size > ceilings.MaxRecordsPerPage()) {
 		throw std::invalid_argument("paginated relation lacks bounded page resources");
 	}
-	const auto max_pages = operation.pagination.MaxPagesPerScan();
 	if (ceilings.MaxRecordsPerPage() > std::numeric_limits<std::uint64_t>::max() / max_pages ||
 	    ceilings.MaxResponseBytesPerPage() > std::numeric_limits<std::uint64_t>::max() / max_pages) {
 		throw std::invalid_argument("compiled pagination resource envelope overflows");
@@ -259,7 +131,7 @@ void ValidateNetworkPolicy(const CompiledNetworkPolicy &policy) {
 		}
 	}
 	for (std::size_t index = 0; index < policy.allowed_hosts.size(); index++) {
-		CompiledRestHost validated(policy.allowed_hosts[index]);
+		CompiledHttpHost validated(policy.allowed_hosts[index]);
 		(void)validated;
 		for (std::size_t other = index + 1; other < policy.allowed_hosts.size(); other++) {
 			if (policy.allowed_hosts[index] == policy.allowed_hosts[other]) {
@@ -271,21 +143,11 @@ void ValidateNetworkPolicy(const CompiledNetworkPolicy &policy) {
 
 } // namespace
 
-CompiledRestHost::CompiledRestHost(std::string value_p) : value(std::move(value_p)) {
-	if (!IsCanonicalHost(value)) {
-		throw std::invalid_argument("compiled REST host is not one exact canonical host component");
-	}
-}
-
-const std::string &CompiledRestHost::Value() const {
-	return value;
-}
-
 CompiledAuthenticationPolicy::CompiledAuthenticationPolicy(CompiledCredentialRequirement requirement_p,
                                                            std::string logical_credential_p,
                                                            CompiledAuthenticator authenticator_p,
                                                            CompiledCredentialPlacement placement_p,
-                                                           std::vector<CompiledRestOrigin> destinations_p)
+                                                           std::vector<CompiledHttpOrigin> destinations_p)
     : requirement(requirement_p), logical_credential(std::move(logical_credential_p)), authenticator(authenticator_p),
       placement(placement_p), destinations(std::move(destinations_p)) {
 	if (requirement == CompiledCredentialRequirement::NONE) {
@@ -310,8 +172,8 @@ CompiledAuthenticationPolicy CompiledAuthenticationPolicy::Anonymous() {
 }
 
 CompiledAuthenticationPolicy CompiledAuthenticationPolicy::RequiredBearer() {
-	std::vector<CompiledRestOrigin> destinations;
-	destinations.push_back({CompiledUrlScheme::HTTPS, CompiledRestHost("api.github.com"), 443});
+	std::vector<CompiledHttpOrigin> destinations;
+	destinations.push_back({CompiledUrlScheme::HTTPS, CompiledHttpHost("api.github.com"), 443});
 	return CompiledAuthenticationPolicy(CompiledCredentialRequirement::REQUIRED, "token", CompiledAuthenticator::BEARER,
 	                                    CompiledCredentialPlacement::AUTHORIZATION_HEADER, std::move(destinations));
 }
@@ -332,7 +194,7 @@ CompiledCredentialPlacement CompiledAuthenticationPolicy::Placement() const {
 	return placement;
 }
 
-const CompiledRestOrigin *CompiledAuthenticationPolicy::Destination() const {
+const CompiledHttpOrigin *CompiledAuthenticationPolicy::Destination() const {
 	return destinations.empty() ? nullptr : &destinations[0];
 }
 
@@ -386,6 +248,15 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
 	for (const auto &operation : operations) {
 		internal::ValidateOperationSelectorReferences(operation, predicate_mappings);
 	}
+	for (const auto &operation : operations) {
+		if (operation.Protocol() == CompiledProtocol::GRAPHQL) {
+			if (operations.size() != 1) {
+				throw std::invalid_argument("canonical GraphQL relation requires exactly one operation");
+			}
+			internal::ValidateCanonicalGraphqlRelation(name, columns, operation, authentication, resource_ceilings,
+			                                           predicate_mappings);
+		}
+	}
 
 	if (authentication.Requirement() == CompiledCredentialRequirement::NONE) {
 		for (const auto &operation : operations) {
@@ -397,9 +268,11 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
 	}
 	const auto destination = authentication.Destination();
 	for (const auto &operation : operations) {
-		if (destination == nullptr || !OriginsEqual(*destination, operation.request.origin) ||
-		    (operation.cardinality == CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS &&
-		     !operation.request.query_parameters.empty())) {
+		const bool exactly_one_query = operation.Protocol() == CompiledProtocol::REST &&
+		                               operation.cardinality == CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS &&
+		                               !operation.Rest().request.query_parameters.empty();
+		if (destination == nullptr || !OriginsEqual(*destination, internal::OperationOrigin(operation)) ||
+		    exactly_one_query) {
 			throw std::invalid_argument("authenticated relation contains inconsistent operation and credential policy");
 		}
 	}
@@ -457,7 +330,7 @@ CompiledConnector::CompiledConnector(CompiledConnectorOrigin origin_p, std::stri
 			}
 		}
 		for (const auto &operation : relations[index].Operations()) {
-			const auto &origin_value = operation.request.origin;
+			const auto &origin_value = internal::OperationOrigin(operation);
 			if (!Contains(network_policy.allowed_schemes, UrlSchemeName(origin_value.scheme)) ||
 			    !Contains(network_policy.allowed_hosts, origin_value.host.Value())) {
 				throw std::invalid_argument("compiled relation destination is outside connector network policy");

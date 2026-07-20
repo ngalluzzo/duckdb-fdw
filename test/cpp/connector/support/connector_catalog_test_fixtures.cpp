@@ -1,6 +1,7 @@
 #include "connector/support/connector_catalog_test_fixtures.hpp"
 
 #include "connector/support/catalog_test_access.hpp"
+#include "duckdb_api/internal/connector/graphql_operation_declaration.hpp"
 
 #include <utility>
 #include <vector>
@@ -16,6 +17,7 @@ const char PREDICATE_EQUAL_RANKED_OPERATIONS_RELATION[] = "controlled_equal_rank
 const char PREDICATE_AMBIGUOUS_MAPPINGS_RELATION[] = "controlled_exact_repositories";
 const char OPERATION_UNIQUE_WINNER_RELATION[] = "controlled_exact_repositories";
 const char OPERATION_FALLBACK_RELATION[] = "controlled_exact_repositories";
+const char GRAPHQL_VIEWER_REPOSITORY_METRICS_RELATION[] = "viewer_repository_metrics";
 
 namespace {
 
@@ -411,6 +413,31 @@ duckdb_api::CompiledConnector BuildMultipleFallbackOperationsCatalogFixture() {
 	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "controlled_multiple_fallback_operations",
 	    "test-1", std::move(relations),
 	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"predicate-proof.invalid"}, false, false, false, false, 4096});
+}
+
+duckdb_api::CompiledConnector BuildCanonicalGraphqlConnectorCatalogFixture() {
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    GRAPHQL_VIEWER_REPOSITORY_METRICS_RELATION,
+	    {{"id", "VARCHAR", false, "$.id"},
+	     {"full_name", "VARCHAR", false, "$.nameWithOwner"},
+	     {"owner_login", "VARCHAR", false, "$.owner.login"},
+	     {"stars", "BIGINT", false, "$.stargazerCount"},
+	     {"primary_language", "VARCHAR", true, "$.primaryLanguage.name"},
+	     {"private", "BOOLEAN", false, "$.isPrivate"},
+	     {"archived", "BOOLEAN", false, "$.isArchived"},
+	     {"updated_at", "VARCHAR", false, "$.updatedAt"}},
+	    ConnectorCatalogTestAccess::GraphqlOperation(
+	        "github_viewer_repository_metrics", true, duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	        duckdb_api::internal::BuildCanonicalGithubViewerRepositoryMetricsGraphqlOperation()),
+	    ConnectorCatalogTestAccess::RequiredBearer(),
+	    ConnectorCatalogTestAccess::PaginatedResources(8ULL * 1024ULL * 1024ULL, 64ULL * 1024ULL * 1024ULL, 100, 3200,
+	                                                   512)));
+	return ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "canonical_graphql_fixture", "test-graphql-v1",
+	    std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {
+	        {"https"}, {"api.github.com"}, false, false, false, false, 8ULL * 1024ULL * 1024ULL});
 }
 
 } // namespace duckdb_api_test

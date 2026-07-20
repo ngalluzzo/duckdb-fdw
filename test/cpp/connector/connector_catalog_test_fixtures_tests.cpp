@@ -69,11 +69,11 @@ void TestDistinctSchemaCatalogFixture() {
 	Require(authenticated->Authentication().LogicalCredential() == "token",
 	        "fixture authenticated relation logical requirement drifted");
 	Require(anonymous->Operation().cardinality == duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY &&
-	            anonymous->Operation().response_source == duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
+	            anonymous->Operation().Rest().response_source == duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
 	        "fixture anonymous response contract drifted");
 	Require(authenticated->Operation().cardinality ==
 	                duckdb_api::CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS &&
-	            authenticated->Operation().response_source == duckdb_api::CompiledResponseSource::ROOT_OBJECT,
+	            authenticated->Operation().Rest().response_source == duckdb_api::CompiledResponseSource::ROOT_OBJECT,
 	        "fixture authenticated response contract drifted");
 
 	Require(first.Snapshot() == second.Snapshot(), "fixture construction is not deterministic");
@@ -100,19 +100,19 @@ void TestExplicitPaginationCatalogFixture() {
 	Require(decoy->Authentication().Requirement() == duckdb_api::CompiledCredentialRequirement::REQUIRED &&
 	            linked->Authentication().Requirement() == duckdb_api::CompiledCredentialRequirement::REQUIRED,
 	        "pagination fixture no longer disproves credential-based selection");
-	const auto &decoy_query = decoy->Operation().request.query_parameters;
-	const auto &linked_query = linked->Operation().request.query_parameters;
+	const auto &decoy_query = decoy->Operation().Rest().request.query_parameters;
+	const auto &linked_query = linked->Operation().Rest().request.query_parameters;
 	Require(decoy_query.size() == 2 && linked_query.size() == 2 && decoy_query[0].name == linked_query[0].name &&
 	            decoy_query[0].encoded_value == linked_query[0].encoded_value &&
 	            decoy_query[1].name == linked_query[1].name &&
 	            decoy_query[1].encoded_value == linked_query[1].encoded_value,
 	        "pagination fixture request shapes no longer provide an inference counterexample");
-	Require(decoy->Operation().pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::DISABLED,
+	Require(decoy->Operation().Rest().pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::DISABLED,
 	        "page-shaped decoy unexpectedly enabled pagination");
-	Require(linked->Operation().pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::LINK_HEADER,
+	Require(linked->Operation().Rest().pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::LINK_HEADER,
 	        "explicit Link relation lost its pagination declaration");
 
-	const auto &pagination = linked->Operation().pagination;
+	const auto &pagination = linked->Operation().Rest().pagination;
 	Require(pagination.Dependency() == duckdb_api::CompiledPageDependency::SEQUENTIAL &&
 	            pagination.Consistency() == duckdb_api::CompiledPageConsistency::MUTABLE &&
 	            pagination.LinkRelation() == duckdb_api::CompiledLinkRelation::NEXT &&
@@ -156,11 +156,11 @@ void TestPlannerCounterexampleCatalogFixtures() {
 	            paginated.Relations().size() == 1,
 	        "planner pagination fixture catalog identity drifted");
 	const auto &candidate = paginated.Relations()[0];
-	const auto &pagination = candidate.Operation().pagination;
+	const auto &pagination = candidate.Operation().Rest().pagination;
 	const auto &ceilings = candidate.ResourceCeilings();
 	Require(candidate.Name() == "planner_pagination_candidate" &&
-	            candidate.Operation().response_source == duckdb_api::CompiledResponseSource::JSON_PATH_MANY &&
-	            candidate.Operation().records_extractor == "$.records[*]",
+	            candidate.Operation().Rest().response_source == duckdb_api::CompiledResponseSource::JSON_PATH_MANY &&
+	            candidate.Operation().Rest().records_extractor == "$.records[*]",
 	        "planner pagination fixture relation shape drifted");
 	Require(pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::LINK_HEADER &&
 	            pagination.PageSizeParameter() == "batch_size" && pagination.PageSize() == 3 &&
@@ -179,18 +179,18 @@ void TestPlannerCounterexampleCatalogFixtures() {
 	        "disabled root-array fixture catalog identity drifted");
 	const auto &repository = disabled.Relations()[0];
 	const auto &operation = repository.Operation();
+	const auto &rest = operation.Rest();
 	const auto &repository_ceilings = repository.ResourceCeilings();
-	Require(repository.Name() == "authenticated_repositories" &&
-	            operation.name == "github_authenticated_repositories" &&
-	            operation.response_source == duckdb_api::CompiledResponseSource::ROOT_ARRAY &&
-	            operation.records_extractor == "$" &&
-	            operation.pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::DISABLED,
-	        "disabled root-array fixture relation shape drifted");
-	Require(operation.request.path == "/user/repos" && operation.request.query_parameters.size() == 2 &&
-	            operation.request.query_parameters[0].name == "per_page" &&
-	            operation.request.query_parameters[0].encoded_value == "100" &&
-	            operation.request.query_parameters[1].name == "page" &&
-	            operation.request.query_parameters[1].encoded_value == "1",
+	Require(
+	    repository.Name() == "authenticated_repositories" && operation.name == "github_authenticated_repositories" &&
+	        rest.response_source == duckdb_api::CompiledResponseSource::ROOT_ARRAY && rest.records_extractor == "$" &&
+	        rest.pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::DISABLED,
+	    "disabled root-array fixture relation shape drifted");
+	Require(rest.request.path == "/user/repos" && rest.request.query_parameters.size() == 2 &&
+	            rest.request.query_parameters[0].name == "per_page" &&
+	            rest.request.query_parameters[0].encoded_value == "100" &&
+	            rest.request.query_parameters[1].name == "page" &&
+	            rest.request.query_parameters[1].encoded_value == "1",
 	        "disabled root-array fixture request shape drifted");
 	Require(!repository_ceilings.HasResponseByteNarrowing() && repository_ceilings.MaxRecordsPerPage() == 100 &&
 	            repository_ceilings.MaxRecordsPerScan() == 100 &&
@@ -214,7 +214,7 @@ void TestPredicateMappingDecoyCatalogFixtures() {
 	Require(absent_relation->Columns().size() == 6 && absent_relation->Columns().back().name == "visibility" &&
 	            absent_relation->Columns().back().extractor == "$.visibility" &&
 	            absent_relation->Operation().name == "github_authenticated_repositories" &&
-	            absent_relation->Operation().request.path == "/user/repos",
+	            absent_relation->Operation().Rest().request.path == "/user/repos",
 	        "mapping-absence decoy no longer preserves native inference bait");
 	Require(schema_relation->Columns().size() == 6 &&
 	            schema_relation->Columns().back().name == "repository_visibility" &&
@@ -222,7 +222,7 @@ void TestPredicateMappingDecoyCatalogFixtures() {
 	        "schema-variation decoy no longer varies the mapped column identity");
 	Require(operation_relation->Columns().size() == 6 && operation_relation->Columns().back().name == "visibility" &&
 	            operation_relation->Operation().name == "fixture_repository_operation" &&
-	            operation_relation->Operation().request.path == "/fixtures/repositories",
+	            operation_relation->Operation().Rest().request.path == "/fixtures/repositories",
 	        "operation-variation decoy no longer varies the operation identity");
 	for (const auto *catalog : {&absent, &schema, &operation}) {
 		Require(catalog->Snapshot().find("predicate_mappings=[]") != std::string::npos,
@@ -265,7 +265,7 @@ void TestExactPredicateCatalogFixture() {
 	            mapping.MaximumConditionalInputs() == 1 && !mapping.SupportsCompoundConjunctionEncoding() &&
 	            !mapping.SupportsDisjunctionEncoding() && !mapping.SupportsComplementEncoding(),
 	        "exact predicate fixture proof, domain, occurrence, or encoding facts drifted");
-	Require(relation->Operation().request.query_parameters.empty(),
+	Require(relation->Operation().Rest().request.query_parameters.empty(),
 	        "exact predicate fixture duplicated its conditional input into the base request");
 	Require(first.Snapshot() == second.Snapshot(), "exact predicate fixture construction is not deterministic");
 	Require(
@@ -302,18 +302,21 @@ void TestEqualRankedOperationsCatalogFixture() {
 
 	const auto &left = relation->Operations()[0];
 	const auto &right = relation->Operations()[1];
+	const auto &left_rest = left.Rest();
+	const auto &right_rest = right.Rest();
 	Require(left.name == "controlled_equal_ranked_repositories_a" &&
 	            right.name == "controlled_equal_ranked_repositories_b" && left.name != right.name && !left.fallback &&
-	            !right.fallback && left.cardinality == right.cardinality && left.protocol == right.protocol &&
-	            left.method == right.method && left.replay_safety == right.replay_safety &&
-	            left.pagination.Strategy() == right.pagination.Strategy() &&
-	            left.response_source == right.response_source && left.records_extractor == right.records_extractor &&
-	            left.selector.RequiredInputs().empty() && left.selector.AnyInputSets().empty() &&
-	            left.selector.ForbiddenInputs().empty() && left.selector.Priority() == 0 &&
-	            right.selector.RequiredInputs().empty() && right.selector.AnyInputSets().empty() &&
-	            right.selector.ForbiddenInputs().empty() && right.selector.Priority() == 0,
+	            !right.fallback && left.cardinality == right.cardinality && left.Protocol() == right.Protocol() &&
+	            left_rest.method == right_rest.method && left_rest.replay_safety == right_rest.replay_safety &&
+	            left_rest.pagination.Strategy() == right_rest.pagination.Strategy() &&
+	            left_rest.response_source == right_rest.response_source &&
+	            left_rest.records_extractor == right_rest.records_extractor && left.selector.RequiredInputs().empty() &&
+	            left.selector.AnyInputSets().empty() && left.selector.ForbiddenInputs().empty() &&
+	            left.selector.Priority() == 0 && right.selector.RequiredInputs().empty() &&
+	            right.selector.AnyInputSets().empty() && right.selector.ForbiddenInputs().empty() &&
+	            right.selector.Priority() == 0,
 	        "equal-ranked operation fixture no longer exposes two equally eligible base declarations");
-	Require(left.request.path != right.request.path && relation->PredicateMappings().empty(),
+	Require(left_rest.request.path != right_rest.request.path && relation->PredicateMappings().empty(),
 	        "equal-ranked operation fixture lost distinct operation identity or invented predicate selection facts");
 	Require(first.Snapshot() == second.Snapshot(), "equal-ranked operation fixture construction is not deterministic");
 	Require(first.Snapshot().find("operations=[{operation=controlled_equal_ranked_repositories_a") !=
@@ -423,6 +426,34 @@ void TestAmbiguousPredicateMappingsCatalogFixture() {
 	        "ambiguous predicate fixture snapshot omitted a safe mapping candidate");
 }
 
+void TestCanonicalGraphqlCatalogFixture() {
+	const auto first = duckdb_api_test::BuildCanonicalGraphqlConnectorCatalogFixture();
+	const auto second = duckdb_api_test::BuildCanonicalGraphqlConnectorCatalogFixture();
+	Require(std::string(duckdb_api_test::GRAPHQL_VIEWER_REPOSITORY_METRICS_RELATION) == "viewer_repository_metrics",
+	        "GraphQL fixture stable relation identifier drifted");
+	Require(first.ConnectorName() == "canonical_graphql_fixture" && first.Version() == "test-graphql-v1" &&
+	            first.Relations().size() == 1,
+	        "GraphQL fixture catalog identity drifted");
+	const auto *relation = first.FindRelation(duckdb_api_test::GRAPHQL_VIEWER_REPOSITORY_METRICS_RELATION);
+	Require(relation == &first.Relations()[0] && relation->Columns().size() == 8 && relation->HasSingleOperation() &&
+	            relation->Operation().Protocol() == duckdb_api::CompiledProtocol::GRAPHQL,
+	        "GraphQL fixture lookup, schema width, or protocol drifted");
+	const auto &graphql = relation->Operation().Graphql();
+	Require(graphql.result_columns.size() == relation->Columns().size() &&
+	            graphql.result_columns[2].name == "owner_login" &&
+	            graphql.result_columns[2].response_path.segments == std::vector<std::string>({"owner", "login"}) &&
+	            graphql.result_columns[3].scalar_kind == duckdb_api::CompiledGraphqlScalarKind::INT64 &&
+	            duckdb_api::IsCanonicalGraphqlDocumentProfile(graphql.document_identity, graphql.document,
+	                                                          graphql.digest_algorithm, graphql.document_digest),
+	        "GraphQL fixture lost canonical typed operation facts");
+	Require(first.Snapshot() == second.Snapshot(), "GraphQL fixture construction is not deterministic");
+	for (const auto &prohibited : {"query DuckdbApiViewer", "secret_name=", "credential_value=", "cursor_value=",
+	                               "request_body=", "response_row="}) {
+		Require(first.Snapshot().find(prohibited) == std::string::npos,
+		        "GraphQL fixture snapshot contains prohibited state: " + std::string(prohibited));
+	}
+}
+
 } // namespace
 
 int main() {
@@ -435,6 +466,7 @@ int main() {
 		TestEqualRankedOperationsCatalogFixture();
 		TestSelectableOperationsCatalogFixtures();
 		TestAmbiguousPredicateMappingsCatalogFixture();
+		TestCanonicalGraphqlCatalogFixture();
 		std::cout << "connector catalog fixture tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

@@ -257,34 +257,46 @@ void TestInvalidValuesAndBindings() {
 void TestProofIsBoundToCanonicalOperation() {
 	RequireInvalid("accepted proof escaped its repository path", []() {
 		auto operation = Operation();
-		operation.request.path = "/other/repos";
-		Relation(Columns(), std::move(operation), {Mapping()});
+		auto rest = operation.Rest();
+		rest.request.path = "/other/repos";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		Relation(Columns(), std::move(changed), {Mapping()});
 	});
 	RequireInvalid("accepted proof escaped its HTTPS origin", []() {
 		auto operation = Operation();
-		operation.request.origin.scheme = duckdb_api::CompiledUrlScheme::HTTP;
-		Relation(Columns(), std::move(operation), {Mapping()});
+		auto rest = operation.Rest();
+		rest.request.origin.scheme = duckdb_api::CompiledUrlScheme::HTTP;
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		Relation(Columns(), std::move(changed), {Mapping()});
 	});
 	RequireInvalid("accepted proof escaped its GitHub host", []() {
 		auto operation = Operation();
-		operation.request.origin.host = duckdb_api::CompiledRestHost("uploads.github.com");
-		Relation(Columns(), std::move(operation), {Mapping()});
+		auto rest = operation.Rest();
+		rest.request.origin.host = duckdb_api::CompiledRestHost("uploads.github.com");
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		Relation(Columns(), std::move(changed), {Mapping()});
 	});
 	RequireInvalid("accepted proof escaped its GitHub port", []() {
 		auto operation = Operation();
-		operation.request.origin.port = 8443;
-		Relation(Columns(), std::move(operation), {Mapping()});
+		auto rest = operation.Rest();
+		rest.request.origin.port = 8443;
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		Relation(Columns(), std::move(changed), {Mapping()});
 	});
 	RequireInvalid("accepted proof escaped its API version", []() {
 		auto operation = Operation();
-		operation.request.headers.back().value = "2023-01-01";
-		Relation(Columns(), std::move(operation), {Mapping()});
+		auto rest = operation.Rest();
+		rest.request.headers.back().value = "2023-01-01";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		Relation(Columns(), std::move(changed), {Mapping()});
 	});
 	RequireInvalid("accepted proof escaped its response source", []() {
 		auto operation = Operation();
-		operation.response_source = duckdb_api::CompiledResponseSource::JSON_PATH_MANY;
-		operation.records_extractor = "$.items";
-		Relation(Columns(), std::move(operation), {Mapping()});
+		auto rest = operation.Rest();
+		rest.response_source = duckdb_api::CompiledResponseSource::JSON_PATH_MANY;
+		rest.records_extractor = "$.items";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		Relation(Columns(), std::move(changed), {Mapping()});
 	});
 	RequireInvalid("accepted proof escaped its Link pagination fields", []() {
 		auto pagination = ConnectorCatalogTestAccess::SequentialLink("per_page", 100, "next_page", 1, 1, 32);

@@ -1,4 +1,5 @@
 #include "duckdb_api/connector.hpp"
+#include "duckdb_api/internal/connector/graphql_operation_declaration.hpp"
 
 #include <utility>
 #include <vector>
@@ -7,7 +8,7 @@ namespace duckdb_api {
 
 namespace {
 
-// The 0.6.0 catalog-wide response policy rises for repository pages. Keep both
+// The 0.7.0 catalog-wide response policy covers repository pages. Keep both
 // existing relations explicitly narrowed to their accepted 64 KiB effective
 // plans instead of allowing them to inherit that wider outer policy.
 constexpr std::uint64_t PREVIOUS_RELATION_MAX_RESPONSE_BYTES = 64ULL * 1024ULL;
@@ -17,7 +18,7 @@ constexpr std::uint64_t REPOSITORY_MAX_RESPONSE_BYTES_PER_SCAN = 64ULL * 1024ULL
 } // namespace
 
 CompiledConnector BuildNativeGithubConnector() {
-	const CompiledRestOrigin github_origin = {CompiledUrlScheme::HTTPS, CompiledRestHost("api.github.com"), 443};
+	const CompiledHttpOrigin github_origin = {CompiledUrlScheme::HTTPS, CompiledHttpHost("api.github.com"), 443};
 	const std::vector<CompiledColumn> columns = {{"id", "BIGINT", false, "$.id"},
 	                                             {"login", "VARCHAR", false, "$.login"},
 	                                             {"site_admin", "BOOLEAN", false, "$.site_admin"}};
@@ -27,6 +28,15 @@ CompiledConnector BuildNativeGithubConnector() {
 	                                                        {"fork", "BOOLEAN", false, "$.fork"},
 	                                                        {"archived", "BOOLEAN", false, "$.archived"},
 	                                                        {"visibility", "VARCHAR", false, "$.visibility"}};
+	const std::vector<CompiledColumn> graphql_repository_columns = {
+	    {"id", "VARCHAR", false, "$.id"},
+	    {"full_name", "VARCHAR", false, "$.nameWithOwner"},
+	    {"owner_login", "VARCHAR", false, "$.owner.login"},
+	    {"stars", "BIGINT", false, "$.stargazerCount"},
+	    {"primary_language", "VARCHAR", true, "$.primaryLanguage.name"},
+	    {"private", "BOOLEAN", false, "$.isPrivate"},
+	    {"archived", "BOOLEAN", false, "$.isArchived"},
+	    {"updated_at", "VARCHAR", false, "$.updatedAt"}};
 	const std::vector<CompiledHttpHeader> headers = {{"Accept", "application/vnd.github+json"},
 	                                                 {"User-Agent", "duckdb-api/0.6.0"},
 	                                                 {"X-GitHub-Api-Version", "2022-11-28"}};
@@ -90,9 +100,17 @@ CompiledConnector BuildNativeGithubConnector() {
 	    CompiledAuthenticationPolicy::RequiredBearer(),
 	    CompiledResourceCeilings {REPOSITORY_MAX_RESPONSE_BYTES_PER_PAGE, REPOSITORY_MAX_RESPONSE_BYTES_PER_SCAN, 100,
 	                              3200, 512}));
+	relations.push_back(CompiledRelation(
+	    "viewer_repository_metrics", graphql_repository_columns, {},
+	    CompiledOperation("github_viewer_repository_metrics", true, CompiledOperationCardinality::ZERO_TO_MANY,
+	                      internal::BuildCanonicalGithubViewerRepositoryMetricsGraphqlOperation(),
+	                      CompiledOperationSelector()),
+	    CompiledAuthenticationPolicy::RequiredBearer(),
+	    CompiledResourceCeilings {REPOSITORY_MAX_RESPONSE_BYTES_PER_PAGE, REPOSITORY_MAX_RESPONSE_BYTES_PER_SCAN, 100,
+	                              3200, 512}));
 
 	return CompiledConnector(
-	    CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "github", "0.6.0", std::move(relations),
+	    CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "github", "0.7.0", std::move(relations),
 	    CompiledNetworkPolicy {
 	        {"https"}, {"api.github.com"}, false, false, false, false, REPOSITORY_MAX_RESPONSE_BYTES_PER_PAGE});
 }

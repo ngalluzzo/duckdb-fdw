@@ -20,6 +20,8 @@ residual ownership. Runtime receives only the resulting plan.
 | --- | --- | --- |
 | Add or change an installed GitHub relation | `native_github_composition.cpp`, `duckdb_api/connector.hpp` | `connector_contract_tests.cpp` |
 | Change catalog values, relation/catalog validation, or lookup | `catalog_model.cpp`, `duckdb_api/connector_catalog.hpp` | `connector_catalog_contract_tests.cpp` |
+| Change the REST/GraphQL operation sum, HTTP authority, canonical GraphQL document, typed result mapping, cursor, or safe protocol snapshot | `protocol_operation_declaration.cpp`, `graphql_operation_declaration.cpp`, `duckdb_api/compiled_protocol_operation.hpp` | `connector_graphql_contract_tests.cpp`; existing REST contract tests |
+| Change protocol-neutral content digests | `content_digest.cpp`, `duckdb_api/content_digest.hpp` | GraphQL digest-vector and canonical-profile tests |
 | Change operation-selector normalization or declaration validation | `operation_selector.cpp` and its internal header | `connector_catalog_contract_tests.cpp`; fixture tests for controlled selection services |
 | Change safe catalog snapshot rendering | `catalog_snapshot.cpp` | catalog and fixture snapshot assertions |
 | Change a pagination declaration | `pagination_declaration.cpp` and its internal header | `connector_pagination_contract_tests.cpp` |
@@ -34,7 +36,15 @@ Production sources are inventoried in `sources.cmake`; provider targets are in
 
 The supported consumer interfaces are
 [`connector.hpp`](../include/duckdb_api/connector.hpp) and
-[`connector_catalog.hpp`](../include/duckdb_api/connector_catalog.hpp).
+[`connector_catalog.hpp`](../include/duckdb_api/connector_catalog.hpp). The
+cohesive operation-level handoff lives in
+[`compiled_protocol_operation.hpp`](../include/duckdb_api/compiled_protocol_operation.hpp):
+it owns protocol alternatives, neutral HTTP authority, REST requests, GraphQL
+document/variable/result/cursor declarations, and guarded access. Catalog
+composition includes that header and retains relation schema, authentication,
+resource, and predicate responsibilities. `content_digest.hpp` is a separate
+stateless service so Runtime may recompute bytes without linking or acquiring
+Connector metadata authority.
 Headers under `duckdb_api/internal/connector/` are implementation details.
 Tests in other packages that need non-production catalogs use the
 Connector-owned fixture service. Connector's own contract tests may use
@@ -53,8 +63,8 @@ request, package, or ABI promise.
 
 `make test` runs both focused Connector executables:
 
-- `duckdb_api_connector_tests` for catalog, schema, predicate, pagination, and
-  resource contracts;
+- `duckdb_api_connector_tests` for catalog, REST/GraphQL protocol, schema,
+  predicate, pagination, digest, and resource contracts;
 - `duckdb_api_connector_catalog_fixture_tests` for the bounded fixture API.
 
 Run `make build` before invoking a focused binary from

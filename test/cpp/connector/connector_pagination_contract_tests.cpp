@@ -39,8 +39,9 @@ static_assert(!HasResponseUrlMember<duckdb_api::CompiledPagination>::VALUE,
               "compiled pagination must not retain a response-granted URL");
 static_assert(!HasLinkValueMember<duckdb_api::CompiledPagination>::VALUE,
               "compiled pagination must not retain mutable Link response data");
-static_assert(std::is_same<decltype(duckdb_api::CompiledOperation::pagination), duckdb_api::CompiledPagination>::value,
-              "CompiledOperation must carry the closed pagination value");
+static_assert(
+    std::is_same<decltype(duckdb_api::CompiledRestOperation::pagination), duckdb_api::CompiledPagination>::value,
+    "the REST protocol alternative must carry the closed pagination value");
 static_assert(std::is_copy_constructible<duckdb_api::CompiledPagination>::value,
               "immutable pagination must support relation/catalog copies");
 static_assert(std::is_move_constructible<duckdb_api::CompiledPagination>::value,
@@ -140,27 +141,27 @@ void TestClosedValuesAndExplanation() {
 	const auto unpaginated = ConnectorCatalogTestAccess::Relation(
 	    "rows", Columns(), BuildDisabledOperation(), ConnectorCatalogTestAccess::Anonymous(),
 	    ConnectorCatalogTestAccess::UnpaginatedResources(2, 64));
-	Require(unpaginated.Operation().pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::DISABLED,
+	Require(unpaginated.Operation().Rest().pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::DISABLED,
 	        "unpaginated relation gained a pagination declaration");
 	Require(!unpaginated.ResourceCeilings().HasResponseByteNarrowing() &&
 	            unpaginated.ResourceCeilings().MaxRecordsPerPage() ==
 	                unpaginated.ResourceCeilings().MaxRecordsPerScan(),
 	        "unpaginated relation lost its one-page resource scope");
 	RequireLogicError("disabled pagination exposed Link payload",
-	                  [&unpaginated]() { (void)unpaginated.Operation().pagination.PageSizeParameter(); });
+	                  [&unpaginated]() { (void)unpaginated.Operation().Rest().pagination.PageSizeParameter(); });
 	RequireLogicError("unscoped resources exposed response-byte payload",
 	                  [&unpaginated]() { (void)unpaginated.ResourceCeilings().MaxResponseBytesPerPage(); });
 
 	const auto catalog = BuildValidPaginatedCatalog();
 	const auto &paginated = catalog.Relations()[0];
-	Require(paginated.Operation().pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::LINK_HEADER &&
-	            paginated.Operation().pagination.Dependency() == duckdb_api::CompiledPageDependency::SEQUENTIAL &&
-	            paginated.Operation().pagination.Consistency() == duckdb_api::CompiledPageConsistency::MUTABLE &&
-	            paginated.Operation().pagination.LinkRelation() == duckdb_api::CompiledLinkRelation::NEXT,
+	const auto &pagination = paginated.Operation().Rest().pagination;
+	Require(pagination.Strategy() == duckdb_api::CompiledPaginationStrategy::LINK_HEADER &&
+	            pagination.Dependency() == duckdb_api::CompiledPageDependency::SEQUENTIAL &&
+	            pagination.Consistency() == duckdb_api::CompiledPageConsistency::MUTABLE &&
+	            pagination.LinkRelation() == duckdb_api::CompiledLinkRelation::NEXT,
 	        "paginated relation lost its closed capability declaration");
-	Require(paginated.Operation().pagination.TargetScope() ==
-	                duckdb_api::CompiledContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH &&
-	            !paginated.Operation().pagination.SupportsTotal() && !paginated.Operation().pagination.SupportsResume(),
+	Require(pagination.TargetScope() == duckdb_api::CompiledContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH &&
+	            !pagination.SupportsTotal() && !pagination.SupportsResume(),
 	        "paginated relation widened continuation or consistency claims");
 	Require(paginated.ResourceCeilings().HasResponseByteNarrowing() &&
 	            paginated.ResourceCeilings().MaxResponseBytesPerPage() == 1024 &&
@@ -214,21 +215,25 @@ void TestPaginationProfileValidation() {
 		auto operation =
 		    BuildPaginatedOperation(ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", 1, 1, 4));
 		operation.cardinality = duckdb_api::CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS;
-		operation.response_source = duckdb_api::CompiledResponseSource::ROOT_OBJECT;
-		operation.records_extractor = "$";
-		ConnectorCatalogTestAccess::Relation("paginated_root", Columns(), std::move(operation),
+		auto rest = operation.Rest();
+		rest.response_source = duckdb_api::CompiledResponseSource::ROOT_OBJECT;
+		rest.records_extractor = "$";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ConnectorCatalogTestAccess::Relation("paginated_root", Columns(), std::move(changed),
 		                                     ConnectorCatalogTestAccess::RequiredBearer(),
 		                                     ConnectorCatalogTestAccess::PaginatedResources(1024, 4096, 1, 4, 64));
 	});
 	{
 		auto operation =
 		    BuildPaginatedOperation(ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", 1, 1, 4));
-		operation.response_source = duckdb_api::CompiledResponseSource::ROOT_ARRAY;
-		operation.records_extractor = "$";
+		auto rest = operation.Rest();
+		rest.response_source = duckdb_api::CompiledResponseSource::ROOT_ARRAY;
+		rest.records_extractor = "$";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
 		const auto root_array = ConnectorCatalogTestAccess::Relation(
-		    "paginated_root_array", Columns(), std::move(operation), ConnectorCatalogTestAccess::RequiredBearer(),
+		    "paginated_root_array", Columns(), std::move(changed), ConnectorCatalogTestAccess::RequiredBearer(),
 		    ConnectorCatalogTestAccess::PaginatedResources(1024, 4096, 5, 20, 64));
-		Require(root_array.Operation().response_source == duckdb_api::CompiledResponseSource::ROOT_ARRAY,
+		Require(root_array.Operation().Rest().response_source == duckdb_api::CompiledResponseSource::ROOT_ARRAY,
 		        "typed paginated root-array source was not retained");
 	}
 }

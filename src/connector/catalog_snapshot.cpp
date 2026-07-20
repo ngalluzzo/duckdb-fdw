@@ -1,6 +1,6 @@
 #include "duckdb_api/connector_catalog.hpp"
-#include "duckdb_api/internal/connector/pagination_declaration.hpp"
 #include "duckdb_api/internal/connector/predicate_declaration.hpp"
+#include "duckdb_api/internal/connector/protocol_operation_declaration.hpp"
 #include "duckdb_api/internal/connector/resource_ceiling_declaration.hpp"
 
 #include <locale>
@@ -27,42 +27,6 @@ const char *CardinalityName(CompiledOperationCardinality cardinality) {
 		return "exactly_one_on_success";
 	}
 	throw std::logic_error("compiled connector contains an unknown operation cardinality");
-}
-
-const char *ProtocolName(CompiledProtocol protocol) {
-	switch (protocol) {
-	case CompiledProtocol::REST:
-		return "REST";
-	}
-	throw std::logic_error("compiled connector contains an unknown protocol");
-}
-
-const char *MethodName(CompiledHttpMethod method) {
-	switch (method) {
-	case CompiledHttpMethod::GET:
-		return "GET";
-	}
-	throw std::logic_error("compiled connector contains an unknown HTTP method");
-}
-
-const char *ReplaySafetyName(CompiledReplaySafety replay_safety) {
-	switch (replay_safety) {
-	case CompiledReplaySafety::SAFE:
-		return "replay_safe";
-	}
-	throw std::logic_error("compiled connector contains an unknown replay-safety declaration");
-}
-
-const char *ResponseSourceName(CompiledResponseSource source) {
-	switch (source) {
-	case CompiledResponseSource::JSON_PATH_MANY:
-		return "json_path_many";
-	case CompiledResponseSource::ROOT_ARRAY:
-		return "root_array";
-	case CompiledResponseSource::ROOT_OBJECT:
-		return "root_object";
-	}
-	throw std::logic_error("compiled connector contains an unknown response source");
 }
 
 const char *RequirementName(CompiledCredentialRequirement requirement) {
@@ -105,10 +69,6 @@ const char *UrlSchemeName(CompiledUrlScheme scheme) {
 	throw std::logic_error("compiled connector contains an unknown URL scheme");
 }
 
-const char *EnabledState(bool enabled) {
-	return enabled ? "enabled" : "disabled";
-}
-
 const char *AuthorityState(bool enabled) {
 	return enabled ? "allowed" : "denied";
 }
@@ -132,25 +92,7 @@ void AppendSchema(std::ostringstream &result, const std::vector<CompiledColumn> 
 	}
 }
 
-void AppendQuery(std::ostringstream &result, const std::vector<CompiledQueryParameter> &query_parameters) {
-	for (std::size_t index = 0; index < query_parameters.size(); index++) {
-		if (index > 0) {
-			result << ',';
-		}
-		result << query_parameters[index].name << '=' << query_parameters[index].encoded_value;
-	}
-}
-
-void AppendHeaders(std::ostringstream &result, const std::vector<CompiledHttpHeader> &headers) {
-	for (std::size_t index = 0; index < headers.size(); index++) {
-		if (index > 0) {
-			result << ',';
-		}
-		result << headers[index].name << '=' << headers[index].value;
-	}
-}
-
-void AppendOrigin(std::ostringstream &result, const CompiledRestOrigin &origin) {
+void AppendOrigin(std::ostringstream &result, const CompiledHttpOrigin &origin) {
 	result << "[scheme:" << UrlSchemeName(origin.scheme) << ",host:" << origin.host.Value() << ",port:" << origin.port
 	       << ']';
 }
@@ -191,17 +133,8 @@ void AppendSelector(std::ostringstream &result, const CompiledOperationSelector 
 
 void AppendOperation(std::ostringstream &result, const CompiledOperation &operation) {
 	result << "operation=" << operation.name << ':' << (operation.fallback ? "fallback" : "selected") << ':'
-	       << CardinalityName(operation.cardinality) << ':' << ProtocolName(operation.protocol) << ':'
-	       << MethodName(operation.method) << ':' << ReplaySafetyName(operation.replay_safety) << ";request=origin:";
-	AppendOrigin(result, operation.request.origin);
-	result << ",path:" << operation.request.path << ",query:[";
-	AppendQuery(result, operation.request.query_parameters);
-	result << "],headers:[";
-	AppendHeaders(result, operation.request.headers);
-	result << "];response=source:" << ResponseSourceName(operation.response_source)
-	       << ",records:" << operation.records_extractor << ";features=retry:" << EnabledState(operation.retry_enabled)
-	       << ",pagination:";
-	internal::AppendPagination(result, operation.pagination);
+	       << CardinalityName(operation.cardinality) << ':';
+	internal::AppendProtocolOperation(result, operation);
 	if (!operation.fallback || !operation.selector.RequiredInputs().empty() ||
 	    !operation.selector.AnyInputSets().empty() || !operation.selector.ForbiddenInputs().empty() ||
 	    operation.selector.Priority() != 0) {

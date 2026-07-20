@@ -15,6 +15,7 @@ add_executable(
   duckdb_api_connector_tests
   test/cpp/connector/connector_contract_tests.cpp
   test/cpp/connector/connector_catalog_contract_tests.cpp
+  test/cpp/connector/connector_graphql_contract_tests.cpp
   test/cpp/connector/connector_pagination_contract_tests.cpp
   test/cpp/connector/connector_predicate_contract_tests.cpp
   test/cpp/connector/connector_predicate_proof_contract_tests.cpp)

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "duckdb_api/compiled_protocol_operation.hpp"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -13,27 +15,10 @@ namespace duckdb_api {
 class CompiledConnector;
 CompiledConnector BuildNativeGithubConnector();
 
-// Identifies how immutable metadata entered the product. The 0.6.0 native
+// Identifies how immutable metadata entered the product. The 0.7.0 native
 // catalog is repository-owned product metadata, not compiled package syntax,
 // package provenance, or a public connector-authoring/native ABI commitment.
 enum class CompiledConnectorOrigin { NATIVE_PRODUCT_METADATA };
-
-// Source cardinality is a declaration for Relational Semantics to interpret.
-// EXACTLY_ONE_ON_SUCCESS is neither a row estimate nor permission to push a
-// limit; authentication, transport, decode, and schema failures remain errors.
-enum class CompiledOperationCardinality { ZERO_TO_MANY, EXACTLY_ONE_ON_SUCCESS };
-
-enum class CompiledProtocol { REST };
-
-enum class CompiledHttpMethod { GET };
-
-enum class CompiledReplaySafety { SAFE };
-
-// Distinguishes a nested JSONPath collection, a root array, and a single root
-// object without asking a consumer to infer response shape from an extractor
-// string. ROOT_ARRAY uses the canonical root extractor `$`; its enum value is
-// the executable array contract.
-enum class CompiledResponseSource { JSON_PATH_MANY, ROOT_ARRAY, ROOT_OBJECT };
 
 enum class CompiledCredentialRequirement { NONE, REQUIRED };
 
@@ -43,11 +28,6 @@ enum class CompiledAuthenticator { NONE, BEARER };
 // header name. Runtime owns construction of the eventual header and value.
 enum class CompiledCredentialPlacement { NONE, AUTHORIZATION_HEADER };
 
-// A closed transport scheme carried as data rather than recovered by parsing a
-// URL. HTTP remains available to private non-installable test compositions; the
-// installed native catalog selects HTTPS exclusively.
-enum class CompiledUrlScheme { HTTP, HTTPS };
-
 // One output column. The extractor is evaluated relative to one object selected
 // by the response source. A non-nullable declaration makes missing or JSON-null
 // extraction fail; it does not claim DuckDB-visible NOT NULL metadata.
@@ -56,157 +36,6 @@ struct CompiledColumn {
 	std::string logical_type;
 	bool nullable;
 	std::string extractor;
-};
-
-// One already-encoded fixed query field. Ordering and encoded_value are part of
-// source identity, not DuckDB predicate or limit pushdown.
-struct CompiledQueryParameter {
-	std::string name;
-	std::string encoded_value;
-};
-
-// One non-sensitive fixed request header. Authorization is deliberately
-// unrepresentable here by catalog validation; credential placement lives only
-// in CompiledAuthenticationPolicy.
-struct CompiledHttpHeader {
-	std::string name;
-	std::string value;
-};
-
-// An exact lower-case DNS name or IPv4 literal. Construction rejects URL
-// syntax, user information, embedded ports, empty labels, and non-canonical
-// labels, so consumers never need to parse host authority from a string.
-class CompiledRestHost {
-public:
-	explicit CompiledRestHost(std::string value);
-
-	const std::string &Value() const;
-
-private:
-	std::string value;
-};
-
-// Typed request authority. It contains no user information, path, query, or
-// fragment, and it is also the complete destination carried by bearer policy.
-struct CompiledRestOrigin {
-	CompiledUrlScheme scheme;
-	CompiledRestHost host;
-	std::uint16_t port;
-};
-
-// Structural REST request metadata. No field can carry a credential value.
-struct CompiledRestRequest {
-	CompiledRestOrigin origin;
-	std::string path;
-	std::vector<CompiledQueryParameter> query_parameters;
-	std::vector<CompiledHttpHeader> headers;
-};
-
-// Pagination is a closed source declaration, not executable page state. A
-// disabled value has no payload. The only enabled native shape is a sequential
-// Link transition whose typed query bindings must agree with the fixed initial
-// request. Semantics consumes these facts without discovering pagination from
-// request strings; Runtime receives only the resulting immutable plan.
-enum class CompiledPaginationStrategy { DISABLED, LINK_HEADER };
-enum class CompiledPageDependency { SEQUENTIAL };
-enum class CompiledPageConsistency { MUTABLE };
-enum class CompiledLinkRelation { NEXT };
-enum class CompiledContinuationTargetScope { EXACT_OPERATION_ORIGIN_AND_PATH };
-
-class CompiledPagination {
-public:
-	CompiledPagination(const CompiledPagination &) = default;
-	CompiledPagination(CompiledPagination &&) = default;
-	CompiledPagination &operator=(const CompiledPagination &) = delete;
-	CompiledPagination &operator=(CompiledPagination &&) = delete;
-
-	CompiledPaginationStrategy Strategy() const;
-	CompiledPageDependency Dependency() const;
-	CompiledPageConsistency Consistency() const;
-	CompiledLinkRelation LinkRelation() const;
-	CompiledContinuationTargetScope TargetScope() const;
-	bool SupportsTotal() const;
-	bool SupportsResume() const;
-	const std::string &PageSizeParameter() const;
-	std::uint64_t PageSize() const;
-	const std::string &PageNumberParameter() const;
-	std::uint64_t FirstPage() const;
-	std::uint64_t PageIncrement() const;
-	std::uint64_t MaxPagesPerScan() const;
-
-private:
-	friend CompiledConnector BuildNativeGithubConnector();
-	friend class duckdb_api_test::ConnectorCatalogTestAccess;
-
-	static CompiledPagination Disabled();
-	CompiledPagination();
-	CompiledPagination(std::string page_size_parameter, std::uint64_t page_size, std::string page_number_parameter,
-	                   std::uint64_t first_page, std::uint64_t page_increment, std::uint64_t max_pages_per_scan);
-
-	void RequireLinkHeader() const;
-
-	CompiledPaginationStrategy strategy;
-	std::string page_size_parameter;
-	std::uint64_t page_size;
-	std::string page_number_parameter;
-	std::uint64_t first_page;
-	std::uint64_t page_increment;
-	std::uint64_t max_pages_per_scan;
-};
-
-// Immutable compiled operation-selection facts. Author-facing absent_inputs
-// are normalized to ForbiddenInputs(); each collection has set semantics and
-// stable canonical order. Connector validates identity and cross-set
-// consistency, while Relational Semantics alone resolves candidate bindings,
-// decides eligibility, computes specificity, applies priority, and selects or
-// rejects a winner. The public empty constructor preserves the sole installed
-// fallback profile; non-empty construction remains provider-private.
-class CompiledOperationSelector {
-public:
-	CompiledOperationSelector();
-	CompiledOperationSelector(const CompiledOperationSelector &) = default;
-	CompiledOperationSelector(CompiledOperationSelector &&) = default;
-	CompiledOperationSelector &operator=(const CompiledOperationSelector &) = delete;
-	CompiledOperationSelector &operator=(CompiledOperationSelector &&) = delete;
-
-	const std::vector<std::string> &RequiredInputs() const;
-	const std::vector<std::vector<std::string>> &AnyInputSets() const;
-	const std::vector<std::string> &ForbiddenInputs() const;
-	std::int32_t Priority() const;
-
-private:
-	friend CompiledConnector BuildNativeGithubConnector();
-	friend class duckdb_api_test::ConnectorCatalogTestAccess;
-
-	CompiledOperationSelector(std::vector<std::string> required_inputs,
-	                          std::vector<std::vector<std::string>> any_input_sets,
-	                          std::vector<std::string> forbidden_inputs, std::int32_t priority);
-
-	std::vector<std::string> required_inputs;
-	std::vector<std::vector<std::string>> any_input_sets;
-	std::vector<std::string> forbidden_inputs;
-	std::int32_t priority;
-};
-
-// One base-row operation declaration. Connector owns declared source facts;
-// Semantics owns their conservative meaning and Runtime owns enforcement of the
-// resulting plan. Selector fallback remains explicit on the operation so
-// Semantics can evaluate the single fallback only after every non-fallback is
-// ineligible. Authentication is derived from the relation policy rather than
-// duplicated as a mutable boolean here.
-struct CompiledOperation {
-	std::string name;
-	bool fallback;
-	CompiledOperationCardinality cardinality;
-	CompiledProtocol protocol;
-	CompiledHttpMethod method;
-	CompiledReplaySafety replay_safety;
-	bool retry_enabled;
-	CompiledPagination pagination;
-	CompiledRestRequest request;
-	CompiledResponseSource response_source;
-	std::string records_extractor;
-	CompiledOperationSelector selector;
 };
 
 // Closed native predicate vocabulary. This first private pre-1.0 service is
@@ -382,7 +211,7 @@ public:
 	const std::string &LogicalCredential() const;
 	CompiledAuthenticator Authenticator() const;
 	CompiledCredentialPlacement Placement() const;
-	const CompiledRestOrigin *Destination() const;
+	const CompiledHttpOrigin *Destination() const;
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
@@ -393,13 +222,13 @@ private:
 
 	CompiledAuthenticationPolicy(CompiledCredentialRequirement requirement, std::string logical_credential,
 	                             CompiledAuthenticator authenticator, CompiledCredentialPlacement placement,
-	                             std::vector<CompiledRestOrigin> destinations);
+	                             std::vector<CompiledHttpOrigin> destinations);
 
 	CompiledCredentialRequirement requirement;
 	std::string logical_credential;
 	CompiledAuthenticator authenticator;
 	CompiledCredentialPlacement placement;
-	std::vector<CompiledRestOrigin> destinations;
+	std::vector<CompiledHttpOrigin> destinations;
 };
 
 // Immutable relation-level Connector handoff. Construction belongs only to
@@ -451,7 +280,7 @@ private:
 	CompiledResourceCeilings resource_ceilings;
 };
 
-// Immutable Connector Experience service for the native 0.6.0 relation
+// Immutable Connector Experience service for the native 0.7.0 relation
 // catalog. Query and Semantics consume exact lookup and const accessors without
 // constructing policy internals. Copy construction supports immutable bind and
 // composition lifetimes; assignment and partial aggregate mutation are

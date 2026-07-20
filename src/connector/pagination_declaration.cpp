@@ -150,7 +150,11 @@ std::uint64_t CompiledPagination::MaxPagesPerScan() const {
 namespace internal {
 
 void ValidatePagination(const CompiledOperation &operation) {
-	const auto &pagination = operation.pagination;
+	if (operation.Protocol() != CompiledProtocol::REST) {
+		throw std::invalid_argument("REST pagination validator received another protocol alternative");
+	}
+	const auto &rest = operation.Rest();
+	const auto &pagination = rest.pagination;
 	if (pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
 		return;
 	}
@@ -163,8 +167,8 @@ void ValidatePagination(const CompiledOperation &operation) {
 		throw std::invalid_argument("compiled pagination contains an unsupported capability profile");
 	}
 	if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY ||
-	    (operation.response_source != CompiledResponseSource::JSON_PATH_MANY &&
-	     operation.response_source != CompiledResponseSource::ROOT_ARRAY)) {
+	    (rest.response_source != CompiledResponseSource::JSON_PATH_MANY &&
+	     rest.response_source != CompiledResponseSource::ROOT_ARRAY)) {
 		throw std::invalid_argument("compiled Link pagination requires a many-row response source");
 	}
 	if (!IsPaginationParameterName(pagination.PageSizeParameter()) ||
@@ -173,11 +177,11 @@ void ValidatePagination(const CompiledOperation &operation) {
 	    pagination.FirstPage() == 0 || pagination.PageIncrement() != 1 || pagination.MaxPagesPerScan() == 0) {
 		throw std::invalid_argument("compiled Link pagination contains invalid typed page bindings");
 	}
-	if (operation.request.query_parameters.size() != 2 ||
-	    operation.request.query_parameters[0].name != pagination.PageSizeParameter() ||
-	    operation.request.query_parameters[0].encoded_value != std::to_string(pagination.PageSize()) ||
-	    operation.request.query_parameters[1].name != pagination.PageNumberParameter() ||
-	    operation.request.query_parameters[1].encoded_value != std::to_string(pagination.FirstPage())) {
+	if (rest.request.query_parameters.size() != 2 ||
+	    rest.request.query_parameters[0].name != pagination.PageSizeParameter() ||
+	    rest.request.query_parameters[0].encoded_value != std::to_string(pagination.PageSize()) ||
+	    rest.request.query_parameters[1].name != pagination.PageNumberParameter() ||
+	    rest.request.query_parameters[1].encoded_value != std::to_string(pagination.FirstPage())) {
 		throw std::invalid_argument("compiled Link pagination disagrees with the fixed initial request");
 	}
 }

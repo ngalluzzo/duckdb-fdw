@@ -5,7 +5,7 @@
 namespace duckdb_api {
 
 class CompiledPagination;
-struct CompiledOperation;
+class CompiledOperation;
 
 namespace internal {
 

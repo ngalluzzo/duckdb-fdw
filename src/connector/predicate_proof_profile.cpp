@@ -7,25 +7,25 @@ namespace internal {
 
 namespace {
 
-bool HasCanonicalGithubOrigin(const CompiledRestOrigin &origin) {
+bool HasCanonicalGithubOrigin(const CompiledHttpOrigin &origin) {
 	return origin.scheme == CompiledUrlScheme::HTTPS && origin.host.Value() == "api.github.com" && origin.port == 443;
 }
 
 bool HasCanonicalRepositoryQuery(const CompiledOperation &operation) {
-	const auto &query = operation.request.query_parameters;
+	const auto &query = operation.Rest().request.query_parameters;
 	return query.size() == 2 && query[0].name == "per_page" && query[0].encoded_value == "100" &&
 	       query[1].name == "page" && query[1].encoded_value == "1";
 }
 
 bool HasCanonicalGithubHeaders(const CompiledOperation &operation) {
-	const auto &headers = operation.request.headers;
+	const auto &headers = operation.Rest().request.headers;
 	return headers.size() == 3 && headers[0].name == "Accept" && headers[0].value == "application/vnd.github+json" &&
 	       headers[1].name == "User-Agent" && headers[1].value == "duckdb-api/0.6.0" &&
 	       headers[2].name == "X-GitHub-Api-Version" && headers[2].value == "2022-11-28";
 }
 
 bool HasCanonicalRepositoryPagination(const CompiledOperation &operation) {
-	const auto &pagination = operation.pagination;
+	const auto &pagination = operation.Rest().pagination;
 	return pagination.Strategy() == CompiledPaginationStrategy::LINK_HEADER &&
 	       pagination.Dependency() == CompiledPageDependency::SEQUENTIAL &&
 	       pagination.Consistency() == CompiledPageConsistency::MUTABLE &&
@@ -51,13 +51,15 @@ bool HasInstalledGithubProfile(const std::string &relation_name, const CompiledO
                                const CompiledPredicateMapping &mapping) {
 	return relation_name == "authenticated_repositories" && operation.name == "github_authenticated_repositories" &&
 	       operation.fallback && operation.cardinality == CompiledOperationCardinality::ZERO_TO_MANY &&
-	       operation.protocol == CompiledProtocol::REST && operation.method == CompiledHttpMethod::GET &&
-	       operation.replay_safety == CompiledReplaySafety::SAFE && !operation.retry_enabled &&
-	       HasCanonicalGithubOrigin(operation.request.origin) && operation.request.path == "/user/repos" &&
-	       HasCanonicalRepositoryQuery(operation) && HasCanonicalGithubHeaders(operation) &&
-	       operation.response_source == CompiledResponseSource::ROOT_ARRAY && operation.records_extractor == "$" &&
-	       HasCanonicalRepositoryPagination(operation) && HasCanonicalRepositoryAuthentication(authentication) &&
-	       mapping.ColumnName() == "visibility" && mapping.Operator() == CompiledPredicateOperator::EQUALS &&
+	       operation.Protocol() == CompiledProtocol::REST && operation.Rest().method == CompiledHttpMethod::GET &&
+	       operation.Rest().replay_safety == CompiledReplaySafety::SAFE && !operation.Rest().retry_enabled &&
+	       HasCanonicalGithubOrigin(operation.Rest().request.origin) &&
+	       operation.Rest().request.path == "/user/repos" && HasCanonicalRepositoryQuery(operation) &&
+	       HasCanonicalGithubHeaders(operation) &&
+	       operation.Rest().response_source == CompiledResponseSource::ROOT_ARRAY &&
+	       operation.Rest().records_extractor == "$" && HasCanonicalRepositoryPagination(operation) &&
+	       HasCanonicalRepositoryAuthentication(authentication) && mapping.ColumnName() == "visibility" &&
+	       mapping.Operator() == CompiledPredicateOperator::EQUALS &&
 	       mapping.Literal() == CompiledPredicateLiteral::VARCHAR_PRIVATE &&
 	       mapping.OperationName() == "github_authenticated_repositories" &&
 	       mapping.InputPlacement() == CompiledPredicateInputPlacement::REST_QUERY_PARAMETER &&
@@ -69,13 +71,13 @@ bool HasInstalledGithubProfile(const std::string &relation_name, const CompiledO
 	       mapping.EncodingCapability() == CompiledPredicateEncodingCapability::SINGLE_POSITIVE_REST_QUERY_INPUT;
 }
 
-bool HasControlledExactOrigin(const CompiledRestOrigin &origin) {
+bool HasControlledExactOrigin(const CompiledHttpOrigin &origin) {
 	return origin.scheme == CompiledUrlScheme::HTTPS && origin.host.Value() == "predicate-proof.invalid" &&
 	       origin.port == 443;
 }
 
 bool HasControlledExactHeaders(const CompiledOperation &operation) {
-	const auto &headers = operation.request.headers;
+	const auto &headers = operation.Rest().request.headers;
 	return headers.size() == 1 && headers[0].name == "X-Connector-Fixture" &&
 	       headers[0].value == "exact-duplicate-repositories";
 }
@@ -102,13 +104,14 @@ bool HasControlledExactProfile(const std::string &relation_name, const CompiledO
 	    operation.name == "controlled_exact_repositories" || operation.name == "controlled_priority_exact_repositories";
 	return relation_name == "controlled_exact_repositories" && controlled_operation &&
 	       operation.cardinality == CompiledOperationCardinality::ZERO_TO_MANY &&
-	       operation.protocol == CompiledProtocol::REST && operation.method == CompiledHttpMethod::GET &&
-	       operation.replay_safety == CompiledReplaySafety::SAFE && !operation.retry_enabled &&
-	       HasControlledExactOrigin(operation.request.origin) &&
-	       operation.request.path == "/fixtures/exact-repositories" && operation.request.query_parameters.empty() &&
-	       HasControlledExactHeaders(operation) && operation.response_source == CompiledResponseSource::ROOT_ARRAY &&
-	       operation.records_extractor == "$" &&
-	       operation.pagination.Strategy() == CompiledPaginationStrategy::DISABLED &&
+	       operation.Protocol() == CompiledProtocol::REST && operation.Rest().method == CompiledHttpMethod::GET &&
+	       operation.Rest().replay_safety == CompiledReplaySafety::SAFE && !operation.Rest().retry_enabled &&
+	       HasControlledExactOrigin(operation.Rest().request.origin) &&
+	       operation.Rest().request.path == "/fixtures/exact-repositories" &&
+	       operation.Rest().request.query_parameters.empty() && HasControlledExactHeaders(operation) &&
+	       operation.Rest().response_source == CompiledResponseSource::ROOT_ARRAY &&
+	       operation.Rest().records_extractor == "$" &&
+	       operation.Rest().pagination.Strategy() == CompiledPaginationStrategy::DISABLED &&
 	       authentication.Requirement() == CompiledCredentialRequirement::NONE &&
 	       authentication.LogicalCredential().empty() &&
 	       authentication.Authenticator() == CompiledAuthenticator::NONE &&

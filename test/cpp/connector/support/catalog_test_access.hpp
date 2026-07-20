@@ -35,6 +35,23 @@ public:
 		                                             std::move(forbidden_inputs), priority);
 	}
 
+	static duckdb_api::CompiledOperation
+	GraphqlOperation(std::string name, bool fallback, duckdb_api::CompiledOperationCardinality cardinality,
+	                 duckdb_api::CompiledGraphqlOperation operation,
+	                 duckdb_api::CompiledOperationSelector selector = duckdb_api::CompiledOperationSelector()) {
+		return duckdb_api::CompiledOperation(std::move(name), fallback, cardinality, std::move(operation),
+		                                     std::move(selector));
+	}
+
+	static duckdb_api::CompiledOperation RestOperation(const duckdb_api::CompiledOperation &common,
+	                                                   duckdb_api::CompiledRestOperation rest,
+	                                                   duckdb_api::CompiledOperationSelector selector) {
+		return duckdb_api::CompiledOperation(
+		    common.name, common.fallback, common.cardinality, duckdb_api::CompiledProtocol::REST, rest.method,
+		    rest.replay_safety, rest.retry_enabled, std::move(rest.pagination), std::move(rest.request),
+		    rest.response_source, std::move(rest.records_extractor), std::move(selector));
+	}
+
 	static duckdb_api::CompiledResourceCeilings UnpaginatedResources(std::uint64_t max_records,
 	                                                                 std::uint64_t max_extracted_string_bytes) {
 		return duckdb_api::CompiledResourceCeilings(max_records, max_extracted_string_bytes);

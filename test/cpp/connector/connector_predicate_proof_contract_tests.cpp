@@ -189,8 +189,10 @@ void TestControlledProfileRejectsDomainOccurrenceAndEncodingDrift() {
 	});
 	RequireInvalid("controlled exact proof accepted another base-domain path", []() {
 		auto operation = ControlledExactOperation();
-		operation.request.path = "/fixtures/other-repositories";
-		ControlledExactRelation(std::move(operation), ControlledExactMapping());
+		auto rest = operation.Rest();
+		rest.request.path = "/fixtures/other-repositories";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ControlledExactRelation(std::move(changed), ControlledExactMapping());
 	});
 	RequireInvalid("controlled exact proof accepted a multiplicity-changing operation identity", []() {
 		auto operation = ControlledExactOperation();
@@ -214,9 +216,11 @@ void TestControlledProfileRejectsDomainOccurrenceAndEncodingDrift() {
 	});
 	RequireInvalid("controlled exact proof accepted a different response occurrence source", []() {
 		auto operation = ControlledExactOperation();
-		operation.response_source = duckdb_api::CompiledResponseSource::JSON_PATH_MANY;
-		operation.records_extractor = "$.distinct[*]";
-		ControlledExactRelation(std::move(operation), ControlledExactMapping());
+		auto rest = operation.Rest();
+		rest.response_source = duckdb_api::CompiledResponseSource::JSON_PATH_MANY;
+		rest.records_extractor = "$.distinct[*]";
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ControlledExactRelation(std::move(changed), ControlledExactMapping());
 	});
 	RequireInvalid("controlled exact proof accepted an incompatible encoded input", []() {
 		ControlledExactRelation(
@@ -239,8 +243,10 @@ void TestControlledProfileRejectsDomainOccurrenceAndEncodingDrift() {
 	});
 	RequireInvalid("controlled exact proof accepted a fixed-field encoding collision", []() {
 		auto operation = ControlledExactOperation();
-		operation.request.query_parameters.push_back({"visibility", "all"});
-		ControlledExactRelation(std::move(operation), ControlledExactMapping());
+		auto rest = operation.Rest();
+		rest.request.query_parameters.push_back({"visibility", "all"});
+		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
+		ControlledExactRelation(std::move(changed), ControlledExactMapping());
 	});
 }
 
