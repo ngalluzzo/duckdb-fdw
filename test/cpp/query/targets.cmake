@@ -15,7 +15,8 @@ configure_duckdb_api_cpp_target(duckdb_api_typed_value_adapter_tests)
 target_include_directories(duckdb_api_typed_value_adapter_tests PRIVATE test/cpp src)
 target_link_libraries(
   duckdb_api_typed_value_adapter_tests
-  PRIVATE duckdb_api_query_typed_value_adapter_service)
+  PRIVATE duckdb_api_query_typed_value_adapter_service
+          dummy_static_extension_loader)
 
 add_executable(
   duckdb_api_duckdb_secret_tests
