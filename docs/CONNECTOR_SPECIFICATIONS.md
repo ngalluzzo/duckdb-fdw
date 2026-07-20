@@ -128,11 +128,25 @@ The repository relation also publishes one closed native predicate declaration:
 required `VARCHAR visibility` equality to the required literal `private` maps
 to the existing repository operation's REST query field
 `visibility=private`, with `superset` accuracy and the reviewed GitHub REST
-2022-11-28 evidence identity. This immutable declaration is distinct from the
-operation's fixed query parameters. It contains no SQL text, DuckDB expression,
-secret, request, or pagination state. Relational Semantics—not Connector—proves
-that the mapping is usable and assigns the residual owner. Both other native
-relations expose an empty predicate-mapping collection.
+2022-11-28 proof identity. The proof profile binds the mapping to the
+authenticated-repository base occurrence bag, preservation of every matching
+occurrence and multiplicity, and an operation-scoped capability for exactly one
+positive REST query input. It explicitly grants no compound conjunction,
+union/disjunction, or complement/negation encoding.
+
+This immutable declaration is distinct from the operation's fixed query
+parameters. It contains no SQL text, DuckDB expression, secret, request, or
+pagination state. Relational Semantics—not Connector—proves implication,
+classifies composition, selects an input, and assigns the residual owner. Both
+other native relations expose an empty predicate-mapping collection. Separate
+non-installable Connector fixtures provide a distinct exact proof profile, two
+individually safe but incompatible inputs, and operation-selector cases for a
+unique priority winner, fallback after ineligibility, and an equal-ranked
+failure in the production Semantics law oracle. The compiled selector carries
+canonical required, alternative, forbidden, and priority facts; Connector
+rejects contradictory or unrepresentable selectors and multiple fallbacks
+before planning. Those fixtures add no package syntax, installed mapping, or
+network authority.
 
 This repository-owned product catalog is not an implementation of this draft
 authoring specification. In particular, the native visibility declaration is
@@ -1634,8 +1648,12 @@ Every mapping must declare one of:
 
 #### `exact`
 
-The remote operation preserves DuckDB semantics for the mapped predicate. No
-local residual predicate is required for that expression.
+The remote predicate has equivalent DuckDB `TRUE`, `FALSE`, and `NULL`
+outcomes over the declared base domain, and the remote operation preserves
+exactly the selected occurrences and multiplicities. Semantic exactness makes
+residual elimination possible only when the active adapter and plan explicitly
+transfer ownership; an advisory profile may deliberately retain the DuckDB
+expression.
 
 #### `superset`
 
@@ -1661,27 +1679,38 @@ predicates:
 ### 18.3 Composition and SQL null semantics
 
 For a DuckDB predicate `D` and a remote predicate `R`, a pushed mapping is safe
-only when `D => R`: the remote service may return extra rows but cannot discard
-a row for which DuckDB returns `TRUE`. `exact` additionally requires `R => D`.
+only when every DuckDB-`TRUE` base occurrence is remote-`TRUE` and retained with
+the same multiplicity. `exact` additionally requires equivalent `TRUE`,
+`FALSE`, and `NULL` outcomes and exact preservation of selected occurrences.
+Logical implication or equivalence alone never grants an executable request
+encoding.
 
 The planner uses the following composition rules:
 
-- `AND` may conjoin the safe remote approximations that are available. The
-  original subtree remains residual unless every branch and the composition are
-  exact.
-- `OR` may be pushed only when every branch has a safe remote approximation. An
+- `AND` may use safe remote approximations only when the selected operation
+  declares a compatible input encoding. With a single-positive-input profile,
+  one supported conjunct may be selected while unsupported children contribute
+  remote `TRUE`; multiple incompatible safe inputs produce explicit ambiguous
+  fallback rather than declaration-order selection.
+- `OR` may be pushed only when every branch has a safe remote approximation and
+  the selected operation declares an occurrence-preserving union encoding. An
   unsupported branch makes the remote approximation `TRUE`.
-- `NOT` may be pushed only around an exact child. Negating a superset mapping is
-  not safe.
+- `NOT` requires equivalent three-valued behavior (or a separately proven
+  total two-valued domain) and an explicit complement-preserving encoding.
+  Negating a superset mapping is not safe.
 - `IS NULL`, `IS NOT NULL`, `IN`, `NOT IN`, comparisons, `LIKE`, and `ILIKE`
   are exact only when null behavior, coercion, collation, escaping, and type
   conversion match DuckDB.
 - `NULL` values inside `IN` and `NOT IN` preserve DuckDB three-valued logic.
 
-If a rule cannot be proven, the whole affected subtree remains residual and its
-remote approximation is `TRUE`. Connector fixture tests compare pushed-plus-
-residual evaluation with DuckDB-only evaluation for `TRUE`, `FALSE`, and
-`NULL` outcomes.
+If a rule or encoding cannot be proven, the affected decision uses remote
+`TRUE` and the designated local owner retains the complete predicate. Ambiguous
+predicate/input selection is a normal conservative fallback; contradictory
+proof facts or equal-ranked base operations are invalid planning contracts and
+fail instead of choosing arbitrarily. Connector fixture tests validate the
+declarations; the Relational Semantics law oracle compares selected-plus-local
+evaluation with DuckDB-only evaluation for `TRUE`, `FALSE`, `NULL`, and
+duplicate occurrences.
 
 ### 18.4 Transforming predicate values
 

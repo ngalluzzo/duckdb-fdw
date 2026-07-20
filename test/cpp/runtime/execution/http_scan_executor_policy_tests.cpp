@@ -32,6 +32,7 @@ void RequirePlanDeniedBeforeTransport(const std::shared_ptr<duckdb_api_test::Con
 	bool rejected = false;
 	if (authenticated) {
 		auto token = GeneratedHttpBearerToken(suffix);
+		runtime->ExpectBearer("Bearer " + token);
 		try {
 			(void)runtime->Executor()->OpenWithAuthorization(
 			    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
@@ -48,7 +49,23 @@ void RequirePlanDeniedBeforeTransport(const std::shared_ptr<duckdb_api_test::Con
 		}
 	}
 	Require(rejected, context + " did not produce a structured policy error");
-	Require(runtime->Observation().request_count == 0, "invalid provider-owned plan reached transport");
+	const auto observation = runtime->Observation();
+	Require(observation.request_count == 0 && observation.target.empty() && observation.headers.empty(),
+	        context + " reached transport or exposed an authorization-decorated request");
+	if (authenticated) {
+		Require(runtime->ConsumeBearerExpectation(0), context + " emitted a bearer-decorated request");
+	}
+}
+
+duckdb_api::internal::HttpExecutionProfile RepositoryExecutionProfile() {
+	return {duckdb_api::PlannedUrlScheme::HTTPS,
+	        "api.github.com",
+	        443,
+	        false,
+	        false,
+	        false,
+	        duckdb_api::MAX_EXECUTION_MILLISECONDS,
+	        duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE};
 }
 
 void TestProviderOwnedPlanDenialMatrix() {
@@ -204,14 +221,22 @@ void TestProviderOwnedPlanDenialMatrix() {
 	    RepositoryPlanCounterexample::SELECTIVE_RESIDUAL_TRUE,
 	    RepositoryPlanCounterexample::SELECTIVE_RESIDUAL_OWNER_UNKNOWN,
 	    RepositoryPlanCounterexample::SELECTIVE_FILTER_OWNER_UNKNOWN,
+	    RepositoryPlanCounterexample::SELECTIVE_PROJECTION_OWNER_UNKNOWN,
 	    RepositoryPlanCounterexample::SELECTIVE_REMOTE_ORDERING_UNKNOWN,
 	    RepositoryPlanCounterexample::UNKNOWN_CONDITIONAL_INPUT,
-	    RepositoryPlanCounterexample::BASELINE_REMOTE_VISIBILITY};
+	    RepositoryPlanCounterexample::BASELINE_REMOTE_VISIBILITY,
+	    RepositoryPlanCounterexample::UNKNOWN_PREDICATE_CATEGORY,
+	    RepositoryPlanCounterexample::UNKNOWN_PREDICATE_REASON,
+	    RepositoryPlanCounterexample::EXACT_CATEGORY_SUPERSET_ACCURACY,
+	    RepositoryPlanCounterexample::SUPERSET_CATEGORY_EXACT_ACCURACY,
+	    RepositoryPlanCounterexample::AMBIGUOUS_RESIDUAL_TRUE,
+	    RepositoryPlanCounterexample::MAPPING_UNAVAILABLE_RESIDUAL_TRUE};
 	for (std::size_t index = 0; index < sizeof(repositories) / sizeof(repositories[0]); index++) {
 		const auto runtime = BuildControlledHttpRuntime();
-		RequirePlanDeniedBeforeTransport(runtime,
-		                                 BuildRepositoryPlanCounterexample("fixture_secret", repositories[index]), true,
-		                                 suffix++, "repository " + std::to_string(index));
+		const auto plan = BuildRepositoryPlanCounterexample("fixture_secret", repositories[index]);
+		Require(!duckdb_api::internal::TryAdmitRepositoryHttpPlan(plan, RepositoryExecutionProfile()),
+		        "repository counterexample produced a profile that could authorize a request");
+		RequirePlanDeniedBeforeTransport(runtime, plan, true, suffix++, "repository " + std::to_string(index));
 	}
 }
 
@@ -303,14 +328,7 @@ void TestExecutionProfileNeverWidensRecordAuthority() {
 }
 
 void TestRepositoryAdmissionProducesOneClosedRequestProfile() {
-	const duckdb_api::internal::HttpExecutionProfile execution_profile {duckdb_api::PlannedUrlScheme::HTTPS,
-	                                                                    "api.github.com",
-	                                                                    443,
-	                                                                    false,
-	                                                                    false,
-	                                                                    false,
-	                                                                    duckdb_api::MAX_EXECUTION_MILLISECONDS,
-	                                                                    100};
+	const auto execution_profile = RepositoryExecutionProfile();
 	auto base = duckdb_api::internal::TryAdmitRepositoryHttpPlan(
 	    duckdb_api_test::BuildValidAuthenticatedRepositoriesPlanFixture("fixture_secret"), execution_profile);
 	auto selective = duckdb_api::internal::TryAdmitRepositoryHttpPlan(
@@ -319,7 +337,9 @@ void TestRepositoryAdmissionProducesOneClosedRequestProfile() {
 	    duckdb_api_test::BuildVisibilityPrivateCompleteResidualPlanFixture("fixture_secret"), execution_profile);
 	auto fallback_complete = duckdb_api::internal::TryAdmitRepositoryHttpPlan(
 	    duckdb_api_test::BuildCompleteResidualFallbackPlanFixture("fixture_secret"), execution_profile);
-	Require(base && selective && selective_complete && fallback_complete && base->Columns().size() == 6 &&
+	auto ambiguous = duckdb_api::internal::TryAdmitRepositoryHttpPlan(
+	    duckdb_api_test::BuildAmbiguousPredicateFallbackPlanFixture("fixture_secret"), execution_profile);
+	Require(base && selective && selective_complete && fallback_complete && ambiguous && base->Columns().size() == 6 &&
 	            base->Columns()[5].name == "visibility" && base->Columns()[5].kind == duckdb_api::ValueKind::VARCHAR &&
 	            base->Method() == "GET" && base->Scheme() == "https" && base->Host() == "api.github.com" &&
 	            base->Port() == 443 && base->Path() == "/user/repos" && base->Headers().size() == 3 &&
@@ -331,7 +351,9 @@ void TestRepositoryAdmissionProducesOneClosedRequestProfile() {
 	                duckdb_api::internal::AdmittedRepositoryConditionalInput::VISIBILITY_PRIVATE &&
 	            selective_complete->ConditionalInput() ==
 	                duckdb_api::internal::AdmittedRepositoryConditionalInput::VISIBILITY_PRIVATE &&
-	            fallback_complete->ConditionalInput() == duckdb_api::internal::AdmittedRepositoryConditionalInput::NONE,
+	            fallback_complete->ConditionalInput() ==
+	                duckdb_api::internal::AdmittedRepositoryConditionalInput::NONE &&
+	            ambiguous->ConditionalInput() == duckdb_api::internal::AdmittedRepositoryConditionalInput::NONE,
 	        "repository admission did not produce the complete closed immutable profile");
 	Require(duckdb_api::internal::BuildAdmittedRepositoryPageRequest(*base, 2).target ==
 	                "/user/repos?per_page=100&page=2" &&
@@ -340,8 +362,10 @@ void TestRepositoryAdmissionProducesOneClosedRequestProfile() {
 	            duckdb_api::internal::BuildAdmittedRepositoryPageRequest(*selective, 2).target ==
 	                "/user/repos?per_page=100&page=2&visibility=private" &&
 	            duckdb_api::internal::BuildAdmittedRepositoryPageRequest(*selective_complete, 2).target ==
-	                "/user/repos?per_page=100&page=2&visibility=private",
-	        "admitted request builder did not distinguish absent and selected conditional input");
+	                "/user/repos?per_page=100&page=2&visibility=private" &&
+	            duckdb_api::internal::BuildAdmittedRepositoryPageRequest(*ambiguous, 2).target ==
+	                "/user/repos?per_page=100&page=2",
+	        "admitted request builder used classification instead of the typed conditional input");
 	RequireHttpExecutionError([&]() { (void)duckdb_api::internal::BuildAdmittedRepositoryPageRequest(*selective, 0); },
 	                          duckdb_api::ErrorStage::POLICY);
 }

@@ -4,40 +4,26 @@ from __future__ import annotations
 
 import pathlib
 import threading
+from collections import Counter
 
-from .service import RepositoryOracleServer, ResponseSpec, repository_response
+from .fixtures import (
+    EXPECTED_BAG,
+    multi_page_responses,
+    selective_superset_responses,
+)
+from .service import RepositoryOracleServer, repository_response
 from .support import (
     ORDERED_SQL,
     REPOSITORY_SCAN,
     REPOSITORY_SCHEMA,
+    assert_duplicate_sensitive_bag,
     assert_exact_requests,
+    assert_ordered_tie_groups,
+    assert_request_prefix,
     assert_request_paths_unordered,
     load_repository_connection,
     page_paths,
 )
-
-
-EXPECTED_BAG = [
-    (10, "synthetic/first", False, False, False, "public"),
-    (10, "synthetic/first", False, False, False, "public"),
-    (20, "synthetic/second", False, True, True, "public"),
-    (25, "synthetic/internal", True, False, False, "internal"),
-    (30, "synthetic/private-a", True, False, False, "private"),
-    (40, "synthetic/private-b", True, False, True, "private"),
-]
-
-
-def multi_page_responses() -> list[ResponseSpec]:
-    return [
-        repository_response(
-            [EXPECTED_BAG[5], EXPECTED_BAG[0]],
-            next_page=2,
-        ),
-        repository_response([], next_page=3),
-        repository_response(
-            [EXPECTED_BAG[1], EXPECTED_BAG[2], EXPECTED_BAG[3], EXPECTED_BAG[4]]
-        ),
-    ]
 
 
 def run_relational_contract(
@@ -56,6 +42,38 @@ def run_relational_contract(
         assert_exact_requests(server, page_paths([1, 2, 3]))
 
         server.configure(multi_page_responses())
+        unordered = connection.execute(
+            "SELECT id, full_name, private, fork, archived, visibility "
+            f"{REPOSITORY_SCAN}"
+        ).fetchall()
+        assert_duplicate_sensitive_bag(
+            unordered, EXPECTED_BAG, "unordered complete traversal"
+        )
+        assert_exact_requests(server, page_paths([1, 2, 3]))
+
+        expected_tie_groups = sorted(
+            [
+                (row[4], row[0], row[1], row[5])
+                for row in EXPECTED_BAG
+                if row[5] != "internal"
+            ],
+            key=lambda row: row[0],
+        )
+        server.configure(multi_page_responses())
+        tie_groups = connection.execute(
+            "SELECT archived, id, full_name, visibility "
+            f"{REPOSITORY_SCAN} "
+            "WHERE visibility <> 'internal' ORDER BY archived"
+        ).fetchall()
+        assert_ordered_tie_groups(
+            tie_groups,
+            expected_tie_groups,
+            key_index=0,
+            context="non-total archived ordering",
+        )
+        assert_exact_requests(server, page_paths([1, 2, 3]))
+
+        server.configure(multi_page_responses())
         forced_local = connection.execute(
             "SELECT id, full_name, visibility "
             f"{REPOSITORY_SCAN} "
@@ -63,9 +81,25 @@ def run_relational_contract(
         ).fetchall()
         if forced_local != [
             (30, "synthetic/private-a", "private"),
+            (30, "synthetic/private-a", "private"),
             (40, "synthetic/private-b", "private"),
         ]:
             raise AssertionError("forced-local visibility baseline drifted")
+        assert_exact_requests(server, page_paths([1, 2, 3]))
+
+        server.configure(multi_page_responses())
+        negated_fallback = connection.execute(
+            "SELECT id, full_name, visibility "
+            f"{REPOSITORY_SCAN} "
+            "WHERE NOT (visibility = 'private') ORDER BY id"
+        ).fetchall()
+        if negated_fallback != [
+            (10, "synthetic/first", "public"),
+            (10, "synthetic/first", "public"),
+            (20, "synthetic/second", "public"),
+            (25, "synthetic/internal", "internal"),
+        ]:
+            raise AssertionError("negated fallback changed DuckDB three-valued results")
         assert_exact_requests(server, page_paths([1, 2, 3]))
 
         server.configure(multi_page_responses())
@@ -79,6 +113,7 @@ def run_relational_contract(
             (10, "synthetic/first", "public"),
             (25, "synthetic/internal", "internal"),
             (30, "synthetic/private-a", "private"),
+            (30, "synthetic/private-a", "private"),
             (40, "synthetic/private-b", "private"),
         ]:
             raise AssertionError(
@@ -86,31 +121,7 @@ def run_relational_contract(
             )
         assert_exact_requests(server, page_paths([1, 2, 3]))
 
-        mapping_absent_connection = load_repository_connection(
-            extension_path, server, predicate_mapping="absent"
-        )
-        try:
-            server.configure(multi_page_responses())
-            mapping_absent = mapping_absent_connection.execute(
-                "SELECT id, full_name, visibility "
-                f"{REPOSITORY_SCAN} WHERE visibility = 'private' ORDER BY id"
-            ).fetchall()
-            if mapping_absent != forced_local:
-                raise AssertionError(
-                    "mapping-absent composition changed the approved SQL result"
-                )
-            assert_exact_requests(server, page_paths([1, 2, 3]))
-        finally:
-            mapping_absent_connection.close()
-
-        server.configure(
-            [
-                repository_response(
-                    [EXPECTED_BAG[5]], next_page=2, selective=True
-                ),
-                repository_response([EXPECTED_BAG[4]], selective=True),
-            ]
-        )
+        server.configure(selective_superset_responses())
         selective = connection.execute(
             "SELECT id, full_name, visibility "
             f"{REPOSITORY_SCAN} WHERE visibility = 'private' ORDER BY id"
@@ -121,39 +132,54 @@ def run_relational_contract(
             )
         assert_exact_requests(server, page_paths([1, 2], selective=True))
 
-        server.configure(
-            [
-                repository_response(
-                    [EXPECTED_BAG[5]], next_page=2, selective=True
-                ),
-                repository_response([EXPECTED_BAG[4]], selective=True),
-            ]
-        )
+        server.configure(selective_superset_responses())
         compound_selective = connection.execute(
             "SELECT id, full_name, visibility "
             f"{REPOSITORY_SCAN} "
             "WHERE visibility = 'private' AND NOT archived ORDER BY id"
         ).fetchall()
-        if compound_selective != [(30, "synthetic/private-a", "private")]:
+        if compound_selective != [
+            (30, "synthetic/private-a", "private"),
+            (30, "synthetic/private-a", "private"),
+        ]:
             raise AssertionError(
                 "compound selective repository query lost its complete DuckDB residual"
             )
         assert_exact_requests(server, page_paths([1, 2], selective=True))
+
+        server.configure(multi_page_responses())
+        local_unordered_bound = connection.execute(
+            "SELECT id, full_name "
+            f"{REPOSITORY_SCAN} WHERE NOT archived LIMIT 2 OFFSET 1"
+        ).fetchall()
+        if len(local_unordered_bound) != 2:
+            raise AssertionError("local unordered bound changed output cardinality")
+        eligible = [
+            (row[0], row[1]) for row in EXPECTED_BAG if not row[4]
+        ]
+        # SQL makes no row-identity promise without a total order. Every
+        # returned occurrence must nevertheless come from DuckDB's local
+        # filtered domain and preserve that domain's multiplicity.
+        observed_counts = Counter(local_unordered_bound)
+        eligible_counts = Counter(eligible)
+        if any(
+            count > eligible_counts[row]
+            for row, count in observed_counts.items()
+        ):
+            raise AssertionError("local unordered bound escaped its filtered bag")
+        assert_request_prefix(server, page_paths([1, 2, 3]))
 
         connection.execute(
             "PREPARE visibility_parameter AS "
             "SELECT id, visibility "
             f"{REPOSITORY_SCAN} WHERE visibility = $1 ORDER BY id"
         )
-        private_responses = [
-            repository_response([EXPECTED_BAG[5]], next_page=2, selective=True),
-            repository_response([EXPECTED_BAG[4]], selective=True),
-        ]
+        private_responses = selective_superset_responses()
         server.configure(private_responses)
         first_private = connection.execute(
             "EXECUTE visibility_parameter('private')"
         ).fetchall()
-        if first_private != [(30, "private"), (40, "private")]:
+        if first_private != [(30, "private"), (30, "private"), (40, "private")]:
             raise AssertionError("prepared private execution returned the wrong rows")
         assert_exact_requests(server, page_paths([1, 2], selective=True))
 
@@ -198,12 +224,8 @@ def run_relational_contract(
                     public_paths[0]: multi_page_responses()[0],
                     public_paths[1]: multi_page_responses()[1],
                     public_paths[2]: multi_page_responses()[2],
-                    private_paths[0]: repository_response(
-                        [EXPECTED_BAG[5]], next_page=2, selective=True
-                    ),
-                    private_paths[1]: repository_response(
-                        [EXPECTED_BAG[4]], selective=True
-                    ),
+                    private_paths[0]: selective_superset_responses()[0],
+                    private_paths[1]: selective_superset_responses()[1],
                 },
                 synchronized_paths=(public_paths[0], private_paths[0]),
             )
@@ -238,7 +260,11 @@ def run_relational_contract(
                 raise AssertionError(
                     f"concurrent prepared executions did not complete safely: {errors!r}"
                 )
-            if results.get("private") != [(30, "private"), (40, "private")]:
+            if results.get("private") != [
+                (30, "private"),
+                (30, "private"),
+                (40, "private"),
+            ]:
                 raise AssertionError("concurrent private execution inherited fallback state")
             if results.get("public") != [
                 (10, "public"),

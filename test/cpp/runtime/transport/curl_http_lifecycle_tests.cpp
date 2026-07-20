@@ -68,6 +68,39 @@ void TestPlanDeadlineBoundsBlockedCurlTransfer() {
 	        "real curl deadline was not bounded by the production plan");
 }
 
+void TestStructuredRepositoryOpenAndCloseRemainSideEffectFree() {
+	ControlledSocketService service(ControlledSocketMode::PAGINATED_REPOSITORIES);
+	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(service.Port());
+	ManualControl control;
+	duckdb_api::TypedBatch batch;
+
+	auto superset_token = duckdb_api_test::RuntimeCurlBearerToken(72);
+	auto superset = runtime->Executor()->OpenWithAuthorization(
+	    duckdb_api_test::BuildVisibilityPrivateRuntimePlan(),
+	    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(superset_token)), control);
+	Require(service.ConnectionCount() == 0 && runtime->Observation().request_count == 0,
+	        "Superset repository Open materialized authorization or started curl I/O");
+	superset->Close();
+	superset->Close();
+	superset->Cancel();
+	Require(!superset->Next(control, batch) && service.ConnectionCount() == 0 &&
+	            runtime->Observation().request_count == 0,
+	        "closed Superset repository stream resumed or acquired request authority");
+
+	auto ambiguous_token = duckdb_api_test::RuntimeCurlBearerToken(73);
+	auto ambiguous = runtime->Executor()->OpenWithAuthorization(
+	    duckdb_api_test::BuildAmbiguousPredicateFallbackRuntimePlan(),
+	    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(ambiguous_token)), control);
+	Require(service.ConnectionCount() == 0 && runtime->Observation().request_count == 0,
+	        "Ambiguous fallback Open materialized authorization or started curl I/O");
+	ambiguous->Cancel();
+	ambiguous->Close();
+	ambiguous->Close();
+	Require(!ambiguous->Next(control, batch) && service.ConnectionCount() == 0 &&
+	            runtime->Observation().request_count == 0,
+	        "closed Ambiguous fallback stream resumed or acquired request authority");
+}
+
 void TestConcurrentCloseAndRecovery() {
 	ControlledSocketService blocked(ControlledSocketMode::BLOCK_THEN_AUTHENTICATED_SUCCESS);
 	const auto runtime = duckdb_api_test::BuildLoopbackCurlRuntime(blocked.Port());
@@ -118,6 +151,7 @@ int main() {
 	try {
 		TestCheckedProcessInitializationAndIdentity();
 		TestPlanDeadlineBoundsBlockedCurlTransfer();
+		TestStructuredRepositoryOpenAndCloseRemainSideEffectFree();
 		TestConcurrentCloseAndRecovery();
 		std::cout << "curl HTTP lifecycle tests passed" << std::endl;
 		return EXIT_SUCCESS;

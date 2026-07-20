@@ -7,6 +7,7 @@
 #include "semantics/support/scan_plan_test_fixtures.hpp"
 
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,15 @@ std::string SnapshotWithoutReason(const duckdb_api::ScanPlan &plan) {
 	return snapshot.substr(0, reason);
 }
 
+std::size_t FindColumn(const duckdb_api::CompiledRelation &relation, const std::string &name) {
+	for (std::size_t index = 0; index < relation.Columns().size(); index++) {
+		if (relation.Columns()[index].name == name) {
+			return index;
+		}
+	}
+	throw std::logic_error("fixture relation is missing required column: " + name);
+}
+
 } // namespace
 
 void TestValidFactoriesUsePublicPlanningPath() {
@@ -45,7 +55,10 @@ void TestValidFactoriesUsePublicPlanningPath() {
 	const auto expected_authenticated = duckdb_api::BuildConservativeScanPlan(
 	    connector, BuildAuthenticatedScanRequest(connector, authenticated.Name(), "fixture_secret_name"));
 	auto selective_request = BuildAuthenticatedScanRequest(connector, repositories.Name(), "fixture_secret_name");
-	selective_request.requested_predicate = duckdb_api::RequestedPredicate::VisibilityEqualsPrivate();
+	selective_request.requested_predicate = duckdb_api::RequestedPredicate::Comparison(
+	    FindColumn(repositories, "visibility"), duckdb_api::RequestedPredicateValueKind::VARCHAR,
+	    duckdb_api::RequestedPredicateComparisonOperator::EQUALS,
+	    duckdb_api::RequestedPredicateValue::Varchar("private"));
 	selective_request.retained_predicate_scope = duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE;
 	selective_request.capabilities.selective_predicate = true;
 	selective_request.capabilities.retains_predicate = true;

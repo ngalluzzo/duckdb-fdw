@@ -56,6 +56,20 @@ static_assert(!HasTokenValueMember<duckdb_api::CompiledAuthenticationPolicy>::VA
               "credential policy must not expose token bytes");
 static_assert(!HasSecretHandleMember<duckdb_api::CompiledAuthenticationPolicy>::VALUE,
               "credential policy must not expose a provider handle");
+static_assert(std::is_default_constructible<duckdb_api::CompiledOperationSelector>::value,
+              "installed fallback operations require the closed empty selector");
+static_assert(std::is_copy_constructible<duckdb_api::CompiledOperationSelector>::value,
+              "immutable selectors must support catalog copies");
+static_assert(std::is_move_constructible<duckdb_api::CompiledOperationSelector>::value,
+              "immutable selectors must support catalog ownership transfer");
+static_assert(!std::is_copy_assignable<duckdb_api::CompiledOperationSelector>::value,
+              "selector assignment would permit post-construction replacement");
+static_assert(!std::is_move_assignable<duckdb_api::CompiledOperationSelector>::value,
+              "selector assignment would permit post-construction replacement");
+static_assert(
+    !std::is_constructible<duckdb_api::CompiledOperationSelector, std::vector<std::string>,
+                           std::vector<std::vector<std::string>>, std::vector<std::string>, std::int32_t>::value,
+    "production consumers must not construct arbitrary operation selectors");
 static_assert(std::is_same<decltype(duckdb_api::CompiledRestOrigin::scheme), duckdb_api::CompiledUrlScheme>::value,
               "CompiledRestOrigin scheme must remain typed");
 static_assert(std::is_same<decltype(duckdb_api::CompiledRestOrigin::host), duckdb_api::CompiledRestHost>::value,
@@ -91,6 +105,11 @@ static_assert(
                            std::vector<duckdb_api::CompiledPredicateMapping>, duckdb_api::CompiledOperation,
                            duckdb_api::CompiledAuthenticationPolicy, duckdb_api::CompiledResourceCeilings>::value,
     "production callers must not construct arbitrary relation authority");
+static_assert(!std::is_constructible<
+                  duckdb_api::CompiledRelation, std::string, std::vector<duckdb_api::CompiledColumn>,
+                  std::vector<duckdb_api::CompiledPredicateMapping>, std::vector<duckdb_api::CompiledOperation>,
+                  duckdb_api::CompiledAuthenticationPolicy, duckdb_api::CompiledResourceCeilings>::value,
+              "production callers must not construct arbitrary multi-operation relation authority");
 
 template <typename Callable>
 void RequireInvalid(const std::string &message, Callable callback) {
@@ -101,6 +120,22 @@ void RequireInvalid(const std::string &message, Callable callback) {
 		rejected = true;
 	}
 	Require(rejected, message);
+}
+
+duckdb_api::CompiledOperation WithSelector(duckdb_api::CompiledOperation operation, bool fallback,
+                                           duckdb_api::CompiledOperationSelector selector) {
+	return duckdb_api::CompiledOperation {std::move(operation.name),
+	                                      fallback,
+	                                      operation.cardinality,
+	                                      operation.protocol,
+	                                      operation.method,
+	                                      operation.replay_safety,
+	                                      operation.retry_enabled,
+	                                      std::move(operation.pagination),
+	                                      std::move(operation.request),
+	                                      operation.response_source,
+	                                      std::move(operation.records_extractor),
+	                                      std::move(selector)};
 }
 
 duckdb_api::CompiledConnector BuildValidCatalogFixture() {
@@ -122,7 +157,8 @@ duckdb_api::CompiledConnector BuildValidCatalogFixture() {
 	                                   ConnectorCatalogTestAccess::DisabledPagination(),
 	                                   {origin, "/rows", {}, headers},
 	                                   duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
-	                                   "$.items[*]"},
+	                                   "$.items[*]",
+	                                   duckdb_api::CompiledOperationSelector()},
 	    ConnectorCatalogTestAccess::Anonymous(), ConnectorCatalogTestAccess::UnpaginatedResources(2, 64)));
 	relations.push_back(ConnectorCatalogTestAccess::Relation(
 	    "current_row", columns,
@@ -136,7 +172,8 @@ duckdb_api::CompiledConnector BuildValidCatalogFixture() {
 	                                   ConnectorCatalogTestAccess::DisabledPagination(),
 	                                   {origin, "/row", {}, headers},
 	                                   duckdb_api::CompiledResponseSource::ROOT_OBJECT,
-	                                   "$"},
+	                                   "$",
+	                                   duckdb_api::CompiledOperationSelector()},
 	    ConnectorCatalogTestAccess::RequiredBearer(), ConnectorCatalogTestAccess::UnpaginatedResources(1, 64)));
 	return ConnectorCatalogTestAccess::Catalog(
 	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "fixture", "1.0.0", std::move(relations),
@@ -152,6 +189,13 @@ void TestSafeImmutableService() {
 	        "exact lookup did not return the owned authenticated relation");
 	Require(catalog.FindRelation("Current_Row") == nullptr, "exact lookup folded identifier case");
 	Require(catalog.FindRelation("missing") == nullptr, "exact lookup fabricated a relation");
+	Require(catalog.Relations()[0].HasSingleOperation() && catalog.Relations()[0].Operations().size() == 1 &&
+	            &catalog.Relations()[0].Operation() == &catalog.Relations()[0].Operations()[0],
+	        "single-operation compatibility access diverged from the immutable operation collection");
+	const auto &selector = catalog.Relations()[0].Operation().selector;
+	Require(selector.RequiredInputs().empty() && selector.AnyInputSets().empty() &&
+	            selector.ForbiddenInputs().empty() && selector.Priority() == 0,
+	        "installed-compatible operation did not receive the closed empty selector");
 
 	const auto copy = catalog;
 	Require(copy.Snapshot() == catalog.Snapshot(), "copy construction changed immutable catalog metadata");
@@ -166,6 +210,44 @@ void TestSafeImmutableService() {
 	        "safe snapshot rendered credential placement as a fixed header");
 	Require(catalog.Snapshot().find("secret_name=") == std::string::npos,
 	        "safe snapshot rendered a secret-binding identifier");
+}
+
+void TestOperationSelectorValidation() {
+	const auto selector =
+	    ConnectorCatalogTestAccess::OperationSelector({"zeta", "alpha"}, {{"gamma"}, {"beta", "alpha"}}, {"omega"}, 17);
+	Require(selector.RequiredInputs() == std::vector<std::string>({"alpha", "zeta"}) &&
+	            selector.AnyInputSets() == std::vector<std::vector<std::string>>({{"alpha", "beta"}, {"gamma"}}) &&
+	            selector.ForbiddenInputs() == std::vector<std::string>({"omega"}) && selector.Priority() == 17,
+	        "compiled selector did not canonicalize its immutable set facts");
+	const auto negative_priority = ConnectorCatalogTestAccess::OperationSelector({}, {}, {}, -3);
+	Require(negative_priority.Priority() == -3, "compiled selector rejected a valid signed priority");
+
+	RequireInvalid("selector accepted an invalid required-input identifier",
+	               []() { (void)ConnectorCatalogTestAccess::OperationSelector({"Bad-Input"}, {}, {}); });
+	RequireInvalid("selector accepted duplicate required inputs",
+	               []() { (void)ConnectorCatalogTestAccess::OperationSelector({"visibility", "visibility"}, {}, {}); });
+	RequireInvalid("selector accepted an empty any-input alternative",
+	               []() { (void)ConnectorCatalogTestAccess::OperationSelector({}, {{}}, {}); });
+	RequireInvalid("selector accepted duplicate input within an alternative", []() {
+		(void)ConnectorCatalogTestAccess::OperationSelector({}, {{"visibility", "visibility"}}, {});
+	});
+	RequireInvalid("selector accepted duplicate canonical alternatives", []() {
+		(void)ConnectorCatalogTestAccess::OperationSelector(
+		    {}, {{"repository_visibility", "visibility"}, {"visibility", "repository_visibility"}}, {});
+	});
+	RequireInvalid("selector both required and forbade an input",
+	               []() { (void)ConnectorCatalogTestAccess::OperationSelector({"visibility"}, {}, {"visibility"}); });
+	RequireInvalid("selector alternative contained a forbidden input",
+	               []() { (void)ConnectorCatalogTestAccess::OperationSelector({}, {{"visibility"}}, {"visibility"}); });
+
+	const auto catalog = BuildValidCatalogFixture();
+	const auto &anonymous = catalog.Relations()[0];
+	RequireInvalid("relation accepted a selector input absent from operation-scoped declarations", [&anonymous]() {
+		auto operation = WithSelector(anonymous.Operation(), false,
+		                              ConnectorCatalogTestAccess::OperationSelector({"phantom_input"}, {}, {}));
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operation),
+		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
+	});
 }
 
 void TestClosedValidation() {
@@ -291,6 +373,30 @@ void TestClosedValidation() {
 		ConnectorCatalogTestAccess::Catalog(catalog.Origin(), catalog.ConnectorName(), catalog.Version(),
 		                                    catalog.Relations(), std::move(policy));
 	});
+	RequireInvalid("relation accepted an empty operation collection", [&anonymous]() {
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(),
+		                                     std::vector<duckdb_api::CompiledOperation> {}, anonymous.Authentication(),
+		                                     anonymous.ResourceCeilings());
+	});
+	RequireInvalid("relation accepted duplicate operation identifiers", [&anonymous]() {
+		std::vector<duckdb_api::CompiledOperation> operations = {anonymous.Operation(), anonymous.Operation()};
+		operations[1].request.path = "/other-rows";
+		ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(), std::move(operations),
+		                                     anonymous.Authentication(), anonymous.ResourceCeilings());
+	});
+	RequireInvalid("catalog ignored a later operation destination outside network policy", [&catalog, &anonymous]() {
+		auto second = anonymous.Operation();
+		second.name = "fixture_other_rows";
+		second.fallback = false;
+		second.request.origin.host = duckdb_api::CompiledRestHost("other.example");
+		std::vector<duckdb_api::CompiledOperation> operations = {anonymous.Operation(), std::move(second)};
+		std::vector<duckdb_api::CompiledRelation> relations;
+		relations.push_back(ConnectorCatalogTestAccess::Relation(anonymous.Name(), anonymous.Columns(),
+		                                                         std::move(operations), anonymous.Authentication(),
+		                                                         anonymous.ResourceCeilings()));
+		ConnectorCatalogTestAccess::Catalog(catalog.Origin(), catalog.ConnectorName(), catalog.Version(),
+		                                    std::move(relations), catalog.NetworkPolicy());
+	});
 }
 
 } // namespace
@@ -299,6 +405,7 @@ namespace duckdb_api_test {
 
 void RunConnectorCatalogContractTests() {
 	TestSafeImmutableService();
+	TestOperationSelectorValidation();
 	TestClosedValidation();
 }
 

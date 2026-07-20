@@ -5,8 +5,17 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <utility>
 
 namespace duckdb_api {
+
+PlanningError::PlanningError(PlanningErrorCode code_p, std::string safe_message)
+    : std::logic_error(std::move(safe_message)), code(code_p) {
+}
+
+PlanningErrorCode PlanningError::Code() const noexcept {
+	return code;
+}
 
 class ScanPlanBuilder {
 public:
@@ -16,17 +25,18 @@ public:
 ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRequest &request) {
 	using namespace scan_planner_internal;
 
-	const auto &relation = ValidateAndSelectRelation(connector, request);
-	const auto predicate_decision = predicate_classifier::Classify(relation, request);
+	const auto selected = ValidateAndSelectOperation(connector, request);
+	const auto &relation = *selected.relation;
+	const auto &operation = *selected.operation;
+	const auto predicate_decision = predicate_classifier::Classify(relation, operation, request);
 
 	ScanPlan result;
 	result.connector_name = connector.ConnectorName();
 	result.connector_version = connector.Version();
 	result.relation_name = relation.Name();
 	result.source_snapshot = relation.Snapshot();
-	result.domain = PlanBaseDomain(relation.Operation().response_source, relation.Operation().pagination.Strategy());
+	result.domain = PlanBaseDomain(operation.response_source, operation.pagination.Strategy());
 
-	const auto &operation = relation.Operation();
 	result.operation.operation_name = operation.name;
 	result.operation.protocol = PlanProtocol(operation.protocol);
 	result.operation.method = PlanMethod(operation.method);
@@ -52,8 +62,10 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	result.residual_predicate = predicate_decision.residual_predicate;
 	result.residual_owner = predicate_decision.residual_owner;
 	result.conditional_input = predicate_decision.conditional_input;
+	result.predicate_category = predicate_decision.category;
+	result.predicate_reason = predicate_decision.reason_code;
 	result.ownership = {RelationalOwner::DUCKDB, RelationalOwner::DUCKDB, RelationalOwner::DUCKDB,
-	                    RelationalOwner::DUCKDB};
+	                    RelationalOwner::DUCKDB, RelationalOwner::DUCKDB};
 	result.remote_ordering = RelationalDelegation::NONE;
 	result.runtime_ordering = RelationalDelegation::NONE;
 	result.remote_limit = RelationalDelegation::NONE;
@@ -182,6 +194,11 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    predicate_decision.reason +
 		    "; successful root object defines exactly one base row; source cardinality is not a limit; DuckDB retains "
 		    "all relational operators";
+	} else if (result.domain == BaseDomain::ROOT_ARRAY_RECORDS) {
+		result.classification_reason =
+		    predicate_decision.reason +
+		    "; selected complete root-array occurrences define one duplicate-preserving base-domain bag; DuckDB "
+		    "retains all relational operators";
 	} else {
 		result.classification_reason =
 		    predicate_decision.reason +
@@ -191,7 +208,13 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 }
 
 ScanPlan BuildConservativeScanPlan(const CompiledConnector &connector, const ScanRequest &request) {
-	return ScanPlanBuilder::Build(connector, request);
+	try {
+		return ScanPlanBuilder::Build(connector, request);
+	} catch (const PlanningError &) {
+		throw;
+	} catch (const std::logic_error &error) {
+		throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, error.what());
+	}
 }
 
 } // namespace duckdb_api

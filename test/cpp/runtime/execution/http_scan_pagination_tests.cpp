@@ -14,7 +14,9 @@
 
 namespace {
 
+using duckdb_api_test::BuildAmbiguousPredicateFallbackPlanFixture;
 using duckdb_api_test::BuildValidAuthenticatedRepositoriesPlanFixture;
+using duckdb_api_test::BuildVisibilityPrivateCompleteResidualPlanFixture;
 using duckdb_api_test::BuildVisibilityPrivatePlanFixture;
 using duckdb_api_test::ControlledHttpResponse;
 using duckdb_api_test::ControlledResponse;
@@ -59,21 +61,41 @@ std::string SelectiveNextLink(uint64_t page, const std::string &visibility = "pr
 
 std::unique_ptr<duckdb_api::BatchStream> Open(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
                                               ManualHttpExecutionControl &control, uint64_t token_suffix) {
+	const auto plan = BuildValidAuthenticatedRepositoriesPlanFixture("github_default");
 	auto token = GeneratedHttpBearerToken(token_suffix);
 	runtime->ExpectBearer("Bearer " + token);
-	return runtime->Executor()->OpenWithAuthorization(BuildValidAuthenticatedRepositoriesPlanFixture("github_default"),
-	                                                  duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)),
-	                                                  control);
+	return runtime->Executor()->OpenWithAuthorization(
+	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
 }
 
 std::unique_ptr<duckdb_api::BatchStream>
 OpenSelective(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
               ManualHttpExecutionControl &control, uint64_t token_suffix) {
+	const auto plan = BuildVisibilityPrivatePlanFixture("github_default");
 	auto token = GeneratedHttpBearerToken(token_suffix);
 	runtime->ExpectBearer("Bearer " + token);
-	return runtime->Executor()->OpenWithAuthorization(BuildVisibilityPrivatePlanFixture("github_default"),
-	                                                  duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)),
-	                                                  control);
+	return runtime->Executor()->OpenWithAuthorization(
+	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+}
+
+std::unique_ptr<duckdb_api::BatchStream>
+OpenSelectiveComplete(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
+                      ManualHttpExecutionControl &control, uint64_t token_suffix) {
+	const auto plan = BuildVisibilityPrivateCompleteResidualPlanFixture("github_default");
+	auto token = GeneratedHttpBearerToken(token_suffix);
+	runtime->ExpectBearer("Bearer " + token);
+	return runtime->Executor()->OpenWithAuthorization(
+	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+}
+
+std::unique_ptr<duckdb_api::BatchStream>
+OpenAmbiguous(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
+              ManualHttpExecutionControl &control, uint64_t token_suffix) {
+	const auto plan = BuildAmbiguousPredicateFallbackPlanFixture("github_default");
+	auto token = GeneratedHttpBearerToken(token_suffix);
+	runtime->ExpectBearer("Bearer " + token);
+	return runtime->Executor()->OpenWithAuthorization(
+	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
 }
 
 void RequireFailure(const std::function<void()> &action, duckdb_api::ErrorStage stage, const std::string &field,
@@ -197,6 +219,54 @@ void TestSelectiveInputPersistsAcrossRequestsAndLinks() {
 	Require(runtime->ConsumeBearerExpectation(2), "selective pages did not retain one authorization capability");
 }
 
+void TestStructuredClassificationsUseOnlyTypedRequestAuthority() {
+	ManualHttpExecutionControl control;
+	duckdb_api::TypedBatch batch;
+
+	const auto superset_runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	superset_runtime->Respond(200, PrivateRepository(1, "superset"));
+	auto superset = OpenSelective(superset_runtime, control, 727);
+	Require(superset_runtime->Observations().empty(), "Superset plan Open performed transport I/O");
+	Require(superset->Next(control, batch) && !superset->Next(control, batch) &&
+	            superset_runtime->ConsumeBearerExpectation(1),
+	        "Superset plan did not execute through the selected typed request profile");
+	const auto superset_observation = superset_runtime->Observation();
+	Require(superset_observation.target == "/user/repos?per_page=100&page=1&visibility=private",
+	        "Superset classification changed or omitted the selected typed request");
+
+	const auto superset_complete_runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	superset_complete_runtime->Respond(200, PrivateRepository(2, "superset-complete"));
+	auto superset_complete = OpenSelectiveComplete(superset_complete_runtime, control, 729);
+	Require(superset_complete_runtime->Observations().empty(),
+	        "Superset complete-residual plan Open performed transport I/O");
+	Require(superset_complete->Next(control, batch) && !superset_complete->Next(control, batch) &&
+	            superset_complete_runtime->ConsumeBearerExpectation(1),
+	        "Superset complete-residual plan did not execute through the selected typed request profile");
+	const auto superset_complete_observation = superset_complete_runtime->Observation();
+	Require(superset_complete_observation.target == superset_observation.target &&
+	            superset_complete_observation.max_header_bytes == superset_observation.max_header_bytes &&
+	            superset_complete_observation.max_response_bytes == superset_observation.max_response_bytes &&
+	            superset_complete_observation.max_decompressed_bytes == superset_observation.max_decompressed_bytes &&
+	            superset_complete_observation.max_metadata_bytes == superset_observation.max_metadata_bytes,
+	        "the complete DuckDB residual changed Superset request or resource authority");
+
+	const auto ambiguous_runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	ambiguous_runtime->Respond(200, Repository(2, "ambiguous"));
+	auto ambiguous = OpenAmbiguous(ambiguous_runtime, control, 728);
+	Require(ambiguous_runtime->Observations().empty(), "ambiguous fallback Open performed transport I/O");
+	Require(ambiguous->Next(control, batch) && !ambiguous->Next(control, batch) &&
+	            ambiguous_runtime->ConsumeBearerExpectation(1),
+	        "ambiguous fallback did not execute through the unrestricted typed profile");
+	const auto ambiguous_observation = ambiguous_runtime->Observation();
+	Require(ambiguous_observation.target == "/user/repos?per_page=100&page=1",
+	        "Ambiguous classification acquired conditional request authority");
+	Require(superset_observation.max_header_bytes == ambiguous_observation.max_header_bytes &&
+	            superset_observation.max_response_bytes == ambiguous_observation.max_response_bytes &&
+	            superset_observation.max_decompressed_bytes == ambiguous_observation.max_decompressed_bytes &&
+	            superset_observation.max_metadata_bytes == ambiguous_observation.max_metadata_bytes,
+	        "classification changed page resource authority");
+}
+
 void RequireSelectiveLinkDenied(const std::string &link, uint64_t token_suffix) {
 	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
 	runtime->RespondSequence({ControlledResponse(200, PrivateRepository(1, "private"), {link})});
@@ -285,9 +355,9 @@ void TestCancellationCloseAndAggregatePageCeiling() {
 	ManualHttpExecutionControl control;
 	duckdb_api::TypedBatch batch;
 	const auto close_runtime = duckdb_api_test::BuildControlledHttpRuntime();
-	close_runtime->RespondSequence({ControlledResponse(200, Repository(1, "first"), {NextLink(2)}),
+	close_runtime->RespondSequence({ControlledResponse(200, PrivateRepository(1, "first"), {SelectiveNextLink(2)}),
 	                                ControlledResponse(200, Repository(2, "unrequested"))});
-	auto closed = Open(close_runtime, control, 706);
+	auto closed = OpenSelectiveComplete(close_runtime, control, 706);
 	Require(closed->Next(control, batch), "early-close fixture did not deliver its first page");
 	closed->Close();
 	closed->Close();
@@ -298,7 +368,7 @@ void TestCancellationCloseAndAggregatePageCeiling() {
 	const auto cancel_runtime = duckdb_api_test::BuildControlledHttpRuntime();
 	cancel_runtime->RespondSequence({ControlledResponse(200, Repository(1, "first"), {NextLink(2)}),
 	                                 ControlledResponse(200, Repository(2, "unrequested"))});
-	auto cancelled = Open(cancel_runtime, control, 707);
+	auto cancelled = OpenAmbiguous(cancel_runtime, control, 707);
 	Require(cancelled->Next(control, batch), "cancellation fixture did not deliver its first page");
 	cancelled->Cancel();
 	bool saw_cancel = false;
@@ -317,7 +387,7 @@ void TestCancellationCloseAndAggregatePageCeiling() {
 	}
 	const auto budget_runtime = duckdb_api_test::BuildControlledHttpRuntime();
 	budget_runtime->RespondSequence(std::move(pages));
-	auto bounded = Open(budget_runtime, control, 708);
+	auto bounded = OpenAmbiguous(budget_runtime, control, 708);
 	RequireFailure([&]() { (void)bounded->Next(control, batch); }, duckdb_api::ErrorStage::RESOURCE, "pages");
 	Require(budget_runtime->Observations().size() == 32 && budget_runtime->ConsumeBearerExpectation(32),
 	        "advertised-next-at-ceiling silently exhausted, retried, or exceeded 32 requests");
@@ -331,6 +401,7 @@ int main() {
 		TestFullPageDrainsBeforeNextRequest();
 		TestTerminalEmptyPageAndAuthorityDenial();
 		TestSelectiveInputPersistsAcrossRequestsAndLinks();
+		TestStructuredClassificationsUseOnlyTypedRequestAuthority();
 		TestSelectiveLinkMustPreserveConditionalInput();
 		TestSelectiveProfileDoesNotLeakAcrossStreamLifecycles();
 		TestLateFailuresAreTerminalAndRedacted();

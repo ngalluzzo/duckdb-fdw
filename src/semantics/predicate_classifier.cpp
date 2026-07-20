@@ -1,129 +1,364 @@
 #include "predicate_classifier.hpp"
 
+#include "duckdb_api/scan_planner.hpp"
+
+#include <algorithm>
 #include <cstddef>
-#include <stdexcept>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace duckdb_api {
 namespace predicate_classifier {
 
 namespace {
 
-const char VISIBILITY_COLUMN[] = "visibility";
-const char VISIBILITY_EXTRACTOR[] = "$.visibility";
-const char VISIBILITY_LOGICAL_TYPE[] = "VARCHAR";
-const char AUTHENTICATED_REPOSITORIES_OPERATION[] = "github_authenticated_repositories";
-const char PRIVATE_VALUE[] = "private";
+struct MatchedCandidate {
+	const CompiledPredicateMapping *mapping;
+	const RequestedPredicate *candidate;
+};
 
-PlannedPredicate ResidualPredicate(const ScanRequest &request) {
+const char *ReasonText(PredicateDecisionReason reason) {
+	switch (reason) {
+	case PredicateDecisionReason::NO_REMOTE_CANDIDATE:
+		return "no structured remote candidate was offered; the complete base-domain traversal remains authoritative";
+	case PredicateDecisionReason::SELECTED_EXACT_MAPPING:
+		return "validated three-valued equivalence, exact occurrence preservation, and one executable input establish "
+		       "an Exact remote restriction; DuckDB retains semantic ownership";
+	case PredicateDecisionReason::SELECTED_SUPERSET_MAPPING:
+		return "validated implication, required occurrence preservation, and one executable input establish a Superset "
+		       "remote restriction; DuckDB retains semantic ownership";
+	case PredicateDecisionReason::STRUCTURE_UNSUPPORTED:
+		return "the offered predicate structure has no complete executable remote proof; remote TRUE preserves the "
+		       "base domain and DuckDB remains authoritative";
+	case PredicateDecisionReason::CAPABILITY_UNAVAILABLE:
+		return "structured inspection or DuckDB residual-retention capability is unavailable; remote TRUE preserves "
+		       "correctness";
+	case PredicateDecisionReason::MAPPING_UNAVAILABLE:
+		return "no validated mapping matches the typed candidate on the selected operation; remote TRUE preserves "
+		       "correctness";
+	case PredicateDecisionReason::DISJUNCTION_ENCODING_UNAVAILABLE:
+		return "the selected operation declares no occurrence-preserving disjunction encoding; remote TRUE preserves "
+		       "every branch";
+	case PredicateDecisionReason::COMPLEMENT_ENCODING_UNAVAILABLE:
+		return "the selected operation declares no three-valued complement encoding; remote TRUE avoids unsafe "
+		       "negation";
+	case PredicateDecisionReason::AMBIGUOUS_CONDITIONAL_INPUT:
+		return "multiple safe candidate occurrences require an undeclared compound input encoding; the unrestricted "
+		       "plan avoids an arbitrary choice";
+	}
+	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
+	                    "predicate decision contains an unknown structured reason");
+}
+
+bool IsKnownBaseDomain(CompiledPredicateBaseDomain domain) {
+	switch (domain) {
+	case CompiledPredicateBaseDomain::GITHUB_AUTHENTICATED_REPOSITORY_OCCURRENCES:
+	case CompiledPredicateBaseDomain::CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES:
+		return true;
+	}
+	return false;
+}
+
+void ValidateMappingFacts(const CompiledOperation &operation, const CompiledPredicateMapping &mapping) {
+	if (mapping.OperationName() != operation.name || !IsKnownBaseDomain(mapping.BaseDomain()) ||
+	    mapping.EncodingCapability() != CompiledPredicateEncodingCapability::SINGLE_POSITIVE_REST_QUERY_INPUT ||
+	    mapping.MaximumConditionalInputs() != 1 || mapping.SupportsCompoundConjunctionEncoding() ||
+	    mapping.SupportsDisjunctionEncoding() || mapping.SupportsComplementEncoding() ||
+	    mapping.InputPlacement() != CompiledPredicateInputPlacement::REST_QUERY_PARAMETER ||
+	    mapping.RemoteInputName().empty() || mapping.EncodedRemoteValue().empty()) {
+		throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
+		                    "selected predicate mapping contains inconsistent operation or encoding facts");
+	}
+
+	switch (mapping.Accuracy()) {
+	case CompiledPredicateAccuracy::EXACT:
+		if (mapping.ProofIdentity() !=
+		        CompiledPredicateProofIdentity::CONTROLLED_EXACT_DUPLICATE_REPOSITORY_VISIBILITY ||
+		    mapping.BaseDomain() != CompiledPredicateBaseDomain::CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES ||
+		    mapping.OccurrencePreservation() !=
+		        CompiledPredicateOccurrencePreservation::PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES) {
+			throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
+			                    "Exact predicate mapping lacks its controlled three-valued occurrence proof");
+		}
+		return;
+	case CompiledPredicateAccuracy::SUPERSET:
+		if (mapping.ProofIdentity() != CompiledPredicateProofIdentity::GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY ||
+		    mapping.BaseDomain() != CompiledPredicateBaseDomain::GITHUB_AUTHENTICATED_REPOSITORY_OCCURRENCES ||
+		    mapping.OccurrencePreservation() !=
+		        CompiledPredicateOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES) {
+			throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
+			                    "Superset predicate mapping lacks its required occurrence-preservation proof");
+		}
+		return;
+	}
+	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, "predicate mapping contains an unknown accuracy");
+}
+
+bool ColumnTypeMatches(const std::string &logical_type, RequestedPredicateValueKind type) {
+	switch (type) {
+	case RequestedPredicateValueKind::BIGINT:
+		return logical_type == "BIGINT";
+	case RequestedPredicateValueKind::VARCHAR:
+		return logical_type == "VARCHAR";
+	case RequestedPredicateValueKind::BOOLEAN:
+		return logical_type == "BOOLEAN";
+	}
+	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, "predicate comparison contains an unknown logical type");
+}
+
+bool MappingMatches(const CompiledRelation &relation, const CompiledOperation &operation,
+                    const CompiledPredicateMapping &mapping, const RequestedPredicate &candidate) {
+	if (candidate.Kind() != RequestedPredicateKind::COMPARISON || mapping.OperationName() != operation.name) {
+		return false;
+	}
+	const auto &column = relation.Columns()[candidate.BoundColumnIndex()];
+	if (column.name != mapping.ColumnName() || !ColumnTypeMatches(column.logical_type, candidate.BoundColumnType()) ||
+	    column.nullable || candidate.ComparisonOperator() != RequestedPredicateComparisonOperator::EQUALS ||
+	    mapping.Operator() != CompiledPredicateOperator::EQUALS ||
+	    candidate.Literal().Kind() != RequestedPredicateValueKind::VARCHAR ||
+	    mapping.Literal() != CompiledPredicateLiteral::VARCHAR_PRIVATE ||
+	    candidate.Literal().VarcharValue() != "private") {
+		return false;
+	}
+	ValidateMappingFacts(operation, mapping);
+	return true;
+}
+
+void ValidateCandidateBindings(const CompiledRelation &relation, const RequestedPredicate &candidate) {
+	switch (candidate.Kind()) {
+	case RequestedPredicateKind::UNRESTRICTED:
+	case RequestedPredicateKind::UNSUPPORTED:
+		return;
+	case RequestedPredicateKind::COMPARISON:
+		if (candidate.BoundColumnIndex() >= relation.Columns().size() ||
+		    !ColumnTypeMatches(relation.Columns()[candidate.BoundColumnIndex()].logical_type,
+		                       candidate.BoundColumnType()) ||
+		    candidate.BoundColumnType() != candidate.Literal().Kind()) {
+			throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
+			                    "predicate candidate contains an invalid bound column or typed literal");
+		}
+		return;
+	case RequestedPredicateKind::CONJUNCTION:
+	case RequestedPredicateKind::DISJUNCTION:
+	case RequestedPredicateKind::NEGATION:
+		for (const auto &child : candidate.Children()) {
+			ValidateCandidateBindings(relation, child);
+		}
+		return;
+	}
+	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, "predicate candidate contains an unknown node kind");
+}
+
+void ValidateCandidateContract(const CompiledRelation &relation, const ScanRequest &request) {
+	if (request.requested_predicate.Depth() == 0 ||
+	    request.requested_predicate.Depth() > MAX_REQUESTED_PREDICATE_DEPTH ||
+	    request.requested_predicate.NodeCount() == 0 ||
+	    request.requested_predicate.NodeCount() > MAX_REQUESTED_PREDICATE_NODES) {
+		throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
+		                    "predicate candidate exceeds the shared structural contract");
+	}
+	ValidateCandidateBindings(relation, request.requested_predicate);
+}
+
+void CollectConjunctiveMatches(const CompiledRelation &relation, const CompiledOperation &operation,
+                               const RequestedPredicate &candidate, std::vector<MatchedCandidate> &matches,
+                               bool &contains_unmapped_structure) {
+	switch (candidate.Kind()) {
+	case RequestedPredicateKind::UNRESTRICTED:
+		return;
+	case RequestedPredicateKind::COMPARISON: {
+		std::size_t matched = 0;
+		for (const auto &mapping : relation.PredicateMappings()) {
+			if (MappingMatches(relation, operation, mapping, candidate)) {
+				matches.push_back({&mapping, &candidate});
+				matched++;
+			}
+		}
+		contains_unmapped_structure = contains_unmapped_structure || matched == 0;
+		return;
+	}
+	case RequestedPredicateKind::CONJUNCTION:
+		for (const auto &child : candidate.Children()) {
+			CollectConjunctiveMatches(relation, operation, child, matches, contains_unmapped_structure);
+		}
+		return;
+	case RequestedPredicateKind::DISJUNCTION:
+	case RequestedPredicateKind::NEGATION:
+	case RequestedPredicateKind::UNSUPPORTED:
+		contains_unmapped_structure = true;
+		return;
+	}
+	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, "predicate candidate contains an unknown node kind");
+}
+
+PlannedPredicate ResidualPredicate(const CompiledRelation &relation, const CompiledOperation &operation,
+                                   const ScanRequest &request) {
 	switch (request.retained_predicate_scope) {
 	case RetainedPredicateScope::UNRESTRICTED:
 		return PlannedPredicate::TRUE_FOR_BASE_DOMAIN;
-	case RetainedPredicateScope::REQUESTED_PREDICATE:
-		if (request.requested_predicate.Kind() == RequestedPredicateKind::VISIBILITY_EQUALS_PRIVATE) {
-			return PlannedPredicate::VISIBILITY_EQUALS_PRIVATE;
-		}
-		throw std::logic_error("requested residual scope has no closed predicate");
 	case RetainedPredicateScope::COMPLETE_DUCKDB_FILTER:
 		return PlannedPredicate::COMPLETE_DUCKDB_FILTER;
-	}
-	throw std::logic_error("predicate classifier received an unknown retained-predicate scope");
-}
-
-PredicatePlanDecision UnrestrictedDecision(const ScanRequest &request, std::string reason) {
-	return {PlannedPredicate::TRUE_FOR_BASE_DOMAIN,
-	        RemotePredicateAccuracy::UNSUPPORTED,
-	        ResidualPredicate(request),
-	        RelationalOwner::DUCKDB,
-	        PlannedConditionalInput::NONE,
-	        std::move(reason)};
-}
-
-PredicatePlanDecision VisibilityFallback(const ScanRequest &request, std::string reason) {
-	return {PlannedPredicate::TRUE_FOR_BASE_DOMAIN,
-	        RemotePredicateAccuracy::UNSUPPORTED,
-	        ResidualPredicate(request),
-	        RelationalOwner::DUCKDB,
-	        PlannedConditionalInput::NONE,
-	        std::move(reason)};
-}
-
-bool HasRequiredVisibilityColumn(const CompiledRelation &relation) {
-	std::size_t matches = 0;
-	for (const auto &column : relation.Columns()) {
-		if (column.name != VISIBILITY_COLUMN) {
-			continue;
+	case RetainedPredicateScope::REQUESTED_PREDICATE:
+		if (request.requested_predicate.Kind() == RequestedPredicateKind::COMPARISON) {
+			for (const auto &mapping : relation.PredicateMappings()) {
+				if (MappingMatches(relation, operation, mapping, request.requested_predicate)) {
+					return PlannedPredicate::VISIBILITY_EQUALS_PRIVATE;
+				}
+			}
 		}
-		matches++;
-		if (column.logical_type != VISIBILITY_LOGICAL_TYPE || column.nullable ||
-		    column.extractor != VISIBILITY_EXTRACTOR) {
+		return PlannedPredicate::COMPLETE_DUCKDB_FILTER;
+	}
+	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
+	                    "predicate decision received an unknown retained-filter scope");
+}
+
+PredicatePlanDecision Fallback(const CompiledRelation &relation, const CompiledOperation &operation,
+                               const ScanRequest &request, PredicateDecisionCategory category,
+                               PredicateDecisionReason reason) {
+	return {PlannedPredicate::TRUE_FOR_BASE_DOMAIN,
+	        RemotePredicateAccuracy::UNSUPPORTED,
+	        ResidualPredicate(relation, operation, request),
+	        RelationalOwner::DUCKDB,
+	        PlannedConditionalInput::NONE,
+	        category,
+	        reason,
+	        ReasonText(reason)};
+}
+
+bool IsSingleComparison(const RequestedPredicate &candidate) {
+	return candidate.Kind() == RequestedPredicateKind::COMPARISON;
+}
+
+bool SameMappingAndBinding(const MatchedCandidate &left, const MatchedCandidate &right) {
+	const auto &left_mapping = *left.mapping;
+	const auto &right_mapping = *right.mapping;
+	return left.candidate->StructurallyEquals(*right.candidate) &&
+	       left_mapping.ColumnName() == right_mapping.ColumnName() &&
+	       left_mapping.Operator() == right_mapping.Operator() && left_mapping.Literal() == right_mapping.Literal() &&
+	       left_mapping.OperationName() == right_mapping.OperationName() &&
+	       left_mapping.InputPlacement() == right_mapping.InputPlacement() &&
+	       left_mapping.RemoteInputName() == right_mapping.RemoteInputName() &&
+	       left_mapping.EncodedRemoteValue() == right_mapping.EncodedRemoteValue() &&
+	       left_mapping.Accuracy() == right_mapping.Accuracy() &&
+	       left_mapping.ProofIdentity() == right_mapping.ProofIdentity() &&
+	       left_mapping.BaseDomain() == right_mapping.BaseDomain() &&
+	       left_mapping.OccurrencePreservation() == right_mapping.OccurrencePreservation() &&
+	       left_mapping.EncodingCapability() == right_mapping.EncodingCapability();
+}
+
+bool AllMatchesEquivalent(const std::vector<MatchedCandidate> &matches) {
+	for (std::size_t index = 1; index < matches.size(); index++) {
+		if (!SameMappingAndBinding(matches.front(), matches[index])) {
 			return false;
 		}
 	}
-	return matches == 1;
+	return true;
 }
 
-bool IsAcceptedVisibilityMapping(const CompiledRelation &relation, const CompiledPredicateMapping &mapping) {
-	return mapping.ColumnName() == VISIBILITY_COLUMN && mapping.Operator() == CompiledPredicateOperator::EQUALS &&
-	       mapping.Literal() == CompiledPredicateLiteral::VARCHAR_PRIVATE &&
-	       relation.Operation().name == AUTHENTICATED_REPOSITORIES_OPERATION &&
-	       mapping.OperationName() == relation.Operation().name &&
-	       mapping.InputPlacement() == CompiledPredicateInputPlacement::REST_QUERY_PARAMETER &&
-	       mapping.RemoteInputName() == VISIBILITY_COLUMN && mapping.EncodedRemoteValue() == PRIVATE_VALUE &&
-	       mapping.Accuracy() == CompiledPredicateAccuracy::SUPERSET &&
-	       mapping.Evidence() == CompiledPredicateEvidence::GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY;
+bool IsEquivalentRepeatedConjunction(const RequestedPredicate &candidate, const std::vector<MatchedCandidate> &matches,
+                                     bool contains_unmapped_structure) {
+	return candidate.Kind() == RequestedPredicateKind::CONJUNCTION && !contains_unmapped_structure &&
+	       candidate.Children().size() == matches.size() && AllMatchesEquivalent(matches);
 }
 
 } // namespace
 
-PredicatePlanDecision Classify(const CompiledRelation &relation, const ScanRequest &request) {
-	const auto requested_kind = request.requested_predicate.Kind();
-	if (requested_kind == RequestedPredicateKind::UNRESTRICTED) {
-		if (request.retained_predicate_scope == RetainedPredicateScope::COMPLETE_DUCKDB_FILTER) {
-			return UnrestrictedDecision(
-			    request,
-			    "DuckDB exposed a retained structured filter, but its shape is outside the accepted mapping; the "
-			    "complete base-domain traversal is used and DuckDB remains authoritative");
+CandidateInputBindings ResolveCandidateInputBindings(const CompiledRelation &relation,
+                                                     const CompiledOperation &operation, const ScanRequest &request) {
+	ValidateCandidateContract(relation, request);
+	if (!request.capabilities.selective_predicate || !request.capabilities.retains_predicate) {
+		return {{}, false};
+	}
+	if (request.requested_predicate.Kind() != RequestedPredicateKind::COMPARISON &&
+	    request.requested_predicate.Kind() != RequestedPredicateKind::CONJUNCTION) {
+		return {{}, false};
+	}
+
+	std::vector<MatchedCandidate> matches;
+	bool contains_unmapped_structure = false;
+	CollectConjunctiveMatches(relation, operation, request.requested_predicate, matches, contains_unmapped_structure);
+	(void)contains_unmapped_structure;
+
+	CandidateInputBindings result {{}, false};
+	for (const auto &match : matches) {
+		const auto &mapping = *match.mapping;
+		auto existing =
+		    std::find_if(result.values.begin(), result.values.end(), [&mapping](const CandidateInputBinding &binding) {
+			    return binding.name == mapping.RemoteInputName();
+		    });
+		if (existing == result.values.end()) {
+			result.values.push_back({mapping.RemoteInputName(), mapping.EncodedRemoteValue()});
+		} else if (existing->encoded_value != mapping.EncodedRemoteValue()) {
+			return {{}, true};
 		}
-		return UnrestrictedDecision(
-		    request, "no selective predicate was requested; the complete base-domain traversal remains authoritative");
 	}
-	if (requested_kind != RequestedPredicateKind::VISIBILITY_EQUALS_PRIVATE) {
-		throw std::logic_error("planner received an unknown requested-predicate state");
+	std::sort(
+	    result.values.begin(), result.values.end(),
+	    [](const CandidateInputBinding &left, const CandidateInputBinding &right) { return left.name < right.name; });
+	return result;
+}
+
+PredicatePlanDecision Classify(const CompiledRelation &relation, const CompiledOperation &operation,
+                               const ScanRequest &request) {
+	ValidateCandidateContract(relation, request);
+	for (const auto &mapping : relation.PredicateMappings()) {
+		if (mapping.OperationName() == operation.name) {
+			ValidateMappingFacts(operation, mapping);
+		}
 	}
 
-	if (!request.capabilities.selective_predicate) {
-		return VisibilityFallback(
-		    request,
-		    "structured selective-predicate capability is unavailable; the complete base-domain traversal is used");
+	if (request.requested_predicate.Kind() == RequestedPredicateKind::UNRESTRICTED) {
+		return Fallback(relation, operation, request, PredicateDecisionCategory::UNSUPPORTED,
+		                PredicateDecisionReason::NO_REMOTE_CANDIDATE);
 	}
-	if (!request.capabilities.retains_predicate) {
-		return VisibilityFallback(
-		    request, "DuckDB residual-retention capability is unavailable; the complete base-domain traversal is used");
+	if (!request.capabilities.selective_predicate || !request.capabilities.retains_predicate) {
+		return Fallback(relation, operation, request, PredicateDecisionCategory::UNSUPPORTED,
+		                PredicateDecisionReason::CAPABILITY_UNAVAILABLE);
 	}
-	if (!HasRequiredVisibilityColumn(relation)) {
-		return VisibilityFallback(
-		    request,
-		    "the required visibility response column is unavailable; the complete base-domain traversal is used");
+	if (request.requested_predicate.Kind() == RequestedPredicateKind::DISJUNCTION) {
+		return Fallback(relation, operation, request, PredicateDecisionCategory::UNSUPPORTED,
+		                PredicateDecisionReason::DISJUNCTION_ENCODING_UNAVAILABLE);
 	}
-	if (relation.PredicateMappings().size() != 1 ||
-	    !IsAcceptedVisibilityMapping(relation, relation.PredicateMappings().front())) {
-		return VisibilityFallback(
-		    request,
-		    "the accepted visibility predicate mapping is unavailable; the complete base-domain traversal is used");
+	if (request.requested_predicate.Kind() == RequestedPredicateKind::NEGATION) {
+		return Fallback(relation, operation, request, PredicateDecisionCategory::UNSUPPORTED,
+		                PredicateDecisionReason::COMPLEMENT_ENCODING_UNAVAILABLE);
+	}
+	if (request.requested_predicate.Kind() == RequestedPredicateKind::UNSUPPORTED) {
+		return Fallback(relation, operation, request, PredicateDecisionCategory::UNSUPPORTED,
+		                PredicateDecisionReason::STRUCTURE_UNSUPPORTED);
 	}
 
-	const auto reason = request.retained_predicate_scope == RetainedPredicateScope::COMPLETE_DUCKDB_FILTER
-	                        ? "the required visibility field and reviewed same-field mapping establish D=>R; DuckDB "
-	                          "retains the complete structured filter as sole residual owner"
-	                        : "the required visibility field and reviewed same-field mapping establish D=>R; DuckDB "
-	                          "retains the complete visibility predicate as sole residual owner";
+	std::vector<MatchedCandidate> matches;
+	bool contains_unmapped_structure = false;
+	CollectConjunctiveMatches(relation, operation, request.requested_predicate, matches, contains_unmapped_structure);
+	if (matches.empty()) {
+		return Fallback(relation, operation, request, PredicateDecisionCategory::UNSUPPORTED,
+		                contains_unmapped_structure ? PredicateDecisionReason::MAPPING_UNAVAILABLE
+		                                            : PredicateDecisionReason::STRUCTURE_UNSUPPORTED);
+	}
+	if (matches.size() > 1 && !AllMatchesEquivalent(matches)) {
+		return Fallback(relation, operation, request, PredicateDecisionCategory::AMBIGUOUS,
+		                PredicateDecisionReason::AMBIGUOUS_CONDITIONAL_INPUT);
+	}
+
+	const auto &mapping = *matches.front().mapping;
+	const bool exact =
+	    mapping.Accuracy() == CompiledPredicateAccuracy::EXACT && !contains_unmapped_structure &&
+	    (IsSingleComparison(request.requested_predicate) ||
+	     IsEquivalentRepeatedConjunction(request.requested_predicate, matches, contains_unmapped_structure));
+	const auto category = exact ? PredicateDecisionCategory::EXACT : PredicateDecisionCategory::SUPERSET;
+	const auto accuracy = exact ? RemotePredicateAccuracy::EXACT : RemotePredicateAccuracy::SUPERSET;
+	const auto reason =
+	    exact ? PredicateDecisionReason::SELECTED_EXACT_MAPPING : PredicateDecisionReason::SELECTED_SUPERSET_MAPPING;
 	return {PlannedPredicate::VISIBILITY_EQUALS_PRIVATE,
-	        RemotePredicateAccuracy::SUPERSET,
-	        ResidualPredicate(request),
+	        accuracy,
+	        ResidualPredicate(relation, operation, request),
 	        RelationalOwner::DUCKDB,
 	        PlannedConditionalInput::VISIBILITY_PRIVATE,
-	        reason};
+	        category,
+	        reason,
+	        ReasonText(reason)};
 }
 
 } // namespace predicate_classifier

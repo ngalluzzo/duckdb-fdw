@@ -28,17 +28,21 @@ FROM duckdb_api_scan(
 
 These relations use fixed HTTPS operations and strict schemas. Bind,
 `DESCRIBE`, `EXPLAIN`, and `PREPARE` do not perform network I/O. DuckDB owns all
-filters, ordering, limits, and offsets. On the repository relation, the one
-supported predicate `visibility = 'private'` also narrows every remote request
-with `visibility=private`; DuckDB retains and evaluates the predicate. Other
-predicate shapes use the complete traversal and local filtering. `EXPLAIN`
-reports which path was selected.
+filters, projections, ordering, limits, and offsets. On the repository
+relation, the supported conjunct `visibility = 'private'` may also narrow every
+remote request with `visibility=private`; DuckDB retains and evaluates the
+complete predicate. Unsupported, `OR`, `NOT`, ambiguous, or unavailable
+optimization states use the complete traversal without changing the result.
+`EXPLAIN` reports the selected or fallback path, ownership, capabilities, and
+safe classification reason.
 
 Execution is bounded and fails the statement on malformed data, an invalid
 page transition, cancellation, or resource exhaustion; it does not return a
 complete-looking partial result. The [changelog](CHANGELOG.md) describes the
 current unreleased source. The [0.5.0 release notes](docs/releases/0.5.0-notes.md)
-remain the contract for the last published version.
+remain the contract for the last published version; the
+[0.6.0 notes](docs/releases/0.6.0-notes.md) describe the current unreleased
+semantic-trust line.
 
 ## Quick start
 
@@ -96,14 +100,15 @@ The underlying SQL is in
 After creating the temporary secret, the selective repository query is:
 
 ```sql
-SELECT id, full_name, visibility
+SELECT full_name
 FROM duckdb_api_scan(
     connector := 'github',
     relation := 'authenticated_repositories',
     secret := 'github_default'
 )
-WHERE visibility = 'private'
-ORDER BY id;
+WHERE visibility = 'private' AND archived = FALSE
+ORDER BY id DESC
+LIMIT 2;
 ```
 
 ## Development

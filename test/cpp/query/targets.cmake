@@ -33,6 +33,7 @@ add_executable(
   test/cpp/query/duckdb/duckdb_adapter_auth_bind_tests.cpp
   test/cpp/query/duckdb/duckdb_adapter_auth_lifecycle_tests.cpp
   test/cpp/query/duckdb/complex_filter_adapter_tests.cpp
+  test/cpp/query/duckdb/predicate_candidate_translation_tests.cpp
   test/cpp/query/duckdb/table_function_plan_state_tests.cpp
   ${QUERY_DUCKDB_SECRET_SOURCES}
   ${QUERY_DUCKDB_ADAPTER_SUPPORT_SOURCES}

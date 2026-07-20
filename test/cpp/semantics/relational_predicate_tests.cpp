@@ -1,82 +1,142 @@
 #include "duckdb_api/relational_predicate.hpp"
 #include "support/require.hpp"
 
+#include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
 
 using duckdb_api_test::Require;
 
-void TestClosedValueIdentityAndSnapshot() {
-	const auto default_value = duckdb_api::RequestedPredicate();
-	const auto unrestricted = duckdb_api::RequestedPredicate::Unrestricted();
-	const auto selective = duckdb_api::RequestedPredicate::VisibilityEqualsPrivate();
-
-	Require(default_value == unrestricted && unrestricted != selective,
-	        "requested predicate default or closed identity is not conservative");
-	Require(unrestricted.Kind() == duckdb_api::RequestedPredicateKind::UNRESTRICTED &&
-	            selective.Kind() == duckdb_api::RequestedPredicateKind::VISIBILITY_EQUALS_PRIVATE,
-	        "requested predicate kind did not preserve the closed states");
-	Require(unrestricted.Snapshot() == "unrestricted" && selective.Snapshot() == "visibility_equals_private",
-	        "requested predicate snapshot is unstable");
-	Require(selective.Snapshot().find("=") == std::string::npos &&
-	            selective.Snapshot().find("visibility=private") == std::string::npos,
-	        "requested predicate snapshot became SQL or request authority");
+duckdb_api::RequestedPredicate VisibilityPrivate(std::size_t column_index) {
+	return duckdb_api::RequestedPredicate::Comparison(column_index, duckdb_api::RequestedPredicateValueKind::VARCHAR,
+	                                                  duckdb_api::RequestedPredicateComparisonOperator::EQUALS,
+	                                                  duckdb_api::RequestedPredicateValue::Varchar("private"));
 }
 
-enum class VisibilityValue { PUBLIC, PRIVATE, INTERNAL, SQL_NULL };
-
-bool DuckDbVisibilityPredicate(VisibilityValue visibility) {
-	return visibility == VisibilityValue::PRIVATE;
-}
-
-bool RemotePrivateVisibilityDomain(VisibilityValue visibility) {
-	return visibility == VisibilityValue::PRIVATE;
-}
-
-void TestSameFieldImplicationAndResidualBag() {
-	const std::vector<VisibilityValue> base = {VisibilityValue::PUBLIC, VisibilityValue::PRIVATE,
-	                                           VisibilityValue::INTERNAL, VisibilityValue::PRIVATE,
-	                                           VisibilityValue::SQL_NULL};
-	std::vector<VisibilityValue> local_only;
-	std::vector<VisibilityValue> remote_then_residual;
-	for (const auto &visibility : base) {
-		const auto duckdb_true = DuckDbVisibilityPredicate(visibility);
-		const auto remotely_retained = RemotePrivateVisibilityDomain(visibility);
-		Require(!duckdb_true || remotely_retained, "same-field visibility mapping violated D=>R");
-		if (duckdb_true) {
-			local_only.push_back(visibility);
-		}
-		if (remotely_retained && duckdb_true) {
-			remote_then_residual.push_back(visibility);
-		}
+template <class ACTION>
+void RequireInvalid(const ACTION &action, const std::string &message) {
+	bool rejected = false;
+	try {
+		action();
+	} catch (const std::invalid_argument &) {
+		rejected = true;
 	}
-	Require(local_only == remote_then_residual,
-	        "remote visibility restriction plus DuckDB residual changed the duplicate-preserving row bag");
+	Require(rejected, message);
 }
 
-void TestBroaderPrivateBooleanCounterexampleRemainsRejected() {
-	const bool internal_private_boolean = true;
-	const auto internal_visibility = VisibilityValue::INTERNAL;
-	Require(internal_private_boolean && !RemotePrivateVisibilityDomain(internal_visibility),
-	        "test no longer exhibits the broader private-boolean counterexample");
-	Require(duckdb_api::RequestedPredicate::VisibilityEqualsPrivate().Snapshot().find("boolean") == std::string::npos,
-	        "closed requested predicate accidentally names the rejected broader Boolean");
+template <class ACTION>
+void RequireLogicError(const ACTION &action, const std::string &message) {
+	bool rejected = false;
+	try {
+		action();
+	} catch (const std::logic_error &) {
+		rejected = true;
+	}
+	Require(rejected, message);
+}
+
+void TestTypedValuesAndSafeSnapshots() {
+	const auto bigint = duckdb_api::RequestedPredicateValue::BigInt(-42);
+	const auto varchar_value = duckdb_api::RequestedPredicateValue::Varchar("private;\n");
+	const auto boolean = duckdb_api::RequestedPredicateValue::Boolean(true);
+	Require(bigint.Kind() == duckdb_api::RequestedPredicateValueKind::BIGINT && bigint.BigIntValue() == -42 &&
+	            bigint.Snapshot() == "bigint:-42",
+	        "BIGINT predicate value lost its typed identity");
+	Require(varchar_value.Kind() == duckdb_api::RequestedPredicateValueKind::VARCHAR &&
+	            varchar_value.VarcharValue() == "private;\n" &&
+	            varchar_value.Snapshot() == "varchar:hex:707269766174653b0a",
+	        "VARCHAR predicate value was not preserved and escaped safely");
+	Require(boolean.Kind() == duckdb_api::RequestedPredicateValueKind::BOOLEAN && boolean.BooleanValue() &&
+	            boolean.Snapshot() == "boolean:true",
+	        "BOOLEAN predicate value lost its typed identity");
+	RequireLogicError([&]() { (void)bigint.VarcharValue(); }, "BIGINT value exposed a VARCHAR payload");
+	RequireInvalid(
+	    []() {
+		    (void)duckdb_api::RequestedPredicate::Comparison(0, duckdb_api::RequestedPredicateValueKind::BIGINT,
+		                                                     duckdb_api::RequestedPredicateComparisonOperator::EQUALS,
+		                                                     duckdb_api::RequestedPredicateValue::Varchar("1"));
+	    },
+	    "comparison admitted mismatched column and literal types");
+}
+
+void TestCandidateIdentityStructureAndOpaquePositions() {
+	const auto unrestricted = duckdb_api::RequestedPredicate();
+	const auto comparison = VisibilityPrivate(5);
+	const auto unsupported = duckdb_api::RequestedPredicate::Unsupported(7);
+	const auto conjunction = duckdb_api::RequestedPredicate::Conjunction({comparison, unsupported});
+	const auto disjunction = duckdb_api::RequestedPredicate::Disjunction({comparison, unsupported});
+	const auto negation = duckdb_api::RequestedPredicate::Negation(comparison);
+
+	Require(unrestricted == duckdb_api::RequestedPredicate::Unrestricted() &&
+	            unrestricted.Kind() == duckdb_api::RequestedPredicateKind::UNRESTRICTED &&
+	            unrestricted.Snapshot() == "true",
+	        "requested predicate default was not conservative TRUE");
+	Require(comparison.Kind() == duckdb_api::RequestedPredicateKind::COMPARISON && comparison.BoundColumnIndex() == 5 &&
+	            comparison.BoundColumnType() == duckdb_api::RequestedPredicateValueKind::VARCHAR &&
+	            comparison.Literal().VarcharValue() == "private" && comparison.Depth() == 1 &&
+	            comparison.NodeCount() == 1,
+	        "comparison leaf lost its bound typed identity");
+	Require(unsupported.Kind() == duckdb_api::RequestedPredicateKind::UNSUPPORTED &&
+	            unsupported.UnsupportedPosition() == 7 && unsupported.Snapshot() == "unsupported[position:7]",
+	        "opaque unsupported leaf lost its deterministic position");
+	Require(conjunction.Kind() == duckdb_api::RequestedPredicateKind::CONJUNCTION && conjunction.Depth() == 2 &&
+	            conjunction.NodeCount() == 3 && conjunction.Children().size() == 2 &&
+	            conjunction.Snapshot().find("and[") == 0,
+	        "conjunction lost ordered child structure or accounting");
+	Require(disjunction.Kind() == duckdb_api::RequestedPredicateKind::DISJUNCTION &&
+	            disjunction.Children()[0] == comparison && disjunction.Children()[1] == unsupported,
+	        "disjunction reordered or rewrote its children");
+	Require(negation.Kind() == duckdb_api::RequestedPredicateKind::NEGATION && negation.Children().size() == 1 &&
+	            negation.Children()[0] == comparison,
+	        "negation lost its sole child");
+	Require(conjunction != duckdb_api::RequestedPredicate::Conjunction({unsupported, comparison}),
+	        "candidate equality ignored deterministic child order");
+	for (const auto &forbidden : {"visibility =", "visibility=private", "SELECT", "WHERE"}) {
+		Require(conjunction.Snapshot().find(forbidden) == std::string::npos,
+		        "candidate snapshot became SQL or request authority: " + std::string(forbidden));
+	}
+}
+
+void TestDepthAndNodeBounds() {
+	std::vector<duckdb_api::RequestedPredicate> leaves;
+	for (std::size_t index = 0; index < duckdb_api::MAX_REQUESTED_PREDICATE_NODES - 1; index++) {
+		leaves.push_back(duckdb_api::RequestedPredicate::Unsupported(index));
+	}
+	const auto maximum = duckdb_api::RequestedPredicate::Conjunction(leaves);
+	Require(maximum.NodeCount() == duckdb_api::MAX_REQUESTED_PREDICATE_NODES && maximum.Depth() == 2,
+	        "candidate did not admit its exact node ceiling");
+	leaves.push_back(duckdb_api::RequestedPredicate::Unsupported(999));
+	RequireInvalid([&]() { (void)duckdb_api::RequestedPredicate::Conjunction(leaves); },
+	               "candidate admitted more than 64 nodes");
+
+	auto depth = VisibilityPrivate(0);
+	for (std::size_t level = 1; level < duckdb_api::MAX_REQUESTED_PREDICATE_DEPTH; level++) {
+		depth = duckdb_api::RequestedPredicate::Negation(std::move(depth));
+	}
+	Require(depth.Depth() == duckdb_api::MAX_REQUESTED_PREDICATE_DEPTH,
+	        "candidate did not admit its exact depth ceiling");
+	RequireInvalid([&]() { (void)duckdb_api::RequestedPredicate::Negation(depth); },
+	               "candidate admitted depth beyond 16");
+	RequireInvalid([]() { (void)duckdb_api::RequestedPredicate::Conjunction({VisibilityPrivate(0)}); },
+	               "conjunction admitted fewer than two children");
 }
 
 } // namespace
 
 static_assert(std::is_default_constructible<duckdb_api::RequestedPredicate>::value,
-              "closed request value must default to unrestricted");
+              "candidate must default to conservative TRUE");
 static_assert(std::is_copy_constructible<duckdb_api::RequestedPredicate>::value,
-              "Query must be able to copy the closed request value into immutable bind state");
+              "Query must copy immutable candidates into bind state");
 static_assert(!std::is_constructible<duckdb_api::RequestedPredicate, std::string>::value,
-              "closed request value must not admit SQL or arbitrary predicate text");
+              "candidate must not admit SQL or arbitrary predicate text");
 
 void RunRelationalPredicateTests() {
-	TestClosedValueIdentityAndSnapshot();
-	TestSameFieldImplicationAndResidualBag();
-	TestBroaderPrivateBooleanCounterexampleRemainsRejected();
+	TestTypedValuesAndSafeSnapshots();
+	TestCandidateIdentityStructureAndOpaquePositions();
+	TestDepthAndNodeBounds();
 }

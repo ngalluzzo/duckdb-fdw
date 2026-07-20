@@ -16,19 +16,20 @@ behind their public interfaces; do not reproduce those rules in the adapter.
    `ScanRequest`, and asks the planner for one immutable baseline `ScanPlan`.
    Bind performs no network I/O.
 3. Pinned DuckDB 1.5.4 logical optimization may offer structured filters. Query
-   recognizes only `visibility = 'private'`, leaves the expression in DuckDB,
-   and asks Semantics for a complete replacement plan from the retained
-   baseline request. DuckDB may substitute a bound prepared-statement parameter
-   with a typed constant before this callback; Query classifies that structured
-   value per execution and does not reconstruct or retain parameter provenance.
-   Unbound, `NULL`, and other values do not select the remote predicate. Each
-   bind-data copy owns its selected plan independently, so executions cannot
-   leak selection state into one another.
-4. Pre-execution explanation renders only the selected plan's relation, remote
-   predicate, accuracy, residual predicate scope, and residual owner. A larger
-   retained filter is opaque and never mislabeled as the selective conjunct.
-   Explanation performs no secret lookup, I/O, request construction, or
-   expression-text parsing.
+   translates exact typed column/constant equality plus exposed `AND`, `OR`,
+   and `NOT` structure into Semantics' bounded protocol-neutral candidate. It
+   leaves every expression in DuckDB and never matches Connector mappings or
+   chooses a remote input. Unsupported structure remains opaque at its offered
+   position; over-depth or over-node input collapses completely rather than
+   selecting a partial branch. DuckDB may substitute a prepared parameter with
+   a typed constant before this callback, so each bind-data copy owns an
+   independent selected request and plan.
+4. Pre-execution explanation renders typed selected-request and plan facts:
+   candidate, remote predicate and accuracy, retained filter scope, full
+   projection closure, relational owners and delegation, adapter capability
+   fallback, and Semantics' structured category and reason. Explanation is not
+   parsed and grants no Runtime authority. It performs no secret lookup, I/O,
+   request construction, or expression-text reconstruction.
 5. Global initialization freezes the selected plan, resolves an explicitly
    named temporary secret, and opens one Runtime stream.
 6. Each scan pull validates a bounded typed batch before writing a `DataChunk`.
@@ -42,7 +43,8 @@ behind their public interfaces; do not reproduce those rules in the adapter.
 | Change | Production code | Focused evidence |
 | --- | --- | --- |
 | `ScanRequest` values or DuckDB capability reporting | `scan_request.cpp`, `duckdb_api/scan_request.hpp` | `duckdb_api_scan_request_tests` |
-| Pinned structured-expression recognition | `duckdb/complex_filter_adapter.*` | `complex_filter_adapter_tests.cpp` in `duckdb_api_adapter_tests` |
+| Pinned structured-expression translation | `duckdb/complex_filter_adapter.*` | `predicate_candidate_translation_tests.cpp` and `complex_filter_adapter_tests.cpp` in `duckdb_api_adapter_tests` |
+| Typed selected-plan explanation | `duckdb/scan_plan_explanation.*` | `complex_filter_adapter_tests.cpp` in `duckdb_api_adapter_tests` |
 | Baseline request retention and copied plan selection | `duckdb/table_function_plan_state.*` | `table_function_plan_state_tests.cpp` in `duckdb_api_adapter_tests` |
 | Installed connector/runtime assembly | `product_composition.cpp`, `duckdb_api/product_composition.hpp` | `test/python/source_demo_contract.py` through `make test`; `make demo` for the live path |
 | Table-function registration, callback composition, explain, bind/init/scan, cancellation, or batch transfer | `duckdb/table_function_adapter.cpp` | `duckdb_api_adapter_tests`, `duckdb_api_adapter_stream_contract_tests` |
@@ -54,6 +56,22 @@ Production and test inventories are in `src/query/{sources,targets}.cmake` and
 `test/cpp/query/{sources,targets}.cmake`. Shared test helpers live under
 `test/cpp/query/support/`; controlled product composition belongs under
 `test/cpp/query/integration/`.
+
+## Product evidence boundary
+
+`test/python/repository_pagination_product_contract.py` executes identical SQL
+through the production-installed `Superset` mapping and a mapping-absent
+forced-local baseline. Its fixture views share one duplicate-preserving bag,
+and the matrix covers projection, `AND`, `OR`, `NOT`, total ordering, local
+limit/offset, and `TRUE`/`FALSE`/`NULL` outcomes in actual DuckDB.
+
+`Exact`, `Ambiguous`, and operation-selection-invalid planner outcomes are not
+executable table-function profiles: the exact controlled operation is not
+installed in Runtime, while the latter outcomes cannot authorize a selected
+operation. Their production-planner and actual-DuckDB relational-law evidence
+lives in `test/cpp/semantics/predicate_composition_law_tests.cpp`. Query tests
+consume only the resulting public plan or error facts and verify explanation
+and failure behavior without constructing provider internals.
 
 ## Tests
 

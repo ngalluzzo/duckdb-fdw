@@ -154,10 +154,46 @@ private:
 	std::uint64_t max_pages_per_scan;
 };
 
+// Immutable compiled operation-selection facts. Author-facing absent_inputs
+// are normalized to ForbiddenInputs(); each collection has set semantics and
+// stable canonical order. Connector validates identity and cross-set
+// consistency, while Relational Semantics alone resolves candidate bindings,
+// decides eligibility, computes specificity, applies priority, and selects or
+// rejects a winner. The public empty constructor preserves the sole installed
+// fallback profile; non-empty construction remains provider-private.
+class CompiledOperationSelector {
+public:
+	CompiledOperationSelector();
+	CompiledOperationSelector(const CompiledOperationSelector &) = default;
+	CompiledOperationSelector(CompiledOperationSelector &&) = default;
+	CompiledOperationSelector &operator=(const CompiledOperationSelector &) = delete;
+	CompiledOperationSelector &operator=(CompiledOperationSelector &&) = delete;
+
+	const std::vector<std::string> &RequiredInputs() const;
+	const std::vector<std::vector<std::string>> &AnyInputSets() const;
+	const std::vector<std::string> &ForbiddenInputs() const;
+	std::int32_t Priority() const;
+
+private:
+	friend CompiledConnector BuildNativeGithubConnector();
+	friend class duckdb_api_test::ConnectorCatalogTestAccess;
+
+	CompiledOperationSelector(std::vector<std::string> required_inputs,
+	                          std::vector<std::vector<std::string>> any_input_sets,
+	                          std::vector<std::string> forbidden_inputs, std::int32_t priority);
+
+	std::vector<std::string> required_inputs;
+	std::vector<std::vector<std::string>> any_input_sets;
+	std::vector<std::string> forbidden_inputs;
+	std::int32_t priority;
+};
+
 // One base-row operation declaration. Connector owns declared source facts;
 // Semantics owns their conservative meaning and Runtime owns enforcement of the
-// resulting plan. Authentication is derived from the relation policy rather
-// than duplicated as a mutable boolean here.
+// resulting plan. Selector fallback remains explicit on the operation so
+// Semantics can evaluate the single fallback only after every non-fallback is
+// ineligible. Authentication is derived from the relation policy rather than
+// duplicated as a mutable boolean here.
 struct CompiledOperation {
 	std::string name;
 	bool fallback;
@@ -170,6 +206,7 @@ struct CompiledOperation {
 	CompiledRestRequest request;
 	CompiledResponseSource response_source;
 	std::string records_extractor;
+	CompiledOperationSelector selector;
 };
 
 // Closed native predicate vocabulary. This first private pre-1.0 service is
@@ -182,9 +219,43 @@ enum class CompiledPredicateLiteral { VARCHAR_PRIVATE };
 enum class CompiledPredicateInputPlacement { REST_QUERY_PARAMETER };
 enum class CompiledPredicateAccuracy { EXACT, SUPERSET };
 
-// Proof identity accepted by RFC 0008. Keeping it closed prevents a native
-// declaration or test decoy from claiming an unreviewed upstream contract.
-enum class CompiledPredicateEvidence { GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY };
+// A reviewed proof profile, not an arbitrary evidence label. Keeping identity
+// closed prevents accuracy from being relabeled independently of the operation,
+// base domain, occurrence guarantee, and executable encoding that justify it.
+// The controlled profile is available only through Connector-owned test
+// fixtures; the installed native catalog publishes the GitHub profile alone.
+enum class CompiledPredicateProofIdentity {
+	GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY,
+	CONTROLLED_EXACT_DUPLICATE_REPOSITORY_VISIBILITY
+};
+
+// Compatibility spelling for existing pre-1.0 consumers. ProofIdentity() is
+// the preferred accessor because the value identifies a complete proof
+// profile rather than unstructured evidence.
+using CompiledPredicateEvidence = CompiledPredicateProofIdentity;
+
+// Identifies the duplicate-preserving base occurrence bag against which a
+// restriction is proven. A similarly shaped operation on another domain is
+// not interchangeable and cannot inherit a mapping's accuracy.
+enum class CompiledPredicateBaseDomain {
+	GITHUB_AUTHENTICATED_REPOSITORY_OCCURRENCES,
+	CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES
+};
+
+// Source-level occurrence guarantee supplied by Connector. Semantics still
+// owns implication and three-valued predicate equivalence. Exact occurrence
+// preservation additionally excludes extra matching occurrences and changes
+// in multiplicity within the declared base domain.
+enum class CompiledPredicateOccurrencePreservation {
+	PRESERVES_ALL_MATCHING_BASE_OCCURRENCES,
+	PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES
+};
+
+// Executable request-encoding envelope for a mapping. The current native and
+// controlled profiles can emit one positive REST query input only. They do not
+// declare compound conjunction, union/disjunction, or complement/negation
+// encodings; logical safety alone therefore cannot invent one.
+enum class CompiledPredicateEncodingCapability { SINGLE_POSITIVE_REST_QUERY_INPUT };
 
 // Immutable Connector Experience handoff for one conditional request input.
 // It carries no SQL text, DuckDB object, credential, mutable request, received
@@ -205,7 +276,15 @@ public:
 	const std::string &RemoteInputName() const;
 	const std::string &EncodedRemoteValue() const;
 	CompiledPredicateAccuracy Accuracy() const;
+	CompiledPredicateProofIdentity ProofIdentity() const;
 	CompiledPredicateEvidence Evidence() const;
+	CompiledPredicateBaseDomain BaseDomain() const;
+	CompiledPredicateOccurrencePreservation OccurrencePreservation() const;
+	CompiledPredicateEncodingCapability EncodingCapability() const;
+	std::uint64_t MaximumConditionalInputs() const;
+	bool SupportsCompoundConjunctionEncoding() const;
+	bool SupportsDisjunctionEncoding() const;
+	bool SupportsComplementEncoding() const;
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
@@ -215,7 +294,9 @@ private:
 	                         CompiledPredicateLiteral literal, std::string operation_name,
 	                         CompiledPredicateInputPlacement input_placement, std::string remote_input_name,
 	                         std::string encoded_remote_value, CompiledPredicateAccuracy accuracy,
-	                         CompiledPredicateEvidence evidence);
+	                         CompiledPredicateProofIdentity proof_identity, CompiledPredicateBaseDomain base_domain,
+	                         CompiledPredicateOccurrencePreservation occurrence_preservation,
+	                         CompiledPredicateEncodingCapability encoding_capability);
 
 	std::string column_name;
 	CompiledPredicateOperator predicate_operator;
@@ -225,7 +306,10 @@ private:
 	std::string remote_input_name;
 	std::string encoded_remote_value;
 	CompiledPredicateAccuracy accuracy;
-	CompiledPredicateEvidence evidence;
+	CompiledPredicateProofIdentity proof_identity;
+	CompiledPredicateBaseDomain base_domain;
+	CompiledPredicateOccurrencePreservation occurrence_preservation;
+	CompiledPredicateEncodingCapability encoding_capability;
 };
 
 // Connector policy only narrows host authority. Runtime intersects these facts
@@ -332,6 +416,12 @@ public:
 	const std::string &Name() const;
 	const std::vector<CompiledColumn> &Columns() const;
 	const std::vector<CompiledPredicateMapping> &PredicateMappings() const;
+	const std::vector<CompiledOperation> &Operations() const;
+	bool HasSingleOperation() const;
+
+	// Backward-compatible convenience for the installed and other singleton
+	// relations. Multi-operation consumers must inspect Operations(); this
+	// accessor fails instead of choosing an arbitrary eligible operation.
 	const CompiledOperation &Operation() const;
 	const CompiledAuthenticationPolicy &Authentication() const;
 	const CompiledResourceCeilings &ResourceCeilings() const;
@@ -348,11 +438,15 @@ private:
 	CompiledRelation(std::string name, std::vector<CompiledColumn> columns,
 	                 std::vector<CompiledPredicateMapping> predicate_mappings, CompiledOperation operation,
 	                 CompiledAuthenticationPolicy authentication, CompiledResourceCeilings resource_ceilings);
+	CompiledRelation(std::string name, std::vector<CompiledColumn> columns,
+	                 std::vector<CompiledPredicateMapping> predicate_mappings,
+	                 std::vector<CompiledOperation> operations, CompiledAuthenticationPolicy authentication,
+	                 CompiledResourceCeilings resource_ceilings);
 
 	std::string name;
 	std::vector<CompiledColumn> columns;
 	std::vector<CompiledPredicateMapping> predicate_mappings;
-	CompiledOperation operation;
+	std::vector<CompiledOperation> operations;
 	CompiledAuthenticationPolicy authentication;
 	CompiledResourceCeilings resource_ceilings;
 };

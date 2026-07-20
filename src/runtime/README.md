@@ -15,6 +15,20 @@ six-column schema, pagination target, and the optional closed
 and Link validation consume only that profile or an exact derived request;
 they do not inspect relational predicates or Connector declarations.
 
+Admission exhaustively validates the structured predicate-decision values and
+the DuckDB-owned execution envelope, but does not reclassify them. The installed
+GitHub `0.6.0` repository operation admits only Connector's validated Superset
+decision with its supported typed input. Exact remains a valid Semantics state
+for a controlled, non-installable proof operation and fails this installed
+profile rather than relabeling the GitHub source. Unsupported and Ambiguous
+decisions with no input produce the same unrestricted request. The typed
+conditional input is the sole predicate-derived request authority. Superset may
+retain either the selected predicate or the opaque complete DuckDB filter;
+fallback reasons admit only the retained-filter scopes that the Semantics
+decision service can emit. Unknown or contradictory structured values,
+unsupported operation/input pairs, and delegated projection, filtering,
+ordering, or bounds fail before authorization materialization or network I/O.
+
 ## Directory guide
 
 | Directory | Change it for |
@@ -38,6 +52,9 @@ in the package `sources.cmake` and `targets.cmake` files.
 
 - Admit the complete plan and authorization capability before materializing
   credentials or starting side effects.
+- Treat predicate category, accuracy, reason, remote/residual vocabulary, and
+  explanation as producer facts to validate, never as an alternate request
+  builder. Only the typed conditional input may select the admitted fixed field.
 - Keep credentials inside opaque, move-only capabilities bound to approved
   authenticators, placements, and hosts. Diagnostics must remain redacted.
 - Treat terminal failure as failure, never clean exhaustion.

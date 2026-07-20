@@ -33,6 +33,7 @@ void RequireDuckDbRelationalOwnership(const duckdb_api::ScanPlan &plan) {
 	            plan.ResidualPredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
 	            plan.ResidualOwner() == duckdb_api::RelationalOwner::DUCKDB &&
 	            plan.Ownership().filter == duckdb_api::RelationalOwner::DUCKDB &&
+	            plan.Ownership().projection == duckdb_api::RelationalOwner::DUCKDB &&
 	            plan.Ownership().ordering == duckdb_api::RelationalOwner::DUCKDB &&
 	            plan.Ownership().limit == duckdb_api::RelationalOwner::DUCKDB &&
 	            plan.Ownership().offset == duckdb_api::RelationalOwner::DUCKDB &&

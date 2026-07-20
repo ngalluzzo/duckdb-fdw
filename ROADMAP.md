@@ -168,13 +168,23 @@ limits; DuckDB-equivalence and property tests; strict schema and value
 conversion; residual ownership; deterministic explanation; and
 capability-profile fallbacks.
 
-Current unreleased evidence proves the first predicate-selective slice:
-`github.authenticated_repositories.visibility = 'private'` narrows every remote
-page while DuckDB retains the residual, and unsupported shapes fall back to the
-complete traversal. The general semantic-law, projection-closure, ordering,
-limit, and fallback evidence remains before the milestone can be released. That
-evidence may prove safe DuckDB ownership rather than adding a remote
-optimization.
+Current unreleased evidence completes the semantic-trust outcome without
+expanding remote authority. Query translates a bounded typed predicate tree,
+Relational Semantics classifies exact, superset, unsupported, ambiguous, and
+invalid cases, and Runtime consumes only the resulting typed operation/input.
+Actual-DuckDB oracles cover three-valued logic, duplicate-sensitive bags,
+projection closure, total and non-total ordering, local limits and offsets,
+prepared copies, conservative fallback, early close, and scan pruning. The sole
+installed optimization remains
+`github.authenticated_repositories.visibility = 'private'`; DuckDB owns every
+filter, projection, ordering, limit, and offset.
+
+The installed-path differential compares identical optimized and forced-local
+SQL. Connector-backed production-planner laws cover Exact, Ambiguous, and
+invalid states that intentionally cannot authorize the installed Runtime.
+Operation selection uses declared eligibility, specificity, priority, and a
+sole fallback, with tied winners and contradictory selectors failing before
+execution.
 
 ### `0.7.0` — reusable protocol product path
 

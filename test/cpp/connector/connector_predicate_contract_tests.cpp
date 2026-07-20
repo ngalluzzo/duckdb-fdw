@@ -27,7 +27,9 @@ static_assert(
     !std::is_constructible<duckdb_api::CompiledPredicateMapping, std::string, duckdb_api::CompiledPredicateOperator,
                            duckdb_api::CompiledPredicateLiteral, std::string,
                            duckdb_api::CompiledPredicateInputPlacement, std::string, std::string,
-                           duckdb_api::CompiledPredicateAccuracy, duckdb_api::CompiledPredicateEvidence>::value,
+                           duckdb_api::CompiledPredicateAccuracy, duckdb_api::CompiledPredicateProofIdentity,
+                           duckdb_api::CompiledPredicateBaseDomain, duckdb_api::CompiledPredicateOccurrencePreservation,
+                           duckdb_api::CompiledPredicateEncodingCapability>::value,
     "production callers must not construct predicate declarations");
 
 template <typename Callable>
@@ -50,11 +52,18 @@ Mapping(std::string column_name = "visibility",
             duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER,
         std::string input_name = "visibility", std::string encoded_value = "private",
         duckdb_api::CompiledPredicateAccuracy accuracy = duckdb_api::CompiledPredicateAccuracy::SUPERSET,
-        duckdb_api::CompiledPredicateEvidence evidence =
-            duckdb_api::CompiledPredicateEvidence::GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY) {
+        duckdb_api::CompiledPredicateProofIdentity proof_identity =
+            duckdb_api::CompiledPredicateProofIdentity::GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY,
+        duckdb_api::CompiledPredicateBaseDomain base_domain =
+            duckdb_api::CompiledPredicateBaseDomain::GITHUB_AUTHENTICATED_REPOSITORY_OCCURRENCES,
+        duckdb_api::CompiledPredicateOccurrencePreservation occurrence_preservation =
+            duckdb_api::CompiledPredicateOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES,
+        duckdb_api::CompiledPredicateEncodingCapability encoding_capability =
+            duckdb_api::CompiledPredicateEncodingCapability::SINGLE_POSITIVE_REST_QUERY_INPUT) {
 	return ConnectorCatalogTestAccess::PredicateMapping(std::move(column_name), predicate_operator, literal,
 	                                                    std::move(operation_name), placement, std::move(input_name),
-	                                                    std::move(encoded_value), accuracy, evidence);
+	                                                    std::move(encoded_value), accuracy, proof_identity, base_domain,
+	                                                    occurrence_preservation, encoding_capability);
 }
 
 duckdb_api::CompiledOperation
@@ -80,7 +89,8 @@ Operation(std::vector<duckdb_api::CompiledQueryParameter> extra_query = {},
 	                                        {"User-Agent", "duckdb-api/0.6.0"},
 	                                        {"X-GitHub-Api-Version", "2022-11-28"}}},
 	                                      duckdb_api::CompiledResponseSource::ROOT_ARRAY,
-	                                      "$"};
+	                                      "$",
+	                                      duckdb_api::CompiledOperationSelector()};
 }
 
 duckdb_api::CompiledRelation
@@ -108,8 +118,20 @@ void TestClosedValueAndExplanation() {
 	Require(mapping.RemoteInputName() == "visibility" && mapping.EncodedRemoteValue() == "private",
 	        "predicate remote input drifted");
 	Require(mapping.Accuracy() == duckdb_api::CompiledPredicateAccuracy::SUPERSET, "predicate accuracy drifted");
-	Require(mapping.Evidence() == duckdb_api::CompiledPredicateEvidence::GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY,
-	        "predicate evidence identity drifted");
+	Require(mapping.ProofIdentity() ==
+	                duckdb_api::CompiledPredicateProofIdentity::GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY &&
+	            mapping.Evidence() == mapping.ProofIdentity(),
+	        "predicate proof identity or compatibility accessor drifted");
+	Require(mapping.BaseDomain() ==
+	                duckdb_api::CompiledPredicateBaseDomain::GITHUB_AUTHENTICATED_REPOSITORY_OCCURRENCES &&
+	            mapping.OccurrencePreservation() ==
+	                duckdb_api::CompiledPredicateOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES,
+	        "predicate base-domain or occurrence guarantee drifted");
+	Require(mapping.EncodingCapability() ==
+	                duckdb_api::CompiledPredicateEncodingCapability::SINGLE_POSITIVE_REST_QUERY_INPUT &&
+	            mapping.MaximumConditionalInputs() == 1 && !mapping.SupportsCompoundConjunctionEncoding() &&
+	            !mapping.SupportsDisjunctionEncoding() && !mapping.SupportsComplementEncoding(),
+	        "predicate operation-scoped encoding capability drifted");
 
 	auto relation = Relation(Columns(), Operation(), {mapping});
 	Require(relation.PredicateMappings().size() == 1, "validated relation lost its predicate mapping");
@@ -119,8 +141,12 @@ void TestClosedValueAndExplanation() {
 	        "predicate explanation lost its typed shape");
 	Require(snapshot.find("input:rest_query:visibility=private,accuracy:superset,") != std::string::npos,
 	        "predicate explanation lost its remote input or conservative accuracy");
-	Require(snapshot.find("evidence:github_rest_2022_11_28_repository_visibility}") != std::string::npos,
-	        "predicate explanation lost its accepted evidence identity");
+	Require(snapshot.find("proof:github_rest_2022_11_28_repository_visibility,") != std::string::npos &&
+	            snapshot.find("base_domain:github_authenticated_repository_occurrences,") != std::string::npos &&
+	            snapshot.find("occurrences:all_matching_base_occurrences,") != std::string::npos &&
+	            snapshot.find("encoding:single_positive_rest_query_input[max_inputs:1,compound_and:unsupported,") !=
+	                std::string::npos,
+	        "predicate explanation lost its proof, domain, occurrence, or encoding facts");
 	for (const auto &prohibited : {"SELECT ", "secret_name=", "credential_value=", "Authorization=", "Link="}) {
 		Require(snapshot.find(prohibited) == std::string::npos,
 		        "predicate explanation contains prohibited state: " + std::string(prohibited));
@@ -145,12 +171,39 @@ void TestInvalidValuesAndBindings() {
 		        duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER, "visibility", "private",
 		        static_cast<duckdb_api::CompiledPredicateAccuracy>(255));
 	});
-	RequireInvalid("predicate mapping accepted an unknown evidence identity", []() {
+	RequireInvalid("predicate mapping accepted an unknown proof identity", []() {
 		Mapping("visibility", duckdb_api::CompiledPredicateOperator::EQUALS,
 		        duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE, "github_authenticated_repositories",
 		        duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER, "visibility", "private",
 		        duckdb_api::CompiledPredicateAccuracy::SUPERSET,
-		        static_cast<duckdb_api::CompiledPredicateEvidence>(255));
+		        static_cast<duckdb_api::CompiledPredicateProofIdentity>(255));
+	});
+	RequireInvalid("predicate mapping accepted an unknown base domain", []() {
+		Mapping("visibility", duckdb_api::CompiledPredicateOperator::EQUALS,
+		        duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE, "github_authenticated_repositories",
+		        duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER, "visibility", "private",
+		        duckdb_api::CompiledPredicateAccuracy::SUPERSET,
+		        duckdb_api::CompiledPredicateProofIdentity::GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY,
+		        static_cast<duckdb_api::CompiledPredicateBaseDomain>(255));
+	});
+	RequireInvalid("predicate mapping accepted an unknown occurrence guarantee", []() {
+		Mapping("visibility", duckdb_api::CompiledPredicateOperator::EQUALS,
+		        duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE, "github_authenticated_repositories",
+		        duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER, "visibility", "private",
+		        duckdb_api::CompiledPredicateAccuracy::SUPERSET,
+		        duckdb_api::CompiledPredicateProofIdentity::GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY,
+		        duckdb_api::CompiledPredicateBaseDomain::GITHUB_AUTHENTICATED_REPOSITORY_OCCURRENCES,
+		        static_cast<duckdb_api::CompiledPredicateOccurrencePreservation>(255));
+	});
+	RequireInvalid("predicate mapping accepted an unknown encoding capability", []() {
+		Mapping("visibility", duckdb_api::CompiledPredicateOperator::EQUALS,
+		        duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE, "github_authenticated_repositories",
+		        duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER, "visibility", "private",
+		        duckdb_api::CompiledPredicateAccuracy::SUPERSET,
+		        duckdb_api::CompiledPredicateProofIdentity::GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY,
+		        duckdb_api::CompiledPredicateBaseDomain::GITHUB_AUTHENTICATED_REPOSITORY_OCCURRENCES,
+		        duckdb_api::CompiledPredicateOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES,
+		        static_cast<duckdb_api::CompiledPredicateEncodingCapability>(255));
 	});
 	RequireInvalid("predicate mapping accepted encoded query injection", []() {
 		Mapping("visibility", duckdb_api::CompiledPredicateOperator::EQUALS,
@@ -201,43 +254,43 @@ void TestInvalidValuesAndBindings() {
 	               []() { Relation(Columns(), Operation(), {Mapping(), Mapping()}); });
 }
 
-void TestEvidenceIsBoundToCanonicalOperation() {
-	RequireInvalid("accepted evidence escaped its repository path", []() {
+void TestProofIsBoundToCanonicalOperation() {
+	RequireInvalid("accepted proof escaped its repository path", []() {
 		auto operation = Operation();
 		operation.request.path = "/other/repos";
 		Relation(Columns(), std::move(operation), {Mapping()});
 	});
-	RequireInvalid("accepted evidence escaped its HTTPS origin", []() {
+	RequireInvalid("accepted proof escaped its HTTPS origin", []() {
 		auto operation = Operation();
 		operation.request.origin.scheme = duckdb_api::CompiledUrlScheme::HTTP;
 		Relation(Columns(), std::move(operation), {Mapping()});
 	});
-	RequireInvalid("accepted evidence escaped its GitHub host", []() {
+	RequireInvalid("accepted proof escaped its GitHub host", []() {
 		auto operation = Operation();
 		operation.request.origin.host = duckdb_api::CompiledRestHost("uploads.github.com");
 		Relation(Columns(), std::move(operation), {Mapping()});
 	});
-	RequireInvalid("accepted evidence escaped its GitHub port", []() {
+	RequireInvalid("accepted proof escaped its GitHub port", []() {
 		auto operation = Operation();
 		operation.request.origin.port = 8443;
 		Relation(Columns(), std::move(operation), {Mapping()});
 	});
-	RequireInvalid("accepted evidence escaped its API version", []() {
+	RequireInvalid("accepted proof escaped its API version", []() {
 		auto operation = Operation();
 		operation.request.headers.back().value = "2023-01-01";
 		Relation(Columns(), std::move(operation), {Mapping()});
 	});
-	RequireInvalid("accepted evidence escaped its response source", []() {
+	RequireInvalid("accepted proof escaped its response source", []() {
 		auto operation = Operation();
 		operation.response_source = duckdb_api::CompiledResponseSource::JSON_PATH_MANY;
 		operation.records_extractor = "$.items";
 		Relation(Columns(), std::move(operation), {Mapping()});
 	});
-	RequireInvalid("accepted evidence escaped its Link pagination fields", []() {
+	RequireInvalid("accepted proof escaped its Link pagination fields", []() {
 		auto pagination = ConnectorCatalogTestAccess::SequentialLink("per_page", 100, "next_page", 1, 1, 32);
 		Relation(Columns(), Operation({}, std::move(pagination)), {Mapping()});
 	});
-	RequireInvalid("accepted evidence escaped required bearer policy",
+	RequireInvalid("accepted proof escaped required bearer policy",
 	               []() { Relation(Columns(), Operation(), {Mapping()}, ConnectorCatalogTestAccess::Anonymous()); });
 }
 
@@ -256,7 +309,7 @@ namespace duckdb_api_test {
 void RunConnectorPredicateContractTests() {
 	TestClosedValueAndExplanation();
 	TestInvalidValuesAndBindings();
-	TestEvidenceIsBoundToCanonicalOperation();
+	TestProofIsBoundToCanonicalOperation();
 	TestAbsentMappingIsExplicit();
 }
 

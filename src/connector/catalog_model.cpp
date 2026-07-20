@@ -1,11 +1,10 @@
 #include "duckdb_api/connector_catalog.hpp"
+#include "duckdb_api/internal/connector/operation_selector_declaration.hpp"
 #include "duckdb_api/internal/connector/pagination_declaration.hpp"
 #include "duckdb_api/internal/connector/predicate_declaration.hpp"
 #include "duckdb_api/internal/connector/resource_ceiling_declaration.hpp"
 
 #include <limits>
-#include <locale>
-#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -94,16 +93,6 @@ const char *OriginName(CompiledConnectorOrigin origin) {
 	throw std::logic_error("compiled connector contains an unknown origin");
 }
 
-const char *CardinalityName(CompiledOperationCardinality cardinality) {
-	switch (cardinality) {
-	case CompiledOperationCardinality::ZERO_TO_MANY:
-		return "zero_to_many";
-	case CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS:
-		return "exactly_one_on_success";
-	}
-	throw std::logic_error("compiled connector contains an unknown operation cardinality");
-}
-
 const char *ProtocolName(CompiledProtocol protocol) {
 	switch (protocol) {
 	case CompiledProtocol::REST:
@@ -128,48 +117,6 @@ const char *ReplaySafetyName(CompiledReplaySafety replay_safety) {
 	throw std::logic_error("compiled connector contains an unknown replay-safety declaration");
 }
 
-const char *ResponseSourceName(CompiledResponseSource source) {
-	switch (source) {
-	case CompiledResponseSource::JSON_PATH_MANY:
-		return "json_path_many";
-	case CompiledResponseSource::ROOT_ARRAY:
-		return "root_array";
-	case CompiledResponseSource::ROOT_OBJECT:
-		return "root_object";
-	}
-	throw std::logic_error("compiled connector contains an unknown response source");
-}
-
-const char *RequirementName(CompiledCredentialRequirement requirement) {
-	switch (requirement) {
-	case CompiledCredentialRequirement::NONE:
-		return "none";
-	case CompiledCredentialRequirement::REQUIRED:
-		return "required";
-	}
-	throw std::logic_error("compiled connector contains an unknown credential requirement");
-}
-
-const char *AuthenticatorName(CompiledAuthenticator authenticator) {
-	switch (authenticator) {
-	case CompiledAuthenticator::NONE:
-		return "none";
-	case CompiledAuthenticator::BEARER:
-		return "bearer";
-	}
-	throw std::logic_error("compiled connector contains an unknown authenticator");
-}
-
-const char *PlacementName(CompiledCredentialPlacement placement) {
-	switch (placement) {
-	case CompiledCredentialPlacement::NONE:
-		return "none";
-	case CompiledCredentialPlacement::AUTHORIZATION_HEADER:
-		return "Authorization";
-	}
-	throw std::logic_error("compiled connector contains an unknown credential placement");
-}
-
 const char *UrlSchemeName(CompiledUrlScheme scheme) {
 	switch (scheme) {
 	case CompiledUrlScheme::HTTP:
@@ -178,14 +125,6 @@ const char *UrlSchemeName(CompiledUrlScheme scheme) {
 		return "https";
 	}
 	throw std::logic_error("compiled connector contains an unknown URL scheme");
-}
-
-const char *EnabledState(bool enabled) {
-	return enabled ? "enabled" : "disabled";
-}
-
-const char *AuthorityState(bool enabled) {
-	return enabled ? "allowed" : "denied";
 }
 
 bool OriginsEqual(const CompiledRestOrigin &left, const CompiledRestOrigin &right) {
@@ -244,7 +183,7 @@ void ValidateHeaders(const std::vector<CompiledHttpHeader> &headers) {
 }
 
 void ValidateOperation(const CompiledOperation &operation) {
-	if (!IsIdentifier(operation.name) || !operation.fallback || operation.retry_enabled) {
+	if (!IsIdentifier(operation.name) || operation.retry_enabled) {
 		throw std::invalid_argument("compiled relation contains an unsupported base operation");
 	}
 	(void)ProtocolName(operation.protocol);
@@ -330,65 +269,6 @@ void ValidateNetworkPolicy(const CompiledNetworkPolicy &policy) {
 	}
 }
 
-void AppendSchema(std::ostringstream &result, const std::vector<CompiledColumn> &columns) {
-	for (std::size_t index = 0; index < columns.size(); index++) {
-		if (index > 0) {
-			result << ',';
-		}
-		const auto &column = columns[index];
-		result << column.name << ':' << column.logical_type << (column.nullable ? '?' : '!') << ':' << column.extractor;
-	}
-}
-
-void AppendQuery(std::ostringstream &result, const std::vector<CompiledQueryParameter> &query_parameters) {
-	for (std::size_t index = 0; index < query_parameters.size(); index++) {
-		if (index > 0) {
-			result << ',';
-		}
-		result << query_parameters[index].name << '=' << query_parameters[index].encoded_value;
-	}
-}
-
-void AppendHeaders(std::ostringstream &result, const std::vector<CompiledHttpHeader> &headers) {
-	for (std::size_t index = 0; index < headers.size(); index++) {
-		if (index > 0) {
-			result << ',';
-		}
-		result << headers[index].name << '=' << headers[index].value;
-	}
-}
-
-void AppendStrings(std::ostringstream &result, const std::vector<std::string> &values) {
-	for (std::size_t index = 0; index < values.size(); index++) {
-		if (index > 0) {
-			result << ',';
-		}
-		result << values[index];
-	}
-}
-
-void AppendOrigin(std::ostringstream &result, const CompiledRestOrigin &origin) {
-	result << "[scheme:" << UrlSchemeName(origin.scheme) << ",host:" << origin.host.Value() << ",port:" << origin.port
-	       << ']';
-}
-
-void AppendAuthentication(std::ostringstream &result, const CompiledAuthenticationPolicy &authentication) {
-	result << "requirement:" << RequirementName(authentication.Requirement()) << ",logical_credential:";
-	if (authentication.Requirement() == CompiledCredentialRequirement::NONE) {
-		result << "none";
-	} else {
-		result << authentication.LogicalCredential();
-	}
-	result << ",authenticator:" << AuthenticatorName(authentication.Authenticator()) << ",destination:";
-	const auto destination = authentication.Destination();
-	if (destination == nullptr) {
-		result << "none";
-	} else {
-		AppendOrigin(result, *destination);
-	}
-	result << ",placement:" << PlacementName(authentication.Placement());
-}
-
 } // namespace
 
 CompiledRestHost::CompiledRestHost(std::string value_p) : value(std::move(value_p)) {
@@ -460,11 +340,21 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
                                    std::vector<CompiledPredicateMapping> predicate_mappings_p,
                                    CompiledOperation operation_p, CompiledAuthenticationPolicy authentication_p,
                                    CompiledResourceCeilings resource_ceilings_p)
+    : CompiledRelation(std::move(name_p), std::move(columns_p), std::move(predicate_mappings_p),
+                       std::vector<CompiledOperation> {std::move(operation_p)}, std::move(authentication_p),
+                       std::move(resource_ceilings_p)) {
+}
+
+CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColumn> columns_p,
+                                   std::vector<CompiledPredicateMapping> predicate_mappings_p,
+                                   std::vector<CompiledOperation> operations_p,
+                                   CompiledAuthenticationPolicy authentication_p,
+                                   CompiledResourceCeilings resource_ceilings_p)
     : name(std::move(name_p)), columns(std::move(columns_p)), predicate_mappings(std::move(predicate_mappings_p)),
-      operation(std::move(operation_p)), authentication(std::move(authentication_p)),
+      operations(std::move(operations_p)), authentication(std::move(authentication_p)),
       resource_ceilings(std::move(resource_ceilings_p)) {
-	if (!IsIdentifier(name) || columns.empty()) {
-		throw std::invalid_argument("compiled relation contains incomplete identity or schema");
+	if (!IsIdentifier(name) || columns.empty() || operations.empty()) {
+		throw std::invalid_argument("compiled relation contains incomplete identity, schema, or operation catalog");
 	}
 	for (std::size_t index = 0; index < columns.size(); index++) {
 		ValidateColumn(columns[index]);
@@ -474,25 +364,44 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
 			}
 		}
 	}
-	ValidateOperation(operation);
-	internal::ValidatePredicateMappings(name, columns, operation, authentication, predicate_mappings);
-	ValidateResourceCeilings(operation, resource_ceilings);
-	if (operation.cardinality == CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS &&
-	    (resource_ceilings.MaxRecordsPerPage() != 1 || resource_ceilings.MaxRecordsPerScan() != 1)) {
-		throw std::invalid_argument("exactly-one relation must carry a distinct one-record ceiling");
+	std::size_t fallback_count = 0;
+	for (std::size_t index = 0; index < operations.size(); index++) {
+		ValidateOperation(operations[index]);
+		fallback_count += operations[index].fallback ? 1 : 0;
+		for (std::size_t other = index + 1; other < operations.size(); other++) {
+			if (operations[index].name == operations[other].name) {
+				throw std::invalid_argument("compiled relation contains a duplicate operation identifier");
+			}
+		}
+		ValidateResourceCeilings(operations[index], resource_ceilings);
+		if (operations[index].cardinality == CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS &&
+		    (resource_ceilings.MaxRecordsPerPage() != 1 || resource_ceilings.MaxRecordsPerScan() != 1)) {
+			throw std::invalid_argument("exactly-one relation must carry a distinct one-record ceiling");
+		}
+	}
+	if (fallback_count > 1) {
+		throw std::invalid_argument("compiled relation contains multiple fallback operations");
+	}
+	internal::ValidatePredicateMappings(name, columns, operations, authentication, predicate_mappings);
+	for (const auto &operation : operations) {
+		internal::ValidateOperationSelectorReferences(operation, predicate_mappings);
 	}
 
 	if (authentication.Requirement() == CompiledCredentialRequirement::NONE) {
-		if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY) {
-			throw std::invalid_argument("native anonymous relation has unsupported source cardinality");
+		for (const auto &operation : operations) {
+			if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY) {
+				throw std::invalid_argument("native anonymous relation has unsupported source cardinality");
+			}
 		}
 		return;
 	}
 	const auto destination = authentication.Destination();
-	if (destination == nullptr || !OriginsEqual(*destination, operation.request.origin) ||
-	    (operation.cardinality == CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS &&
-	     !operation.request.query_parameters.empty())) {
-		throw std::invalid_argument("authenticated relation contains inconsistent operation and credential policy");
+	for (const auto &operation : operations) {
+		if (destination == nullptr || !OriginsEqual(*destination, operation.request.origin) ||
+		    (operation.cardinality == CompiledOperationCardinality::EXACTLY_ONE_ON_SUCCESS &&
+		     !operation.request.query_parameters.empty())) {
+			throw std::invalid_argument("authenticated relation contains inconsistent operation and credential policy");
+		}
 	}
 }
 
@@ -508,8 +417,19 @@ const std::vector<CompiledPredicateMapping> &CompiledRelation::PredicateMappings
 	return predicate_mappings;
 }
 
+const std::vector<CompiledOperation> &CompiledRelation::Operations() const {
+	return operations;
+}
+
+bool CompiledRelation::HasSingleOperation() const {
+	return operations.size() == 1;
+}
+
 const CompiledOperation &CompiledRelation::Operation() const {
-	return operation;
+	if (!HasSingleOperation()) {
+		throw std::logic_error("compiled relation does not contain exactly one operation");
+	}
+	return operations[0];
 }
 
 const CompiledAuthenticationPolicy &CompiledRelation::Authentication() const {
@@ -518,32 +438,6 @@ const CompiledAuthenticationPolicy &CompiledRelation::Authentication() const {
 
 const CompiledResourceCeilings &CompiledRelation::ResourceCeilings() const {
 	return resource_ceilings;
-}
-
-std::string CompiledRelation::Snapshot() const {
-	std::ostringstream result;
-	result.imbue(std::locale::classic());
-	result << "relation=" << name << ";schema=";
-	AppendSchema(result, columns);
-	result << ";predicate_mappings=[";
-	internal::AppendPredicateMappings(result, predicate_mappings);
-	result << "];operation=" << operation.name << ':' << (operation.fallback ? "fallback" : "selected") << ':'
-	       << CardinalityName(operation.cardinality) << ':' << ProtocolName(operation.protocol) << ':'
-	       << MethodName(operation.method) << ':' << ReplaySafetyName(operation.replay_safety) << ";request=origin:";
-	AppendOrigin(result, operation.request.origin);
-	result << ",path:" << operation.request.path << ",query:[";
-	AppendQuery(result, operation.request.query_parameters);
-	result << "],headers:[";
-	AppendHeaders(result, operation.request.headers);
-	result << "];response=source:" << ResponseSourceName(operation.response_source)
-	       << ",records:" << operation.records_extractor << ";features=retry:" << EnabledState(operation.retry_enabled)
-	       << ",pagination:";
-	internal::AppendPagination(result, operation.pagination);
-	result << ";authentication=";
-	AppendAuthentication(result, authentication);
-	result << ";ceilings=";
-	internal::AppendResourceCeilings(result, resource_ceilings);
-	return result.str();
 }
 
 CompiledConnector::CompiledConnector(CompiledConnectorOrigin origin_p, std::string connector_name_p,
@@ -562,10 +456,12 @@ CompiledConnector::CompiledConnector(CompiledConnectorOrigin origin_p, std::stri
 				throw std::invalid_argument("compiled connector contains a duplicate relation identifier");
 			}
 		}
-		const auto &origin_value = relations[index].Operation().request.origin;
-		if (!Contains(network_policy.allowed_schemes, UrlSchemeName(origin_value.scheme)) ||
-		    !Contains(network_policy.allowed_hosts, origin_value.host.Value())) {
-			throw std::invalid_argument("compiled relation destination is outside connector network policy");
+		for (const auto &operation : relations[index].Operations()) {
+			const auto &origin_value = operation.request.origin;
+			if (!Contains(network_policy.allowed_schemes, UrlSchemeName(origin_value.scheme)) ||
+			    !Contains(network_policy.allowed_hosts, origin_value.host.Value())) {
+				throw std::invalid_argument("compiled relation destination is outside connector network policy");
+			}
 		}
 		const auto credential_destination = relations[index].Authentication().Destination();
 		if (credential_destination != nullptr &&
@@ -608,29 +504,6 @@ const CompiledRelation *CompiledConnector::FindRelation(const std::string &relat
 
 const CompiledNetworkPolicy &CompiledConnector::NetworkPolicy() const {
 	return network_policy;
-}
-
-std::string CompiledConnector::Snapshot() const {
-	std::ostringstream result;
-	result.imbue(std::locale::classic());
-	result << "origin=" << OriginName(origin) << ";connector=" << connector_name << ";version=" << version
-	       << ";network=schemes:[";
-	AppendStrings(result, network_policy.allowed_schemes);
-	result << "],hosts:[";
-	AppendStrings(result, network_policy.allowed_hosts);
-	result << "],redirects:" << AuthorityState(network_policy.redirects_enabled)
-	       << ",private:" << AuthorityState(network_policy.private_addresses_enabled)
-	       << ",link_local:" << AuthorityState(network_policy.link_local_addresses_enabled)
-	       << ",loopback:" << AuthorityState(network_policy.loopback_addresses_enabled)
-	       << ",max_response_bytes:" << network_policy.max_response_bytes << ";relations=[";
-	for (std::size_t index = 0; index < relations.size(); index++) {
-		if (index > 0) {
-			result << ',';
-		}
-		result << '{' << relations[index].Snapshot() << '}';
-	}
-	result << ']';
-	return result.str();
 }
 
 } // namespace duckdb_api

@@ -36,7 +36,10 @@ const char REPOSITORY_SOURCE_SNAPSHOT[] =
     "visibility:VARCHAR!:$.visibility;"
     "predicate_mappings=[{column:visibility,operator:equals,literal:varchar:private,"
     "operation:github_authenticated_repositories,input:rest_query:visibility=private,accuracy:superset,"
-    "evidence:github_rest_2022_11_28_repository_visibility}];"
+    "proof:github_rest_2022_11_28_repository_visibility,"
+    "base_domain:github_authenticated_repository_occurrences,occurrences:all_matching_base_occurrences,"
+    "encoding:single_positive_rest_query_input[max_inputs:1,compound_and:unsupported,or:unsupported,"
+    "not:unsupported]}];"
     "operation=github_authenticated_repositories:fallback:zero_to_many:REST:GET:replay_safe;"
     "request=origin:[scheme:https,host:api.github.com,port:443],path:/user/repos,"
     "query:[per_page=100,page=1],headers:[Accept=application/vnd.github+json,User-Agent=duckdb-api/0.6.0,"
@@ -60,7 +63,9 @@ class ScanPlanFixtureBuilder {
 public:
 	static duckdb_api::ScanPlan Anonymous();
 	static duckdb_api::ScanPlan Authenticated(const std::string &secret_name);
-	static duckdb_api::ScanPlan Repository(const std::string &secret_name, bool selective, bool complete_residual);
+	static duckdb_api::ScanPlan Repository(const std::string &secret_name,
+	                                       duckdb_api::PredicateDecisionCategory predicate_category,
+	                                       bool complete_residual);
 	static duckdb_api::ScanPlan GenericPagination(const std::string &secret_name);
 
 private:
@@ -85,8 +90,11 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Common(std::string connector, std::
 	plan.residual_predicate = duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN;
 	plan.residual_owner = duckdb_api::RelationalOwner::DUCKDB;
 	plan.conditional_input = duckdb_api::PlannedConditionalInput::NONE;
+	plan.predicate_category = duckdb_api::PredicateDecisionCategory::UNSUPPORTED;
+	plan.predicate_reason = duckdb_api::PredicateDecisionReason::NO_REMOTE_CANDIDATE;
 	plan.ownership = {duckdb_api::RelationalOwner::DUCKDB, duckdb_api::RelationalOwner::DUCKDB,
-	                  duckdb_api::RelationalOwner::DUCKDB, duckdb_api::RelationalOwner::DUCKDB};
+	                  duckdb_api::RelationalOwner::DUCKDB, duckdb_api::RelationalOwner::DUCKDB,
+	                  duckdb_api::RelationalOwner::DUCKDB};
 	plan.remote_ordering = duckdb_api::RelationalDelegation::NONE;
 	plan.runtime_ordering = duckdb_api::RelationalDelegation::NONE;
 	plan.remote_limit = duckdb_api::RelationalDelegation::NONE;
@@ -207,7 +215,8 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Authenticated(const std::string &se
 	return plan;
 }
 
-duckdb_api::ScanPlan ScanPlanFixtureBuilder::Repository(const std::string &secret_name, bool selective,
+duckdb_api::ScanPlan ScanPlanFixtureBuilder::Repository(const std::string &secret_name,
+                                                        duckdb_api::PredicateDecisionCategory predicate_category,
                                                         bool complete_residual) {
 	auto plan = Common("github", "0.6.0", "authenticated_repositories", REPOSITORY_SOURCE_SNAPSHOT);
 	plan.domain = duckdb_api::BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS;
@@ -232,14 +241,19 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Repository(const std::string &secre
 	                       {"visibility", "VARCHAR", false, "$.visibility"}};
 	EnablePagination(plan, "per_page", 100, "page", 32, 8 * 1024 * 1024, 64 * 1024 * 1024, 100, 3200, 512);
 	RequireBearer(plan, secret_name);
-	if (selective) {
+	if (predicate_category == duckdb_api::PredicateDecisionCategory::SUPERSET) {
 		plan.remote_predicate = duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE;
 		plan.remote_accuracy = duckdb_api::RemotePredicateAccuracy::SUPERSET;
 		plan.conditional_input = duckdb_api::PlannedConditionalInput::VISIBILITY_PRIVATE;
+		plan.predicate_category = predicate_category;
+		plan.predicate_reason = duckdb_api::PredicateDecisionReason::SELECTED_SUPERSET_MAPPING;
+	} else if (predicate_category == duckdb_api::PredicateDecisionCategory::AMBIGUOUS) {
+		plan.predicate_category = predicate_category;
+		plan.predicate_reason = duckdb_api::PredicateDecisionReason::AMBIGUOUS_CONDITIONAL_INPUT;
 	}
 	if (complete_residual) {
 		plan.residual_predicate = duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER;
-	} else if (selective) {
+	} else if (predicate_category == duckdb_api::PredicateDecisionCategory::SUPERSET) {
 		plan.residual_predicate = duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE;
 	}
 	return plan;
@@ -280,19 +294,28 @@ duckdb_api::ScanPlan BuildValidPaginatedPlanFixture(const std::string &exact_log
 }
 
 duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::string &exact_logical_secret_name) {
-	return ScanPlanFixtureBuilder::Repository(exact_logical_secret_name, false, false);
+	return ScanPlanFixtureBuilder::Repository(exact_logical_secret_name,
+	                                          duckdb_api::PredicateDecisionCategory::UNSUPPORTED, false);
 }
 
 duckdb_api::ScanPlan BuildVisibilityPrivatePlanFixture(const std::string &exact_logical_secret_name) {
-	return ScanPlanFixtureBuilder::Repository(exact_logical_secret_name, true, false);
+	return ScanPlanFixtureBuilder::Repository(exact_logical_secret_name,
+	                                          duckdb_api::PredicateDecisionCategory::SUPERSET, false);
 }
 
 duckdb_api::ScanPlan BuildVisibilityPrivateCompleteResidualPlanFixture(const std::string &exact_logical_secret_name) {
-	return ScanPlanFixtureBuilder::Repository(exact_logical_secret_name, true, true);
+	return ScanPlanFixtureBuilder::Repository(exact_logical_secret_name,
+	                                          duckdb_api::PredicateDecisionCategory::SUPERSET, true);
 }
 
 duckdb_api::ScanPlan BuildCompleteResidualFallbackPlanFixture(const std::string &exact_logical_secret_name) {
-	return ScanPlanFixtureBuilder::Repository(exact_logical_secret_name, false, true);
+	return ScanPlanFixtureBuilder::Repository(exact_logical_secret_name,
+	                                          duckdb_api::PredicateDecisionCategory::UNSUPPORTED, true);
+}
+
+duckdb_api::ScanPlan BuildAmbiguousPredicateFallbackPlanFixture(const std::string &exact_logical_secret_name) {
+	return ScanPlanFixtureBuilder::Repository(exact_logical_secret_name,
+	                                          duckdb_api::PredicateDecisionCategory::AMBIGUOUS, true);
 }
 
 } // namespace duckdb_api_test

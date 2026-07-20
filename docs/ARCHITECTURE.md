@@ -4,10 +4,11 @@
 > semantic pushdown, bounded streaming execution, pagination, enrichment,
 > shared auth and transport infrastructure, and an escape hatch for custom code.
 
-**Status:** Design proposal, revision 0.6; predicate-selective repository scans
-are accepted by RFC 0008, the bounded repository-traversal native profile by
-RFC 0007, its authenticated capability base by RFC 0006, its live REST base by
-RFC 0005, and the distribution and native v1 boundary by RFC 0009.
+**Status:** Design proposal, revision 0.6; conservative relational composition
+is accepted by RFC 0010, predicate-selective repository scans by RFC 0008, the
+bounded repository-traversal native profile by RFC 0007, its authenticated
+capability base by RFC 0006, its live REST base by RFC 0005, and the
+distribution and native v1 boundary by RFC 0009.
 
 **Integration profiles:** The native C++ table-function product selected for
 v1, a possible future portable C Extension API implementation, and an optional
@@ -52,11 +53,12 @@ The current unreleased `0.6.0` source uses a native C++ table function to query
 one anonymous fixed HTTPS relation, one fixed authenticated identity, and one
 bounded sequential authenticated repository relation on one exact DuckDB and
 platform-dependency cell. It adds one safe predicate-selective path to the
-published `0.5.0` traversal while DuckDB remains the residual owner. RFC 0009
-selects that permanent native C++ table-function lineage for v1 on an exact
-tested compatibility matrix. A Rust/stable-C-API implementation and a custom
-attached catalog or logical-plan optimizer are optional future profiles, not
-v1 requirements or public ABI commitments.
+published `0.5.0` traversal and proves that projections, Boolean predicates,
+ordering, limits, and offsets compose conservatively while DuckDB remains the
+semantic owner. RFC 0009 selects that permanent native C++ table-function
+lineage for v1 on an exact tested compatibility matrix. A Rust/stable-C-API
+implementation and a custom attached catalog or logical-plan optimizer are
+optional future profiles, not v1 requirements or public ABI commitments.
 
 ---
 
@@ -283,16 +285,31 @@ is the duplicate-preserving bag across every accepted page of a mutable source.
 It promises neither remote ordering nor snapshot consistency; the example's
 local `ORDER BY` belongs to DuckDB.
 
-The one supported selective predicate is
+The one installed selective predicate is
 `authenticated_repositories.visibility = 'private'`. The pinned DuckDB
-complex-filter callback offers only that exact structured equality to
-Relational Semantics and leaves the expression in DuckDB. Connector's reviewed
-same-field mapping selects `visibility=private`; the immutable plan records
-`Superset` accuracy and DuckDB as the sole residual owner. Runtime appends the
-typed field to every reconstructed page request. Unsupported shapes, other
-values, `NULL`, missing capabilities, or missing mapping evidence use the
-complete traversal and DuckDB filtering. Query does not parse SQL text,
-Runtime does not interpret predicates, and ordinary planning remains offline.
+complex-filter callback translates exact typed `BIGINT`, `VARCHAR`, and
+`BOOLEAN` equalities plus exposed `AND`, `OR`, and `NOT` structure into a
+bounded protocol-neutral candidate. It leaves every offered expression in
+DuckDB. Unsupported structure retains an opaque position; exceeding the shared
+depth or node budget collapses the complete candidate instead of selecting a
+partial branch.
+
+Relational Semantics—not the adapter—matches Connector's reviewed same-field
+mapping and may select the typed `visibility=private` input. The immutable plan
+records `Superset` accuracy and DuckDB as the sole filter and residual owner.
+For a conjunction, an unsupported child contributes remote `TRUE`, so the
+supported conjunct may still narrow traversal. `OR`, `NOT`, more than one
+incompatible safe input, other values, `NULL`, missing capabilities, or absent
+mapping evidence use the complete traversal and DuckDB filtering. Controlled,
+non-installable Connector fixtures additionally prove `Exact`, explicit
+predicate ambiguity, and deterministic operation selection through the same
+production decision service. Each operation publishes immutable required,
+alternative, forbidden, priority, and fallback facts. Semantics derives
+candidate-scoped mapped inputs, ranks eligible non-fallback operations by
+specificity and then priority, consults the sole fallback only when none is
+eligible, and fails a top-rank tie instead of using declaration order. Query
+does not parse SQL text, Runtime does not interpret classifications, and
+ordinary planning remains offline.
 
 Pagination is pull-driven and sequential. Remote Runtime retains only bounded
 physical `Link` values from the terminal response header section, recognizes
@@ -339,17 +356,19 @@ unsupported capability but does not rebuild the plan or reinterpret relational
 ownership. Query remains the only DuckDB-aware layer and translates batches
 and structured errors at the adapter edge.
 
-The native capability profile exposes no projection, generic filter, ordering,
-limit, offset, or progress delegation. It exposes only the retained structured
-filter advisory described above. The adapter requests each relation's complete
-fixed schema, leaves ordering and bounds undelegated, and assigns every filter,
-ordering, limit, and offset to DuckDB. The baseline records `TRUE` remotely;
-the exact selective query records `visibility_equals_private` remotely and as
-the DuckDB-owned residual. Query carries the remote candidate separately from
-the complete retained-predicate scope: unsupported filters and selective
-conjunctions use the opaque `complete_duckdb_filter` residual marker while the
-original DuckDB expressions stay outside the plan. Plans grant no remote or
-runtime limit. Ordinary bind,
+The native capability profile exposes no projection, generic filter execution,
+ordering, limit, offset, or progress delegation. It exposes only the retained
+structured-filter advisory described above. The adapter requests each
+relation's complete fixed schema, leaves ordering and bounds undelegated, and
+assigns every filter, projection, ordering, limit, and offset to DuckDB. The
+baseline records `TRUE` remotely; a selected visibility query records
+`visibility_equals_private` remotely and the complete retained filter as
+DuckDB-owned. Query carries the typed remote candidate separately from the
+retained-predicate scope. The plan records one of `Exact`, `Superset`,
+`Unsupported`, or `Ambiguous` with a structured reason; an invalid declaration
+or operation decision produces no plan. Exactness never transfers residual
+ownership in this profile. Plans grant no remote or runtime ordering, limit, or
+offset. Ordinary bind,
 `DESCRIBE`, `EXPLAIN`, `PREPARE`, and planning read only immutable metadata and
 acquire no network or credential authority.
 

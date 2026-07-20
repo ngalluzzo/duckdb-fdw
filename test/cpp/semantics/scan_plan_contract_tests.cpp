@@ -91,6 +91,7 @@ void RequireDuckDbRelationalOwnership(const duckdb_api::ScanPlan &plan) {
 	            plan.ResidualOwner() == duckdb_api::RelationalOwner::DUCKDB,
 	        "plan changed the conservative remote/residual predicate contract");
 	Require(plan.Ownership().filter == duckdb_api::RelationalOwner::DUCKDB &&
+	            plan.Ownership().projection == duckdb_api::RelationalOwner::DUCKDB &&
 	            plan.Ownership().ordering == duckdb_api::RelationalOwner::DUCKDB &&
 	            plan.Ownership().limit == duckdb_api::RelationalOwner::DUCKDB &&
 	            plan.Ownership().offset == duckdb_api::RelationalOwner::DUCKDB,

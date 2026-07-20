@@ -27,6 +27,14 @@ public:
 		                                      max_pages_per_scan);
 	}
 
+	static duckdb_api::CompiledOperationSelector OperationSelector(std::vector<std::string> required_inputs,
+	                                                               std::vector<std::vector<std::string>> any_input_sets,
+	                                                               std::vector<std::string> forbidden_inputs,
+	                                                               std::int32_t priority = 0) {
+		return duckdb_api::CompiledOperationSelector(std::move(required_inputs), std::move(any_input_sets),
+		                                             std::move(forbidden_inputs), priority);
+	}
+
 	static duckdb_api::CompiledResourceCeilings UnpaginatedResources(std::uint64_t max_records,
 	                                                                 std::uint64_t max_extracted_string_bytes) {
 		return duckdb_api::CompiledResourceCeilings(max_records, max_extracted_string_bytes);
@@ -65,10 +73,14 @@ public:
 	                 duckdb_api::CompiledPredicateLiteral literal, std::string operation_name,
 	                 duckdb_api::CompiledPredicateInputPlacement input_placement, std::string remote_input_name,
 	                 std::string encoded_remote_value, duckdb_api::CompiledPredicateAccuracy accuracy,
-	                 duckdb_api::CompiledPredicateEvidence evidence) {
+	                 duckdb_api::CompiledPredicateProofIdentity proof_identity,
+	                 duckdb_api::CompiledPredicateBaseDomain base_domain,
+	                 duckdb_api::CompiledPredicateOccurrencePreservation occurrence_preservation,
+	                 duckdb_api::CompiledPredicateEncodingCapability encoding_capability) {
 		return duckdb_api::CompiledPredicateMapping(
 		    std::move(column_name), predicate_operator, literal, std::move(operation_name), input_placement,
-		    std::move(remote_input_name), std::move(encoded_remote_value), accuracy, evidence);
+		    std::move(remote_input_name), std::move(encoded_remote_value), accuracy, proof_identity, base_domain,
+		    occurrence_preservation, encoding_capability);
 	}
 
 	static duckdb_api::CompiledRelation
@@ -78,6 +90,16 @@ public:
 	         std::vector<duckdb_api::CompiledPredicateMapping> predicate_mappings = {}) {
 		return duckdb_api::CompiledRelation(std::move(name), std::move(columns), std::move(predicate_mappings),
 		                                    std::move(operation), std::move(authentication), resource_ceilings);
+	}
+
+	static duckdb_api::CompiledRelation
+	Relation(std::string name, std::vector<duckdb_api::CompiledColumn> columns,
+	         std::vector<duckdb_api::CompiledOperation> operations,
+	         duckdb_api::CompiledAuthenticationPolicy authentication,
+	         duckdb_api::CompiledResourceCeilings resource_ceilings,
+	         std::vector<duckdb_api::CompiledPredicateMapping> predicate_mappings = {}) {
+		return duckdb_api::CompiledRelation(std::move(name), std::move(columns), std::move(predicate_mappings),
+		                                    std::move(operations), std::move(authentication), resource_ceilings);
 	}
 
 	static duckdb_api::CompiledConnector Catalog(duckdb_api::CompiledConnectorOrigin origin, std::string connector_name,

@@ -93,7 +93,7 @@ inline BaseDomain PlanBaseDomain(CompiledResponseSource source, CompiledPaginati
 	case CompiledResponseSource::JSON_PATH_MANY:
 		return BaseDomain::JSON_PATH_RECORDS;
 	case CompiledResponseSource::ROOT_ARRAY:
-		throw std::logic_error("root-array response requires an explicit supported pagination declaration");
+		return BaseDomain::ROOT_ARRAY_RECORDS;
 	case CompiledResponseSource::ROOT_OBJECT:
 		return BaseDomain::SUCCESSFUL_ROOT_OBJECT;
 	}
@@ -134,7 +134,15 @@ inline PlannedContinuationTargetScope PlanTargetScope(CompiledContinuationTarget
 
 std::uint64_t BoundedProduct(std::uint64_t left, std::uint64_t right, std::uint64_t ceiling, const char *field);
 
-const CompiledRelation &ValidateAndSelectRelation(const CompiledConnector &connector, const ScanRequest &request);
+// Complete, side-effect-free selection result. The operation pointer is always
+// one member of relation->Operations(); plural relations never reach plan
+// construction unless one operation has been selected unambiguously.
+struct SelectedRelationOperation {
+	const CompiledRelation *relation;
+	const CompiledOperation *operation;
+};
+
+SelectedRelationOperation ValidateAndSelectOperation(const CompiledConnector &connector, const ScanRequest &request);
 
 } // namespace scan_planner_internal
 } // namespace duckdb_api

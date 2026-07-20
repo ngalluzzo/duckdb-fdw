@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <string>
 
+void RunPredicateCompositionLawTests();
+
 namespace {
 
 using duckdb_api_test::BuildAnonymousScanRequest;
@@ -24,6 +26,17 @@ void RequireRequestRejected(const duckdb_api::CompiledConnector &connector, cons
 	RequireThrows<std::logic_error>(
 	    [&connector, &request]() { (void)duckdb_api::BuildConservativeScanPlan(connector, request); },
 	    "planner accepted " + counterexample);
+}
+
+void RequirePlanningErrorCode(const duckdb_api::CompiledConnector &connector, const duckdb_api::ScanRequest &request,
+                              duckdb_api::PlanningErrorCode code, const std::string &counterexample) {
+	bool rejected = false;
+	try {
+		(void)duckdb_api::BuildConservativeScanPlan(connector, request);
+	} catch (const duckdb_api::PlanningError &error) {
+		rejected = error.Code() == code;
+	}
+	Require(rejected, "planner did not reject " + counterexample + " with the required structured code");
 }
 
 void RequireBudgetFieldBounded(const duckdb_api::ResourceBudgets &baseline,
@@ -53,13 +66,77 @@ void TestExactSelectionHasNoFallback() {
 
 	auto missing = BuildAnonymousScanRequest(connector, anonymous.Name());
 	missing.relation_name = "missing_relation";
-	RequireRequestRejected(connector, missing, "an unknown relation with an available fallback operation");
+	RequirePlanningErrorCode(connector, missing, duckdb_api::PlanningErrorCode::INVALID_CONTRACT,
+	                         "an unknown relation with an available fallback operation");
 	auto case_varied = BuildAuthenticatedScanRequest(connector, authenticated.Name(), "selected_secret");
 	case_varied.relation_name[0] = case_varied.relation_name[0] == 'f' ? 'F' : 'f';
-	RequireRequestRejected(connector, case_varied, "a case-varied relation identifier");
+	RequirePlanningErrorCode(connector, case_varied, duckdb_api::PlanningErrorCode::INVALID_CONTRACT,
+	                         "a case-varied relation identifier");
 	auto wrong_connector = BuildAnonymousScanRequest(connector, anonymous.Name());
 	wrong_connector.connector_name = "other_connector";
-	RequireRequestRejected(connector, wrong_connector, "a connector/request identity mismatch");
+	RequirePlanningErrorCode(connector, wrong_connector, duckdb_api::PlanningErrorCode::INVALID_CONTRACT,
+	                         "a connector/request identity mismatch");
+}
+
+void TestEqualRankedOperationSelectionFailsBeforePlanConstruction() {
+	const auto connector = duckdb_api_test::BuildEqualRankedOperationsCatalogFixture();
+	const auto &relation = FindRelation(connector, duckdb_api_test::PREDICATE_EQUAL_RANKED_OPERATIONS_RELATION);
+	Require(!relation.HasSingleOperation() && relation.Operations().size() == 2,
+	        "equal-ranked operation fixture lost its plural selection problem");
+	auto request =
+	    duckdb_api::BuildConservativeScanRequest(connector, relation.Name(), duckdb_api::LogicalSecretReference());
+	request.requested_predicate = duckdb_api::RequestedPredicate::Comparison(
+	    1, duckdb_api::RequestedPredicateValueKind::VARCHAR, duckdb_api::RequestedPredicateComparisonOperator::EQUALS,
+	    duckdb_api::RequestedPredicateValue::Varchar("private"));
+	request.retained_predicate_scope = duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE;
+	request.capabilities.selective_predicate = true;
+	request.capabilities.retains_predicate = true;
+	RequirePlanningErrorCode(connector, request, duckdb_api::PlanningErrorCode::OPERATION_SELECTION_FAILED,
+	                         "equal-ranked eligible base operations");
+}
+
+duckdb_api::ScanRequest BuildVisibilityCandidateRequest(const duckdb_api::CompiledConnector &connector,
+                                                        const duckdb_api::CompiledRelation &relation) {
+	auto request =
+	    duckdb_api::BuildConservativeScanRequest(connector, relation.Name(), duckdb_api::LogicalSecretReference());
+	request.requested_predicate = duckdb_api::RequestedPredicate::Comparison(
+	    1, duckdb_api::RequestedPredicateValueKind::VARCHAR, duckdb_api::RequestedPredicateComparisonOperator::EQUALS,
+	    duckdb_api::RequestedPredicateValue::Varchar("private"));
+	request.retained_predicate_scope = duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE;
+	request.capabilities.selective_predicate = true;
+	request.capabilities.retains_predicate = true;
+	return request;
+}
+
+void TestCandidateSpecificOperationSelectionAndFallback() {
+	const auto winner_connector = duckdb_api_test::BuildUniqueWinnerOperationsCatalogFixture();
+	const auto &winner_relation = FindRelation(winner_connector, duckdb_api_test::OPERATION_UNIQUE_WINNER_RELATION);
+	const auto winner = duckdb_api::BuildConservativeScanPlan(
+	    winner_connector, BuildVisibilityCandidateRequest(winner_connector, winner_relation));
+	Require(winner.Operation().operation_name == "controlled_exact_repositories" &&
+	            winner.PredicateCategory() == duckdb_api::PredicateDecisionCategory::EXACT &&
+	            winner.ConditionalInput() == duckdb_api::PlannedConditionalInput::VISIBILITY_PRIVATE,
+	        "candidate-specific visibility binding did not select and classify the unique non-fallback operation");
+
+	const auto fallback_connector = duckdb_api_test::BuildFallbackOperationsCatalogFixture();
+	const auto &fallback_relation = FindRelation(fallback_connector, duckdb_api_test::OPERATION_FALLBACK_RELATION);
+	const auto fallback = duckdb_api::BuildConservativeScanPlan(
+	    fallback_connector, duckdb_api::BuildConservativeScanRequest(fallback_connector, fallback_relation.Name(),
+	                                                                 duckdb_api::LogicalSecretReference()));
+	Require(fallback.Operation().operation_name == "controlled_selector_fallback_repositories" &&
+	            fallback.PredicateCategory() == duckdb_api::PredicateDecisionCategory::UNSUPPORTED &&
+	            fallback.PredicateReason() == duckdb_api::PredicateDecisionReason::NO_REMOTE_CANDIDATE &&
+	            fallback.ConditionalInput() == duckdb_api::PlannedConditionalInput::NONE,
+	        "ineligible non-fallback operation did not yield the sole unrestricted fallback");
+
+	auto unavailable_request = BuildVisibilityCandidateRequest(fallback_connector, fallback_relation);
+	unavailable_request.capabilities.retains_predicate = false;
+	const auto unavailable = duckdb_api::BuildConservativeScanPlan(fallback_connector, unavailable_request);
+	Require(unavailable.Operation().operation_name == "controlled_selector_fallback_repositories" &&
+	            unavailable.PredicateCategory() == duckdb_api::PredicateDecisionCategory::UNSUPPORTED &&
+	            unavailable.PredicateReason() == duckdb_api::PredicateDecisionReason::CAPABILITY_UNAVAILABLE &&
+	            unavailable.ConditionalInput() == duckdb_api::PlannedConditionalInput::NONE,
+	        "unavailable predicate-retention capability supplied a selector binding or bypassed the fallback");
 }
 
 void TestReferenceRequirementMatrix() {
@@ -315,7 +392,10 @@ int main() {
 	try {
 		RunRelationalPredicateTests();
 		RunPredicatePlannerTests();
+		RunPredicateCompositionLawTests();
 		TestExactSelectionHasNoFallback();
+		TestCandidateSpecificOperationSelectionAndFallback();
+		TestEqualRankedOperationSelectionFailsBeforePlanConstruction();
 		TestReferenceRequirementMatrix();
 		TestSecretManagerCapabilityIsRequirementScoped();
 		TestUnavailableRelationalCounterexamples();

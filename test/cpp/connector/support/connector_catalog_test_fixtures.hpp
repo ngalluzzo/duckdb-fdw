@@ -13,6 +13,11 @@ extern const char DISTINCT_SCHEMA_ANONYMOUS_RELATION[];
 extern const char DISTINCT_SCHEMA_AUTHENTICATED_RELATION[];
 extern const char PAGINATION_DECOY_RELATION[];
 extern const char PAGINATION_LINK_RELATION[];
+extern const char PREDICATE_EXACT_RELATION[];
+extern const char PREDICATE_EQUAL_RANKED_OPERATIONS_RELATION[];
+extern const char PREDICATE_AMBIGUOUS_MAPPINGS_RELATION[];
+extern const char OPERATION_UNIQUE_WINNER_RELATION[];
+extern const char OPERATION_FALLBACK_RELATION[];
 
 // Returns a deterministic immutable catalog whose two relations deliberately
 // differ in name, schema width, column names/types, response shape, and
@@ -51,5 +56,40 @@ duckdb_api::CompiledConnector BuildDisabledRootArrayRepositoryCandidate();
 duckdb_api::CompiledConnector BuildPredicateMappingAbsentCatalogFixture();
 duckdb_api::CompiledConnector BuildPredicateSchemaVariationCatalogFixture();
 duckdb_api::CompiledConnector BuildPredicateOperationVariationCatalogFixture();
+
+// Returns a one-relation, non-installable controlled catalog whose visibility
+// mapping has a distinct exact proof identity. The root-array operation and
+// mapping pass the same production Connector validation as native metadata;
+// duplicate-sensitive rows are supplied by consumer law/product oracles. The
+// relation keeps `visibility` as required VARCHAR output and can encode exactly
+// one positive `visibility=private` input, with no compound Boolean encoding.
+duckdb_api::CompiledConnector BuildExactPredicateCatalogFixture();
+
+// Returns a controlled relation with two structurally valid fallback base
+// operations carrying equal eligibility facts. Connector validates and exposes
+// their stable declaration order but does not select, rank, or break the tie;
+// Relational Semantics owns the deterministic operation-selection failure.
+duckdb_api::CompiledConnector BuildEqualRankedOperationsCatalogFixture();
+
+// The unique-winner service exposes two non-fallback exact operations with
+// equally specific operation-scoped `visibility` inputs and distinct
+// priorities, plus one fallback. The fallback service exposes one required-
+// input candidate plus one fallback and is consumed without that binding.
+// Connector supplies validated facts and never performs request-dependent
+// selection.
+duckdb_api::CompiledConnector BuildUniqueWinnerOperationsCatalogFixture();
+duckdb_api::CompiledConnector BuildFallbackOperationsCatalogFixture();
+
+// Returns the controlled exact relation with two individually validated safe
+// encodings for the same predicate on its sole operation. The mappings bind
+// distinct conditional input names; Connector does not choose between them,
+// allowing Relational Semantics to produce its explicit Ambiguous fallback.
+duckdb_api::CompiledConnector BuildAmbiguousPredicateMappingsCatalogFixture();
+
+// Invalid controlled construction probes. Each factory must throw
+// std::invalid_argument before a catalog escapes: one selector both requires
+// and forbids the same input, and one relation declares two fallbacks.
+duckdb_api::CompiledConnector BuildContradictorySelectorCatalogFixture();
+duckdb_api::CompiledConnector BuildMultipleFallbackOperationsCatalogFixture();
 
 } // namespace duckdb_api_test

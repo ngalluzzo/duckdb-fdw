@@ -2,8 +2,11 @@
 # connector metadata and native catalog composition in this package.
 set(CONNECTOR_CATALOG_SOURCES
     src/connector/catalog_model.cpp
+    src/connector/catalog_snapshot.cpp
+    src/connector/operation_selector.cpp
     src/connector/pagination_declaration.cpp
     src/connector/predicate_declaration.cpp
+    src/connector/predicate_proof_profile.cpp
     src/connector/resource_ceiling_declaration.cpp)
 set(CONNECTOR_NATIVE_PROFILE_SOURCES
     src/connector/native_github_composition.cpp)

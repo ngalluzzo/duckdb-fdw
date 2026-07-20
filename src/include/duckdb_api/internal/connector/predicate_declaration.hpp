@@ -9,10 +9,11 @@ namespace duckdb_api {
 namespace internal {
 
 // Validates a relation's mapping collection against its declared schema,
-// operation, fixed query fields, and pagination bindings. This is Connector
+// operations, fixed query fields, and pagination bindings. This is Connector
 // compilation logic; consumers receive only the validated public const values.
 void ValidatePredicateMappings(const std::string &relation_name, const std::vector<CompiledColumn> &columns,
-                               const CompiledOperation &operation, const CompiledAuthenticationPolicy &authentication,
+                               const std::vector<CompiledOperation> &operations,
+                               const CompiledAuthenticationPolicy &authentication,
                                const std::vector<CompiledPredicateMapping> &mappings);
 
 // Emits safe deterministic declaration facts only. The output is explanation,

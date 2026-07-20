@@ -1,5 +1,7 @@
 #include "scan_planner_internal.hpp"
 
+#include "predicate_classifier.hpp"
+
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
@@ -166,13 +168,38 @@ void ValidateExecutableOrigin(const CompiledRestOrigin &origin, const CompiledNe
 	throw std::logic_error("cleartext operation lacks private controlled loopback authority");
 }
 
-void ValidateOperation(const CompiledRelation &relation, const CompiledNetworkPolicy &network_policy) {
-	const auto &operation = relation.Operation();
+bool IsControlledCompleteRootArray(const CompiledRelation &relation, const CompiledOperation &operation) {
+	bool found_selected_mapping = false;
+	for (const auto &mapping : relation.PredicateMappings()) {
+		if (mapping.OperationName() != operation.name) {
+			continue;
+		}
+		found_selected_mapping = true;
+		if (mapping.Accuracy() != CompiledPredicateAccuracy::EXACT ||
+		    mapping.ProofIdentity() !=
+		        CompiledPredicateProofIdentity::CONTROLLED_EXACT_DUPLICATE_REPOSITORY_VISIBILITY ||
+		    mapping.BaseDomain() != CompiledPredicateBaseDomain::CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES ||
+		    mapping.OccurrencePreservation() !=
+		        CompiledPredicateOccurrencePreservation::PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES) {
+			return false;
+		}
+	}
+	return found_selected_mapping;
+}
+
+void ValidateOperation(const CompiledRelation &relation, const CompiledOperation &operation,
+                       const CompiledNetworkPolicy &network_policy) {
 	const auto &ceilings = relation.ResourceCeilings();
-	if (operation.name.empty() || !operation.fallback || operation.retry_enabled || operation.request.path.empty() ||
+	if (operation.name.empty() || operation.retry_enabled || operation.request.path.empty() ||
 	    operation.request.path.front() != '/' || ceilings.MaxRecordsPerPage() == 0 ||
 	    ceilings.MaxRecordsPerScan() == 0 || ceilings.MaxExtractedStringBytes() == 0) {
 		throw std::logic_error("selected relation contains an unsupported base operation or resource declaration");
+	}
+	if (operation.response_source == CompiledResponseSource::ROOT_ARRAY &&
+	    operation.pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
+		if (!IsControlledCompleteRootArray(relation, operation)) {
+			throw std::logic_error("root-array response requires an explicit supported pagination declaration");
+		}
 	}
 	(void)PlanProtocol(operation.protocol);
 	(void)PlanMethod(operation.method);
@@ -182,6 +209,80 @@ void ValidateOperation(const CompiledRelation &relation, const CompiledNetworkPo
 	ValidateSourceShape(operation, ceilings);
 	ValidateExecutableOrigin(operation.request.origin, network_policy);
 	ValidatePagination(operation, ceilings, network_policy);
+}
+
+bool HasBinding(const predicate_classifier::CandidateInputBindings &bindings, const std::string &name) {
+	return std::any_of(
+	    bindings.values.begin(), bindings.values.end(),
+	    [&name](const predicate_classifier::CandidateInputBinding &binding) { return binding.name == name; });
+}
+
+bool HasEveryBinding(const predicate_classifier::CandidateInputBindings &bindings,
+                     const std::vector<std::string> &names) {
+	return std::all_of(names.begin(), names.end(),
+	                   [&bindings](const std::string &name) { return HasBinding(bindings, name); });
+}
+
+struct EligibleOperation {
+	const CompiledOperation *operation;
+	std::size_t specificity;
+	std::int32_t priority;
+};
+
+EligibleOperation EvaluateEligibility(const CompiledRelation &relation, const CompiledOperation &operation,
+                                      const ScanRequest &request) {
+	const auto bindings = predicate_classifier::ResolveCandidateInputBindings(relation, operation, request);
+	if (bindings.conflicting || !HasEveryBinding(bindings, operation.selector.RequiredInputs()) ||
+	    std::any_of(operation.selector.ForbiddenInputs().begin(), operation.selector.ForbiddenInputs().end(),
+	                [&bindings](const std::string &name) { return HasBinding(bindings, name); })) {
+		return {nullptr, 0, 0};
+	}
+
+	std::size_t largest_satisfied_alternative = 0;
+	if (!operation.selector.AnyInputSets().empty()) {
+		bool has_satisfied_alternative = false;
+		for (const auto &alternative : operation.selector.AnyInputSets()) {
+			if (HasEveryBinding(bindings, alternative)) {
+				has_satisfied_alternative = true;
+				largest_satisfied_alternative = std::max(largest_satisfied_alternative, alternative.size());
+			}
+		}
+		if (!has_satisfied_alternative) {
+			return {nullptr, 0, 0};
+		}
+	}
+
+	return EligibleOperation {&operation, operation.selector.RequiredInputs().size() + largest_satisfied_alternative,
+	                          operation.selector.Priority()};
+}
+
+bool HasHigherRank(const EligibleOperation &left, const EligibleOperation &right) {
+	return left.specificity > right.specificity ||
+	       (left.specificity == right.specificity && left.priority > right.priority);
+}
+
+bool HasEqualRank(const EligibleOperation &left, const EligibleOperation &right) {
+	return left.specificity == right.specificity && left.priority == right.priority;
+}
+
+bool ContainsOpaqueUnsupportedPosition(const RequestedPredicate &candidate) {
+	switch (candidate.Kind()) {
+	case RequestedPredicateKind::UNSUPPORTED:
+		return true;
+	case RequestedPredicateKind::CONJUNCTION:
+	case RequestedPredicateKind::DISJUNCTION:
+	case RequestedPredicateKind::NEGATION:
+		for (const auto &child : candidate.Children()) {
+			if (ContainsOpaqueUnsupportedPosition(child)) {
+				return true;
+			}
+		}
+		return false;
+	case RequestedPredicateKind::UNRESTRICTED:
+	case RequestedPredicateKind::COMPARISON:
+		return false;
+	}
+	return false;
 }
 
 void ValidateRequest(const CompiledConnector &connector, const CompiledRelation &relation, const ScanRequest &request) {
@@ -203,19 +304,35 @@ void ValidateRequest(const CompiledConnector &connector, const CompiledRelation 
 	const auto requested_kind = request.requested_predicate.Kind();
 	if ((requested_kind == RequestedPredicateKind::UNRESTRICTED &&
 	     request.retained_predicate_scope == RetainedPredicateScope::REQUESTED_PREDICATE) ||
-	    (requested_kind == RequestedPredicateKind::VISIBILITY_EQUALS_PRIVATE &&
+	    (requested_kind != RequestedPredicateKind::UNRESTRICTED &&
 	     request.retained_predicate_scope == RetainedPredicateScope::UNRESTRICTED)) {
 		throw std::logic_error("planner received contradictory requested and retained predicate states");
 	}
+	// COMPLETE_DUCKDB_FILTER means Query retained more structure than it could
+	// represent. The candidate must therefore contain an opaque position proving
+	// where that unseen structure lives. Otherwise a fully represented p AND p
+	// could actually be a fragment of (p AND p) OR q and selecting p would lose
+	// DuckDB-true rows. Fully represented trees use REQUESTED_PREDICATE; a
+	// represented p AND Unsupported remains safely selectable as a Superset.
+	if (requested_kind != RequestedPredicateKind::UNRESTRICTED &&
+	    request.retained_predicate_scope == RetainedPredicateScope::COMPLETE_DUCKDB_FILTER &&
+	    !ContainsOpaqueUnsupportedPosition(request.requested_predicate)) {
+		throw std::logic_error("fully represented candidate contradicts its opaque complete-filter scope");
+	}
 	switch (requested_kind) {
 	case RequestedPredicateKind::UNRESTRICTED:
-	case RequestedPredicateKind::VISIBILITY_EQUALS_PRIVATE:
+	case RequestedPredicateKind::COMPARISON:
+	case RequestedPredicateKind::CONJUNCTION:
+	case RequestedPredicateKind::DISJUNCTION:
+	case RequestedPredicateKind::NEGATION:
+	case RequestedPredicateKind::UNSUPPORTED:
 		return;
 	}
 	throw std::logic_error("planner received an unknown requested-predicate state");
 }
 
-void ValidateAuthentication(const CompiledRelation &relation, const ScanRequest &request) {
+void ValidateAuthentication(const CompiledRelation &relation, const CompiledOperation &operation,
+                            const ScanRequest &request) {
 	const auto &authentication = relation.Authentication();
 	const auto requirement = authentication.Requirement();
 	if (requirement == CompiledCredentialRequirement::NONE) {
@@ -234,7 +351,7 @@ void ValidateAuthentication(const CompiledRelation &relation, const ScanRequest 
 	    authentication.Authenticator() != CompiledAuthenticator::BEARER ||
 	    authentication.Placement() != CompiledCredentialPlacement::AUTHORIZATION_HEADER ||
 	    authentication.Destination() == nullptr ||
-	    !OriginsEqual(*authentication.Destination(), relation.Operation().request.origin)) {
+	    !OriginsEqual(*authentication.Destination(), operation.request.origin)) {
 		throw std::logic_error("authenticated relation contains a contradictory authentication policy");
 	}
 	if (!request.secret_reference.IsPresent()) {
@@ -247,7 +364,7 @@ void ValidateAuthentication(const CompiledRelation &relation, const ScanRequest 
 
 } // namespace
 
-const CompiledRelation &ValidateAndSelectRelation(const CompiledConnector &connector, const ScanRequest &request) {
+SelectedRelationOperation ValidateAndSelectOperation(const CompiledConnector &connector, const ScanRequest &request) {
 	if (connector.Origin() != CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA || connector.ConnectorName().empty() ||
 	    connector.Version().empty()) {
 		throw std::logic_error("planner received incomplete native connector identity");
@@ -260,14 +377,56 @@ const CompiledRelation &ValidateAndSelectRelation(const CompiledConnector &conne
 	// no relation, including the anonymous relation, is a runtime fallback.
 	const auto *relation = connector.FindRelation(request.relation_name);
 	if (relation == nullptr) {
-		throw std::logic_error("planner could not select the exact requested relation");
+		throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, "planner request names an unknown exact relation");
 	}
 
 	ValidateSchema(*relation);
-	ValidateOperation(*relation, connector.NetworkPolicy());
 	ValidateRequest(connector, *relation, request);
-	ValidateAuthentication(*relation, request);
-	return *relation;
+	for (const auto &operation : relation->Operations()) {
+		ValidateOperation(*relation, operation, connector.NetworkPolicy());
+	}
+
+	// Predicate mappings are operation-scoped, so each candidate derives its own
+	// immutable binding set. Declaration order is never a tie-breaker. The sole
+	// fallback is considered only after all non-fallback operations are proven
+	// ineligible; only the selected operation reaches full classification.
+	EligibleOperation winner {nullptr, 0, 0};
+	bool winner_is_tied = false;
+	const CompiledOperation *fallback = nullptr;
+	for (const auto &operation : relation->Operations()) {
+		if (operation.fallback) {
+			if (fallback != nullptr) {
+				throw PlanningError(PlanningErrorCode::OPERATION_SELECTION_FAILED,
+				                    "operation selection contains multiple fallback operations");
+			}
+			fallback = &operation;
+			continue;
+		}
+		const auto candidate = EvaluateEligibility(*relation, operation, request);
+		if (candidate.operation == nullptr) {
+			continue;
+		}
+		if (winner.operation == nullptr || HasHigherRank(candidate, winner)) {
+			winner = candidate;
+			winner_is_tied = false;
+		} else if (HasEqualRank(candidate, winner)) {
+			winner_is_tied = true;
+		}
+	}
+	if (winner_is_tied) {
+		throw PlanningError(PlanningErrorCode::OPERATION_SELECTION_FAILED,
+		                    "operation selection has multiple equally ranked eligible base operations");
+	}
+	if (winner.operation == nullptr && fallback != nullptr) {
+		winner = EvaluateEligibility(*relation, *fallback, request);
+	}
+	if (winner.operation == nullptr) {
+		throw PlanningError(PlanningErrorCode::OPERATION_SELECTION_FAILED,
+		                    "operation selection has no eligible base operation");
+	}
+	const auto &operation = *winner.operation;
+	ValidateAuthentication(*relation, operation, request);
+	return {relation, &operation};
 }
 
 } // namespace scan_planner_internal

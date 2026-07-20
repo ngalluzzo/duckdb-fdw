@@ -68,6 +68,8 @@ const char *BaseDomainName(BaseDomain domain) {
 	switch (domain) {
 	case BaseDomain::JSON_PATH_RECORDS:
 		return "json_path_records";
+	case BaseDomain::ROOT_ARRAY_RECORDS:
+		return "root_array_records";
 	case BaseDomain::PAGINATED_JSON_PATH_RECORDS:
 		return "paginated_json_path_records";
 	case BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS:
@@ -84,6 +86,8 @@ const char *PredicateName(PlannedPredicate predicate, BaseDomain domain) {
 		switch (domain) {
 		case BaseDomain::JSON_PATH_RECORDS:
 			return "TRUE@json_path_records";
+		case BaseDomain::ROOT_ARRAY_RECORDS:
+			return "TRUE@root_array_records";
 		case BaseDomain::PAGINATED_JSON_PATH_RECORDS:
 			return "TRUE@paginated_json_path_records";
 		case BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS:
@@ -106,8 +110,48 @@ const char *AccuracyName(RemotePredicateAccuracy accuracy) {
 		return "unsupported";
 	case RemotePredicateAccuracy::SUPERSET:
 		return "superset";
+	case RemotePredicateAccuracy::EXACT:
+		return "exact";
 	}
 	throw std::logic_error("scan plan contains an unknown remote-predicate accuracy");
+}
+
+const char *PredicateCategoryName(PredicateDecisionCategory category) {
+	switch (category) {
+	case PredicateDecisionCategory::EXACT:
+		return "exact";
+	case PredicateDecisionCategory::SUPERSET:
+		return "superset";
+	case PredicateDecisionCategory::UNSUPPORTED:
+		return "unsupported";
+	case PredicateDecisionCategory::AMBIGUOUS:
+		return "ambiguous";
+	}
+	throw std::logic_error("scan plan contains an unknown predicate-decision category");
+}
+
+const char *PredicateReasonName(PredicateDecisionReason reason) {
+	switch (reason) {
+	case PredicateDecisionReason::NO_REMOTE_CANDIDATE:
+		return "no_remote_candidate";
+	case PredicateDecisionReason::SELECTED_EXACT_MAPPING:
+		return "selected_exact_mapping";
+	case PredicateDecisionReason::SELECTED_SUPERSET_MAPPING:
+		return "selected_superset_mapping";
+	case PredicateDecisionReason::STRUCTURE_UNSUPPORTED:
+		return "structure_unsupported";
+	case PredicateDecisionReason::CAPABILITY_UNAVAILABLE:
+		return "capability_unavailable";
+	case PredicateDecisionReason::MAPPING_UNAVAILABLE:
+		return "mapping_unavailable";
+	case PredicateDecisionReason::DISJUNCTION_ENCODING_UNAVAILABLE:
+		return "disjunction_encoding_unavailable";
+	case PredicateDecisionReason::COMPLEMENT_ENCODING_UNAVAILABLE:
+		return "complement_encoding_unavailable";
+	case PredicateDecisionReason::AMBIGUOUS_CONDITIONAL_INPUT:
+		return "ambiguous_conditional_input";
+	}
+	throw std::logic_error("scan plan contains an unknown predicate-decision reason");
 }
 
 const char *ConditionalInputName(PlannedConditionalInput input) {
@@ -315,7 +359,9 @@ std::string ScanPlan::Snapshot() const {
 	       << ";residual_predicate=" << PredicateName(residual_predicate, domain)
 	       << ";residual_owner=" << OwnerName(residual_owner)
 	       << ";conditional_input=" << ConditionalInputName(conditional_input)
-	       << ";owners=filter:" << OwnerName(ownership.filter) << ",ordering:" << OwnerName(ownership.ordering)
+	       << ";predicate_decision=category:" << PredicateCategoryName(predicate_category)
+	       << ",reason:" << PredicateReasonName(predicate_reason) << ";owners=filter:" << OwnerName(ownership.filter)
+	       << ",projection:" << OwnerName(ownership.projection) << ",ordering:" << OwnerName(ownership.ordering)
 	       << ",limit:" << OwnerName(ownership.limit) << ",offset:" << OwnerName(ownership.offset)
 	       << ";delegation=remote_ordering:" << DelegationName(remote_ordering)
 	       << ",runtime_ordering:" << DelegationName(runtime_ordering)

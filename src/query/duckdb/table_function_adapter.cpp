@@ -1,6 +1,7 @@
 #include "duckdb_api_extension.hpp"
 
 #include "complex_filter_adapter.hpp"
+#include "scan_plan_explanation.hpp"
 #include "table_function_bind_data.hpp"
 #include "table_function_plan_state.hpp"
 
@@ -53,52 +54,13 @@ struct DuckdbApiFunctionInfo : public TableFunctionInfo {
 	const std::shared_ptr<const duckdb_api::ScanExecutor> executor;
 };
 
-const char *PredicateName(duckdb_api::PlannedPredicate predicate) {
-	switch (predicate) {
-	case duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN:
-		return "unrestricted";
-	case duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE:
-		return "visibility_equals_private";
-	case duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER:
-		return "complete_duckdb_filter";
-	}
-	throw InternalException("duckdb_api scan plan contains an unknown predicate state");
-}
-
-const char *AccuracyName(duckdb_api::RemotePredicateAccuracy accuracy) {
-	switch (accuracy) {
-	case duckdb_api::RemotePredicateAccuracy::UNSUPPORTED:
-		return "unsupported";
-	case duckdb_api::RemotePredicateAccuracy::SUPERSET:
-		return "superset";
-	}
-	throw InternalException("duckdb_api scan plan contains an unknown remote accuracy");
-}
-
-const char *ResidualOwnerName(duckdb_api::RelationalOwner owner) {
-	switch (owner) {
-	case duckdb_api::RelationalOwner::DUCKDB:
-		return "duckdb";
-	}
-	throw InternalException("duckdb_api scan plan contains an unknown residual owner");
-}
-
 InsertionOrderPreservingMap<string> DuckdbApiToString(TableFunctionToStringInput &input) {
 	if (!input.bind_data) {
 		throw InternalException("duckdb_api explanation is missing bind data");
 	}
 	const auto &bind_data = input.bind_data->Cast<DuckdbApiBindData>();
-	const auto &plan = bind_data.plan_state.SelectedPlan();
-	InsertionOrderPreservingMap<string> result;
-	// These closed plan facts are safe explanation only. Query neither parses
-	// this rendering nor exposes request, credential, row, or received-URL data.
-	result["Relation"] = plan.RelationName();
-	result["Remote Predicate"] = PredicateName(plan.RemotePredicate());
-	result["Remote Accuracy"] = AccuracyName(plan.RemoteAccuracy());
-	result["Residual Predicate"] = PredicateName(plan.ResidualPredicate());
-	result["Residual Owner"] = ResidualOwnerName(plan.ResidualOwner());
-	result["Classification"] = plan.ClassificationReason();
-	return result;
+	return duckdb_api_query_internal::ExplainSelectedScan(bind_data.plan_state.SelectedRequest(),
+	                                                      bind_data.plan_state.SelectedPlan());
 }
 
 void DuckdbApiPushdownComplexFilter(ClientContext &, LogicalGet &get, FunctionData *function_data,
@@ -114,25 +76,9 @@ void DuckdbApiPushdownComplexFilter(ClientContext &, LogicalGet &get, FunctionDa
 	auto candidate = bind_data.plan_state.BaselineRequest();
 	candidate.capabilities.selective_predicate = true;
 	candidate.capabilities.retains_predicate = true;
-	std::size_t recognized = 0;
-	std::size_t present = 0;
-	for (const auto &filter : filters) {
-		if (!filter) {
-			continue;
-		}
-		present++;
-		if (duckdb_api_query_internal::IsVisibilityEqualsPrivate(get, *filter)) {
-			recognized++;
-		}
-	}
-	if (recognized > 0) {
-		candidate.requested_predicate = duckdb_api::RequestedPredicate::VisibilityEqualsPrivate();
-		candidate.retained_predicate_scope = recognized == 1 && present == 1
-		                                         ? duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE
-		                                         : duckdb_api::RetainedPredicateScope::COMPLETE_DUCKDB_FILTER;
-	} else if (present > 0) {
-		candidate.retained_predicate_scope = duckdb_api::RetainedPredicateScope::COMPLETE_DUCKDB_FILTER;
-	}
+	const auto translated = duckdb_api_query_internal::TranslateComplexFilters(get, filters);
+	candidate.requested_predicate = translated.candidate;
+	candidate.retained_predicate_scope = translated.retained_scope;
 
 	// The filter vector is intentionally untouched. DuckDB regenerates every
 	// expression as its own LogicalFilter because generic filter pushdown stays
@@ -140,7 +86,9 @@ void DuckdbApiPushdownComplexFilter(ClientContext &, LogicalGet &get, FunctionDa
 	try {
 		auto &function_info = get.function.function_info->Cast<DuckdbApiFunctionInfo>();
 		auto selected_plan = duckdb_api::BuildConservativeScanPlan(function_info.connector, candidate);
-		bind_data.plan_state.ReplaceSelectedPlan(std::move(selected_plan));
+		bind_data.plan_state.ReplaceSelected(std::move(candidate), std::move(selected_plan));
+	} catch (const duckdb_api::PlanningError &error) {
+		throw InvalidInputException("[duckdb_api][planning] %s", error.what());
 	} catch (const std::exception &) {
 		throw InvalidInputException("[duckdb_api][planning] selective predicate planning failed safely");
 	} catch (...) {

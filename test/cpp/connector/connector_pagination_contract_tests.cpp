@@ -99,7 +99,8 @@ duckdb_api::CompiledOperation BuildDisabledOperation() {
 	                                      ConnectorCatalogTestAccess::DisabledPagination(),
 	                                      {origin, "/rows", {}, {{"X-Fixture", "safe"}}},
 	                                      duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
-	                                      "$.items[*]"};
+	                                      "$.items[*]",
+	                                      duckdb_api::CompiledOperationSelector()};
 }
 
 duckdb_api::CompiledOperation BuildPaginatedOperation(
@@ -118,7 +119,8 @@ duckdb_api::CompiledOperation BuildPaginatedOperation(
 	    std::move(pagination),
 	    {origin, "/linked-rows", std::move(query_parameters), {{"X-Fixture", "safe"}}},
 	    duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
-	    "$.items[*]"};
+	    "$.items[*]",
+	    duckdb_api::CompiledOperationSelector()};
 }
 
 duckdb_api::CompiledConnector BuildValidPaginatedCatalog() {

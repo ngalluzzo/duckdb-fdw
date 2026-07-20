@@ -1,43 +1,100 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <string>
+#include <vector>
 
 namespace duckdb_api {
 
-// Protocol-neutral relational intent shared by Query and Semantics. This
-// private pre-1.0 team API deliberately represents only the complete base
-// domain and RFC 0008's one admitted equality. It contains no DuckDB object,
-// SQL text, Connector mapping, request field, credential, or execution state.
-enum class RequestedPredicateKind { UNRESTRICTED, VISIBILITY_EQUALS_PRIVATE };
+static const std::size_t MAX_REQUESTED_PREDICATE_DEPTH = 16;
+static const std::size_t MAX_REQUESTED_PREDICATE_NODES = 64;
 
-// Query reports the complete predicate that remains owned by DuckDB separately
-// from the closed predicate offered for remote selection. This prevents a
-// selective conjunct from being mistaken for the whole residual expression.
-// COMPLETE_DUCKDB_FILTER is deliberately opaque: it conveys ownership and
-// scope, never SQL text or authority to interpret the expression.
+enum class RequestedPredicateKind { UNRESTRICTED, COMPARISON, CONJUNCTION, DISJUNCTION, NEGATION, UNSUPPORTED };
+enum class RequestedPredicateComparisonOperator { EQUALS };
+enum class RequestedPredicateValueKind { BIGINT, VARCHAR, BOOLEAN };
+
+// DuckDB's retained local predicate scope. This is supplied by Query beside
+// the candidate tree and remains the authoritative description of which
+// predicate DuckDB will still evaluate after any remote narrowing.
 enum class RetainedPredicateScope { UNRESTRICTED, REQUESTED_PREDICATE, COMPLETE_DUCKDB_FILTER };
 
-class RequestedPredicate {
+// Typed scalar identity carried by a comparison leaf. It contains no DuckDB
+// object, coercion rule, request encoding, or execution authority. NULL and
+// values that Query cannot identify without coercion are represented by an
+// opaque unsupported candidate instead.
+class RequestedPredicateValue {
 public:
-	// The default is the complete base domain so ordinary request construction
-	// remains conservative when no structured predicate is available.
-	RequestedPredicate();
+	static RequestedPredicateValue BigInt(std::int64_t value);
+	static RequestedPredicateValue Varchar(std::string value);
+	static RequestedPredicateValue Boolean(bool value);
 
-	static RequestedPredicate Unrestricted();
-	static RequestedPredicate VisibilityEqualsPrivate();
+	RequestedPredicateValueKind Kind() const noexcept;
+	std::int64_t BigIntValue() const;
+	const std::string &VarcharValue() const;
+	bool BooleanValue() const;
 
-	RequestedPredicateKind Kind() const noexcept;
-	bool operator==(const RequestedPredicate &other) const noexcept;
-	bool operator!=(const RequestedPredicate &other) const noexcept;
-
-	// Stable structural explanation. The output is not SQL, serialization, or
-	// authority for Connector or Runtime behavior.
+	bool operator==(const RequestedPredicateValue &other) const noexcept;
+	bool operator!=(const RequestedPredicateValue &other) const noexcept;
 	std::string Snapshot() const;
 
 private:
-	explicit RequestedPredicate(RequestedPredicateKind kind);
+	explicit RequestedPredicateValue(std::int64_t value);
+	explicit RequestedPredicateValue(std::string value);
+	explicit RequestedPredicateValue(bool value);
 
-	RequestedPredicateKind kind;
+	RequestedPredicateValueKind kind;
+	std::int64_t bigint_value;
+	std::string varchar_value;
+	bool boolean_value;
+};
+
+class RequestedPredicateNode;
+
+// Bounded protocol-neutral relational structure shared by Query and
+// Relational Semantics. Query constructs the complete structure DuckDB offers;
+// Semantics alone matches Connector mappings and assigns remote meaning. The
+// immutable tree is safe to retain across prepared and concurrent bind copies.
+// It contains no SQL text, DuckDB object, function body, collation inference,
+// remote input, credential, or I/O authority.
+class RequestedPredicate {
+public:
+	// Conservative default used when no structured restriction is available.
+	RequestedPredicate();
+
+	static RequestedPredicate Unrestricted();
+	static RequestedPredicate Comparison(std::size_t bound_column_index, RequestedPredicateValueKind bound_column_type,
+	                                     RequestedPredicateComparisonOperator comparison_operator,
+	                                     RequestedPredicateValue literal);
+	static RequestedPredicate Conjunction(std::vector<RequestedPredicate> children);
+	static RequestedPredicate Disjunction(std::vector<RequestedPredicate> children);
+	static RequestedPredicate Negation(RequestedPredicate child);
+	static RequestedPredicate Unsupported(std::uint64_t position);
+
+	RequestedPredicateKind Kind() const noexcept;
+	std::size_t BoundColumnIndex() const;
+	RequestedPredicateValueKind BoundColumnType() const;
+	RequestedPredicateComparisonOperator ComparisonOperator() const;
+	const RequestedPredicateValue &Literal() const;
+	const std::vector<RequestedPredicate> &Children() const;
+	std::uint64_t UnsupportedPosition() const;
+
+	std::size_t Depth() const noexcept;
+	std::size_t NodeCount() const noexcept;
+	bool StructurallyEquals(const RequestedPredicate &other) const noexcept;
+	bool operator==(const RequestedPredicate &other) const noexcept;
+	bool operator!=(const RequestedPredicate &other) const noexcept;
+
+	// Stable structural explanation. String values are hex escaped. The output
+	// is not SQL, serialization, or authority for Connector or Runtime behavior.
+	std::string Snapshot() const;
+
+private:
+	explicit RequestedPredicate(std::shared_ptr<const RequestedPredicateNode> node);
+	static RequestedPredicate BooleanNode(RequestedPredicateKind kind, std::vector<RequestedPredicate> children);
+
+	std::shared_ptr<const RequestedPredicateNode> node;
 };
 
 } // namespace duckdb_api

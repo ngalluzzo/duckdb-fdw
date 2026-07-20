@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+from collections import Counter
 from typing import Iterable
 
 import duckdb
@@ -106,6 +107,56 @@ def assert_request_paths_unordered(
         raise AssertionError("repository concurrent request set drifted")
     for request in requests:
         assert_request(request, request["path"], server)
+
+
+def assert_request_prefix(
+    server: RepositoryOracleServer, expected_paths: list[str]
+) -> None:
+    """Require an early-closed traversal to remain an ordered base-plan prefix."""
+
+    requests = server.requests()
+    if not requests or len(requests) > len(expected_paths):
+        raise AssertionError("repository early-close request count drifted")
+    observed_paths = [request["path"] for request in requests]
+    if observed_paths != expected_paths[: len(observed_paths)]:
+        raise AssertionError("repository early-close request trace was not a prefix")
+    for request, expected_path in zip(
+        requests, expected_paths, strict=False
+    ):
+        assert_request(request, expected_path, server)
+
+
+def assert_duplicate_sensitive_bag(
+    actual: Iterable[tuple[object, ...]],
+    expected: Iterable[tuple[object, ...]],
+    context: str,
+) -> None:
+    if Counter(actual) != Counter(expected):
+        raise AssertionError(f"{context} changed the duplicate-sensitive bag")
+
+
+def assert_ordered_tie_groups(
+    actual: list[tuple[object, ...]],
+    expected: list[tuple[object, ...]],
+    *,
+    key_index: int,
+    context: str,
+) -> None:
+    """Compare ordered keys while treating rows tied on each key as a bag."""
+
+    def groups(
+        rows: list[tuple[object, ...]],
+    ) -> list[tuple[object, Counter[tuple[object, ...]]]]:
+        result: list[tuple[object, Counter[tuple[object, ...]]]] = []
+        for row in rows:
+            key = row[key_index]
+            if not result or result[-1][0] != key:
+                result.append((key, Counter()))
+            result[-1][1][row] += 1
+        return result
+
+    if groups(actual) != groups(expected):
+        raise AssertionError(f"{context} changed ordered tie groups")
 
 
 def assert_request(

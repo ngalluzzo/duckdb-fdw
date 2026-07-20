@@ -38,6 +38,9 @@ duckdb_api::ScanPlan ScanPlanTestAccess::Repository(duckdb_api::ScanPlan plan,
 	case RepositoryPlanCounterexample::SELECTIVE_FILTER_OWNER_UNKNOWN:
 		plan.ownership.filter = static_cast<duckdb_api::RelationalOwner>(255);
 		break;
+	case RepositoryPlanCounterexample::SELECTIVE_PROJECTION_OWNER_UNKNOWN:
+		plan.ownership.projection = static_cast<duckdb_api::RelationalOwner>(255);
+		break;
 	case RepositoryPlanCounterexample::SELECTIVE_REMOTE_ORDERING_UNKNOWN:
 		plan.remote_ordering = static_cast<duckdb_api::RelationalDelegation>(255);
 		break;
@@ -47,6 +50,26 @@ duckdb_api::ScanPlan ScanPlanTestAccess::Repository(duckdb_api::ScanPlan plan,
 	case RepositoryPlanCounterexample::BASELINE_REMOTE_VISIBILITY:
 		plan.remote_predicate = duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE;
 		break;
+	case RepositoryPlanCounterexample::UNKNOWN_PREDICATE_CATEGORY:
+		plan.predicate_category = static_cast<duckdb_api::PredicateDecisionCategory>(255);
+		break;
+	case RepositoryPlanCounterexample::UNKNOWN_PREDICATE_REASON:
+		plan.predicate_reason = static_cast<duckdb_api::PredicateDecisionReason>(255);
+		break;
+	case RepositoryPlanCounterexample::EXACT_CATEGORY_SUPERSET_ACCURACY:
+		plan.predicate_category = duckdb_api::PredicateDecisionCategory::EXACT;
+		plan.predicate_reason = duckdb_api::PredicateDecisionReason::SELECTED_EXACT_MAPPING;
+		break;
+	case RepositoryPlanCounterexample::SUPERSET_CATEGORY_EXACT_ACCURACY:
+		plan.remote_accuracy = duckdb_api::RemotePredicateAccuracy::EXACT;
+		break;
+	case RepositoryPlanCounterexample::AMBIGUOUS_RESIDUAL_TRUE:
+		plan.residual_predicate = duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN;
+		break;
+	case RepositoryPlanCounterexample::MAPPING_UNAVAILABLE_RESIDUAL_TRUE:
+		plan.predicate_reason = duckdb_api::PredicateDecisionReason::MAPPING_UNAVAILABLE;
+		plan.residual_predicate = duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN;
+		break;
 	default:
 		throw std::invalid_argument("unknown closed repository plan counterexample");
 	}
@@ -55,9 +78,13 @@ duckdb_api::ScanPlan ScanPlanTestAccess::Repository(duckdb_api::ScanPlan plan,
 
 duckdb_api::ScanPlan BuildRepositoryPlanCounterexample(const std::string &exact_logical_secret_name,
                                                        RepositoryPlanCounterexample counterexample) {
-	const bool selective = counterexample != RepositoryPlanCounterexample::BASELINE_REMOTE_VISIBILITY;
-	auto plan = selective ? BuildVisibilityPrivatePlanFixture(exact_logical_secret_name)
-	                      : BuildValidAuthenticatedRepositoriesPlanFixture(exact_logical_secret_name);
+	const bool baseline = counterexample == RepositoryPlanCounterexample::BASELINE_REMOTE_VISIBILITY;
+	const bool ambiguous = counterexample == RepositoryPlanCounterexample::AMBIGUOUS_RESIDUAL_TRUE;
+	const bool mapping_unavailable = counterexample == RepositoryPlanCounterexample::MAPPING_UNAVAILABLE_RESIDUAL_TRUE;
+	auto plan = baseline              ? BuildValidAuthenticatedRepositoriesPlanFixture(exact_logical_secret_name)
+	            : ambiguous           ? BuildAmbiguousPredicateFallbackPlanFixture(exact_logical_secret_name)
+	            : mapping_unavailable ? BuildCompleteResidualFallbackPlanFixture(exact_logical_secret_name)
+	                                  : BuildVisibilityPrivatePlanFixture(exact_logical_secret_name);
 	return ScanPlanTestAccess::Repository(std::move(plan), counterexample);
 }
 

@@ -27,10 +27,16 @@ struct AdmittedRepositoryColumn {
 };
 
 // Complete immutable authority produced only after Runtime validates the whole
-// repository ScanPlan. Request construction, authentication, decoding, and
-// Link validation consume this value rather than reinterpreting predicate,
-// Connector, or plan fields during execution. Copies own their strings and are
-// safe for concurrent read-only use; stream close destroys its retained copy.
+// repository ScanPlan. Admission exhaustively checks the structured predicate
+// decision and its legal retained-filter scope for known, coherent producer
+// values, but only the typed conditional input selects the fixed request field.
+// The installed GitHub operation admits its Connector-proven Superset decision;
+// Exact remains controlled semantic evidence and is not executable through this
+// profile. Unsupported and Ambiguous decisions share one unrestricted form.
+// Request construction, authentication, decoding, and Link validation consume
+// this value rather than reinterpreting predicate, Connector, or plan fields
+// during execution. Copies own their strings and are safe for concurrent
+// read-only use; stream close destroys its retained copy.
 class AdmittedRepositoryRequestProfile {
 public:
 	AdmittedRepositoryRequestProfile(const AdmittedRepositoryRequestProfile &) = default;

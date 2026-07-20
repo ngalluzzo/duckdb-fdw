@@ -5,10 +5,22 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
 using duckdb_api_test::Require;
+
+template <typename Callable>
+void RequireInvalid(const std::string &message, Callable callback) {
+	bool rejected = false;
+	try {
+		callback();
+	} catch (const std::invalid_argument &) {
+		rejected = true;
+	}
+	Require(rejected, message);
+}
 
 void RequireColumn(const duckdb_api::CompiledColumn &column, const std::string &name, const std::string &logical_type,
                    const std::string &extractor) {
@@ -220,6 +232,197 @@ void TestPredicateMappingDecoyCatalogFixtures() {
 	}
 }
 
+void TestExactPredicateCatalogFixture() {
+	const auto first = duckdb_api_test::BuildExactPredicateCatalogFixture();
+	const auto second = duckdb_api_test::BuildExactPredicateCatalogFixture();
+	Require(std::string(duckdb_api_test::PREDICATE_EXACT_RELATION) == "controlled_exact_repositories",
+	        "exact predicate fixture relation identifier drifted");
+	Require(first.ConnectorName() == "controlled_exact_predicate" && first.Version() == "test-1" &&
+	            first.Relations().size() == 1,
+	        "exact predicate fixture catalog identity drifted");
+	const auto *relation = first.FindRelation(duckdb_api_test::PREDICATE_EXACT_RELATION);
+	Require(relation == &first.Relations()[0], "exact predicate fixture lookup or singular relation drifted");
+	Require(relation->Columns().size() == 2 && relation->Columns()[0].name == "occurrence_id" &&
+	            relation->Columns()[0].logical_type == "BIGINT" && !relation->Columns()[0].nullable &&
+	            relation->Columns()[1].name == "visibility" && relation->Columns()[1].logical_type == "VARCHAR" &&
+	            !relation->Columns()[1].nullable && relation->Columns()[1].extractor == "$.visibility",
+	        "exact predicate fixture schema or visibility ordinal drifted");
+	Require(relation->PredicateMappings().size() == 1, "exact predicate fixture mapping count drifted");
+	const auto &mapping = relation->PredicateMappings()[0];
+	Require(mapping.ColumnName() == "visibility" &&
+	            mapping.Literal() == duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE &&
+	            mapping.OperationName() == relation->Operation().name && mapping.RemoteInputName() == "visibility" &&
+	            mapping.EncodedRemoteValue() == "private" &&
+	            mapping.Accuracy() == duckdb_api::CompiledPredicateAccuracy::EXACT &&
+	            mapping.ProofIdentity() ==
+	                duckdb_api::CompiledPredicateProofIdentity::CONTROLLED_EXACT_DUPLICATE_REPOSITORY_VISIBILITY &&
+	            mapping.BaseDomain() ==
+	                duckdb_api::CompiledPredicateBaseDomain::CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES &&
+	            mapping.OccurrencePreservation() ==
+	                duckdb_api::CompiledPredicateOccurrencePreservation::PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES &&
+	            mapping.EncodingCapability() ==
+	                duckdb_api::CompiledPredicateEncodingCapability::SINGLE_POSITIVE_REST_QUERY_INPUT &&
+	            mapping.MaximumConditionalInputs() == 1 && !mapping.SupportsCompoundConjunctionEncoding() &&
+	            !mapping.SupportsDisjunctionEncoding() && !mapping.SupportsComplementEncoding(),
+	        "exact predicate fixture proof, domain, occurrence, or encoding facts drifted");
+	Require(relation->Operation().request.query_parameters.empty(),
+	        "exact predicate fixture duplicated its conditional input into the base request");
+	Require(first.Snapshot() == second.Snapshot(), "exact predicate fixture construction is not deterministic");
+	Require(
+	    first.Snapshot().find("proof:controlled_exact_duplicate_repository_visibility") != std::string::npos &&
+	        first.Snapshot().find("base_domain:controlled_duplicate_repository_occurrences") != std::string::npos &&
+	        first.Snapshot().find("occurrences:exact_matching_base_occurrences") != std::string::npos &&
+	        first.Snapshot().find("encoding:single_positive_rest_query_input[max_inputs:1,compound_and:unsupported,") !=
+	            std::string::npos,
+	    "exact predicate fixture snapshot lost structural proof facts");
+	for (const auto &prohibited : {"SELECT ", "secret_name=", "credential_value=", "Authorization=", "Link="}) {
+		Require(first.Snapshot().find(prohibited) == std::string::npos,
+		        "exact predicate fixture snapshot contains prohibited state: " + std::string(prohibited));
+	}
+}
+
+void TestEqualRankedOperationsCatalogFixture() {
+	const auto first = duckdb_api_test::BuildEqualRankedOperationsCatalogFixture();
+	const auto second = duckdb_api_test::BuildEqualRankedOperationsCatalogFixture();
+	Require(std::string(duckdb_api_test::PREDICATE_EQUAL_RANKED_OPERATIONS_RELATION) ==
+	            "controlled_equal_ranked_operations",
+	        "equal-ranked operation fixture relation identifier drifted");
+	Require(first.ConnectorName() == "controlled_equal_ranked_operations" && first.Relations().size() == 1,
+	        "equal-ranked operation fixture catalog identity drifted");
+	const auto *relation = first.FindRelation(duckdb_api_test::PREDICATE_EQUAL_RANKED_OPERATIONS_RELATION);
+	Require(relation == &first.Relations()[0] && relation->Operations().size() == 2 && !relation->HasSingleOperation(),
+	        "equal-ranked operation fixture lost its immutable operation collection");
+	bool singleton_access_rejected = false;
+	try {
+		(void)relation->Operation();
+	} catch (const std::logic_error &) {
+		singleton_access_rejected = true;
+	}
+	Require(singleton_access_rejected, "singleton operation access selected an arbitrary equal-ranked operation");
+
+	const auto &left = relation->Operations()[0];
+	const auto &right = relation->Operations()[1];
+	Require(left.name == "controlled_equal_ranked_repositories_a" &&
+	            right.name == "controlled_equal_ranked_repositories_b" && left.name != right.name && !left.fallback &&
+	            !right.fallback && left.cardinality == right.cardinality && left.protocol == right.protocol &&
+	            left.method == right.method && left.replay_safety == right.replay_safety &&
+	            left.pagination.Strategy() == right.pagination.Strategy() &&
+	            left.response_source == right.response_source && left.records_extractor == right.records_extractor &&
+	            left.selector.RequiredInputs().empty() && left.selector.AnyInputSets().empty() &&
+	            left.selector.ForbiddenInputs().empty() && left.selector.Priority() == 0 &&
+	            right.selector.RequiredInputs().empty() && right.selector.AnyInputSets().empty() &&
+	            right.selector.ForbiddenInputs().empty() && right.selector.Priority() == 0,
+	        "equal-ranked operation fixture no longer exposes two equally eligible base declarations");
+	Require(left.request.path != right.request.path && relation->PredicateMappings().empty(),
+	        "equal-ranked operation fixture lost distinct operation identity or invented predicate selection facts");
+	Require(first.Snapshot() == second.Snapshot(), "equal-ranked operation fixture construction is not deterministic");
+	Require(first.Snapshot().find("operations=[{operation=controlled_equal_ranked_repositories_a") !=
+	                std::string::npos &&
+	            first.Snapshot().find("{operation=controlled_equal_ranked_repositories_b") != std::string::npos,
+	        "equal-ranked operation snapshot omitted the complete stable operation collection");
+}
+
+void TestSelectableOperationsCatalogFixtures() {
+	const auto unique = duckdb_api_test::BuildUniqueWinnerOperationsCatalogFixture();
+	const auto fallback = duckdb_api_test::BuildFallbackOperationsCatalogFixture();
+	Require(std::string(duckdb_api_test::OPERATION_UNIQUE_WINNER_RELATION) == "controlled_exact_repositories" &&
+	            std::string(duckdb_api_test::OPERATION_FALLBACK_RELATION) == "controlled_exact_repositories",
+	        "selectable-operation fixture relation identifiers drifted");
+	Require(unique.ConnectorName() == "controlled_unique_winner_operations" &&
+	            fallback.ConnectorName() == "controlled_fallback_operations",
+	        "selectable-operation fixture catalog identities drifted");
+	const auto *unique_relation = unique.FindRelation("controlled_exact_repositories");
+	Require(unique_relation != nullptr && unique_relation->Operations().size() == 3 &&
+	            !unique_relation->HasSingleOperation() && unique_relation->PredicateMappings().size() == 2,
+	        "unique-winner fixture lost its candidate, fallback, or mapping collection");
+	const auto &any_candidate = unique_relation->Operations()[0];
+	const auto &required_candidate = unique_relation->Operations()[1];
+	const auto &unique_fallback = unique_relation->Operations()[2];
+	Require(any_candidate.name == "controlled_exact_repositories" && !any_candidate.fallback &&
+	            any_candidate.selector.RequiredInputs().empty() &&
+	            any_candidate.selector.AnyInputSets() == std::vector<std::vector<std::string>>({{"visibility"}}) &&
+	            any_candidate.selector.ForbiddenInputs().empty() && any_candidate.selector.Priority() == 10 &&
+	            unique_relation->PredicateMappings()[0].OperationName() == any_candidate.name &&
+	            unique_relation->PredicateMappings()[0].RemoteInputName() == "visibility",
+	        "unique-winner fixture lost its higher-priority any-input candidate facts");
+	Require(required_candidate.name == "controlled_priority_exact_repositories" && !required_candidate.fallback &&
+	            required_candidate.selector.RequiredInputs() == std::vector<std::string>({"visibility"}) &&
+	            required_candidate.selector.AnyInputSets().empty() &&
+	            required_candidate.selector.ForbiddenInputs().empty() && required_candidate.selector.Priority() == 5 &&
+	            unique_relation->PredicateMappings()[1].OperationName() == required_candidate.name &&
+	            unique_relation->PredicateMappings()[1].RemoteInputName() == "visibility",
+	        "unique-winner fixture lost its equally specific required-input candidate facts");
+	Require(unique_fallback.name == "controlled_selector_fallback_repositories" && unique_fallback.fallback &&
+	            unique_fallback.selector.RequiredInputs().empty() && unique_fallback.selector.AnyInputSets().empty() &&
+	            unique_fallback.selector.ForbiddenInputs().empty() && unique_fallback.selector.Priority() == 0,
+	        "unique-winner fixture lost its sole fallback facts");
+	Require(unique.Snapshot().find("selector=required:[],any:[[visibility]],forbidden:[],priority:10") !=
+	                std::string::npos &&
+	            unique.Snapshot().find("selector=required:[visibility],any:[],forbidden:[],priority:5") !=
+	                std::string::npos,
+	        "unique-winner snapshot omitted immutable selector facts");
+
+	const auto *fallback_relation = fallback.FindRelation("controlled_exact_repositories");
+	Require(fallback_relation != nullptr && fallback_relation->Operations().size() == 2 &&
+	            !fallback_relation->HasSingleOperation() && fallback_relation->PredicateMappings().size() == 1,
+	        "fallback fixture lost its candidate, fallback, or mapping collection");
+	const auto &ineligible_candidate = fallback_relation->Operations()[0];
+	const auto &base_fallback = fallback_relation->Operations()[1];
+	Require(ineligible_candidate.name == "controlled_exact_repositories" && !ineligible_candidate.fallback &&
+	            ineligible_candidate.selector.RequiredInputs() == std::vector<std::string>({"visibility"}) &&
+	            ineligible_candidate.selector.AnyInputSets().empty() &&
+	            ineligible_candidate.selector.ForbiddenInputs().empty() &&
+	            ineligible_candidate.selector.Priority() == 10 &&
+	            fallback_relation->PredicateMappings()[0].OperationName() == ineligible_candidate.name &&
+	            fallback_relation->PredicateMappings()[0].RemoteInputName() == "visibility",
+	        "fallback fixture lost its required mapped candidate facts");
+	Require(base_fallback.name == "controlled_selector_fallback_repositories" && base_fallback.fallback &&
+	            base_fallback.selector.RequiredInputs().empty() && base_fallback.selector.AnyInputSets().empty() &&
+	            base_fallback.selector.ForbiddenInputs().empty() && base_fallback.selector.Priority() == 0,
+	        "fallback fixture lost its sole fallback-after-ineligibility facts");
+	Require(fallback.Snapshot().find("selector=required:[visibility],any:[],forbidden:[],priority:10") !=
+	            std::string::npos,
+	        "fallback snapshot omitted immutable selector facts");
+	Require(unique.Snapshot() == duckdb_api_test::BuildUniqueWinnerOperationsCatalogFixture().Snapshot() &&
+	            fallback.Snapshot() == duckdb_api_test::BuildFallbackOperationsCatalogFixture().Snapshot(),
+	        "selectable-operation fixture construction is not deterministic");
+	RequireInvalid("controlled contradictory-selector fixture escaped validation",
+	               []() { (void)duckdb_api_test::BuildContradictorySelectorCatalogFixture(); });
+	RequireInvalid("controlled multiple-fallback fixture escaped validation",
+	               []() { (void)duckdb_api_test::BuildMultipleFallbackOperationsCatalogFixture(); });
+}
+
+void TestAmbiguousPredicateMappingsCatalogFixture() {
+	const auto first = duckdb_api_test::BuildAmbiguousPredicateMappingsCatalogFixture();
+	const auto second = duckdb_api_test::BuildAmbiguousPredicateMappingsCatalogFixture();
+	Require(std::string(duckdb_api_test::PREDICATE_AMBIGUOUS_MAPPINGS_RELATION) == "controlled_exact_repositories",
+	        "ambiguous predicate fixture relation identifier drifted");
+	Require(first.ConnectorName() == "controlled_ambiguous_predicate" && first.Relations().size() == 1,
+	        "ambiguous predicate fixture catalog identity drifted");
+	const auto *relation = first.FindRelation(duckdb_api_test::PREDICATE_AMBIGUOUS_MAPPINGS_RELATION);
+	Require(relation == &first.Relations()[0] && relation->HasSingleOperation() && relation->Operations().size() == 1 &&
+	            &relation->Operation() == &relation->Operations()[0],
+	        "ambiguous predicate fixture changed its selected-operation precondition");
+	Require(relation->PredicateMappings().size() == 2,
+	        "ambiguous predicate fixture must expose exactly two safe mapping candidates");
+	const auto &left = relation->PredicateMappings()[0];
+	const auto &right = relation->PredicateMappings()[1];
+	Require(left.ColumnName() == right.ColumnName() && left.Operator() == right.Operator() &&
+	            left.Literal() == right.Literal() && left.OperationName() == relation->Operation().name &&
+	            right.OperationName() == relation->Operation().name && left.Accuracy() == right.Accuracy() &&
+	            left.ProofIdentity() == right.ProofIdentity() && left.BaseDomain() == right.BaseDomain() &&
+	            left.OccurrencePreservation() == right.OccurrencePreservation() &&
+	            left.EncodingCapability() == right.EncodingCapability() && left.RemoteInputName() == "visibility" &&
+	            right.RemoteInputName() == "repository_visibility" &&
+	            left.RemoteInputName() != right.RemoteInputName() && left.EncodedRemoteValue() == "private" &&
+	            right.EncodedRemoteValue() == "private",
+	        "ambiguous predicate fixture mappings are not distinct individually safe input encodings");
+	Require(first.Snapshot() == second.Snapshot(), "ambiguous predicate fixture construction is not deterministic");
+	Require(first.Snapshot().find("input:rest_query:visibility=private") != std::string::npos &&
+	            first.Snapshot().find("input:rest_query:repository_visibility=private") != std::string::npos,
+	        "ambiguous predicate fixture snapshot omitted a safe mapping candidate");
+}
+
 } // namespace
 
 int main() {
@@ -228,6 +431,10 @@ int main() {
 		TestExplicitPaginationCatalogFixture();
 		TestPlannerCounterexampleCatalogFixtures();
 		TestPredicateMappingDecoyCatalogFixtures();
+		TestExactPredicateCatalogFixture();
+		TestEqualRankedOperationsCatalogFixture();
+		TestSelectableOperationsCatalogFixtures();
+		TestAmbiguousPredicateMappingsCatalogFixture();
 		std::cout << "connector catalog fixture tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

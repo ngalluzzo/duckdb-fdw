@@ -112,13 +112,143 @@ bool HasExpectedRepositoryNetwork(const NetworkCapability &network, const HttpEx
 	       network.loopback_addresses_enabled == profile.loopback_addresses_enabled;
 }
 
+bool HasKnownPredicate(PlannedPredicate predicate) {
+	switch (predicate) {
+	case PlannedPredicate::TRUE_FOR_BASE_DOMAIN:
+	case PlannedPredicate::VISIBILITY_EQUALS_PRIVATE:
+	case PlannedPredicate::COMPLETE_DUCKDB_FILTER:
+		return true;
+	}
+	return false;
+}
+
+bool HasKnownPredicateReason(PredicateDecisionReason reason) {
+	switch (reason) {
+	case PredicateDecisionReason::NO_REMOTE_CANDIDATE:
+	case PredicateDecisionReason::SELECTED_EXACT_MAPPING:
+	case PredicateDecisionReason::SELECTED_SUPERSET_MAPPING:
+	case PredicateDecisionReason::STRUCTURE_UNSUPPORTED:
+	case PredicateDecisionReason::CAPABILITY_UNAVAILABLE:
+	case PredicateDecisionReason::MAPPING_UNAVAILABLE:
+	case PredicateDecisionReason::DISJUNCTION_ENCODING_UNAVAILABLE:
+	case PredicateDecisionReason::COMPLEMENT_ENCODING_UNAVAILABLE:
+	case PredicateDecisionReason::AMBIGUOUS_CONDITIONAL_INPUT:
+		return true;
+	}
+	return false;
+}
+
+bool HasKnownFallbackReason(PredicateDecisionReason reason) {
+	switch (reason) {
+	case PredicateDecisionReason::NO_REMOTE_CANDIDATE:
+	case PredicateDecisionReason::STRUCTURE_UNSUPPORTED:
+	case PredicateDecisionReason::CAPABILITY_UNAVAILABLE:
+	case PredicateDecisionReason::MAPPING_UNAVAILABLE:
+	case PredicateDecisionReason::DISJUNCTION_ENCODING_UNAVAILABLE:
+	case PredicateDecisionReason::COMPLEMENT_ENCODING_UNAVAILABLE:
+		return true;
+	case PredicateDecisionReason::SELECTED_EXACT_MAPPING:
+	case PredicateDecisionReason::SELECTED_SUPERSET_MAPPING:
+	case PredicateDecisionReason::AMBIGUOUS_CONDITIONAL_INPUT:
+		return false;
+	}
+	return false;
+}
+
+bool HasLegalUnsupportedResidual(PredicateDecisionReason reason, PlannedPredicate residual) {
+	switch (reason) {
+	case PredicateDecisionReason::NO_REMOTE_CANDIDATE:
+		return residual == PlannedPredicate::TRUE_FOR_BASE_DOMAIN ||
+		       residual == PlannedPredicate::COMPLETE_DUCKDB_FILTER;
+	case PredicateDecisionReason::CAPABILITY_UNAVAILABLE:
+		return residual == PlannedPredicate::VISIBILITY_EQUALS_PRIVATE ||
+		       residual == PlannedPredicate::COMPLETE_DUCKDB_FILTER;
+	case PredicateDecisionReason::STRUCTURE_UNSUPPORTED:
+	case PredicateDecisionReason::MAPPING_UNAVAILABLE:
+	case PredicateDecisionReason::DISJUNCTION_ENCODING_UNAVAILABLE:
+	case PredicateDecisionReason::COMPLEMENT_ENCODING_UNAVAILABLE:
+		return residual == PlannedPredicate::COMPLETE_DUCKDB_FILTER;
+	case PredicateDecisionReason::SELECTED_EXACT_MAPPING:
+	case PredicateDecisionReason::SELECTED_SUPERSET_MAPPING:
+	case PredicateDecisionReason::AMBIGUOUS_CONDITIONAL_INPUT:
+		return false;
+	}
+	return false;
+}
+
+bool HasLegalSelectedOrAmbiguousResidual(PlannedPredicate residual) {
+	return residual == PlannedPredicate::VISIBILITY_EQUALS_PRIVATE ||
+	       residual == PlannedPredicate::COMPLETE_DUCKDB_FILTER;
+}
+
+// Semantics owns classification. Runtime checks that the closed handoff is a
+// complete known value supported by the installed operation, but it never
+// derives a conditional input or executable request from this decision. Exact
+// is valid semantic vocabulary, but the installed GitHub operation carries only
+// Connector's Superset proof; controlled Exact evidence is not executable here.
+bool HasCoherentStructuredPredicateDecision(const ScanPlan &plan) {
+	if (!HasKnownPredicate(plan.RemotePredicate()) || !HasKnownPredicate(plan.ResidualPredicate()) ||
+	    !HasKnownPredicateReason(plan.PredicateReason())) {
+		return false;
+	}
+
+	switch (plan.PredicateCategory()) {
+	case PredicateDecisionCategory::EXACT:
+		return false;
+	case PredicateDecisionCategory::SUPERSET:
+		return plan.RemoteAccuracy() == RemotePredicateAccuracy::SUPERSET &&
+		       plan.PredicateReason() == PredicateDecisionReason::SELECTED_SUPERSET_MAPPING &&
+		       plan.RemotePredicate() == PlannedPredicate::VISIBILITY_EQUALS_PRIVATE &&
+		       (plan.ResidualPredicate() == PlannedPredicate::VISIBILITY_EQUALS_PRIVATE ||
+		        plan.ResidualPredicate() == PlannedPredicate::COMPLETE_DUCKDB_FILTER) &&
+		       plan.ConditionalInput() == PlannedConditionalInput::VISIBILITY_PRIVATE;
+	case PredicateDecisionCategory::UNSUPPORTED:
+		return plan.RemoteAccuracy() == RemotePredicateAccuracy::UNSUPPORTED &&
+		       HasKnownFallbackReason(plan.PredicateReason()) &&
+		       plan.RemotePredicate() == PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
+		       HasLegalUnsupportedResidual(plan.PredicateReason(), plan.ResidualPredicate()) &&
+		       plan.ConditionalInput() == PlannedConditionalInput::NONE;
+	case PredicateDecisionCategory::AMBIGUOUS:
+		return plan.RemoteAccuracy() == RemotePredicateAccuracy::UNSUPPORTED &&
+		       plan.PredicateReason() == PredicateDecisionReason::AMBIGUOUS_CONDITIONAL_INPUT &&
+		       plan.RemotePredicate() == PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
+		       HasLegalSelectedOrAmbiguousResidual(plan.ResidualPredicate()) &&
+		       plan.ConditionalInput() == PlannedConditionalInput::NONE;
+	}
+	return false;
+}
+
+bool HasDuckDbOwnedRelationalEnvelope(const ScanPlan &plan) {
+	const auto &ownership = plan.Ownership();
+	return plan.ResidualOwner() == RelationalOwner::DUCKDB && ownership.filter == RelationalOwner::DUCKDB &&
+	       ownership.projection == RelationalOwner::DUCKDB && ownership.ordering == RelationalOwner::DUCKDB &&
+	       ownership.limit == RelationalOwner::DUCKDB && ownership.offset == RelationalOwner::DUCKDB &&
+	       plan.RemoteOrdering() == RelationalDelegation::NONE &&
+	       plan.RuntimeOrdering() == RelationalDelegation::NONE && plan.RemoteLimit() == RelationalDelegation::NONE &&
+	       plan.RemoteOffset() == RelationalDelegation::NONE && plan.RuntimeLimit() == RelationalDelegation::NONE &&
+	       plan.RuntimeOffset() == RelationalDelegation::NONE;
+}
+
+bool HasSupportedRelationalExecutionEnvelope(const ScanPlan &plan) {
+	if (!HasDuckDbOwnedRelationalEnvelope(plan) || !HasCoherentStructuredPredicateDecision(plan)) {
+		return false;
+	}
+	switch (plan.ConditionalInput()) {
+	case PlannedConditionalInput::NONE:
+	case PlannedConditionalInput::VISIBILITY_PRIVATE:
+		return true;
+	}
+	return false;
+}
+
 bool TryAdmitSingleResponsePlan(const ScanPlan &plan, const HttpExecutionProfile &profile,
                                 AdmittedHttpOperation &operation) {
 	if (plan.ConnectorName() != "github" || plan.ConnectorVersion() != "0.6.0" ||
 	    !HasUserColumns(plan.OutputColumns()) || plan.Pagination().Strategy() != PlannedPaginationStrategy::DISABLED ||
 	    plan.Providers() != FeatureState::DISABLED || plan.Retry() != FeatureState::DISABLED ||
 	    plan.Cache() != FeatureState::DISABLED || !HasExpectedNetwork(plan.Network(), profile) ||
-	    !plan.Budgets().IsWithinLiveRestBounds() || plan.Budgets().decoded_records > profile.max_decoded_records) {
+	    !plan.Budgets().IsWithinLiveRestBounds() || plan.Budgets().decoded_records > profile.max_decoded_records ||
+	    !HasSupportedRelationalExecutionEnvelope(plan) || plan.ConditionalInput() != PlannedConditionalInput::NONE) {
 		return false;
 	}
 	if (plan.RelationName() == "duckdb_login_search_page" && plan.Domain() == BaseDomain::JSON_PATH_RECORDS &&
@@ -171,36 +301,6 @@ bool HasExpectedPagination(const ScanPlan &plan) {
 	       scan.decoded_memory_bytes >= page.decoded_memory_bytes;
 }
 
-bool HasDuckDbOwnedRelationalEnvelope(const ScanPlan &plan) {
-	const auto &ownership = plan.Ownership();
-	return plan.ResidualOwner() == RelationalOwner::DUCKDB && ownership.filter == RelationalOwner::DUCKDB &&
-	       ownership.ordering == RelationalOwner::DUCKDB && ownership.limit == RelationalOwner::DUCKDB &&
-	       ownership.offset == RelationalOwner::DUCKDB && plan.RemoteOrdering() == RelationalDelegation::NONE &&
-	       plan.RuntimeOrdering() == RelationalDelegation::NONE && plan.RemoteLimit() == RelationalDelegation::NONE &&
-	       plan.RemoteOffset() == RelationalDelegation::NONE && plan.RuntimeLimit() == RelationalDelegation::NONE &&
-	       plan.RuntimeOffset() == RelationalDelegation::NONE;
-}
-
-bool HasExpectedRepositoryRelationalProfile(const ScanPlan &plan) {
-	if (!HasDuckDbOwnedRelationalEnvelope(plan)) {
-		return false;
-	}
-	if (plan.ConditionalInput() == PlannedConditionalInput::NONE) {
-		return plan.RemotePredicate() == PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
-		       plan.RemoteAccuracy() == RemotePredicateAccuracy::UNSUPPORTED &&
-		       (plan.ResidualPredicate() == PlannedPredicate::TRUE_FOR_BASE_DOMAIN ||
-		        plan.ResidualPredicate() == PlannedPredicate::VISIBILITY_EQUALS_PRIVATE ||
-		        plan.ResidualPredicate() == PlannedPredicate::COMPLETE_DUCKDB_FILTER);
-	}
-	if (plan.ConditionalInput() == PlannedConditionalInput::VISIBILITY_PRIVATE) {
-		return plan.RemotePredicate() == PlannedPredicate::VISIBILITY_EQUALS_PRIVATE &&
-		       plan.RemoteAccuracy() == RemotePredicateAccuracy::SUPERSET &&
-		       (plan.ResidualPredicate() == PlannedPredicate::VISIBILITY_EQUALS_PRIVATE ||
-		        plan.ResidualPredicate() == PlannedPredicate::COMPLETE_DUCKDB_FILTER);
-	}
-	return false;
-}
-
 bool IsAuthenticatedRepositoriesPlan(const ScanPlan &plan, const HttpExecutionProfile &profile) {
 	return plan.ConnectorName() == "github" && plan.ConnectorVersion() == "0.6.0" &&
 	       plan.RelationName() == "authenticated_repositories" &&
@@ -210,7 +310,7 @@ bool IsAuthenticatedRepositoriesPlan(const ScanPlan &plan, const HttpExecutionPr
 	       plan.Providers() == FeatureState::DISABLED && plan.Retry() == FeatureState::DISABLED &&
 	       plan.Cache() == FeatureState::DISABLED && plan.Authentication() == FeatureState::ENABLED &&
 	       plan.SecretReference().IsPresent() && HasAuthenticatedObligation(plan.AuthenticationObligation(), profile) &&
-	       HasExpectedRepositoryNetwork(plan.Network(), profile) && HasExpectedRepositoryRelationalProfile(plan);
+	       HasExpectedRepositoryNetwork(plan.Network(), profile) && HasSupportedRelationalExecutionEnvelope(plan);
 }
 
 } // namespace

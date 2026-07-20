@@ -38,8 +38,8 @@ private:
 struct AdapterCapabilities {
 	bool projection;
 	bool filter;
-	// The pinned complex-filter callback can offer the one closed structured
-	// predicate without claiming generic DuckDB table-filter execution.
+	// The pinned complex-filter callback can offer Semantics' bounded structured
+	// candidate without claiming generic DuckDB table-filter execution.
 	bool selective_predicate;
 	// Query leaves every offered expression in DuckDB's filter vector. This
 	// flag is required before Semantics may plan a selective remote restriction.
@@ -68,6 +68,9 @@ struct ScanRequest {
 	std::string relation_name;
 	std::vector<std::string> explicit_inputs;
 	std::vector<std::string> projected_columns;
+	// Complete bounded structure Query could translate from the offered filter.
+	// Unsupported positions are opaque and the complete DuckDB filter remains
+	// separately owned according to retained_predicate_scope.
 	RequestedPredicate requested_predicate;
 	RetainedPredicateScope retained_predicate_scope;
 	std::vector<std::string> orderings;

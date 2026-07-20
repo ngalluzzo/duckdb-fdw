@@ -26,6 +26,12 @@ duckdb_api::ScanRequest RepositoryBaselineRequest(const duckdb_api::CompiledConn
 	                                                duckdb_api::LogicalSecretReference::Named("offline_secret"));
 }
 
+duckdb_api::RequestedPredicate VisibilityPrivateCandidate() {
+	return duckdb_api::RequestedPredicate::Comparison(5, duckdb_api::RequestedPredicateValueKind::VARCHAR,
+	                                                  duckdb_api::RequestedPredicateComparisonOperator::EQUALS,
+	                                                  duckdb_api::RequestedPredicateValue::Varchar("private"));
+}
+
 void TestBaselineRetentionAndIndependentCopy() {
 	const auto connector = duckdb_api::BuildNativeGithubConnector();
 	auto baseline_request = RepositoryBaselineRequest(connector);
@@ -33,18 +39,20 @@ void TestBaselineRetentionAndIndependentCopy() {
 	duckdb_api::query_internal::TableFunctionPlanState state(std::move(baseline_request), std::move(baseline_plan));
 	const duckdb_api::query_internal::TableFunctionPlanState copy(state);
 
-	Require(&state.BaselineRequest() != &copy.BaselineRequest() && &state.SelectedPlan() != &copy.SelectedPlan(),
+	Require(&state.BaselineRequest() != &copy.BaselineRequest() &&
+	            &state.SelectedRequest() != &copy.SelectedRequest() && &state.SelectedPlan() != &copy.SelectedPlan(),
 	        "bind-state copy shared request or selected-plan storage");
 	Require(state.BaselineRequest().Snapshot() == copy.BaselineRequest().Snapshot() &&
 	            state.SelectedPlan().Snapshot() == copy.SelectedPlan().Snapshot(),
 	        "bind-state copy changed baseline request or selected plan value");
 
 	auto candidate = state.BaselineRequest();
-	candidate.requested_predicate = duckdb_api::RequestedPredicate::VisibilityEqualsPrivate();
+	candidate.requested_predicate = VisibilityPrivateCandidate();
 	candidate.retained_predicate_scope = duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE;
 	candidate.capabilities.selective_predicate = true;
 	candidate.capabilities.retains_predicate = true;
-	state.ReplaceSelectedPlan(duckdb_api::BuildConservativeScanPlan(connector, candidate));
+	auto candidate_plan = duckdb_api::BuildConservativeScanPlan(connector, candidate);
+	state.ReplaceSelected(std::move(candidate), std::move(candidate_plan));
 
 	Require(state.SelectedPlan().RemotePredicate() == duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE &&
 	            state.SelectedPlan().RemoteAccuracy() == duckdb_api::RemotePredicateAccuracy::SUPERSET &&
@@ -59,7 +67,9 @@ void TestBaselineRetentionAndIndependentCopy() {
 	        "selected-plan replacement mutated the retained credential-free baseline request");
 
 	const duckdb_api::query_internal::TableFunctionPlanState refined_copy(state);
-	state.ReplaceSelectedPlan(duckdb_api::BuildConservativeScanPlan(connector, state.BaselineRequest()));
+	auto replacement_request = state.BaselineRequest();
+	auto replacement_plan = duckdb_api::BuildConservativeScanPlan(connector, replacement_request);
+	state.ReplaceSelected(std::move(replacement_request), std::move(replacement_plan));
 	Require(refined_copy.SelectedPlan().RemotePredicate() == duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE &&
 	            state.SelectedPlan().RemotePredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN,
 	        "copying after refinement shared later selected-plan replacement");
@@ -68,14 +78,17 @@ void TestBaselineRetentionAndIndependentCopy() {
 	invalid.connector_name = "wrong-connector";
 	bool failed = false;
 	try {
-		state.ReplaceSelectedPlan(duckdb_api::BuildConservativeScanPlan(connector, invalid));
+		auto invalid_plan = duckdb_api::BuildConservativeScanPlan(connector, invalid);
+		state.ReplaceSelected(std::move(invalid), std::move(invalid_plan));
 	} catch (const std::logic_error &) {
 		failed = true;
 	}
 	Require(failed && state.SelectedPlan().RemotePredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN,
 	        "failed refinement changed the previously frozen selected plan");
 
-	state.ReplaceSelectedPlan(duckdb_api::BuildConservativeScanPlan(connector, state.BaselineRequest()));
+	auto final_request = state.BaselineRequest();
+	auto final_plan = duckdb_api::BuildConservativeScanPlan(connector, final_request);
+	state.ReplaceSelected(std::move(final_request), std::move(final_plan));
 	Require(state.SelectedPlan().RemotePredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN,
 	        "replanning from the baseline request retained stale selective state");
 }
@@ -125,11 +138,12 @@ void TestDuckdbBindCopiesRefineConcurrentlyFromOneDestroyedAncestor() {
 		try {
 			synchronize();
 			auto request = private_copy.plan_state.BaselineRequest();
-			request.requested_predicate = duckdb_api::RequestedPredicate::VisibilityEqualsPrivate();
+			request.requested_predicate = VisibilityPrivateCandidate();
 			request.retained_predicate_scope = duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE;
 			request.capabilities.selective_predicate = true;
 			request.capabilities.retains_predicate = true;
-			private_copy.plan_state.ReplaceSelectedPlan(duckdb_api::BuildConservativeScanPlan(connector, request));
+			auto plan = duckdb_api::BuildConservativeScanPlan(connector, request);
+			private_copy.plan_state.ReplaceSelected(std::move(request), std::move(plan));
 		} catch (...) {
 			private_failure = std::current_exception();
 		}
@@ -138,10 +152,12 @@ void TestDuckdbBindCopiesRefineConcurrentlyFromOneDestroyedAncestor() {
 		try {
 			synchronize();
 			auto request = fallback_copy.plan_state.BaselineRequest();
+			request.requested_predicate = duckdb_api::RequestedPredicate::Unsupported(0);
 			request.retained_predicate_scope = duckdb_api::RetainedPredicateScope::COMPLETE_DUCKDB_FILTER;
 			request.capabilities.selective_predicate = true;
 			request.capabilities.retains_predicate = true;
-			fallback_copy.plan_state.ReplaceSelectedPlan(duckdb_api::BuildConservativeScanPlan(connector, request));
+			auto plan = duckdb_api::BuildConservativeScanPlan(connector, request);
+			fallback_copy.plan_state.ReplaceSelected(std::move(request), std::move(plan));
 		} catch (...) {
 			fallback_failure = std::current_exception();
 		}

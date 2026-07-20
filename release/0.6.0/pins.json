@@ -19,8 +19,11 @@
     "build_graph": {
       "controlled_translation_units": [
         "src/connector/catalog_model.cpp",
+        "src/connector/catalog_snapshot.cpp",
+        "src/connector/operation_selector.cpp",
         "src/connector/pagination_declaration.cpp",
         "src/connector/predicate_declaration.cpp",
+        "src/connector/predicate_proof_profile.cpp",
         "src/connector/resource_ceiling_declaration.cpp",
         "src/connector/native_github_composition.cpp",
         "test/cpp/connector/support/connector_catalog_test_fixtures.cpp",
@@ -52,14 +55,18 @@
         "src/query/duckdb/table_function_adapter.cpp",
         "test/cpp/runtime/support/loopback_curl_runtime.cpp",
         "src/query/duckdb/complex_filter_adapter.cpp",
+        "src/query/duckdb/scan_plan_explanation.cpp",
         "src/query/duckdb/table_function_plan_state.cpp",
         "test/cpp/query/integration/support/controlled_product_composition.cpp",
         "test/cpp/query/integration/controlled_extension_entrypoint.cpp"
       ],
       "public_translation_units": [
         "src/connector/catalog_model.cpp",
+        "src/connector/catalog_snapshot.cpp",
+        "src/connector/operation_selector.cpp",
         "src/connector/pagination_declaration.cpp",
         "src/connector/predicate_declaration.cpp",
+        "src/connector/predicate_proof_profile.cpp",
         "src/connector/resource_ceiling_declaration.cpp",
         "src/connector/native_github_composition.cpp",
         "src/query/scan_request.cpp",
@@ -89,6 +96,7 @@
         "src/query/product_composition.cpp",
         "src/query/duckdb/secret_integration.cpp",
         "src/query/duckdb/complex_filter_adapter.cpp",
+        "src/query/duckdb/scan_plan_explanation.cpp",
         "src/query/duckdb/table_function_plan_state.cpp",
         "src/query/duckdb/table_function_adapter.cpp",
         "src/query/duckdb/extension_entrypoint.cpp"
@@ -106,7 +114,7 @@
         "test/cpp/runtime/support/loopback_curl_runtime.cpp",
         "test/cpp/runtime/support/loopback_curl_runtime.hpp"
       ],
-      "sha256": "2390a8982c3d6ac1f3b0165345f9cf1c656ea67fa2e4bfb150d31b47a1708ebc"
+      "sha256": "31e4ff9cfe69c2809f0bf76eae1920bb2f25b5d79fd5181784af76f4c1a13b85"
     },
     "native_product_sources": {
       "algorithm": "sha256-length-prefixed-path-and-bytes-v1",
@@ -114,9 +122,12 @@
         "src/README.md",
         "src/connector/README.md",
         "src/connector/catalog_model.cpp",
+        "src/connector/catalog_snapshot.cpp",
         "src/connector/native_github_composition.cpp",
+        "src/connector/operation_selector.cpp",
         "src/connector/pagination_declaration.cpp",
         "src/connector/predicate_declaration.cpp",
+        "src/connector/predicate_proof_profile.cpp",
         "src/connector/resource_ceiling_declaration.cpp",
         "src/connector/sources.cmake",
         "src/connector/targets.cmake",
@@ -126,8 +137,10 @@
         "src/include/duckdb_api/duckdb_secret.hpp",
         "src/include/duckdb_api/execution.hpp",
         "src/include/duckdb_api/http_runtime.hpp",
+        "src/include/duckdb_api/internal/connector/operation_selector_declaration.hpp",
         "src/include/duckdb_api/internal/connector/pagination_declaration.hpp",
         "src/include/duckdb_api/internal/connector/predicate_declaration.hpp",
+        "src/include/duckdb_api/internal/connector/predicate_proof_profile.hpp",
         "src/include/duckdb_api/internal/connector/resource_ceiling_declaration.hpp",
         "src/include/duckdb_api/internal/runtime/authentication/fixed_github_user_bearer_authenticator.hpp",
         "src/include/duckdb_api/internal/runtime/decoding/decoded_page_buffer.hpp",
@@ -156,6 +169,8 @@
         "src/query/duckdb/complex_filter_adapter.cpp",
         "src/query/duckdb/complex_filter_adapter.hpp",
         "src/query/duckdb/extension_entrypoint.cpp",
+        "src/query/duckdb/scan_plan_explanation.cpp",
+        "src/query/duckdb/scan_plan_explanation.hpp",
         "src/query/duckdb/secret_integration.cpp",
         "src/query/duckdb/table_function_adapter.cpp",
         "src/query/duckdb/table_function_bind_data.hpp",
@@ -197,7 +212,7 @@
         "src/semantics/sources.cmake",
         "src/semantics/targets.cmake"
       ],
-      "sha256": "b178740f8e268dc0d9d9c3327e23514f01426bbc4d734928abb3b12251dc073c"
+      "sha256": "9dc8c9337497f7e1afeeda608f4ccfcecb4c682fda37a96f6888d6b2b0fc111f"
     },
     "public_contract": {
       "canonical_json_sha256": "580a33b94357b2a539489ff2c2ba69289b89be3ee2ed019efe29832230f1cecf",

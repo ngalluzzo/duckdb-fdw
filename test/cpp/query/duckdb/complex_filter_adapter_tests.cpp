@@ -42,7 +42,29 @@ void RequireExplainedField(const std::string &explanation, const std::string &la
 	        context + " did not associate " + label + " with " + value + ":\n" + explanation);
 }
 
+void RequireCompleteOwnershipExplanation(const std::string &explanation, const std::string &context) {
+	for (const auto &label : {"Filter Action",         "Residual Owner",
+	                          "Filter Owner",          "Projection Closure",
+	                          "Projection Owner",      "Ordering Owner",
+	                          "Limit Owner",           "Offset Owner",
+	                          "Remote Ordering",       "Runtime Ordering",
+	                          "Remote Limit",          "Runtime Limit",
+	                          "Remote Offset",         "Runtime Offset",
+	                          "Projection Metadata",   "Generic Filter Execution",
+	                          "Candidate Inspection",  "DuckDB Residual Retention",
+	                          "Ordering Metadata",     "Limit Metadata",
+	                          "Offset Metadata",       "Classification Category",
+	                          "Classification Reason", "Classification Detail"}) {
+		Require(explanation.find(label) != std::string::npos,
+		        context + " omitted typed explanation field " + label + ":\n" + explanation);
+	}
+	Require(explanation.find("id,full_name,private,fork") != std::string::npos &&
+	            explanation.find("archived,visibility") != std::string::npos,
+	        context + " omitted the complete projection closure:\n" + explanation);
+}
+
 void RequireBaselineExplanation(const std::string &explanation, const std::string &context) {
+	RequireCompleteOwnershipExplanation(explanation, context);
 	Require(explanation.find("Relation") != std::string::npos &&
 	            explanation.find("authenticated_repositories") != std::string::npos &&
 	            explanation.find("Residual Owner") != std::string::npos &&
@@ -51,22 +73,31 @@ void RequireBaselineExplanation(const std::string &explanation, const std::strin
 	RequireExplainedField(explanation, "Remote Predicate", "unrestricted", "Remote Accuracy", context);
 	RequireExplainedField(explanation, "Remote Accuracy", "unsupported", "Residual Predicate", context);
 	RequireExplainedField(explanation, "Residual Predicate", "unrestricted", "Residual Owner", context);
+	RequireExplainedField(explanation, "Classification Category", "unsupported", "Classification Reason", context);
+	RequireExplainedField(explanation, "Classification Reason", "no_remote_candidate", "Classification Detail",
+	                      context);
 }
 
-void RequireStructuredFallbackExplanation(const std::string &explanation, const std::string &context) {
+void RequireStructuredFallbackExplanation(const std::string &explanation, const std::string &context,
+                                          const std::string &category = "unsupported", const std::string &reason = "") {
+	RequireCompleteOwnershipExplanation(explanation, context);
 	RequireExplainedField(explanation, "Remote Predicate", "unrestricted", "Remote Accuracy", context);
 	RequireExplainedField(explanation, "Remote Accuracy", "unsupported", "Residual Predicate", context);
 	RequireExplainedField(explanation, "Residual Predicate", "complete_duckdb_filter", "Residual Owner", context);
+	RequireExplainedField(explanation, "Classification Category", category, "Classification Reason", context);
 	Require(explanation.find("authenticated_repositories") != std::string::npos &&
 	            explanation.find("Residual Owner") != std::string::npos &&
 	            explanation.find("duckdb") != std::string::npos &&
-	            explanation.find("Classification") != std::string::npos &&
-	            explanation.find("accepted") != std::string::npos && explanation.find("mapping") != std::string::npos,
+	            explanation.find("Filter Action") != std::string::npos &&
+	            explanation.find("retained") != std::string::npos &&
+	            explanation.find("Classification Reason") != std::string::npos &&
+	            (reason.empty() || explanation.find(reason) != std::string::npos),
 	        context + " did not explain the structural fallback reason:\n" + explanation);
 }
 
 void RequireSelectiveExplanation(const std::string &explanation, const std::string &context,
                                  const std::string &expected_residual = "visibility_equals_private") {
+	RequireCompleteOwnershipExplanation(explanation, context);
 	Require(explanation.find("Relation") != std::string::npos &&
 	            explanation.find("authenticated_repositories") != std::string::npos &&
 	            explanation.find("Residual Owner") != std::string::npos &&
@@ -75,6 +106,9 @@ void RequireSelectiveExplanation(const std::string &explanation, const std::stri
 	RequireExplainedField(explanation, "Remote Predicate", "visibility_equals_private", "Remote Accuracy", context);
 	RequireExplainedField(explanation, "Remote Accuracy", "superset", "Residual Predicate", context);
 	RequireExplainedField(explanation, "Residual Predicate", expected_residual, "Residual Owner", context);
+	RequireExplainedField(explanation, "Classification Category", "superset", "Classification Reason", context);
+	RequireExplainedField(explanation, "Classification Reason", "selected_superset_mapping", "Classification Detail",
+	                      context);
 	Require(explanation.find("FILTER") != std::string::npos && explanation.find("visibility") != std::string::npos &&
 	            explanation.find("private") != std::string::npos,
 	        context + " removed or rewrote DuckDB's original residual filter:\n" + explanation);
@@ -107,15 +141,17 @@ void TestExactRecognitionResidualAndFallback() {
 	const auto conjunction = Explain(connection, "SELECT id FROM " + std::string(REPOSITORY_SCAN) +
 	                                                 " WHERE visibility = 'private' AND archived = FALSE");
 	RequireSelectiveExplanation(conjunction, "supported conjunction member", "complete_duckdb_filter");
-	// DuckDB's box renderer may wrap the reason between words. The structured
-	// residual field above is the exact contract; these tokens ensure the prose
-	// remains scope-aware without coupling the oracle to terminal width.
-	Require(conjunction.find("structured") != std::string::npos &&
+	Require(conjunction.find("Candidate") != std::string::npos && conjunction.find("and[") != std::string::npos &&
+	            conjunction.find("literal:boolean:false") != std::string::npos &&
 	            conjunction.find("complete visibility predicate") == std::string::npos,
-	        "compound explanation described only its selective conjunct:\n" + conjunction);
+	        "compound explanation lost its complete typed candidate:\n" + conjunction);
 	const auto duplicate = Explain(connection, "SELECT id FROM " + std::string(REPOSITORY_SCAN) +
 	                                               " WHERE visibility = 'private' AND visibility = 'private'");
-	RequireSelectiveExplanation(duplicate, "duplicate supported equality");
+	// DuckDB may simplify duplicate expressions before the callback. Query
+	// translates only the structure actually offered and leaves that simplified
+	// expression in DuckDB; Semantics' direct oracle owns the unsimplified
+	// incompatible-candidate case.
+	RequireSelectiveExplanation(duplicate, "DuckDB-simplified duplicate equality");
 
 	const std::vector<std::string> unsupported = {
 	    "private = TRUE",

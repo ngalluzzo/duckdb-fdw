@@ -8,17 +8,23 @@ catalog explanation changes.
 Connector construction is deterministic and network-free. The resulting
 `CompiledConnector` contains metadata only: no credentials, active requests,
 DuckDB callback state, or runtime objects. Conditional predicate declarations
-are immutable source facts; Semantics owns their relational interpretation and
-Runtime receives only the resulting plan.
+are immutable source facts. A closed proof identity binds accuracy to one base
+occurrence domain, occurrence-preservation guarantee, and operation-scoped
+encoding envelope; changing one field cannot relabel another profile. Semantics
+owns implication, three-valued equivalence, composition, classification, and
+residual ownership. Runtime receives only the resulting plan.
 
 ## Start here
 
 | Change | Production code | Test |
 | --- | --- | --- |
 | Add or change an installed GitHub relation | `native_github_composition.cpp`, `duckdb_api/connector.hpp` | `connector_contract_tests.cpp` |
-| Change catalog values, validation, lookup, or snapshots | `catalog_model.cpp`, `duckdb_api/connector_catalog.hpp` | `connector_catalog_contract_tests.cpp` |
+| Change catalog values, relation/catalog validation, or lookup | `catalog_model.cpp`, `duckdb_api/connector_catalog.hpp` | `connector_catalog_contract_tests.cpp` |
+| Change operation-selector normalization or declaration validation | `operation_selector.cpp` and its internal header | `connector_catalog_contract_tests.cpp`; fixture tests for controlled selection services |
+| Change safe catalog snapshot rendering | `catalog_snapshot.cpp` | catalog and fixture snapshot assertions |
 | Change a pagination declaration | `pagination_declaration.cpp` and its internal header | `connector_pagination_contract_tests.cpp` |
 | Change a predicate declaration | `predicate_declaration.cpp` and its internal header | `connector_predicate_contract_tests.cpp`; `connector_contract_tests.cpp` for installed values |
+| Change an accepted predicate proof/domain profile | `predicate_proof_profile.cpp` and its internal header | `connector_predicate_proof_contract_tests.cpp`; fixture tests for the controlled exact service |
 | Change resource ceilings | `resource_ceiling_declaration.cpp` and its internal header | `connector_pagination_contract_tests.cpp`; `connector_contract_tests.cpp` for installed values |
 | Add a deterministic catalog fixture | `test/cpp/connector/support/connector_catalog_test_fixtures.*` | `connector_catalog_test_fixtures_tests.cpp` |
 
@@ -34,6 +40,14 @@ Tests in other packages that need non-production catalogs use the
 Connector-owned fixture service. Connector's own contract tests may use
 `test/cpp/connector/support/catalog_test_access.hpp` to exercise private model
 invariants; that construction access must not become a consumer API.
+
+The fixture service's distinct exact predicate catalog is non-installable. It
+passes the same production constructors and proof-profile validation as native
+metadata, then exposes only public const catalog access. Consumers must not
+infer proof or encoding from relation names, extractors, paths, fixed request
+fields, or snapshots. The installed catalog retains only the reviewed GitHub
+`SUPERSET` mapping; the controlled exact identity creates no public relation,
+request, package, or ABI promise.
 
 ## Tests
 

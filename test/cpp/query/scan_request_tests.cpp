@@ -100,7 +100,7 @@ void TestAcceptedAnonymousAndAuthenticatedRequests() {
 	        "request builder changed logical-reference presence or identity");
 	Require(anonymous.Snapshot() ==
 	            "connector=github;relation=duckdb_login_search_page;inputs=[];projection=id,login,site_admin;"
-	            "requested-predicate=unrestricted;retained-predicate-scope=unrestricted;ordering=[];limit=unset;"
+	            "requested-predicate=true;retained-predicate-scope=unrestricted;ordering=[];limit=unset;"
 	            "offset=unset;capabilities=projection:"
 	            "unavailable,filter:unavailable,selective-predicate:unavailable,retains-predicate:unavailable,"
 	            "ordering:unavailable,limit:unavailable,offset:unavailable,progress:unavailable,"
@@ -136,7 +136,7 @@ void TestAuthenticatedRepositoryRequest() {
 	        "repository request changed the exact logical secret reference");
 	const std::string expected =
 	    "connector=github;relation=authenticated_repositories;inputs=[];projection=id,full_name,private,fork,"
-	    "archived,visibility;requested-predicate=unrestricted;retained-predicate-scope=unrestricted;ordering=[];"
+	    "archived,visibility;requested-predicate=true;retained-predicate-scope=unrestricted;ordering=[];"
 	    "limit=unset;offset=unset;capabilities="
 	    "projection:unavailable,filter:unavailable,selective-predicate:unavailable,retains-predicate:unavailable,"
 	    "ordering:unavailable,limit:unavailable,offset:unavailable,progress:unavailable,cancellation:"
@@ -252,7 +252,9 @@ void TestProtocolNeutralSelectiveCandidateCopy() {
 	const auto baseline = duckdb_api::BuildConservativeScanRequest(
 	    connector, REPOSITORY_RELATION, duckdb_api::LogicalSecretReference::Named("github_default"));
 	auto candidate = baseline;
-	candidate.requested_predicate = duckdb_api::RequestedPredicate::VisibilityEqualsPrivate();
+	candidate.requested_predicate = duckdb_api::RequestedPredicate::Comparison(
+	    5, duckdb_api::RequestedPredicateValueKind::VARCHAR, duckdb_api::RequestedPredicateComparisonOperator::EQUALS,
+	    duckdb_api::RequestedPredicateValue::Varchar("private"));
 	candidate.retained_predicate_scope = duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE;
 	candidate.capabilities.selective_predicate = true;
 	candidate.capabilities.retains_predicate = true;
@@ -260,11 +262,15 @@ void TestProtocolNeutralSelectiveCandidateCopy() {
 	Require(baseline.requested_predicate == duckdb_api::RequestedPredicate::Unrestricted() &&
 	            baseline.capabilities.HasConservativeRelationalProfile(),
 	        "selective candidate mutation changed the retained baseline request");
-	Require(candidate.requested_predicate == duckdb_api::RequestedPredicate::VisibilityEqualsPrivate() &&
+	Require(candidate.requested_predicate == duckdb_api::RequestedPredicate::Comparison(
+	                                             5, duckdb_api::RequestedPredicateValueKind::VARCHAR,
+	                                             duckdb_api::RequestedPredicateComparisonOperator::EQUALS,
+	                                             duckdb_api::RequestedPredicateValue::Varchar("private")) &&
 	            candidate.capabilities.selective_predicate && candidate.capabilities.retains_predicate &&
 	            !candidate.capabilities.filter,
 	        "selective candidate did not distinguish advisory recognition from generic filter execution");
-	Require(candidate.Snapshot().find("requested-predicate=visibility_equals_private") != std::string::npos &&
+	Require(candidate.Snapshot().find("requested-predicate=comparison[column:5,type:varchar,operator:equals,"
+	                                  "literal:varchar:hex:70726976617465]") != std::string::npos &&
 	            candidate.Snapshot().find("retained-predicate-scope=requested_predicate") != std::string::npos &&
 	            candidate.Snapshot().find("selective-predicate:available,retains-predicate:verified") !=
 	                std::string::npos,

@@ -217,6 +217,14 @@ PlannedConditionalInput ScanPlan::ConditionalInput() const {
 	return conditional_input;
 }
 
+PredicateDecisionCategory ScanPlan::PredicateCategory() const {
+	return predicate_category;
+}
+
+PredicateDecisionReason ScanPlan::PredicateReason() const {
+	return predicate_reason;
+}
+
 const RelationalOwnership &ScanPlan::Ownership() const {
 	return ownership;
 }

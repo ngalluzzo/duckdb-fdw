@@ -11,6 +11,11 @@ const char DISTINCT_SCHEMA_ANONYMOUS_RELATION[] = "fixture_public_records";
 const char DISTINCT_SCHEMA_AUTHENTICATED_RELATION[] = "fixture_private_profile";
 const char PAGINATION_DECOY_RELATION[] = "fixture_page_shaped_unpaginated";
 const char PAGINATION_LINK_RELATION[] = "fixture_explicit_link_records";
+const char PREDICATE_EXACT_RELATION[] = "controlled_exact_repositories";
+const char PREDICATE_EQUAL_RANKED_OPERATIONS_RELATION[] = "controlled_equal_ranked_operations";
+const char PREDICATE_AMBIGUOUS_MAPPINGS_RELATION[] = "controlled_exact_repositories";
+const char OPERATION_UNIQUE_WINNER_RELATION[] = "controlled_exact_repositories";
+const char OPERATION_FALLBACK_RELATION[] = "controlled_exact_repositories";
 
 namespace {
 
@@ -35,7 +40,8 @@ duckdb_api::CompiledConnector BuildPredicateDecoyCatalog(std::string connector_n
 	                                    {{"per_page", "100"}, {"page", "1"}},
 	                                    {{"X-Connector-Fixture", "predicate-decoy"}}},
 	                                   duckdb_api::CompiledResponseSource::ROOT_ARRAY,
-	                                   "$"},
+	                                   "$",
+	                                   duckdb_api::CompiledOperationSelector()},
 	    ConnectorCatalogTestAccess::RequiredBearer(),
 	    ConnectorCatalogTestAccess::PaginatedResources(4096, 8192, 100, 200, 512)));
 	return ConnectorCatalogTestAccess::Catalog(
@@ -51,6 +57,92 @@ std::vector<duckdb_api::CompiledColumn> PredicateRepositorySchema() {
 	        {"fork", "BOOLEAN", false, "$.fork"},
 	        {"archived", "BOOLEAN", false, "$.archived"},
 	        {"visibility", "VARCHAR", false, "$.visibility"}};
+}
+
+duckdb_api::CompiledOperation ControlledExactPredicateOperation(
+    bool fallback = true, duckdb_api::CompiledOperationSelector selector = duckdb_api::CompiledOperationSelector(),
+    std::string operation_name = "controlled_exact_repositories") {
+	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledRestHost("predicate-proof.invalid"), 443};
+	return duckdb_api::CompiledOperation {
+	    std::move(operation_name),
+	    fallback,
+	    duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	    duckdb_api::CompiledProtocol::REST,
+	    duckdb_api::CompiledHttpMethod::GET,
+	    duckdb_api::CompiledReplaySafety::SAFE,
+	    false,
+	    ConnectorCatalogTestAccess::DisabledPagination(),
+	    {origin, "/fixtures/exact-repositories", {}, {{"X-Connector-Fixture", "exact-duplicate-repositories"}}},
+	    duckdb_api::CompiledResponseSource::ROOT_ARRAY,
+	    "$",
+	    std::move(selector)};
+}
+
+duckdb_api::CompiledPredicateMapping
+ControlledExactPredicateMapping(std::string remote_input_name,
+                                std::string operation_name = "controlled_exact_repositories") {
+	return ConnectorCatalogTestAccess::PredicateMapping(
+	    "visibility", duckdb_api::CompiledPredicateOperator::EQUALS,
+	    duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE, std::move(operation_name),
+	    duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER, std::move(remote_input_name), "private",
+	    duckdb_api::CompiledPredicateAccuracy::EXACT,
+	    duckdb_api::CompiledPredicateProofIdentity::CONTROLLED_EXACT_DUPLICATE_REPOSITORY_VISIBILITY,
+	    duckdb_api::CompiledPredicateBaseDomain::CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES,
+	    duckdb_api::CompiledPredicateOccurrencePreservation::PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES,
+	    duckdb_api::CompiledPredicateEncodingCapability::SINGLE_POSITIVE_REST_QUERY_INPUT);
+}
+
+std::vector<duckdb_api::CompiledColumn> ControlledPredicateSchema() {
+	return {{"occurrence_id", "BIGINT", false, "$.occurrence_id"}, {"visibility", "VARCHAR", false, "$.visibility"}};
+}
+
+duckdb_api::CompiledOperation ControlledSelectorFallbackOperation() {
+	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledRestHost("predicate-proof.invalid"), 443};
+	return duckdb_api::CompiledOperation {"controlled_selector_fallback_repositories",
+	                                      true,
+	                                      duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	                                      duckdb_api::CompiledProtocol::REST,
+	                                      duckdb_api::CompiledHttpMethod::GET,
+	                                      duckdb_api::CompiledReplaySafety::SAFE,
+	                                      false,
+	                                      ConnectorCatalogTestAccess::DisabledPagination(),
+	                                      {origin,
+	                                       "/fixtures/selector-fallback-repositories",
+	                                       {},
+	                                       {{"X-Connector-Fixture", "selector-fallback-repositories"}}},
+	                                      duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
+	                                      "$.records[*]",
+	                                      duckdb_api::CompiledOperationSelector()};
+}
+
+duckdb_api::CompiledConnector BuildSelectableOperationsCatalog(std::string connector_name, bool priority_winner) {
+	std::vector<duckdb_api::CompiledOperation> operations;
+	std::vector<duckdb_api::CompiledPredicateMapping> mappings;
+	if (priority_winner) {
+		operations.push_back(ControlledExactPredicateOperation(
+		    false, ConnectorCatalogTestAccess::OperationSelector({}, {{"visibility"}}, {}, 10)));
+		operations.push_back(ControlledExactPredicateOperation(
+		    false, ConnectorCatalogTestAccess::OperationSelector({"visibility"}, {}, {}, 5),
+		    "controlled_priority_exact_repositories"));
+		mappings.push_back(ControlledExactPredicateMapping("visibility"));
+		mappings.push_back(ControlledExactPredicateMapping("visibility", "controlled_priority_exact_repositories"));
+	} else {
+		operations.push_back(ControlledExactPredicateOperation(
+		    false, ConnectorCatalogTestAccess::OperationSelector({"visibility"}, {}, {}, 10)));
+		mappings.push_back(ControlledExactPredicateMapping("visibility"));
+	}
+	operations.push_back(ControlledSelectorFallbackOperation());
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    PREDICATE_EXACT_RELATION, ControlledPredicateSchema(), std::move(operations),
+	    ConnectorCatalogTestAccess::Anonymous(), ConnectorCatalogTestAccess::UnpaginatedResources(8, 128),
+	    std::move(mappings)));
+	return ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, std::move(connector_name), "test-1",
+	    std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"predicate-proof.invalid"}, false, false, false, false, 4096});
 }
 
 } // namespace
@@ -74,7 +166,8 @@ duckdb_api::CompiledConnector BuildDistinctSchemaConnectorCatalogFixture() {
 	                                   ConnectorCatalogTestAccess::DisabledPagination(),
 	                                   {github_origin, "/fixtures/public-records", {}, headers},
 	                                   duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
-	                                   "$.records[*]"},
+	                                   "$.records[*]",
+	                                   duckdb_api::CompiledOperationSelector()},
 	    ConnectorCatalogTestAccess::Anonymous(), ConnectorCatalogTestAccess::UnpaginatedResources(4, 64)));
 	relations.push_back(ConnectorCatalogTestAccess::Relation(
 	    DISTINCT_SCHEMA_AUTHENTICATED_RELATION,
@@ -91,7 +184,8 @@ duckdb_api::CompiledConnector BuildDistinctSchemaConnectorCatalogFixture() {
 	                                   ConnectorCatalogTestAccess::DisabledPagination(),
 	                                   {github_origin, "/fixtures/private-profile", {}, headers},
 	                                   duckdb_api::CompiledResponseSource::ROOT_OBJECT,
-	                                   "$"},
+	                                   "$",
+	                                   duckdb_api::CompiledOperationSelector()},
 	    ConnectorCatalogTestAccess::RequiredBearer(), ConnectorCatalogTestAccess::UnpaginatedResources(1, 96)));
 
 	return ConnectorCatalogTestAccess::Catalog(
@@ -121,7 +215,8 @@ duckdb_api::CompiledConnector BuildPaginationConnectorCatalogFixture() {
 	                                   ConnectorCatalogTestAccess::DisabledPagination(),
 	                                   {github_origin, "/fixtures/page-shaped", page_query, headers},
 	                                   duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
-	                                   "$.records[*]"},
+	                                   "$.records[*]",
+	                                   duckdb_api::CompiledOperationSelector()},
 	    ConnectorCatalogTestAccess::RequiredBearer(), ConnectorCatalogTestAccess::UnpaginatedResources(3, 96)));
 	relations.push_back(ConnectorCatalogTestAccess::Relation(
 	    PAGINATION_LINK_RELATION, columns,
@@ -136,7 +231,8 @@ duckdb_api::CompiledConnector BuildPaginationConnectorCatalogFixture() {
 	        ConnectorCatalogTestAccess::SequentialLink("batch_size", 3, "cursor_page", 1, 1, 4),
 	        {github_origin, "/fixtures/linked-records", page_query, headers},
 	        duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
-	        "$.records[*]"},
+	        "$.records[*]",
+	        duckdb_api::CompiledOperationSelector()},
 	    ConnectorCatalogTestAccess::RequiredBearer(),
 	    ConnectorCatalogTestAccess::PaginatedResources(1024, 4096, 3, 12, 96)));
 
@@ -170,7 +266,8 @@ BuildPaginationPlannerCandidate(std::uint64_t max_pages, std::uint64_t response_
 	         {{"batch_size", "3"}, {"cursor_page", "1"}},
 	         {{"X-Connector-Fixture", "planner-pagination"}}},
 	        duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
-	        "$.records[*]"},
+	        "$.records[*]",
+	        duckdb_api::CompiledOperationSelector()},
 	    ConnectorCatalogTestAccess::RequiredBearer(),
 	    ConnectorCatalogTestAccess::PaginatedResources(response_bytes_per_page, response_bytes_per_scan,
 	                                                   records_per_page, records_per_scan, extracted_string_bytes)));
@@ -200,7 +297,8 @@ duckdb_api::CompiledConnector BuildDisabledRootArrayRepositoryCandidate() {
 	                                    {{"per_page", "100"}, {"page", "1"}},
 	                                    {{"X-Connector-Fixture", "disabled-root-array"}}},
 	                                   duckdb_api::CompiledResponseSource::ROOT_ARRAY,
-	                                   "$"},
+	                                   "$",
+	                                   duckdb_api::CompiledOperationSelector()},
 	    ConnectorCatalogTestAccess::RequiredBearer(), ConnectorCatalogTestAccess::UnpaginatedResources(100, 512)));
 	return ConnectorCatalogTestAccess::Catalog(
 	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "github", "test-disabled-root-array",
@@ -222,6 +320,97 @@ duckdb_api::CompiledConnector BuildPredicateSchemaVariationCatalogFixture() {
 duckdb_api::CompiledConnector BuildPredicateOperationVariationCatalogFixture() {
 	return BuildPredicateDecoyCatalog("fixture_predicate_operation", PredicateRepositorySchema(),
 	                                  "fixture_repository_operation", "/fixtures/repositories");
+}
+
+duckdb_api::CompiledConnector BuildExactPredicateCatalogFixture() {
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    PREDICATE_EXACT_RELATION, ControlledPredicateSchema(), ControlledExactPredicateOperation(),
+	    ConnectorCatalogTestAccess::Anonymous(), ConnectorCatalogTestAccess::UnpaginatedResources(8, 128),
+	    {ControlledExactPredicateMapping("visibility")}));
+	return ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "controlled_exact_predicate", "test-1",
+	    std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"predicate-proof.invalid"}, false, false, false, false, 4096});
+}
+
+duckdb_api::CompiledConnector BuildEqualRankedOperationsCatalogFixture() {
+	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledRestHost("predicate-proof.invalid"), 443};
+	const std::vector<duckdb_api::CompiledHttpHeader> headers = {{"X-Connector-Fixture", "equal-ranked-repositories"}};
+	std::vector<duckdb_api::CompiledOperation> operations;
+	for (const auto &suffix : {std::string("a"), std::string("b")}) {
+		operations.push_back(
+		    duckdb_api::CompiledOperation {"controlled_equal_ranked_repositories_" + suffix,
+		                                   false,
+		                                   duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+		                                   duckdb_api::CompiledProtocol::REST,
+		                                   duckdb_api::CompiledHttpMethod::GET,
+		                                   duckdb_api::CompiledReplaySafety::SAFE,
+		                                   false,
+		                                   ConnectorCatalogTestAccess::DisabledPagination(),
+		                                   {origin, "/fixtures/equal-ranked-repositories-" + suffix, {}, headers},
+		                                   duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
+		                                   "$.records[*]",
+		                                   duckdb_api::CompiledOperationSelector()});
+	}
+
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    PREDICATE_EQUAL_RANKED_OPERATIONS_RELATION, ControlledPredicateSchema(), std::move(operations),
+	    ConnectorCatalogTestAccess::Anonymous(), ConnectorCatalogTestAccess::UnpaginatedResources(8, 128)));
+	return ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "controlled_equal_ranked_operations", "test-1",
+	    std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"predicate-proof.invalid"}, false, false, false, false, 4096});
+}
+
+duckdb_api::CompiledConnector BuildUniqueWinnerOperationsCatalogFixture() {
+	return BuildSelectableOperationsCatalog("controlled_unique_winner_operations", true);
+}
+
+duckdb_api::CompiledConnector BuildFallbackOperationsCatalogFixture() {
+	return BuildSelectableOperationsCatalog("controlled_fallback_operations", false);
+}
+
+duckdb_api::CompiledConnector BuildAmbiguousPredicateMappingsCatalogFixture() {
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    PREDICATE_AMBIGUOUS_MAPPINGS_RELATION, ControlledPredicateSchema(), ControlledExactPredicateOperation(),
+	    ConnectorCatalogTestAccess::Anonymous(), ConnectorCatalogTestAccess::UnpaginatedResources(8, 128),
+	    {ControlledExactPredicateMapping("visibility"), ControlledExactPredicateMapping("repository_visibility")}));
+	return ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "controlled_ambiguous_predicate", "test-1",
+	    std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"predicate-proof.invalid"}, false, false, false, false, 4096});
+}
+
+duckdb_api::CompiledConnector BuildContradictorySelectorCatalogFixture() {
+	auto selector = ConnectorCatalogTestAccess::OperationSelector({"visibility"}, {}, {"visibility"});
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    PREDICATE_EXACT_RELATION, ControlledPredicateSchema(),
+	    ControlledExactPredicateOperation(false, std::move(selector)), ConnectorCatalogTestAccess::Anonymous(),
+	    ConnectorCatalogTestAccess::UnpaginatedResources(8, 128), {ControlledExactPredicateMapping("visibility")}));
+	return ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "controlled_contradictory_selector", "test-1",
+	    std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"predicate-proof.invalid"}, false, false, false, false, 4096});
+}
+
+duckdb_api::CompiledConnector BuildMultipleFallbackOperationsCatalogFixture() {
+	std::vector<duckdb_api::CompiledOperation> operations;
+	operations.push_back(ControlledExactPredicateOperation());
+	operations.push_back(ControlledSelectorFallbackOperation());
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    PREDICATE_EXACT_RELATION, ControlledPredicateSchema(), std::move(operations),
+	    ConnectorCatalogTestAccess::Anonymous(), ConnectorCatalogTestAccess::UnpaginatedResources(8, 128),
+	    {ControlledExactPredicateMapping("visibility")}));
+	return ConnectorCatalogTestAccess::Catalog(
+	    duckdb_api::CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA, "controlled_multiple_fallback_operations",
+	    "test-1", std::move(relations),
+	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"predicate-proof.invalid"}, false, false, false, false, 4096});
 }
 
 } // namespace duckdb_api_test

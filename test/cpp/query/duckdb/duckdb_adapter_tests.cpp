@@ -16,6 +16,7 @@
 
 namespace duckdb_api_test {
 void RunComplexFilterAdapterTests();
+void RunPredicateCandidateTranslationTests();
 void RunTableFunctionPlanStateTests();
 } // namespace duckdb_api_test
 
@@ -114,6 +115,21 @@ void TestBindFailuresDoNotOpenRuntime() {
 	Require(unknown_relation.find("connector=github: unknown relation identifier") != std::string::npos,
 	        "removed fixture relation did not fail at bind");
 	Require(probe->streams_opened.load(std::memory_order_relaxed) == 0, "bind failure opened runtime state");
+}
+
+void TestDuckdbPrunedExecutionDoesNotOpenRuntime() {
+	duckdb::DuckDB database(nullptr);
+	auto probe = RegisterNativeAdapter(database, QueryRuntimeScenario::SUCCESS);
+	duckdb::Connection connection(database);
+	auto result = connection.Query(
+	    "SELECT id FROM duckdb_api_scan(connector := 'github', relation := 'duckdb_login_search_page') "
+	    "WHERE NULL");
+	Require(!result->HasError() && result->RowCount() == 0, "DuckDB-pruned scan did not preserve the empty SQL result");
+	Require(probe->legacy_open_calls.load(std::memory_order_relaxed) == 0 &&
+	            probe->authorization_open_calls.load(std::memory_order_relaxed) == 0 &&
+	            probe->streams_opened.load(std::memory_order_relaxed) == 0 &&
+	            probe->next_calls.load(std::memory_order_relaxed) == 0,
+	        "DuckDB-pruned scan entered Runtime");
 }
 
 void TestStructuredFailuresAndBatchValidation() {
@@ -339,12 +355,14 @@ int main() {
 		TestOfflineBindPreparedCopyAndTypedRows();
 		TestDuckdbRetainsRelationalOperators();
 		TestBindFailuresDoNotOpenRuntime();
+		TestDuckdbPrunedExecutionDoesNotOpenRuntime();
 		TestStructuredFailuresAndBatchValidation();
 		TestOpenStageFailuresDoNotAcquireStream();
 		TestEarlyResultCloseAndLastOwnerTeardown();
 		TestIndependentConcurrentScans();
 		TestSynchronizedCancellation();
 		duckdb_api_test::RunComplexFilterAdapterTests();
+		duckdb_api_test::RunPredicateCandidateTranslationTests();
 		duckdb_api_test::RunTableFunctionPlanStateTests();
 		duckdb_api_test::RunDuckdbAdapterAuthBindTests();
 		duckdb_api_test::RunDuckdbAdapterAuthLifecycleTests();

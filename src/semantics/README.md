@@ -8,24 +8,45 @@ The planner decides what may run remotely and what DuckDB must still evaluate.
 Runtime consumes the finished plan; it must never need to repeat relational
 classification.
 
-The native RFC 0008 profile admits exactly one selective shape:
-`visibility = 'private'` over the authenticated-repositories response field.
-Semantics selects the Connector mapping only when the closed request,
-structured-callback capability, DuckDB residual-retention capability, required
-VARCHAR schema, operation, and reviewed mapping all agree. The plan records a
-remote `SUPERSET`, leaves the complete predicate owned by DuckDB, and carries
-the sole typed `VISIBILITY_PRIVATE` conditional input. Exact single-filter
-requests name the visibility residual; larger or unsupported retained filters
-use an opaque complete-filter marker rather than SQL text. Every absent or
-mismatched fact retains complete traversal. No other predicate, projection,
-ordering, limit, or offset is delegated.
+The shared candidate is an immutable protocol-neutral tree with typed equality
+leaves, ordered conjunction/disjunction, unary negation, and opaque unsupported
+positions. Construction enforces depth 16 and 64 total nodes. Query owns the
+DuckDB-to-candidate translation; Semantics alone binds ordinals to the selected
+relation and interprets Connector proof and encoding facts. The value contains
+no SQL, DuckDB expression, request input, credential, or I/O authority.
+
+The native profile can encode one positive `visibility = 'private'`
+restriction. The permanent GitHub proof produces only `SUPERSET`; the
+Connector-owned controlled duplicate-occurrence fixture has the distinct
+three-valued and occurrence proof needed for `EXACT`. Identical repeated leaves
+may share the one declared input. A safe member of a larger conjunction may
+narrow remotely while DuckDB retains the complete filter, but that opaque
+complete-filter scope is accepted only when the candidate tree contains an
+unsupported position. Fully represented trees use the exact requested-predicate
+scope so an unseen outer `OR` cannot be hidden. Unencodable
+disjunction/negation, missing mappings/capabilities, and opaque structure use
+`UNSUPPORTED`; conflicting safe inputs use `AMBIGUOUS`; malformed bindings or
+contracts return `PlanningError` without a partial plan. Every successful
+decision keeps filtering, final projection, ordering, limit, and offset owned
+by DuckDB.
+
+Operation selection precedes classification. Semantics derives an independent
+binding set for every non-fallback operation from only that operation's
+predicate mappings. Required, alternative, and forbidden input selectors decide
+eligibility; the largest satisfied alternative determines specificity, and
+priority breaks only a specificity tie. The sole fallback is evaluated only
+when no non-fallback operation is eligible. An equal top rank or no eligible
+operation fails with `OPERATION_SELECTION_FAILED`; neither is reinterpreted as
+predicate ambiguity or resolved by declaration order. Only the selected
+operation reaches full predicate classification and plan construction. Unknown
+relation identity is instead an invalid request contract.
 
 ## Start here
 
 | Change | Production code | Focused test |
 | --- | --- | --- |
 | Closed protocol-neutral request predicate | `relational_predicate.cpp`, `duckdb_api/relational_predicate.hpp` | `duckdb_api_scan_planner_tests` |
-| Visibility implication, mapping selection, and fallback | `predicate_classifier.cpp` | `duckdb_api_scan_planner_tests` |
+| Exact/Superset proof matching, composition, and fallback | `predicate_classifier.cpp` | `duckdb_api_scan_planner_tests` |
 | Plan values, guarded payloads, or resource predicates | `scan_plan.cpp`, `duckdb_api/scan_plan.hpp` | `duckdb_api_scan_plan_contract_tests` |
 | Human-readable plan snapshots | `scan_plan_explain.cpp` | `duckdb_api_scan_plan_contract_tests`, `duckdb_api_scan_plan_fixture_tests` |
 | Capability narrowing or conservative classification | `scan_planner.cpp`, `duckdb_api/scan_planner.hpp` | `duckdb_api_scan_planner_tests` |
@@ -43,6 +64,11 @@ Runtime must use only `ScanPlan::ConditionalInput()` for predicate-derived
 request selection. `Operation().query_parameters`, Connector provenance, and
 the safe snapshot do not duplicate or supersede that authority.
 
+`PredicateCategory()` and `PredicateReason()` are the stable diagnostic
+contract. `ClassificationReason()` and `Snapshot()` are safe prose and must
+never be parsed for execution decisions. Exact and Superset remain independent
+of residual ownership: both retain the offered DuckDB filter in this profile.
+
 ## Correctness checklist
 
 - Remote predicate `R` is safe only when DuckDB predicate `D` implies `R`;
@@ -52,8 +78,11 @@ the safe snapshot do not duplicate or supersede that authority.
 - Providers preserve base-row cardinality.
 - Missing DuckDB capabilities produce conservative behavior, never SQL-text
   reconstruction.
-- Every classification has an explainable reason and a counterexample or
+- Every classification has a structured reason and a counterexample or
   property oracle where appropriate.
+- An Exact proof preserves the full three-valued vector and base-occurrence
+  multiplicity; Superset preserves every DuckDB-true occurrence and its
+  multiplicity.
 
 The complete semantic contract is in
 [ARCHITECTURE.md](../../docs/ARCHITECTURE.md) and
@@ -64,7 +93,10 @@ selection, declared capabilities, and connector-facing proof inputs, also read
 ## Tests
 
 `make test` runs the focused planner, plan-contract, pagination-contract, and
-fixture executables declared in `test/cpp/semantics/targets.cmake`. Run
+fixture executables declared in `test/cpp/semantics/targets.cmake`. The planner
+target includes a pinned-DuckDB law oracle over TRUE/FALSE/NULL values and
+duplicate occurrence identifiers; it compares DuckDB-only with
+remote-plus-retained-residual result bags. Run
 `make build` before invoking one directly from
 `<build_root>/extension/duckdb_api/`, where `build_root` is printed by
 `make paths`. Run `make verify` before handoff on the supported product cell.

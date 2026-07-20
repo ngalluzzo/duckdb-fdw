@@ -61,28 +61,52 @@ enum class PlannedUrlScheme { HTTP, HTTPS };
 enum class PlannedResponseSource { JSON_PATH_MANY, ROOT_ARRAY, ROOT_OBJECT };
 
 // The base domain names the complete row-producing source before DuckDB-owned
-// relational operators. Each PAGINATED_* domain is the duplicate-preserving
-// bag from every accepted page, not an ordered or snapshot-isolated relation.
-// A successful root object is one base row; failures and zero/multiple-object
-// violations are errors rather than empty results.
+// relational operators. ROOT_ARRAY_RECORDS is admitted only for the controlled
+// complete-array proof profile. Each PAGINATED_* domain is the
+// duplicate-preserving bag from every accepted page, not an ordered or
+// snapshot-isolated relation. A successful root object is one base row;
+// failures and zero/multiple-object violations are errors rather than empty
+// results.
 enum class BaseDomain {
 	JSON_PATH_RECORDS,
+	ROOT_ARRAY_RECORDS,
 	PAGINATED_JSON_PATH_RECORDS,
 	PAGINATED_ROOT_ARRAY_RECORDS,
 	SUCCESSFUL_ROOT_OBJECT
 };
 
-// Closed relational classifications for RFC 0008. A visibility predicate is
-// meaningful only for the required VARCHAR response field admitted by the
-// planner. COMPLETE_DUCKDB_FILTER records that the retained residual is larger
-// than the closed candidate without carrying an expression or SQL text.
-// Runtime must never infer meaning from either explanation or output values.
+// Closed executable predicate vocabulary for the accepted native profile. A
+// visibility predicate is meaningful only for the bound required VARCHAR
+// response field admitted by the planner. COMPLETE_DUCKDB_FILTER records that
+// the retained residual is larger than the typed candidate without carrying an
+// expression or SQL text. Runtime must never infer meaning from explanation or
+// output values.
 enum class PlannedPredicate { TRUE_FOR_BASE_DOMAIN, VISIBILITY_EQUALS_PRIVATE, COMPLETE_DUCKDB_FILTER };
 
-// UNSUPPORTED means the complete base operation is retained. SUPERSET means
-// DuckDB predicate D implies remote restriction R, while DuckDB still owns and
-// evaluates D. This slice deliberately has no Exact state.
-enum class RemotePredicateAccuracy { UNSUPPORTED, SUPERSET };
+// Accuracy describes the relationship between the complete DuckDB predicate D
+// and emitted remote restriction R. It never transfers residual ownership or
+// bound authority in the native profile.
+enum class RemotePredicateAccuracy { UNSUPPORTED, SUPERSET, EXACT };
+
+// Successful semantic outcomes remain distinct even when Unsupported and
+// Ambiguous both execute the unrestricted base operation. Invalid contracts do
+// not produce a ScanPlan; the separate planner service returns a typed error.
+enum class PredicateDecisionCategory { EXACT, SUPERSET, UNSUPPORTED, AMBIGUOUS };
+
+// Structured safe reason consumed by Query explanation. Consumers may render
+// this value but must not parse ClassificationReason() or derive authority from
+// either representation.
+enum class PredicateDecisionReason {
+	NO_REMOTE_CANDIDATE,
+	SELECTED_EXACT_MAPPING,
+	SELECTED_SUPERSET_MAPPING,
+	STRUCTURE_UNSUPPORTED,
+	CAPABILITY_UNAVAILABLE,
+	MAPPING_UNAVAILABLE,
+	DISJUNCTION_ENCODING_UNAVAILABLE,
+	COMPLEMENT_ENCODING_UNAVAILABLE,
+	AMBIGUOUS_CONDITIONAL_INPUT
+};
 
 // The sole predicate-derived execution authority. Runtime consumes this typed
 // value with the base operation and pagination target; no raw query parameter,
@@ -143,6 +167,7 @@ struct PlannedRestOperation {
 // them from the protocol request.
 struct RelationalOwnership {
 	RelationalOwner filter;
+	RelationalOwner projection;
 	RelationalOwner ordering;
 	RelationalOwner limit;
 	RelationalOwner offset;
@@ -359,6 +384,8 @@ public:
 	PlannedPredicate ResidualPredicate() const;
 	RelationalOwner ResidualOwner() const;
 	PlannedConditionalInput ConditionalInput() const;
+	PredicateDecisionCategory PredicateCategory() const;
+	PredicateDecisionReason PredicateReason() const;
 	const RelationalOwnership &Ownership() const;
 
 	RelationalDelegation RemoteOrdering() const;
@@ -404,6 +431,8 @@ private:
 	PlannedPredicate residual_predicate;
 	RelationalOwner residual_owner;
 	PlannedConditionalInput conditional_input;
+	PredicateDecisionCategory predicate_category;
+	PredicateDecisionReason predicate_reason;
 	RelationalOwnership ownership;
 	RelationalDelegation remote_ordering;
 	RelationalDelegation runtime_ordering;

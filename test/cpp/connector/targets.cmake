@@ -16,7 +16,8 @@ add_executable(
   test/cpp/connector/connector_contract_tests.cpp
   test/cpp/connector/connector_catalog_contract_tests.cpp
   test/cpp/connector/connector_pagination_contract_tests.cpp
-  test/cpp/connector/connector_predicate_contract_tests.cpp)
+  test/cpp/connector/connector_predicate_contract_tests.cpp
+  test/cpp/connector/connector_predicate_proof_contract_tests.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_connector_tests)
 target_include_directories(duckdb_api_connector_tests PRIVATE test/cpp)
 target_compile_definitions(

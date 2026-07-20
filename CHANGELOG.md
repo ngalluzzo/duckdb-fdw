@@ -12,22 +12,42 @@ This file records user-visible changes to duckdb-fdw.
 - Predicate-selective repository traversal for the exact structured predicate
   `visibility = 'private'`. Every page carries `visibility=private`, while
   DuckDB retains and evaluates the original predicate.
-- `EXPLAIN` fields for the selected remote predicate, its accuracy, the
-  residual predicate and owner, and the safe classification reason.
+- Bounded typed translation of DuckDB equality, `AND`, `OR`, and `NOT`
+  structure into the protocol-neutral planner contract. Unsupported or
+  over-budget structure remains opaque and cannot select a partial remote
+  restriction.
+- `EXPLAIN` fields for the candidate, selected remote predicate and accuracy,
+  retained filter scope, projection closure, relational ownership and
+  delegation, adapter capabilities, and the structured classification reason.
+- Installed-path actual-DuckDB evidence compares identical optimized and
+  forced-local SQL for three-valued logic, duplicate-sensitive bags,
+  projection, total ordering, local limits and offsets, and conservative
+  fallback. Provider-backed planner laws separately prove Exact, Ambiguous,
+  and invalid outcomes that intentionally have no installed Runtime authority.
 
 ### Changed
 
 - The working extension identity advances to the unreleased `0.6.0` line. The
   published `0.5.0` source, contract, and release records remain immutable.
-- Unsupported, ambiguous, `NULL`, and differently valued predicates continue
-  to traverse the complete repository relation and are evaluated by DuckDB.
+- Unsupported, ambiguous, unencodable, `NULL`, differently valued, and
+  capability-unavailable predicates use the complete repository traversal and
+  are evaluated by DuckDB. Invalid planning contracts fail before Runtime or
+  network entry.
+- DuckDB remains the owner of all filter, projection, ordering, limit, and
+  offset semantics, including when the existing visibility restriction is
+  selected as a remote superset optimization.
+- Base-operation selection evaluates candidate-scoped mapped inputs, ranks
+  eligible non-fallback operations by selector specificity and priority, uses
+  the sole fallback only after ineligibility, and rejects tied winners or
+  contradictory declarations before Runtime entry.
 
 ### Limitations
 
 - The only remote predicate optimization is
   `github.authenticated_repositories.visibility = 'private'`. Projection,
-  ordering, limit, offset, and every other predicate remain local; this slice
-  does not complete the full `0.6.0` relational-trust milestone.
+  ordering, limit, offset, and every other predicate remain local. The
+  controlled exact and ambiguous paths are semantic proof fixtures, not new
+  installed mappings or executable network authority.
 
 ## 0.5.0 — 2026-07-18
 

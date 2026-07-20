@@ -131,6 +131,15 @@ void TestCatalogAndLookup() {
 	Require(connector.FindRelation("Authenticated_Repositories") == nullptr,
 	        "CompiledConnector repository lookup unexpectedly folded relation case");
 	Require(connector.FindRelation("missing") == nullptr, "CompiledConnector lookup fabricated an unknown relation");
+	for (const auto &relation : connector.Relations()) {
+		Require(relation.HasSingleOperation() && relation.Operations().size() == 1 &&
+		            &relation.Operation() == &relation.Operations()[0],
+		        "installed native relation gained another base operation or inconsistent singleton access");
+		const auto &selector = relation.Operation().selector;
+		Require(relation.Operation().fallback && selector.RequiredInputs().empty() && selector.AnyInputSets().empty() &&
+		            selector.ForbiddenInputs().empty() && selector.Priority() == 0,
+		        "installed native operation selector behavior drifted");
+	}
 
 	const auto &policy = connector.NetworkPolicy();
 	Require(policy.allowed_schemes == std::vector<std::string>({"https"}), "CompiledConnector allowed schemes drifted");
@@ -222,15 +231,24 @@ void TestAuthenticatedRepositoriesRelation() {
 	Require(relation->PredicateMappings().size() == 1,
 	        "authenticated repository relation lost its single predicate mapping");
 	const auto &mapping = relation->PredicateMappings()[0];
-	Require(
-	    mapping.ColumnName() == "visibility" && mapping.Operator() == duckdb_api::CompiledPredicateOperator::EQUALS &&
-	        mapping.Literal() == duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE &&
-	        mapping.OperationName() == "github_authenticated_repositories" &&
-	        mapping.InputPlacement() == duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER &&
-	        mapping.RemoteInputName() == "visibility" && mapping.EncodedRemoteValue() == "private" &&
-	        mapping.Accuracy() == duckdb_api::CompiledPredicateAccuracy::SUPERSET &&
-	        mapping.Evidence() == duckdb_api::CompiledPredicateEvidence::GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY,
-	    "authenticated repository predicate mapping drifted");
+	Require(mapping.ColumnName() == "visibility" &&
+	            mapping.Operator() == duckdb_api::CompiledPredicateOperator::EQUALS &&
+	            mapping.Literal() == duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE &&
+	            mapping.OperationName() == "github_authenticated_repositories" &&
+	            mapping.InputPlacement() == duckdb_api::CompiledPredicateInputPlacement::REST_QUERY_PARAMETER &&
+	            mapping.RemoteInputName() == "visibility" && mapping.EncodedRemoteValue() == "private" &&
+	            mapping.Accuracy() == duckdb_api::CompiledPredicateAccuracy::SUPERSET &&
+	            mapping.ProofIdentity() ==
+	                duckdb_api::CompiledPredicateProofIdentity::GITHUB_REST_2022_11_28_REPOSITORY_VISIBILITY &&
+	            mapping.BaseDomain() ==
+	                duckdb_api::CompiledPredicateBaseDomain::GITHUB_AUTHENTICATED_REPOSITORY_OCCURRENCES &&
+	            mapping.OccurrencePreservation() ==
+	                duckdb_api::CompiledPredicateOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES &&
+	            mapping.EncodingCapability() ==
+	                duckdb_api::CompiledPredicateEncodingCapability::SINGLE_POSITIVE_REST_QUERY_INPUT &&
+	            mapping.MaximumConditionalInputs() == 1 && !mapping.SupportsCompoundConjunctionEncoding() &&
+	            !mapping.SupportsDisjunctionEncoding() && !mapping.SupportsComplementEncoding(),
+	        "authenticated repository predicate mapping drifted");
 
 	const auto &operation = relation->Operation();
 	RequireBaseOperation(operation);
@@ -298,7 +316,10 @@ const std::string AUTHENTICATED_REPOSITORIES_SNAPSHOT =
     "visibility:VARCHAR!:$.visibility;"
     "predicate_mappings=[{column:visibility,operator:equals,literal:varchar:private,"
     "operation:github_authenticated_repositories,input:rest_query:visibility=private,accuracy:superset,"
-    "evidence:github_rest_2022_11_28_repository_visibility}];"
+    "proof:github_rest_2022_11_28_repository_visibility,"
+    "base_domain:github_authenticated_repository_occurrences,occurrences:all_matching_base_occurrences,"
+    "encoding:single_positive_rest_query_input[max_inputs:1,compound_and:unsupported,or:unsupported,"
+    "not:unsupported]}];"
     "operation=github_authenticated_repositories:fallback:zero_to_many:REST:GET:replay_safe;"
     "request=origin:[scheme:https,host:api.github.com,port:443],path:/user/repos,"
     "query:[per_page=100,page=1],headers:[Accept=application/vnd.github+json,User-Agent=duckdb-api/0.6.0,"
@@ -362,6 +383,7 @@ int main() {
 		duckdb_api_test::RunConnectorCatalogContractTests();
 		duckdb_api_test::RunConnectorPaginationContractTests();
 		duckdb_api_test::RunConnectorPredicateContractTests();
+		duckdb_api_test::RunConnectorPredicateProofContractTests();
 		TestCatalogAndLookup();
 		TestAnonymousRelation();
 		TestAuthenticatedRelation();

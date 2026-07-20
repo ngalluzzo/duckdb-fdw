@@ -130,9 +130,16 @@ enum class RepositoryPlanCounterexample {
 	SELECTIVE_RESIDUAL_TRUE,
 	SELECTIVE_RESIDUAL_OWNER_UNKNOWN,
 	SELECTIVE_FILTER_OWNER_UNKNOWN,
+	SELECTIVE_PROJECTION_OWNER_UNKNOWN,
 	SELECTIVE_REMOTE_ORDERING_UNKNOWN,
 	UNKNOWN_CONDITIONAL_INPUT,
-	BASELINE_REMOTE_VISIBILITY
+	BASELINE_REMOTE_VISIBILITY,
+	UNKNOWN_PREDICATE_CATEGORY,
+	UNKNOWN_PREDICATE_REASON,
+	EXACT_CATEGORY_SUPERSET_ACCURACY,
+	SUPERSET_CATEGORY_EXACT_ACCURACY,
+	AMBIGUOUS_RESIDUAL_TRUE,
+	MAPPING_UNAVAILABLE_RESIDUAL_TRUE
 };
 
 duckdb_api::ScanPlan BuildValidAnonymousPlanFixture();
@@ -144,6 +151,7 @@ duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::s
 duckdb_api::ScanPlan BuildVisibilityPrivatePlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildVisibilityPrivateCompleteResidualPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildCompleteResidualFallbackPlanFixture(const std::string &exact_logical_secret_name);
+duckdb_api::ScanPlan BuildAmbiguousPredicateFallbackPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildPaginationPlanCounterexample(const std::string &exact_logical_secret_name,
                                                        PaginationPlanCounterexample counterexample);
 

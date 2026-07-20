@@ -93,18 +93,19 @@ here is not a v1 product promise.
 ### 1.2 Current native `0.6.0` mapping
 
 RFCs 0005 through 0008 define the bounded live REST, authenticated capability,
-sequential repository-traversal, and one predicate-selective subset mapped into
-private native C++ types. Those types are neither a public ABI nor frozen by
-v1, but RFC 0009 selects this permanent implementation lineage rather than a
-Rust/stable-C-API replatform as the v1 product profile. The `0.6.0` identity
-names the current unreleased source; it does not claim that every roadmap gate
-for the eventual release is complete.
+sequential repository-traversal, and first predicate-selective subset mapped
+into private native C++ types. RFC 0010 completes the `0.6.0` conservative
+composition contract across the same lineage. Those types are neither a public
+ABI nor frozen by v1, but RFC 0009 selects this permanent implementation rather
+than a Rust/stable-C-API replatform as the v1 product profile. The `0.6.0`
+identity names the current unreleased source; publication remains a separate
+release action.
 
 | Semantic artifact | Native preview mapping |
 |---|---|
-| `CompiledConnector` | Immutable `github` version `0.6.0` snapshot with the bounded anonymous page, exactly-one authenticated user, and bounded sequential authenticated repository relations; six-column repository schema; one closed visibility predicate mapping; fixed structural REST operations, logical credential policy, typed HTTPS origin, response source, extraction paths, pagination declaration, and connector-owned page/scan ceilings |
-| `ScanRequest` | Selected relation and optional logical secret reference; full projection closure; a closed remote candidate state and a separate retained-predicate scope (`unrestricted`, exact requested predicate, or opaque complete DuckDB filter); explicit adapter capability and residual-retention facts; empty ordering; unset limit and offset; no credential bytes, SQL text, DuckDB object, or I/O capability |
-| `ScanPlan` | One fixed anonymous search, authenticated root object, or authenticated paginated root-array operation; typed destination and bearer obligation where required; explicit disabled-or-Link `PaginationPlan`; baseline or `visibility_equals_private` remote predicate; exact, unrestricted, or opaque complete-DuckDB-filter residual; explicit accuracy, residual owner, and optional typed `VISIBILITY_PRIVATE` input; disabled retry/cache/providers; and explicit page/scan budgets; no credential bytes or received Link values |
+| `CompiledConnector` | Immutable `github` version `0.6.0` snapshot with the bounded anonymous page, exactly-one authenticated user, and bounded sequential authenticated repository relations; six-column repository schema; one closed visibility predicate mapping bound to a reviewed proof identity, base occurrence domain, occurrence guarantee, and single-positive-input encoding; fixed structural REST operations, logical credential policy, typed HTTPS origin, response source, extraction paths, pagination declaration, and connector-owned page/scan ceilings |
+| `ScanRequest` | Selected relation and optional logical secret reference; full projection closure; a bounded immutable typed candidate tree (`TRUE`, equality, `AND`, `OR`, `NOT`, or opaque unsupported) and a separate retained-predicate scope (`unrestricted`, exact requested predicate, or opaque complete DuckDB filter); explicit adapter capability and residual-retention facts; empty ordering; unset limit and offset; no credential bytes, SQL text, DuckDB object, remote input, or I/O capability |
+| `ScanPlan` | One deterministically selected fixed operation; typed destination and bearer obligation where required; explicit disabled-or-Link `PaginationPlan`; unrestricted or `visibility_equals_private` remote predicate; exact, superset, unsupported, or ambiguous category with structured reason; DuckDB-owned residual, projection, ordering, limit, and offset; optional typed `VISIBILITY_PRIVATE` input; no remote/runtime ordering or bounds; disabled retry/cache/providers; and explicit page/scan budgets; no credential bytes, candidate tree, DuckDB object, or received Link values |
 | `BatchStream` | Synchronous pull stream owning either the anonymous or opaque GitHub-user authorization alternative; complete-plan admission before authorization; one attempt for a single-response relation or one attempt per accepted sequential repository page; bounded strict JSON decode and retained page memory; nonempty schema-aligned batches; one retained scan deadline; cancellation checks; and idempotent close |
 
 The native adapter receives an immutable `ScanExecutor` from product
@@ -125,11 +126,15 @@ provider pipeline, retry, rate-limit wait, cache, async runtime, or
 cross-language FFI exists in this profile. The repository relation implements
 only RFC 0007's fixed sequential Link traversal; it does not establish a
 general pagination framework, parallel-page authority, resume, total count, or
-remote limit. RFC 0008 adds only one retained DuckDB complex-filter advisory:
-the exact structured `visibility = 'private'` shape may select the typed
-`visibility=private` request input with `Superset` accuracy. Every other shape
-uses the complete traversal. The snapshot is built from repository metadata at
-extension construction; arbitrary connector syntax is not accepted.
+remote limit. RFC 0010 generalizes RFC 0008's retained complex-filter advisory
+without adding another installed mapping. Query may offer a bounded typed
+equality/Boolean candidate; Relational Semantics alone matches and composes it.
+The existing `visibility = 'private'` conjunct may select the typed
+`visibility=private` request input with `Superset` accuracy. Unsupported,
+unencodable, ambiguous, or capability-unavailable decisions use the complete
+traversal; invalid proof or operation contracts fail before Runtime entry. The
+snapshot is built from repository metadata at extension construction;
+arbitrary connector syntax is not accepted.
 
 ### 1.3 Native sequential pagination lifecycle
 
@@ -188,15 +193,22 @@ Runtime admits a repository plan into one immutable
 transport I/O. Admission validates the complete six-column schema and
 extractors, fixed operation, pagination profile, network and authentication
 capabilities, resource budgets, disabled features, relational owner and
-delegation envelope, and one of exactly two coherent remote alternatives:
+delegation envelope, and one of exactly two executable request alternatives:
 
-- baseline: `TRUE` remotely, `Unsupported` accuracy, no conditional input, and
-  either unrestricted, exact visibility, or opaque complete-filter residual;
-  or
-- selective: `visibility_equals_private` remotely, `Superset` accuracy,
-  DuckDB ownership, the typed `VISIBILITY_PRIVATE` input, and either the exact
-  visibility residual or an opaque complete-filter residual for a larger
-  retained conjunction.
+- unrestricted: `TRUE` remotely, no conditional input, DuckDB ownership, and a
+  coherent `Unsupported` or `Ambiguous` classification; or
+- selected: `visibility_equals_private` remotely, DuckDB ownership, the typed
+  `VISIBILITY_PRIVATE` input, and the installed GitHub mapping's coherent
+  `Superset` classification.
+
+Classification never creates request authority. The selected Superset plan
+admits one request shape; Unsupported and Ambiguous plans without an input
+admit the same unrestricted shape. Exact is production-planner evidence for a
+distinct controlled operation and is not an installed executable profile; an
+Exact label on the GitHub Superset source is an invalid relabeling. Unknown
+categories/reasons, mismatched predicate/input/accuracy facts, unsupported
+operations, or delegated relational work fail before authorization or
+transport.
 
 The opaque residual is ownership evidence only. Runtime never parses it or
 receives DuckDB expressions; unknown residual or conditional-input enum values
@@ -918,12 +930,14 @@ lifecycle behavior, including teardown and error paths, is verified.
 
 The accepted native profile records projection, generic filter execution,
 ordering, limit, offset, and progress as unavailable. Its complex-filter
-callback supplies one advisory structured predicate only when DuckDB retains
-the complete expression above the scan. Its secret-manager coupling is
-restricted to exact-name temporary-memory resolution during global
-initialization and is never exposed to planning or Runtime. Cancellation is
-verified. It uses one DuckDB source task, requests the full projection closure,
-and leaves every row-removing, ordering, and bounding operation in DuckDB.
+callback may supply a bounded typed equality/Boolean candidate only while
+DuckDB retains the complete expression above the scan. Unsupported structure
+stays opaque and a structural-budget overflow collapses the complete candidate.
+Its secret-manager coupling is restricted to exact-name temporary-memory
+resolution during global initialization and is never exposed to planning or
+Runtime. Cancellation is verified. It uses one DuckDB source task, requests
+the full projection closure, and leaves every row-removing, projection,
+ordering, and bounding operation in DuckDB.
 
 An adapter cannot delegate limit, offset, or ordering past an unavailable or
 DuckDB-owned row-removing or ordering prerequisite. It must retain the
@@ -1142,12 +1156,19 @@ bindings and translations enter `ScanPlan`.
 
 ### 8.3 Predicate classification
 
-For each predicate node, the planner determines whether it is:
+Through one production decision service, the planner determines whether the
+complete candidate is:
 
-- Exactly executable remotely.
-- Executable remotely only as a superset.
-- Unsupported remotely.
-- Invalid for the selected operation.
+- `Exact`: three-valued equivalent and exactly occurrence-preserving, with one
+  declared executable input.
+- `Superset`: implication and preservation of every matching occurrence are
+  proven, with one declared executable input.
+- `Unsupported`: no safe executable restriction is available, so remote
+  `TRUE` preserves the base domain.
+- `Ambiguous`: more than one safe predicate/input remains after selecting one
+  base operation, so remote `TRUE` avoids an arbitrary choice.
+- Invalid: proof, ownership, capability, or operation-selection facts are
+  inconsistent, so planning fails and produces no partial plan.
 
 ```rust
 pub struct PredicatePlanningResult {
@@ -1157,14 +1178,22 @@ pub struct PredicatePlanningResult {
 }
 ```
 
-A superset mapping appears in both remote and residual trees.
+The native adapter retains the complete offered DuckDB expression for both
+Exact and Superset decisions, so exact semantic classification does not
+transfer residual ownership. For a DuckDB predicate `D` and remote
+approximation `R`, the planner requires `D => R` plus occurrence preservation.
+It may choose one safe conjunct only when the selected operation declares the
+corresponding single-input encoding. `OR` requires an occurrence-preserving
+union encoding and `NOT` requires three-valued equivalence plus a complement
+encoding; the native profile declares neither. Unsupported or unencodable
+structure uses remote `TRUE` and preserves the complete DuckDB expression,
+including `NULL` behavior.
 
-For a DuckDB predicate `D` and remote approximation `R`, the planner requires
-`D => R`. It applies the connector specification's composition rules: safe
-approximations may be conjoined; a disjunction requires a safe approximation
-for every branch; and negation requires an exact child. Unsupported or
-unprovable subtrees use `Predicate::True` remotely and preserve the original
-DuckDB expression as residual, including three-valued `NULL` behavior.
+Operation selection precedes predicate classification. Exactly one eligible
+base operation must win by declared specificity and priority, or the single
+fallback is used when no non-fallback is eligible. Equal-ranked operations and
+multiple eligible fallbacks are planning errors, not predicate ambiguity and
+not declaration-order choices.
 
 ### 8.4 Projection planning
 
