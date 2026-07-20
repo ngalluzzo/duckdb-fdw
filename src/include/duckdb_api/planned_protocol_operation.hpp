@@ -21,8 +21,65 @@ enum class PlannedReplaySafety { SAFE };
 enum class PlannedUrlScheme { HTTP, HTTPS };
 enum class PlannedResponseSource { JSON_PATH_MANY, ROOT_ARRAY, ROOT_OBJECT };
 
+enum class PlannedRestScalarKind { BOOLEAN, BIGINT, VARCHAR };
+enum class PlannedRestQueryValueSource {
+	FIXED,
+	RELATION_INPUT,
+	CONDITIONAL_INPUT,
+	PAGINATION_PAGE_SIZE,
+	PAGINATION_PAGE_NUMBER
+};
+enum class PlannedRestQueryEncoding { FORM_URLENCODED };
+
 struct PlannedQueryParameter {
 	std::string name;
+	std::string encoded_value;
+};
+
+// One included REST query field after input resolution and operation
+// selection. The decoded typed payload and its validated canonical encoded
+// bytes form one request value; construction rejects any disagreement. Source
+// and source_id are retained only as provenance;
+// consumers never use them to choose an operation or recover a value. Fixed
+// and pagination sources have no source_id; relation and conditional sources
+// preserve their exact declared IDs. Construction rejects any other pairing.
+// Name and vector order are request authority; Runtime serializes each Name
+// with its EncodedValue in this order. UNBOUND and BOUND_NULL inputs have no
+// planned binding.
+class PlannedRestQueryBinding {
+public:
+	PlannedRestQueryBinding(const PlannedRestQueryBinding &) = default;
+	PlannedRestQueryBinding(PlannedRestQueryBinding &&) = default;
+	PlannedRestQueryBinding &operator=(const PlannedRestQueryBinding &) = delete;
+	PlannedRestQueryBinding &operator=(PlannedRestQueryBinding &&) = delete;
+
+	const std::string &Name() const noexcept;
+	PlannedRestQueryValueSource Source() const noexcept;
+	const std::string &SourceId() const noexcept;
+	PlannedRestScalarKind Kind() const noexcept;
+	bool BooleanValue() const;
+	std::int64_t BigintValue() const;
+	const std::string &VarcharValue() const;
+	PlannedRestQueryEncoding Encoding() const noexcept;
+	const std::string &EncodedValue() const noexcept;
+
+private:
+	friend class ScanPlanBuilder;
+	friend class duckdb_api_test::ScanPlanFixtureBuilder;
+	friend class duckdb_api_test::ScanPlanTestAccess;
+
+	PlannedRestQueryBinding(std::string name, PlannedRestQueryValueSource source, std::string source_id,
+	                        PlannedRestScalarKind kind, bool boolean_value, std::int64_t bigint_value,
+	                        std::string varchar_value, PlannedRestQueryEncoding encoding, std::string encoded_value);
+
+	std::string name;
+	PlannedRestQueryValueSource source;
+	std::string source_id;
+	PlannedRestScalarKind kind;
+	bool boolean_value;
+	std::int64_t bigint_value;
+	std::string varchar_value;
+	PlannedRestQueryEncoding encoding;
 	std::string encoded_value;
 };
 
@@ -41,20 +98,58 @@ struct PlannedHttpOrigin {
 
 using PlannedRestOrigin = PlannedHttpOrigin;
 
+// Structural response paths are copied from Connector's validated segments.
+// A records path is root-relative and a result-column path is relative to one
+// selected record. ROOT_ARRAY and ROOT_OBJECT use an empty records path.
+// Runtime traverses these values directly and never parses the retained 0.7
+// extractor spelling.
+struct PlannedRestResponsePath {
+	std::vector<std::string> segments;
+};
+
+struct PlannedRestResultColumn {
+	std::string name;
+	PlannedRestScalarKind scalar_kind;
+	bool nullable;
+	PlannedRestResponsePath response_path;
+};
+
 struct PlannedRestOperation {
+	PlannedRestOperation(std::string operation_name, PlannedHttpMethod method, PlannedCardinality cardinality,
+	                     PlannedReplaySafety replay_safety, PlannedHttpOrigin origin, std::string path,
+	                     std::vector<PlannedQueryParameter> query_parameters, std::vector<PlannedHttpHeader> headers,
+	                     PlannedResponseSource response_source, std::string records_extractor,
+	                     std::vector<PlannedRestQueryBinding> query_bindings = std::vector<PlannedRestQueryBinding>(),
+	                     PlannedRestResponsePath records_path = PlannedRestResponsePath(),
+	                     std::vector<PlannedRestResultColumn> result_columns = std::vector<PlannedRestResultColumn>());
+
 	std::string operation_name;
 	PlannedHttpMethod method;
 	PlannedCardinality cardinality;
 	PlannedReplaySafety replay_safety;
 	PlannedHttpOrigin origin;
 	std::string path;
+	// Native 0.7 compatibility mirror. Package Runtime consumes query_bindings;
+	// this field is neither package request authority nor a reconstruction
+	// fallback and may contain non-executable explanation probes in fixtures.
 	std::vector<PlannedQueryParameter> query_parameters;
 	std::vector<PlannedHttpHeader> headers;
 	PlannedResponseSource response_source;
+	// Native 0.7 compatibility/explanation spelling only. Package Runtime uses
+	// records_path and result_columns without parsing this string or the legacy
+	// ScanPlan output-column type/extractor strings.
 	std::string records_extractor;
+	std::vector<PlannedRestQueryBinding> query_bindings;
+	PlannedRestResponsePath records_path;
+	std::vector<PlannedRestResultColumn> result_columns;
 };
 
-enum class PlannedGraphqlDocumentIdentity { GITHUB_VIEWER_REPOSITORY_METRICS_V1 };
+// Closed reviewed document families. The native bridge identity preserves the
+// 0.7 compatibility profile. PACKAGE_GENERATED_V1 identifies a document that
+// Semantics copied from Connector's validated package IR; Runtime still
+// validates the complete planned document envelope and never derives this
+// identity from connector, relation, operation, or source-provenance strings.
+enum class PlannedGraphqlDocumentIdentity { GITHUB_VIEWER_REPOSITORY_METRICS_V1, PACKAGE_GENERATED_V1 };
 enum class PlannedGraphqlDigestAlgorithm { SHA256 };
 enum class PlannedGraphqlOperationKind { QUERY };
 enum class PlannedGraphqlVariableType { INT_NON_NULL, STRING_NULLABLE };

@@ -109,6 +109,7 @@ enum class GraphqlRuntimeAdmissionCounterexample {
 	REORDERED_OUTPUT_COLUMNS,
 	EXTRA_OUTPUT_COLUMN,
 	OTHER_DOMAIN,
+	UNKNOWN_DOMAIN,
 	OTHER_REMOTE_PREDICATE,
 	OTHER_REMOTE_ACCURACY,
 	OTHER_RESIDUAL_OWNER,
@@ -191,11 +192,12 @@ duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_l
                                                       GraphqlLocalResidualProfile profile);
 
 // Coherent positive plan with package-like connector, relation, operation, and
-// source-provenance labels. Its executable GraphQL, network, credential,
-// cursor, resource, and relational authority is identical to the canonical
-// fixture. Runtime consumers use this bounded value to prove that admission
-// and execution do not reconstruct authority from source identity or names.
-// The caller-selected logical secret reference is preserved exactly.
+// source-provenance labels. Its package document identity and generic Relay
+// connection-node domain deliberately differ from the native 0.7 bridge; all
+// other executable GraphQL, network, credential, cursor, resource, and
+// relational authority is identical. Runtime consumers use this bounded value
+// to prove that admission does not reconstruct authority from source identity
+// or names. The caller-selected logical secret reference is preserved exactly.
 duckdb_api::ScanPlan BuildDistinctGraphqlProvenanceScanPlanFixture(const std::string &exact_logical_secret_name);
 
 duckdb_api::ScanPlan BuildGraphqlRuntimeNonAuthorityVariation(const std::string &exact_logical_secret_name,

@@ -20,8 +20,10 @@ duckdb_api::ScanPlan ScanPlanTestAccess::DistinctGraphqlProvenance(duckdb_api::S
 	plan.relation_name = "repository_activity";
 	plan.source_snapshot = "package=package_graphql_fixture@1.2.3;relation=repository_activity;"
 	                       "operation=package_repository_activity_graphql;profile=canonical_graphql_authority";
+	plan.domain = duckdb_api::BaseDomain::GRAPHQL_RELAY_CONNECTION_NODE_OCCURRENCES;
 	auto operation = plan.Operation().Graphql();
 	operation.operation_name = "package_repository_activity_graphql";
+	operation.document_identity = duckdb_api::PlannedGraphqlDocumentIdentity::PACKAGE_GENERATED_V1;
 	ReplaceGraphql(plan, std::move(operation));
 	return plan;
 }

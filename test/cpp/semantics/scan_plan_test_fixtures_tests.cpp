@@ -34,6 +34,7 @@ int main() {
 		TestNetworkCounterexamples(canary);
 		TestFeatureCounterexamples(canary);
 		TestResourceCounterexamples(canary);
+		TestRestQueryPathFixture(canary);
 		TestSafeConsumerHeaderBoundary();
 		std::cout << "scan plan test fixture tests passed" << std::endl;
 		return EXIT_SUCCESS;

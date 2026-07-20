@@ -142,10 +142,41 @@ enum class RepositoryPlanCounterexample {
 	MAPPING_UNAVAILABLE_RESIDUAL_TRUE
 };
 
+// Constructor-law probes for the planned REST value. These are rejection
+// requests, not malformed ScanPlan values: no invalid binding escapes the
+// Semantics-owned fixture service.
+enum class RestQueryBindingConstructionCounterexample {
+	NONEMPTY_FIXED_SOURCE_ID,
+	EMPTY_RELATION_INPUT_SOURCE_ID,
+	EMPTY_CONDITIONAL_INPUT_SOURCE_ID,
+	NONEMPTY_PAGE_SIZE_SOURCE_ID,
+	NONEMPTY_PAGE_NUMBER_SOURCE_ID,
+	UNKNOWN_SOURCE,
+	UNKNOWN_SCALAR_KIND,
+	UNKNOWN_ENCODING,
+	NONCANONICAL_BOOLEAN_PAYLOAD,
+	NONCANONICAL_BIGINT_PAYLOAD,
+	NONCANONICAL_VARCHAR_PAYLOAD,
+	BOOLEAN_ENCODED_VALUE_MISMATCH,
+	BIGINT_ENCODED_VALUE_MISMATCH,
+	VARCHAR_ENCODED_VALUE_MISMATCH,
+	INVALID_VARCHAR_UTF8,
+	CONTROL_VARCHAR,
+	COUNT
+};
+
 duckdb_api::ScanPlan BuildValidAnonymousPlanFixture();
 duckdb_api::ScanPlan BuildValidAuthenticatedPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidPaginatedPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::string &exact_logical_secret_name);
+// Bounded package-like REST query/path provider for Runtime consumer tests. It
+// contains fixed, relation-input, conditional-input, page-size, and page-number
+// query bindings plus multi-segment record and result-column paths. Its neutral
+// predicate fields deliberately withhold package predicate authority; package
+// planner tests must use the generic typed decision added with materialization.
+// No builder or mutation surface escapes.
+duckdb_api::ScanPlan BuildDistinctRestQueryPathScanPlanFixture(const std::string &exact_logical_secret_name);
+bool RestQueryBindingConstructionRejects(RestQueryBindingConstructionCounterexample counterexample);
 // Closed RFC 0008 plan-only fixture. Runtime consumers receive the typed
 // conditional input and classification without Connector or Query dependencies.
 duckdb_api::ScanPlan BuildVisibilityPrivatePlanFixture(const std::string &exact_logical_secret_name);

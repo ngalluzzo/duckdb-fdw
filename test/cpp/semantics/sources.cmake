@@ -33,6 +33,7 @@ set(RELATIONAL_PLAN_TEST_CONTRACT_SOURCES
     test/cpp/semantics/scan_plan_network_test_fixture_tests.cpp
     test/cpp/semantics/scan_plan_feature_test_fixture_tests.cpp
     test/cpp/semantics/scan_plan_resource_test_fixture_tests.cpp
+    test/cpp/semantics/scan_plan_rest_query_path_fixture_tests.cpp
     test/cpp/semantics/scan_plan_fixture_consumer_boundary_tests.cpp)
 set(GRAPHQL_SEMANTICS_TEST_SOURCES
     test/cpp/semantics/support/graphql_plan_equality.cpp

@@ -8,6 +8,9 @@ bool ScanPlanTestAccess::MutateGraphqlRelationalOrAuthority(duckdb_api::ScanPlan
 	case GraphqlRuntimeAdmissionCounterexample::OTHER_DOMAIN:
 		plan.domain = duckdb_api::BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS;
 		return true;
+	case GraphqlRuntimeAdmissionCounterexample::UNKNOWN_DOMAIN:
+		plan.domain = static_cast<duckdb_api::BaseDomain>(127);
+		return true;
 	case GraphqlRuntimeAdmissionCounterexample::OTHER_REMOTE_PREDICATE:
 		plan.remote_predicate = duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE;
 		return true;

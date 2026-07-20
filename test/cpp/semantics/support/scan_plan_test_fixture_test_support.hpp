@@ -17,6 +17,7 @@ void TestResponseCounterexamples(const std::string &canary);
 void TestNetworkCounterexamples(const std::string &canary);
 void TestFeatureCounterexamples(const std::string &canary);
 void TestResourceCounterexamples(const std::string &canary);
+void TestRestQueryPathFixture(const std::string &canary);
 void TestSafeConsumerHeaderBoundary();
 
 } // namespace scan_plan_fixture_contract

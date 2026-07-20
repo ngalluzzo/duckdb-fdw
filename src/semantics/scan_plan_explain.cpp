@@ -48,6 +48,8 @@ const char *GraphqlDocumentIdentityName(PlannedGraphqlDocumentIdentity identity)
 	switch (identity) {
 	case PlannedGraphqlDocumentIdentity::GITHUB_VIEWER_REPOSITORY_METRICS_V1:
 		return "github_viewer_repository_metrics_v1";
+	case PlannedGraphqlDocumentIdentity::PACKAGE_GENERATED_V1:
+		return "package_generated_v1";
 	}
 	throw std::logic_error("scan plan contains an unknown GraphQL document identity");
 }
@@ -86,6 +88,8 @@ const char *BaseDomainName(BaseDomain domain) {
 		return "paginated_root_array_records";
 	case BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES:
 		return "graphql_viewer_repository_occurrences";
+	case BaseDomain::GRAPHQL_RELAY_CONNECTION_NODE_OCCURRENCES:
+		return "graphql_relay_connection_node_occurrences";
 	case BaseDomain::SUCCESSFUL_ROOT_OBJECT:
 		return "successful_root_object";
 	}
@@ -106,6 +110,8 @@ const char *PredicateName(PlannedPredicate predicate, BaseDomain domain) {
 			return "TRUE@paginated_root_array_records";
 		case BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES:
 			return "TRUE@graphql_viewer_repository_occurrences";
+		case BaseDomain::GRAPHQL_RELAY_CONNECTION_NODE_OCCURRENCES:
+			return "TRUE@graphql_relay_connection_node_occurrences";
 		case BaseDomain::SUCCESSFUL_ROOT_OBJECT:
 			return "TRUE@successful_root_object";
 		}

@@ -29,6 +29,28 @@ void RequireCanaryAbsent(const duckdb_api::ScanPlan &plan, const std::string &ca
 		Require(query.name.find(canary) == std::string::npos && query.encoded_value.find(canary) == std::string::npos,
 		        "runtime-built credential canary entered fixture query fields");
 	}
+	for (const auto &binding : plan.Operation().Rest().query_bindings) {
+		Require(binding.Name().find(canary) == std::string::npos &&
+		            binding.SourceId().find(canary) == std::string::npos &&
+		            binding.EncodedValue().find(canary) == std::string::npos,
+		        "runtime-built credential canary entered typed REST query fields");
+		if (binding.Kind() == duckdb_api::PlannedRestScalarKind::VARCHAR) {
+			Require(binding.VarcharValue().find(canary) == std::string::npos,
+			        "runtime-built credential canary entered decoded REST query payload");
+		}
+	}
+	for (const auto &segment : plan.Operation().Rest().records_path.segments) {
+		Require(segment.find(canary) == std::string::npos,
+		        "runtime-built credential canary entered structural REST records path");
+	}
+	for (const auto &column : plan.Operation().Rest().result_columns) {
+		Require(column.name.find(canary) == std::string::npos,
+		        "runtime-built credential canary entered structural REST result schema");
+		for (const auto &segment : column.response_path.segments) {
+			Require(segment.find(canary) == std::string::npos,
+			        "runtime-built credential canary entered structural REST result path");
+		}
+	}
 	for (const auto &header : plan.Operation().Rest().headers) {
 		Require(header.name.find(canary) == std::string::npos && header.value.find(canary) == std::string::npos,
 		        "runtime-built credential canary entered fixture fixed headers");

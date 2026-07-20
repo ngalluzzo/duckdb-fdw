@@ -69,7 +69,9 @@ public:
 	                                       duckdb_api::PredicateDecisionCategory predicate_category,
 	                                       bool complete_residual);
 	static duckdb_api::ScanPlan GenericPagination(const std::string &secret_name);
+	static duckdb_api::ScanPlan DistinctRestQueryPath(const std::string &secret_name);
 	static duckdb_api::ScanPlan Graphql(const std::string &secret_name, GraphqlLocalResidualProfile profile);
+	static bool RejectsRestQueryBinding(RestQueryBindingConstructionCounterexample counterexample);
 
 private:
 	static duckdb_api::ScanPlan Common(std::string connector, std::string version, std::string relation,
@@ -288,6 +290,158 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::GenericPagination(const std::string
 	return plan;
 }
 
+duckdb_api::ScanPlan ScanPlanFixtureBuilder::DistinctRestQueryPath(const std::string &secret_name) {
+	auto plan = Common("package_rest_fixture", "1.2.3", "activity_records",
+	                   "package=package_rest_fixture@1.2.3;relation=activity_records;"
+	                   "operation=package_activity_records;profile=typed_rest_materialization");
+	plan.domain = duckdb_api::BaseDomain::PAGINATED_JSON_PATH_RECORDS;
+	std::vector<duckdb_api::PlannedRestQueryBinding> bindings;
+	bindings.push_back(duckdb_api::PlannedRestQueryBinding(
+	    "view", duckdb_api::PlannedRestQueryValueSource::FIXED, "", duckdb_api::PlannedRestScalarKind::VARCHAR, false,
+	    0, "summary", duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "summary"));
+	bindings.push_back(duckdb_api::PlannedRestQueryBinding("empty_tag", duckdb_api::PlannedRestQueryValueSource::FIXED,
+	                                                       "", duckdb_api::PlannedRestScalarKind::VARCHAR, false, 0, "",
+	                                                       duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, ""));
+	bindings.push_back(
+	    duckdb_api::PlannedRestQueryBinding("include_archived", duckdb_api::PlannedRestQueryValueSource::RELATION_INPUT,
+	                                        "include_archived", duckdb_api::PlannedRestScalarKind::BOOLEAN, false, 0,
+	                                        "", duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "false"));
+	bindings.push_back(
+	    duckdb_api::PlannedRestQueryBinding("min_rank", duckdb_api::PlannedRestQueryValueSource::RELATION_INPUT,
+	                                        "minimum_rank", duckdb_api::PlannedRestScalarKind::BIGINT, false, 42, "",
+	                                        duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "42"));
+	bindings.push_back(duckdb_api::PlannedRestQueryBinding(
+	    "label_filter", duckdb_api::PlannedRestQueryValueSource::RELATION_INPUT, "label",
+	    duckdb_api::PlannedRestScalarKind::VARCHAR, false, 0, "north america/β",
+	    duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "north+america%2F%CE%B2"));
+	bindings.push_back(duckdb_api::PlannedRestQueryBinding(
+	    "access", duckdb_api::PlannedRestQueryValueSource::CONDITIONAL_INPUT, "visibility",
+	    duckdb_api::PlannedRestScalarKind::VARCHAR, false, 0, "private",
+	    duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "private"));
+	bindings.push_back(
+	    duckdb_api::PlannedRestQueryBinding("page_size", duckdb_api::PlannedRestQueryValueSource::PAGINATION_PAGE_SIZE,
+	                                        "", duckdb_api::PlannedRestScalarKind::BIGINT, false, 25, "",
+	                                        duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "25"));
+	bindings.push_back(
+	    duckdb_api::PlannedRestQueryBinding("page", duckdb_api::PlannedRestQueryValueSource::PAGINATION_PAGE_NUMBER, "",
+	                                        duckdb_api::PlannedRestScalarKind::BIGINT, false, 1, "",
+	                                        duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "1"));
+	SetRestOperation(plan, {"package_activity_records",
+	                        duckdb_api::PlannedHttpMethod::GET,
+	                        duckdb_api::PlannedCardinality::ZERO_TO_MANY,
+	                        duckdb_api::PlannedReplaySafety::SAFE,
+	                        {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
+	                        "/fixtures/activity-records",
+	                        {{"compat_query_not_runtime_authority", "decoy"}},
+	                        {{"Accept", "application/json"}},
+	                        duckdb_api::PlannedResponseSource::JSON_PATH_MANY,
+	                        "compat-records-path-not-runtime-authority",
+	                        std::move(bindings),
+	                        {{"payload", "records"}},
+	                        {{"record_id", duckdb_api::PlannedRestScalarKind::BIGINT, false, {{"identity", "id"}}},
+	                         {"label", duckdb_api::PlannedRestScalarKind::VARCHAR, true, {{"attributes", "label"}}},
+	                         {"active", duckdb_api::PlannedRestScalarKind::BOOLEAN, false, {{"flags", "active"}}}}});
+	plan.output_columns = {{"record_id", "compat-bigint", false, "compat-record-id-path"},
+	                       {"label", "compat-varchar", true, "compat-label-path"},
+	                       {"active", "compat-boolean", false, "compat-active-path"}};
+	EnablePagination(plan, "page_size", 25, "page", 4, 1024, 4096, 25, 100, 128);
+	RequireBearer(plan, secret_name);
+	plan.remote_predicate = duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN;
+	plan.remote_accuracy = duckdb_api::RemotePredicateAccuracy::UNSUPPORTED;
+	plan.residual_predicate = duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER;
+	plan.conditional_input = duckdb_api::PlannedConditionalInput::NONE;
+	plan.predicate_category = duckdb_api::PredicateDecisionCategory::UNSUPPORTED;
+	plan.predicate_reason = duckdb_api::PredicateDecisionReason::MAPPING_UNAVAILABLE;
+	plan.classification_reason =
+	    "query/path fixture intentionally withholds package predicate authority until generic materialization";
+	return plan;
+}
+
+bool ScanPlanFixtureBuilder::RejectsRestQueryBinding(RestQueryBindingConstructionCounterexample counterexample) {
+	duckdb_api::PlannedRestQueryValueSource source = duckdb_api::PlannedRestQueryValueSource::FIXED;
+	std::string source_id;
+	duckdb_api::PlannedRestScalarKind kind = duckdb_api::PlannedRestScalarKind::VARCHAR;
+	bool boolean_value = false;
+	std::int64_t bigint_value = 0;
+	std::string varchar_value = "value";
+	duckdb_api::PlannedRestQueryEncoding encoding = duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED;
+	std::string encoded_value = "value";
+	switch (counterexample) {
+	case RestQueryBindingConstructionCounterexample::NONEMPTY_FIXED_SOURCE_ID:
+		source = duckdb_api::PlannedRestQueryValueSource::FIXED;
+		source_id = "invalid";
+		break;
+	case RestQueryBindingConstructionCounterexample::EMPTY_RELATION_INPUT_SOURCE_ID:
+		source = duckdb_api::PlannedRestQueryValueSource::RELATION_INPUT;
+		break;
+	case RestQueryBindingConstructionCounterexample::EMPTY_CONDITIONAL_INPUT_SOURCE_ID:
+		source = duckdb_api::PlannedRestQueryValueSource::CONDITIONAL_INPUT;
+		break;
+	case RestQueryBindingConstructionCounterexample::NONEMPTY_PAGE_SIZE_SOURCE_ID:
+		source = duckdb_api::PlannedRestQueryValueSource::PAGINATION_PAGE_SIZE;
+		source_id = "invalid";
+		break;
+	case RestQueryBindingConstructionCounterexample::NONEMPTY_PAGE_NUMBER_SOURCE_ID:
+		source = duckdb_api::PlannedRestQueryValueSource::PAGINATION_PAGE_NUMBER;
+		source_id = "invalid";
+		break;
+	case RestQueryBindingConstructionCounterexample::UNKNOWN_SOURCE:
+		source = static_cast<duckdb_api::PlannedRestQueryValueSource>(127);
+		break;
+	case RestQueryBindingConstructionCounterexample::UNKNOWN_SCALAR_KIND:
+		kind = static_cast<duckdb_api::PlannedRestScalarKind>(127);
+		break;
+	case RestQueryBindingConstructionCounterexample::UNKNOWN_ENCODING:
+		encoding = static_cast<duckdb_api::PlannedRestQueryEncoding>(127);
+		break;
+	case RestQueryBindingConstructionCounterexample::NONCANONICAL_BOOLEAN_PAYLOAD:
+		kind = duckdb_api::PlannedRestScalarKind::BOOLEAN;
+		bigint_value = 1;
+		varchar_value.clear();
+		break;
+	case RestQueryBindingConstructionCounterexample::NONCANONICAL_BIGINT_PAYLOAD:
+		kind = duckdb_api::PlannedRestScalarKind::BIGINT;
+		boolean_value = true;
+		varchar_value.clear();
+		break;
+	case RestQueryBindingConstructionCounterexample::NONCANONICAL_VARCHAR_PAYLOAD:
+		bigint_value = 1;
+		break;
+	case RestQueryBindingConstructionCounterexample::BOOLEAN_ENCODED_VALUE_MISMATCH:
+		kind = duckdb_api::PlannedRestScalarKind::BOOLEAN;
+		varchar_value.clear();
+		encoded_value = "true";
+		break;
+	case RestQueryBindingConstructionCounterexample::BIGINT_ENCODED_VALUE_MISMATCH:
+		kind = duckdb_api::PlannedRestScalarKind::BIGINT;
+		bigint_value = 42;
+		varchar_value.clear();
+		encoded_value = "0042";
+		break;
+	case RestQueryBindingConstructionCounterexample::VARCHAR_ENCODED_VALUE_MISMATCH:
+		encoded_value = "other";
+		break;
+	case RestQueryBindingConstructionCounterexample::INVALID_VARCHAR_UTF8:
+		varchar_value = std::string("\xC3\x28", 2);
+		encoded_value = "%C3%28";
+		break;
+	case RestQueryBindingConstructionCounterexample::CONTROL_VARCHAR:
+		varchar_value = "line\nbreak";
+		encoded_value = "line%0Abreak";
+		break;
+	default:
+		throw std::invalid_argument("unknown planned REST binding constructor-law counterexample");
+	}
+	try {
+		(void)duckdb_api::PlannedRestQueryBinding("field", source, std::move(source_id), kind, boolean_value,
+		                                          bigint_value, std::move(varchar_value), encoding,
+		                                          std::move(encoded_value));
+		return false;
+	} catch (const std::invalid_argument &) {
+		return true;
+	}
+}
+
 duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string &secret_name,
                                                      GraphqlLocalResidualProfile profile) {
 	static const std::string DOCUMENT = "query DuckdbApiViewerRepositoryMetrics($pageSize: Int!, $cursor: String) {\n"
@@ -429,6 +583,14 @@ duckdb_api::ScanPlan BuildValidAuthenticatedPlanFixture(const std::string &exact
 
 duckdb_api::ScanPlan BuildValidPaginatedPlanFixture(const std::string &exact_logical_secret_name) {
 	return ScanPlanFixtureBuilder::GenericPagination(exact_logical_secret_name);
+}
+
+duckdb_api::ScanPlan BuildDistinctRestQueryPathScanPlanFixture(const std::string &exact_logical_secret_name) {
+	return ScanPlanFixtureBuilder::DistinctRestQueryPath(exact_logical_secret_name);
+}
+
+bool RestQueryBindingConstructionRejects(RestQueryBindingConstructionCounterexample counterexample) {
+	return ScanPlanFixtureBuilder::RejectsRestQueryBinding(counterexample);
 }
 
 duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::string &exact_logical_secret_name) {
