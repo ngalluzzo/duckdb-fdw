@@ -189,16 +189,16 @@ bool HasCanonicalPagination(const ScanPlan &plan) {
 
 bool HasCanonicalRelationalEnvelope(const ScanPlan &plan) {
 	const auto &ownership = plan.Ownership();
+	// Relational Semantics owns the opaque DuckDB residual and its diagnostic
+	// classification. Runtime admits only the executable authority envelope: a
+	// complete remote traversal, DuckDB ownership, and no delegated work.
 	return plan.RemotePredicate() == PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
 	       plan.RemoteAccuracy() == RemotePredicateAccuracy::UNSUPPORTED &&
-	       plan.ResidualPredicate() == PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
 	       plan.ResidualOwner() == RelationalOwner::DUCKDB &&
-	       plan.ConditionalInput() == PlannedConditionalInput::NONE &&
-	       plan.PredicateCategory() == PredicateDecisionCategory::UNSUPPORTED &&
-	       plan.PredicateReason() == PredicateDecisionReason::NO_REMOTE_CANDIDATE &&
-	       ownership.filter == RelationalOwner::DUCKDB && ownership.projection == RelationalOwner::DUCKDB &&
-	       ownership.ordering == RelationalOwner::DUCKDB && ownership.limit == RelationalOwner::DUCKDB &&
-	       ownership.offset == RelationalOwner::DUCKDB && plan.RemoteOrdering() == RelationalDelegation::NONE &&
+	       plan.ConditionalInput() == PlannedConditionalInput::NONE && ownership.filter == RelationalOwner::DUCKDB &&
+	       ownership.projection == RelationalOwner::DUCKDB && ownership.ordering == RelationalOwner::DUCKDB &&
+	       ownership.limit == RelationalOwner::DUCKDB && ownership.offset == RelationalOwner::DUCKDB &&
+	       plan.RemoteOrdering() == RelationalDelegation::NONE &&
 	       plan.RuntimeOrdering() == RelationalDelegation::NONE && plan.RemoteLimit() == RelationalDelegation::NONE &&
 	       plan.RemoteOffset() == RelationalDelegation::NONE && plan.RuntimeLimit() == RelationalDelegation::NONE &&
 	       plan.RuntimeOffset() == RelationalDelegation::NONE;

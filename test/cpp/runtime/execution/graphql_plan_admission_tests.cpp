@@ -219,7 +219,7 @@ void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 
 void TestEveryProviderCounterexampleFailsClosed() {
 	const auto count = static_cast<std::size_t>(duckdb_api_test::GraphqlRuntimeAdmissionCounterexample::COUNT);
-	Require(count == 143, "Runtime must exercise the complete Semantics counterexample corpus");
+	Require(count == 140, "Runtime must exercise the complete Semantics counterexample corpus");
 	for (std::size_t value = 0; value < count; value++) {
 		const auto counterexample = static_cast<duckdb_api_test::GraphqlRuntimeAdmissionCounterexample>(value);
 		const auto plan =
@@ -228,6 +228,47 @@ void TestEveryProviderCounterexampleFailsClosed() {
 		if (admitted) {
 			throw std::runtime_error("GraphQL admission accepted Semantics counterexample " + std::to_string(value));
 		}
+	}
+}
+
+void TestEveryValidLocalResidualProfileAdmits() {
+	const auto count = static_cast<std::size_t>(duckdb_api_test::GraphqlLocalResidualProfile::COUNT);
+	Require(count == 4, "Runtime must exercise the complete valid local-residual profile catalog");
+	for (std::size_t value = 0; value < count; value++) {
+		const auto profile = static_cast<duckdb_api_test::GraphqlLocalResidualProfile>(value);
+		const auto plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("local_residual_secret", profile);
+		if (!duckdb_api::internal::TryAdmitGraphqlPlan(plan, PublicProfile())) {
+			throw std::runtime_error("GraphQL admission rejected valid local-residual profile " +
+			                         std::to_string(value));
+		}
+	}
+}
+
+void TestEveryNonAuthorityVariationAdmits() {
+	const auto count = static_cast<std::size_t>(duckdb_api_test::GraphqlRuntimeNonAuthorityVariation::COUNT);
+	Require(count == 3, "Runtime must exercise the complete non-authority variation catalog");
+	for (std::size_t value = 0; value < count; value++) {
+		const auto variation = static_cast<duckdb_api_test::GraphqlRuntimeNonAuthorityVariation>(value);
+		const auto plan = duckdb_api_test::BuildGraphqlRuntimeNonAuthorityVariation("non_authority_secret", variation);
+		if (!duckdb_api::internal::TryAdmitGraphqlPlan(plan, PublicProfile())) {
+			throw std::runtime_error("GraphQL admission interpreted non-authority variation " + std::to_string(value));
+		}
+	}
+}
+
+void TestRelationalAuthorityMutationsStillFailClosed() {
+	using Counterexample = duckdb_api_test::GraphqlRuntimeAdmissionCounterexample;
+	const Counterexample authority_changes[] = {
+	    Counterexample::OTHER_REMOTE_PREDICATE, Counterexample::OTHER_REMOTE_ACCURACY,
+	    Counterexample::OTHER_RESIDUAL_OWNER,   Counterexample::OTHER_CONDITIONAL_INPUT,
+	    Counterexample::OTHER_REMOTE_ORDERING,  Counterexample::OTHER_RUNTIME_ORDERING,
+	    Counterexample::OTHER_REMOTE_LIMIT,     Counterexample::OTHER_REMOTE_OFFSET,
+	    Counterexample::OTHER_RUNTIME_LIMIT,    Counterexample::OTHER_RUNTIME_OFFSET};
+	for (const auto counterexample : authority_changes) {
+		const auto plan =
+		    duckdb_api_test::BuildGraphqlRuntimeAdmissionCounterexample("authority_secret", counterexample);
+		Require(!duckdb_api::internal::TryAdmitGraphqlPlan(plan, PublicProfile()),
+		        "GraphQL admission accepted mutated relational execution authority");
 	}
 }
 
@@ -251,6 +292,9 @@ int main() {
 		TestValidPlanProducesClosedProfileAndCanonicalBodies();
 		TestRequestBodyExactOneOverAggregateAndPreBearerOrdering();
 		TestDocumentAdmissionRequiresIntegrityAndCanonicalMembership();
+		TestEveryValidLocalResidualProfileAdmits();
+		TestEveryNonAuthorityVariationAdmits();
+		TestRelationalAuthorityMutationsStillFailClosed();
 		TestEveryProviderCounterexampleFailsClosed();
 		std::cout << "GraphQL plan admission tests passed\n";
 		return EXIT_SUCCESS;
