@@ -112,13 +112,9 @@ bool HasExpectedRepositoryNetwork(const NetworkCapability &network, const HttpEx
 }
 
 bool HasKnownPredicate(PlannedPredicate predicate) {
-	switch (predicate) {
-	case PlannedPredicate::TRUE_FOR_BASE_DOMAIN:
-	case PlannedPredicate::VISIBILITY_EQUALS_PRIVATE:
-	case PlannedPredicate::COMPLETE_DUCKDB_FILTER:
-		return true;
-	}
-	return false;
+	return predicate == PlannedPredicate::TRUE_FOR_BASE_DOMAIN ||
+	       predicate == PlannedPredicate::VISIBILITY_EQUALS_PRIVATE ||
+	       predicate == PlannedPredicate::COMPLETE_DUCKDB_FILTER;
 }
 
 bool HasKnownPredicateReason(PredicateDecisionReason reason) {
@@ -232,12 +228,8 @@ bool HasSupportedRelationalExecutionEnvelope(const ScanPlan &plan) {
 	if (!HasDuckDbOwnedRelationalEnvelope(plan) || !HasCoherentStructuredPredicateDecision(plan)) {
 		return false;
 	}
-	switch (plan.ConditionalInput()) {
-	case PlannedConditionalInput::NONE:
-	case PlannedConditionalInput::VISIBILITY_PRIVATE:
-		return true;
-	}
-	return false;
+	return plan.ConditionalInput() == PlannedConditionalInput::NONE ||
+	       plan.ConditionalInput() == PlannedConditionalInput::VISIBILITY_PRIVATE;
 }
 
 bool TryAdmitSingleResponsePlan(const ScanPlan &plan, const HttpExecutionProfile &profile,

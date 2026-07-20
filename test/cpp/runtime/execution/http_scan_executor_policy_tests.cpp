@@ -223,6 +223,8 @@ void TestProviderOwnedPlanDenialMatrix() {
 	    RepositoryPlanCounterexample::SELECTIVE_FILTER_OWNER_UNKNOWN,
 	    RepositoryPlanCounterexample::SELECTIVE_PROJECTION_OWNER_UNKNOWN,
 	    RepositoryPlanCounterexample::SELECTIVE_REMOTE_ORDERING_UNKNOWN,
+	    RepositoryPlanCounterexample::UNKNOWN_REMOTE_PREDICATE,
+	    RepositoryPlanCounterexample::UNKNOWN_RESIDUAL_PREDICATE,
 	    RepositoryPlanCounterexample::UNKNOWN_CONDITIONAL_INPUT,
 	    RepositoryPlanCounterexample::BASELINE_REMOTE_VISIBILITY,
 	    RepositoryPlanCounterexample::UNKNOWN_PREDICATE_CATEGORY,

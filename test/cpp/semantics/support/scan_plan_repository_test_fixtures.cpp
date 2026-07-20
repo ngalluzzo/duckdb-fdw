@@ -44,6 +44,12 @@ duckdb_api::ScanPlan ScanPlanTestAccess::Repository(duckdb_api::ScanPlan plan,
 	case RepositoryPlanCounterexample::SELECTIVE_REMOTE_ORDERING_UNKNOWN:
 		plan.remote_ordering = static_cast<duckdb_api::RelationalDelegation>(255);
 		break;
+	case RepositoryPlanCounterexample::UNKNOWN_REMOTE_PREDICATE:
+		plan.remote_predicate = static_cast<duckdb_api::PlannedPredicate>(255);
+		break;
+	case RepositoryPlanCounterexample::UNKNOWN_RESIDUAL_PREDICATE:
+		plan.residual_predicate = static_cast<duckdb_api::PlannedPredicate>(255);
+		break;
 	case RepositoryPlanCounterexample::UNKNOWN_CONDITIONAL_INPUT:
 		plan.conditional_input = static_cast<duckdb_api::PlannedConditionalInput>(255);
 		break;
