@@ -2,6 +2,7 @@
 
 #include "connector/support/catalog_test_access.hpp"
 #include "duckdb_api/internal/connector/compiled_model_builder.hpp"
+#include "duckdb_api/internal/connector/predicate_declaration.hpp"
 
 #include <utility>
 #include <vector>
@@ -133,40 +134,43 @@ CompiledRelation BuildDistinctRelation(bool renamed = false) {
 	                                            ConnectorCatalogTestAccess::UnpaginatedResources(1, 64));
 }
 
-duckdb_api::CompiledPredicateMapping ExactPredicateMapping(const std::string &remote_input) {
-	return ConnectorCatalogTestAccess::PredicateMapping(
-	    "visibility", CompiledPredicateOperator::EQUALS, CompiledPredicateLiteral::VARCHAR_PRIVATE,
-	    "controlled_exact_repositories", CompiledPredicateInputPlacement::REST_QUERY_PARAMETER, remote_input, "private",
-	    CompiledPredicateAccuracy::EXACT,
-	    CompiledPredicateProofIdentity::CONTROLLED_EXACT_DUPLICATE_REPOSITORY_VISIBILITY,
-	    CompiledPredicateBaseDomain::CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES,
-	    CompiledPredicateOccurrencePreservation::PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES,
-	    CompiledPredicateEncodingCapability::SINGLE_POSITIVE_REST_QUERY_INPUT);
+duckdb_api::CompiledPredicateMapping
+PackagePredicateMapping(const std::string &column, duckdb_api::CompiledScalarValue literal,
+                        const std::string &operation, const std::string &remote_input, const std::string &encoded_value,
+                        const duckdb_api::internal::CompiledPackagePredicateIdentities &identities,
+                        const std::string &fixture_prefix) {
+	return ConnectorCatalogTestAccess::PackagePredicateMapping(
+	    column, std::move(literal), operation, remote_input, encoded_value, CompiledPredicateAccuracy::EXACT,
+	    identities.proof, identities.base_domain, fixture_prefix + "_match", fixture_prefix + "_false_or_null",
+	    fixture_prefix + "_duplicates");
 }
 
-CompiledRelation BuildPredicateRelation(bool changed) {
+CompiledRelation BuildPredicateRelation(bool changed, const std::string &package_digest,
+                                        bool conflicting_mappings = false) {
 	const std::string conditional_input = changed ? "repository_visibility" : "visibility";
 	std::vector<duckdb_api::CompiledColumn> columns;
 	columns.push_back(
 	    CompiledModelBuilder::Column("occurrence_id", CompiledScalarType::BIGINT, false, "$.occurrence_id"));
 	columns.push_back(CompiledModelBuilder::Column("visibility", CompiledScalarType::VARCHAR, false, "$.visibility"));
 	std::vector<CompiledOperation> operations;
-	operations.push_back(CompiledOperation {"controlled_exact_repositories",
-	                                        false,
-	                                        CompiledOperationCardinality::ZERO_TO_MANY,
-	                                        CompiledProtocol::REST,
-	                                        CompiledHttpMethod::GET,
-	                                        CompiledReplaySafety::SAFE,
-	                                        false,
-	                                        CompiledModelBuilder::DisabledPagination(),
-	                                        {Origin("predicate-proof.invalid"),
-	                                         "/fixtures/exact-repositories",
-	                                         {},
-	                                         {{"X-Connector-Fixture", "exact-duplicate-repositories"}}},
-	                                        CompiledResponseSource::ROOT_ARRAY,
-	                                        "$",
-	                                        CompiledModelBuilder::V1OperationSelector(
-	                                            {CompiledModelBuilder::ConditionalInputReference(conditional_input)})});
+	operations.push_back(CompiledOperation {
+	    "controlled_exact_repositories",
+	    false,
+	    CompiledOperationCardinality::ZERO_TO_MANY,
+	    CompiledProtocol::REST,
+	    CompiledHttpMethod::GET,
+	    CompiledReplaySafety::SAFE,
+	    false,
+	    CompiledModelBuilder::DisabledPagination(),
+	    {Origin("predicate-proof.invalid"),
+	     "/fixtures/exact-repositories",
+	     {duckdb_api::CompiledQueryParameter(conditional_input, duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT,
+	                                         conditional_input, true, false)},
+	     {{"X-Connector-Fixture", "exact-duplicate-repositories"}}},
+	    CompiledResponseSource::ROOT_ARRAY,
+	    "$",
+	    CompiledModelBuilder::V1OperationSelector(
+	        {CompiledModelBuilder::ConditionalInputReference(conditional_input)})});
 	operations.push_back(CompiledOperation {"controlled_all_repositories",
 	                                        true,
 	                                        CompiledOperationCardinality::ZERO_TO_MANY,
@@ -182,12 +186,73 @@ CompiledRelation BuildPredicateRelation(bool changed) {
 	                                        CompiledResponseSource::ROOT_ARRAY,
 	                                        "$",
 	                                        CompiledModelBuilder::V1OperationSelector({})});
+	const auto identities = duckdb_api::internal::DerivePackagePredicateIdentities(
+	    package_digest, PACKAGE_PREDICATE_RELATION, operations.front());
 	std::vector<duckdb_api::CompiledPredicateMapping> mappings;
-	mappings.push_back(ExactPredicateMapping(conditional_input));
+	mappings.push_back(PackagePredicateMapping("visibility", CompiledModelBuilder::Varchar("private"),
+	                                           "controlled_exact_repositories", conditional_input, "private",
+	                                           identities, "private"));
+	if (conflicting_mappings) {
+		mappings.push_back(PackagePredicateMapping("visibility", CompiledModelBuilder::Varchar("public"),
+		                                           "controlled_exact_repositories", conditional_input, "public",
+		                                           identities, "public"));
+	}
 	return ConnectorCatalogTestAccess::Relation(PACKAGE_PREDICATE_RELATION, std::move(columns), {},
 	                                            std::move(operations), ConnectorCatalogTestAccess::Anonymous(),
 	                                            ConnectorCatalogTestAccess::UnpaginatedResources(8, 128),
 	                                            std::move(mappings));
+}
+
+CompiledRelation BuildScalarPredicateRelation(const std::string &package_digest, const std::string &relation_name,
+                                              const std::string &column_name, CompiledScalarType type,
+                                              duckdb_api::CompiledScalarValue literal,
+                                              const std::string &encoded_value) {
+	const std::string operation_name = relation_name + "_selected";
+	std::vector<duckdb_api::CompiledColumn> columns;
+	columns.push_back(
+	    CompiledModelBuilder::Column("occurrence_id", CompiledScalarType::BIGINT, false, "$.occurrence_id"));
+	columns.push_back(CompiledModelBuilder::Column(column_name, type, false, "$." + column_name));
+	std::vector<CompiledOperation> operations;
+	operations.push_back(CompiledOperation {
+	    operation_name,
+	    false,
+	    CompiledOperationCardinality::ZERO_TO_MANY,
+	    CompiledProtocol::REST,
+	    CompiledHttpMethod::GET,
+	    CompiledReplaySafety::SAFE,
+	    false,
+	    CompiledModelBuilder::DisabledPagination(),
+	    {Origin("predicate-proof.invalid"),
+	     "/fixtures/" + relation_name + "/restricted",
+	     {duckdb_api::CompiledQueryParameter(column_name, duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT,
+	                                         column_name, true, false)},
+	     {{"X-Connector-Fixture", relation_name}}},
+	    CompiledResponseSource::ROOT_ARRAY,
+	    "$",
+	    CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::ConditionalInputReference(column_name)})});
+	operations.push_back(CompiledOperation {relation_name + "_fallback",
+	                                        true,
+	                                        CompiledOperationCardinality::ZERO_TO_MANY,
+	                                        CompiledProtocol::REST,
+	                                        CompiledHttpMethod::GET,
+	                                        CompiledReplaySafety::SAFE,
+	                                        false,
+	                                        CompiledModelBuilder::DisabledPagination(),
+	                                        {Origin("predicate-proof.invalid"),
+	                                         "/fixtures/" + relation_name + "/all",
+	                                         {},
+	                                         {{"X-Connector-Fixture", relation_name + "-fallback"}}},
+	                                        CompiledResponseSource::ROOT_ARRAY,
+	                                        "$",
+	                                        CompiledModelBuilder::V1OperationSelector({})});
+	const auto identities =
+	    duckdb_api::internal::DerivePackagePredicateIdentities(package_digest, relation_name, operations.front());
+	std::vector<duckdb_api::CompiledPredicateMapping> mappings;
+	mappings.push_back(PackagePredicateMapping(column_name, std::move(literal), operation_name, column_name,
+	                                           encoded_value, identities, relation_name));
+	return ConnectorCatalogTestAccess::Relation(
+	    relation_name, std::move(columns), {}, std::move(operations), ConnectorCatalogTestAccess::Anonymous(),
+	    ConnectorCatalogTestAccess::UnpaginatedResources(8, 128), std::move(mappings));
 }
 
 CompiledRelation BuildAppendedRelation(const std::string &name = "appended_records") {
@@ -211,7 +276,7 @@ duckdb_api::CompiledNetworkPolicy NetworkPolicy(bool changed) {
 
 duckdb_api::CompiledPackageGeneration BuildGeneration(PackageCompatibilityFixture variant, bool tie,
                                                       const std::string &version, char digest_fill,
-                                                      bool distinct_only = false) {
+                                                      bool distinct_only = false, bool conflicting_predicates = false) {
 	std::vector<CompiledRelation> relations;
 	if (distinct_only) {
 		relations.push_back(BuildDistinctRelation());
@@ -227,7 +292,8 @@ duckdb_api::CompiledPackageGeneration BuildGeneration(PackageCompatibilityFixtur
 			relations.push_back(BuildDistinctRelation(variant == PackageCompatibilityFixture::RELATION_CHANGED));
 		}
 		if (variant != PackageCompatibilityFixture::RELATION_REMOVED) {
-			relations.push_back(BuildPredicateRelation(variant == PackageCompatibilityFixture::PREDICATE_CHANGED));
+			relations.push_back(BuildPredicateRelation(variant == PackageCompatibilityFixture::PREDICATE_CHANGED,
+			                                           Digest(digest_fill), conflicting_predicates));
 		}
 		if (variant == PackageCompatibilityFixture::APPEND_RELATION) {
 			relations.push_back(BuildAppendedRelation());
@@ -242,6 +308,24 @@ duckdb_api::CompiledPackageGeneration BuildGeneration(PackageCompatibilityFixtur
 	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
 }
 
+duckdb_api::CompiledPackageGeneration BuildTypedPredicateGeneration(const std::string &version, char digest_fill) {
+	const auto digest = Digest(digest_fill);
+	std::vector<CompiledRelation> relations;
+	relations.push_back(BuildScalarPredicateRelation(digest, "boolean_predicates", "active",
+	                                                 CompiledScalarType::BOOLEAN, CompiledModelBuilder::Boolean(true),
+	                                                 "true"));
+	relations.push_back(BuildScalarPredicateRelation(digest, "bigint_predicates", "rank", CompiledScalarType::BIGINT,
+	                                                 CompiledModelBuilder::Bigint(42), "42"));
+	relations.push_back(BuildScalarPredicateRelation(digest, "varchar_predicates", "visibility",
+	                                                 CompiledScalarType::VARCHAR, CompiledModelBuilder::Varchar(""),
+	                                                 ""));
+	auto identity = CompiledModelBuilder::PackageIdentity("duckdb_api/v1", "typed_predicate_package", version, digest);
+	auto connector =
+	    CompiledModelBuilder::Connector(CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA, "typed_predicate_package",
+	                                    version, std::move(relations), NetworkPolicy(false));
+	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
+}
+
 } // namespace
 
 duckdb_api::CompiledPackageGeneration BuildTypedFallbackPackageGenerationFixture(const std::string &package_version,
@@ -252,6 +336,16 @@ duckdb_api::CompiledPackageGeneration BuildTypedFallbackPackageGenerationFixture
 duckdb_api::CompiledPackageGeneration BuildTypedTiePackageGenerationFixture(const std::string &package_version,
                                                                             char digest_fill) {
 	return BuildGeneration(PackageCompatibilityFixture::BASELINE, true, package_version, digest_fill);
+}
+
+duckdb_api::CompiledPackageGeneration BuildPredicateConflictPackageGenerationFixture(const std::string &package_version,
+                                                                                     char digest_fill) {
+	return BuildGeneration(PackageCompatibilityFixture::BASELINE, false, package_version, digest_fill, false, true);
+}
+
+duckdb_api::CompiledPackageGeneration BuildTypedPredicatePackageGenerationFixture(const std::string &package_version,
+                                                                                  char digest_fill) {
+	return BuildTypedPredicateGeneration(package_version, digest_fill);
 }
 
 duckdb_api::CompiledPackageGeneration BuildDistinctPackageGenerationFixture(const std::string &package_version,

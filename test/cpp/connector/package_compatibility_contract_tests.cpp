@@ -118,16 +118,77 @@ void TestPackageGenerationFixtureBoundary() {
 	Require(fallback.Connector().FindRelation(duckdb_api_test::PACKAGE_DISTINCT_RELATION) != nullptr,
 	        "typed package fixture lost its structurally distinct relation");
 	const auto *conditional = fallback.Connector().FindRelation(duckdb_api_test::PACKAGE_PREDICATE_RELATION);
-	Require(conditional != nullptr && conditional->Operations().size() == 2 &&
-	            !conditional->Operations()[0].fallback && conditional->Operations()[1].fallback &&
+	Require(conditional != nullptr && conditional->Operations().size() == 2 && !conditional->Operations()[0].fallback &&
+	            conditional->Operations()[1].fallback &&
 	            conditional->Operations()[0].selector.RequiredInputReferences().size() == 1 &&
 	            conditional->Operations()[0].selector.RequiredInputReferences()[0].Kind() ==
 	                duckdb_api::CompiledRequiredInputKind::CONDITIONAL_INPUT &&
 	            conditional->Operations()[0].selector.RequiredInputReferences()[0].Id() == "visibility" &&
 	            conditional->Operations()[1].selector.RequiredInputReferences().empty() &&
 	            conditional->PredicateMappings().size() == 1 &&
-	            conditional->PredicateMappings()[0].OperationName() == conditional->Operations()[0].name,
+	            conditional->PredicateMappings()[0].OperationName() == conditional->Operations()[0].name &&
+	            conditional->PredicateMappings()[0].ProofIdentity() ==
+	                duckdb_api::CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1,
 	        "package fixture lost its conditional-selected operation or empty fallback containment shape");
+
+	const auto predicate_conflict = duckdb_api_test::BuildPredicateConflictPackageGenerationFixture();
+	const auto *conflict = predicate_conflict.Connector().FindRelation(duckdb_api_test::PACKAGE_PREDICATE_RELATION);
+	Require(
+	    conflict != nullptr && conflict->Operations().size() == 2 && !conflict->Operations()[0].fallback &&
+	        conflict->Operations()[1].fallback && conflict->Operations()[1].Rest().request.query_parameters.empty() &&
+	        conflict->PredicateMappings().size() == 2 &&
+	        conflict->PredicateMappings()[0].ProofIdentity() ==
+	            duckdb_api::CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1 &&
+	        conflict->PredicateMappings()[1].ProofIdentity() ==
+	            duckdb_api::CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1 &&
+	        conflict->PredicateMappings()[0].RemoteInputName() == conflict->PredicateMappings()[1].RemoteInputName() &&
+	        conflict->PredicateMappings()[0].TypedLiteral().Varchar() == "private" &&
+	        conflict->PredicateMappings()[1].TypedLiteral().Varchar() == "public" &&
+	        conflict->PredicateMappings()[0].EncodedRemoteValue() == "private" &&
+	        conflict->PredicateMappings()[1].EncodedRemoteValue() == "public",
+	    "predicate conflict fixture lost its package-selected conflict or unaffected empty fallback");
+
+	const auto typed_predicates = duckdb_api_test::BuildTypedPredicatePackageGenerationFixture();
+	const std::vector<std::string> typed_relation_names = {"boolean_predicates", "bigint_predicates",
+	                                                       "varchar_predicates"};
+	const std::vector<duckdb_api::CompiledScalarType> typed_relation_types = {duckdb_api::CompiledScalarType::BOOLEAN,
+	                                                                          duckdb_api::CompiledScalarType::BIGINT,
+	                                                                          duckdb_api::CompiledScalarType::VARCHAR};
+	Require(typed_predicates.Connector().Relations().size() == typed_relation_names.size(),
+	        "typed predicate fixture relation inventory drifted");
+	for (std::size_t index = 0; index < typed_relation_names.size(); index++) {
+		const auto *relation = typed_predicates.Connector().FindRelation(typed_relation_names[index]);
+		Require(relation != nullptr && relation->Columns().size() == 2 &&
+		            relation->Columns()[1].ScalarType() == typed_relation_types[index] &&
+		            relation->Operations().size() == 2 && !relation->Operations()[0].fallback &&
+		            relation->Operations()[1].fallback && relation->PredicateMappings().size() == 1 &&
+		            relation->PredicateMappings()[0].TypedLiteral().Type() == typed_relation_types[index] &&
+		            relation->PredicateMappings()[0].ProofIdentity() ==
+		                duckdb_api::CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1,
+		        "typed predicate fixture lost an independent package equality mapping or fallback");
+	}
+	Require(typed_predicates.Connector()
+	                .FindRelation("boolean_predicates")
+	                ->PredicateMappings()[0]
+	                .TypedLiteral()
+	                .Boolean() &&
+	            typed_predicates.Connector()
+	                    .FindRelation("bigint_predicates")
+	                    ->PredicateMappings()[0]
+	                    .TypedLiteral()
+	                    .Bigint() == 42 &&
+	            typed_predicates.Connector()
+	                .FindRelation("varchar_predicates")
+	                ->PredicateMappings()[0]
+	                .TypedLiteral()
+	                .Varchar()
+	                .empty() &&
+	            typed_predicates.Connector()
+	                .FindRelation("varchar_predicates")
+	                ->PredicateMappings()[0]
+	                .EncodedRemoteValue()
+	                .empty(),
+	        "typed predicate fixture lost its BOOLEAN, BIGINT, or empty VARCHAR values");
 
 	const auto tie = duckdb_api_test::BuildTypedTiePackageGenerationFixture();
 	const auto *tied = tie.Connector().FindRelation(duckdb_api_test::PACKAGE_TYPED_RELATION);

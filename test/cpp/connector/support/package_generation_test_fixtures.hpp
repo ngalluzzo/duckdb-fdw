@@ -48,6 +48,21 @@ BuildTypedFallbackPackageGenerationFixture(const std::string &package_version = 
 duckdb_api::CompiledPackageGeneration
 BuildTypedTiePackageGenerationFixture(const std::string &package_version = "1.2.3", char digest_fill = 'b');
 
+// Same structural package as the fallback fixture, except the controlled
+// predicate relation exposes two mappings for the selected operation and
+// remote input with distinct typed literals and encoded values. The immutable
+// generation accepts this bounded provider shape; Relational Semantics owns
+// conflict containment and must leave the fallback unaffected.
+duckdb_api::CompiledPackageGeneration
+BuildPredicateConflictPackageGenerationFixture(const std::string &package_version = "1.2.3", char digest_fill = 'e');
+
+// Three independent package-declared equality mappings over BOOLEAN, BIGINT,
+// and VARCHAR columns. Each selected operation owns one conditional input and
+// one empty-selector fallback so Semantics can exercise its closed typed
+// matcher without compiler-private construction access.
+duckdb_api::CompiledPackageGeneration
+BuildTypedPredicatePackageGenerationFixture(const std::string &package_version = "1.2.3", char digest_fill = 'f');
+
 // One-relation valid package whose name, schema, input shape, and response
 // structure differ from the typed fixture relation.
 duckdb_api::CompiledPackageGeneration
