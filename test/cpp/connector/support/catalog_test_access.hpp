@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb_api/connector_catalog.hpp"
+#include "duckdb_api/internal/connector/compiled_model_builder.hpp"
 
 #include <memory>
 #include <string>
@@ -26,6 +27,19 @@ public:
 		return duckdb_api::CompiledPagination(std::move(page_size_parameter), page_size,
 		                                      std::move(page_number_parameter), first_page, page_increment,
 		                                      max_pages_per_scan);
+	}
+
+	static duckdb_api::CompiledQueryParameter FixedQuery(std::string name, std::string decoded_value) {
+		return duckdb_api::internal::CompiledModelBuilder::FixedQueryParameter(
+		    std::move(name), duckdb_api::internal::CompiledModelBuilder::Varchar(std::move(decoded_value)));
+	}
+
+	static duckdb_api::CompiledQueryParameter PageSizeQuery(std::string name, std::uint64_t value) {
+		return duckdb_api::internal::CompiledModelBuilder::PageSizeQueryParameter(std::move(name), value);
+	}
+
+	static duckdb_api::CompiledQueryParameter PageNumberQuery(std::string name, std::uint64_t value) {
+		return duckdb_api::internal::CompiledModelBuilder::PageNumberQueryParameter(std::move(name), value);
 	}
 
 	// Temporary compatibility bridge for Semantics-owned controlled fixtures.

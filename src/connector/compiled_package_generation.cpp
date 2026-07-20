@@ -3,6 +3,7 @@
 #include "duckdb_api/internal/connector/predicate_declaration.hpp"
 #include "duckdb_api/package_semver.hpp"
 
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -52,6 +53,69 @@ CompiledRegistrationAuthentication RegistrationAuthentication(const CompiledAuth
 		return CompiledRegistrationAuthentication::LOGICAL_SECRET_REQUIRED;
 	}
 	throw std::logic_error("compiled relation contains an unknown Query authentication shape");
+}
+
+const CompiledRelationInput *FindRelationInput(const CompiledRelation &relation, const std::string &id) {
+	for (const auto &input : relation.Inputs()) {
+		if (input.Name() == id) {
+			return &input;
+		}
+	}
+	return nullptr;
+}
+
+bool HasCanonicalConditionalInput(const CompiledRelation &relation, const CompiledOperation &operation,
+                                  const CompiledQueryParameter &parameter) {
+	bool found = false;
+	for (const auto &mapping : relation.PredicateMappings()) {
+		if (mapping.OperationName() != operation.name || mapping.RemoteInputName() != parameter.source_id) {
+			continue;
+		}
+		found = true;
+		if (mapping.EncodedRemoteValue() != EncodeCompiledQueryScalar(mapping.TypedLiteral(), parameter.encoding)) {
+			return false;
+		}
+	}
+	return found;
+}
+
+void ValidatePackageRequestBindings(const CompiledRelation &relation, const CompiledOperation &operation) {
+	if (operation.Protocol() != CompiledProtocol::REST) {
+		return;
+	}
+	std::size_t conditional_count = 0;
+	for (const auto &parameter : operation.Rest().request.query_parameters) {
+		switch (parameter.source) {
+		case CompiledQueryValueSource::FIXED:
+			if (!parameter.HasDecodedValue() || parameter.DecodedValue().Type() != CompiledScalarType::VARCHAR) {
+				throw std::invalid_argument("compiled package fixed query field is not an author VARCHAR");
+			}
+			break;
+		case CompiledQueryValueSource::PAGE_SIZE:
+		case CompiledQueryValueSource::PAGE_NUMBER:
+			if (!parameter.HasDecodedValue()) {
+				throw std::invalid_argument("compiled package query field lacks decoded scalar authority");
+			}
+			break;
+		case CompiledQueryValueSource::RELATION_INPUT:
+			if (FindRelationInput(relation, parameter.source_id) == nullptr) {
+				throw std::invalid_argument("compiled package query field references an absent relation input");
+			}
+			break;
+		case CompiledQueryValueSource::CONDITIONAL_INPUT:
+			conditional_count++;
+			if (conditional_count > 1) {
+				throw std::invalid_argument(
+				    "compiled package operation contains more than one conditional request binding");
+			}
+			if (!HasCanonicalConditionalInput(relation, operation, parameter)) {
+				throw std::invalid_argument("compiled package query field lacks exact conditional scalar provenance");
+			}
+			break;
+		default:
+			throw std::invalid_argument("compiled package query field has an unknown source");
+		}
+	}
 }
 
 } // namespace
@@ -241,8 +305,52 @@ CompiledColumn CompiledModelBuilder::Column(std::string name, CompiledScalarType
 	return CompiledColumn(std::move(name), type, nullable, std::move(extractor));
 }
 
+CompiledColumn CompiledModelBuilder::Column(std::string name, CompiledScalarType type, bool nullable,
+                                            std::string extractor, std::vector<std::string> extractor_segments) {
+	return CompiledColumn(std::move(name), type, nullable, std::move(extractor), std::move(extractor_segments));
+}
+
 CompiledPagination CompiledModelBuilder::DisabledPagination() {
 	return CompiledPagination::Disabled();
+}
+
+CompiledPagination CompiledModelBuilder::LinkPagination(std::string page_size_parameter, std::uint64_t page_size,
+                                                        std::string page_number_parameter, std::uint64_t first_page,
+                                                        std::uint64_t page_increment,
+                                                        std::uint64_t max_pages_per_scan) {
+	return CompiledPagination(std::move(page_size_parameter), page_size, std::move(page_number_parameter), first_page,
+	                          page_increment, max_pages_per_scan);
+}
+
+CompiledQueryParameter CompiledModelBuilder::FixedQueryParameter(std::string name, CompiledScalarValue decoded_value) {
+	return CompiledQueryParameter(std::move(name), CompiledQueryValueSource::FIXED, std::move(decoded_value));
+}
+
+CompiledQueryParameter CompiledModelBuilder::RelationInputQueryParameter(std::string name, std::string input_id) {
+	return CompiledQueryParameter(std::move(name), CompiledQueryValueSource::RELATION_INPUT, std::move(input_id), true,
+	                              true);
+}
+
+CompiledQueryParameter CompiledModelBuilder::ConditionalInputQueryParameter(std::string name,
+                                                                            std::string conditional_id) {
+	return CompiledQueryParameter(std::move(name), CompiledQueryValueSource::CONDITIONAL_INPUT,
+	                              std::move(conditional_id), true, false);
+}
+
+CompiledQueryParameter CompiledModelBuilder::PageSizeQueryParameter(std::string name, std::uint64_t value) {
+	if (value == 0 || value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+		throw std::invalid_argument("compiled page size exceeds BIGINT request authority");
+	}
+	return CompiledQueryParameter(std::move(name), CompiledQueryValueSource::PAGE_SIZE,
+	                              Bigint(static_cast<std::int64_t>(value)));
+}
+
+CompiledQueryParameter CompiledModelBuilder::PageNumberQueryParameter(std::string name, std::uint64_t value) {
+	if (value == 0 || value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+		throw std::invalid_argument("compiled page number exceeds BIGINT request authority");
+	}
+	return CompiledQueryParameter(std::move(name), CompiledQueryValueSource::PAGE_NUMBER,
+	                              Bigint(static_cast<std::int64_t>(value)));
 }
 
 CompiledRequiredInputReference CompiledModelBuilder::RelationInputReference(std::string id) {
@@ -265,6 +373,15 @@ CompiledAuthenticationPolicy CompiledModelBuilder::AnonymousAuthentication() {
 CompiledResourceCeilings CompiledModelBuilder::UnpaginatedResources(std::uint64_t max_records,
                                                                     std::uint64_t max_extracted_string_bytes) {
 	return CompiledResourceCeilings(max_records, max_extracted_string_bytes);
+}
+
+CompiledOperation CompiledModelBuilder::RestOperation(
+    std::string name, bool fallback, CompiledOperationCardinality cardinality, CompiledPagination pagination,
+    CompiledRestRequest request, CompiledResponseSource response_source, std::string records_extractor,
+    std::vector<std::string> records_extractor_segments, CompiledOperationSelector selector) {
+	return CompiledOperation(std::move(name), fallback, cardinality, std::move(pagination), std::move(request),
+	                         response_source, std::move(records_extractor), std::move(records_extractor_segments),
+	                         std::move(selector));
 }
 
 CompiledRelation CompiledModelBuilder::Relation(std::string name, std::vector<CompiledColumn> columns,
@@ -301,6 +418,7 @@ CompiledPackageGeneration CompiledModelBuilder::PackageGeneration(CompiledPackag
 			if (operation.selector.legacy_compatibility_bridge) {
 				throw std::invalid_argument("compiled package generation contains a legacy operation selector");
 			}
+			ValidatePackageRequestBindings(relation, operation);
 		}
 		for (const auto &mapping : relation.PredicateMappings()) {
 			if (mapping.ProofIdentity() != CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1) {

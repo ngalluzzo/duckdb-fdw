@@ -41,7 +41,8 @@ duckdb_api::CompiledConnector BuildPredicateDecoyCatalog(std::string connector_n
 	                                   ConnectorCatalogTestAccess::SequentialLink("per_page", 100, "page", 1, 1, 2),
 	                                   {origin,
 	                                    std::move(path),
-	                                    {{"per_page", "100"}, {"page", "1"}},
+	                                    {ConnectorCatalogTestAccess::PageSizeQuery("per_page", 100),
+	                                     ConnectorCatalogTestAccess::PageNumberQuery("page", 1)},
 	                                    {{"X-Connector-Fixture", "predicate-decoy"}}},
 	                                   duckdb_api::CompiledResponseSource::ROOT_ARRAY,
 	                                   "$",
@@ -204,7 +205,12 @@ duckdb_api::CompiledConnector BuildPaginationConnectorCatalogFixture() {
 	const std::vector<duckdb_api::CompiledColumn> columns = {{"record_id", "BIGINT", false, "$.record_id"},
 	                                                         {"record_label", "VARCHAR", false, "$.record_label"}};
 	const std::vector<duckdb_api::CompiledHttpHeader> headers = {{"X-Connector-Fixture", "pagination-shape"}};
-	const std::vector<duckdb_api::CompiledQueryParameter> page_query = {{"batch_size", "3"}, {"cursor_page", "1"}};
+	const std::vector<duckdb_api::CompiledQueryParameter> fixed_page_shaped_query = {
+	    ConnectorCatalogTestAccess::FixedQuery("batch_size", "3"),
+	    ConnectorCatalogTestAccess::FixedQuery("cursor_page", "1")};
+	const std::vector<duckdb_api::CompiledQueryParameter> structural_page_query = {
+	    ConnectorCatalogTestAccess::PageSizeQuery("batch_size", 3),
+	    ConnectorCatalogTestAccess::PageNumberQuery("cursor_page", 1)};
 
 	std::vector<duckdb_api::CompiledRelation> relations;
 	relations.push_back(ConnectorCatalogTestAccess::Relation(
@@ -217,7 +223,7 @@ duckdb_api::CompiledConnector BuildPaginationConnectorCatalogFixture() {
 	                                   duckdb_api::CompiledReplaySafety::SAFE,
 	                                   false,
 	                                   ConnectorCatalogTestAccess::DisabledPagination(),
-	                                   {github_origin, "/fixtures/page-shaped", page_query, headers},
+	                                   {github_origin, "/fixtures/page-shaped", fixed_page_shaped_query, headers},
 	                                   duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
 	                                   "$.records[*]",
 	                                   duckdb_api::CompiledOperationSelector()},
@@ -233,7 +239,7 @@ duckdb_api::CompiledConnector BuildPaginationConnectorCatalogFixture() {
 	        duckdb_api::CompiledReplaySafety::SAFE,
 	        false,
 	        ConnectorCatalogTestAccess::SequentialLink("batch_size", 3, "cursor_page", 1, 1, 4),
-	        {github_origin, "/fixtures/linked-records", page_query, headers},
+	        {github_origin, "/fixtures/linked-records", structural_page_query, headers},
 	        duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
 	        "$.records[*]",
 	        duckdb_api::CompiledOperationSelector()},
@@ -267,7 +273,8 @@ BuildPaginationPlannerCandidate(std::uint64_t max_pages, std::uint64_t response_
 	        ConnectorCatalogTestAccess::SequentialLink("batch_size", 3, "cursor_page", 1, 1, max_pages),
 	        {origin,
 	         "/fixtures/planner-pagination",
-	         {{"batch_size", "3"}, {"cursor_page", "1"}},
+	         {ConnectorCatalogTestAccess::PageSizeQuery("batch_size", 3),
+	          ConnectorCatalogTestAccess::PageNumberQuery("cursor_page", 1)},
 	         {{"X-Connector-Fixture", "planner-pagination"}}},
 	        duckdb_api::CompiledResponseSource::JSON_PATH_MANY,
 	        "$.records[*]",
@@ -298,7 +305,8 @@ duckdb_api::CompiledConnector BuildDisabledRootArrayRepositoryCandidate() {
 	                                   ConnectorCatalogTestAccess::DisabledPagination(),
 	                                   {origin,
 	                                    "/user/repos",
-	                                    {{"per_page", "100"}, {"page", "1"}},
+	                                    {ConnectorCatalogTestAccess::FixedQuery("per_page", "100"),
+	                                     ConnectorCatalogTestAccess::FixedQuery("page", "1")},
 	                                    {{"X-Connector-Fixture", "disabled-root-array"}}},
 	                                   duckdb_api::CompiledResponseSource::ROOT_ARRAY,
 	                                   "$",

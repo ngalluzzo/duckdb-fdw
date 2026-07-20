@@ -150,7 +150,11 @@ void TestCanonicalGraphqlOperationIsExclusive() {
 	    "fixture_extra_rest_operation", false, duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
 	    duckdb_api::CompiledProtocol::REST, duckdb_api::CompiledHttpMethod::GET, duckdb_api::CompiledReplaySafety::SAFE,
 	    false, ConnectorCatalogTestAccess::SequentialLink("per_page", 100, "page", 1, 1, 32),
-	    {origin, "/user/repos", {{"per_page", "100"}, {"page", "1"}}, {{"X-Fixture", "safe"}}},
+	    {origin,
+	     "/user/repos",
+	     {ConnectorCatalogTestAccess::PageSizeQuery("per_page", 100),
+	      ConnectorCatalogTestAccess::PageNumberQuery("page", 1)},
+	     {{"X-Fixture", "safe"}}},
 	    duckdb_api::CompiledResponseSource::ROOT_ARRAY, "$", duckdb_api::CompiledOperationSelector());
 	RequireInvalid("canonical GraphQL relation accepted an extra valid REST operation", [&relation, &extra_rest]() {
 		std::vector<duckdb_api::CompiledOperation> operations = {relation.Operation(), extra_rest};

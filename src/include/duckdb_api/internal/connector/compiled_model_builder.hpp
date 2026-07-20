@@ -26,7 +26,17 @@ public:
 	                                   CompiledInputDefault default_value);
 
 	static CompiledColumn Column(std::string name, CompiledScalarType type, bool nullable, std::string extractor);
+	static CompiledColumn Column(std::string name, CompiledScalarType type, bool nullable, std::string extractor,
+	                             std::vector<std::string> extractor_segments);
 	static CompiledPagination DisabledPagination();
+	static CompiledPagination LinkPagination(std::string page_size_parameter, std::uint64_t page_size,
+	                                         std::string page_number_parameter, std::uint64_t first_page,
+	                                         std::uint64_t page_increment, std::uint64_t max_pages_per_scan);
+	static CompiledQueryParameter FixedQueryParameter(std::string name, CompiledScalarValue decoded_value);
+	static CompiledQueryParameter RelationInputQueryParameter(std::string name, std::string input_id);
+	static CompiledQueryParameter ConditionalInputQueryParameter(std::string name, std::string conditional_id);
+	static CompiledQueryParameter PageSizeQueryParameter(std::string name, std::uint64_t value);
+	static CompiledQueryParameter PageNumberQueryParameter(std::string name, std::uint64_t value);
 	static CompiledRequiredInputReference RelationInputReference(std::string id);
 	static CompiledRequiredInputReference ConditionalInputReference(std::string id);
 	// duckdb_api/v1 admits required references only. There is intentionally no
@@ -36,6 +46,11 @@ public:
 	static CompiledAuthenticationPolicy AnonymousAuthentication();
 	static CompiledResourceCeilings UnpaginatedResources(std::uint64_t max_records,
 	                                                     std::uint64_t max_extracted_string_bytes);
+	static CompiledOperation RestOperation(std::string name, bool fallback, CompiledOperationCardinality cardinality,
+	                                       CompiledPagination pagination, CompiledRestRequest request,
+	                                       CompiledResponseSource response_source, std::string records_extractor,
+	                                       std::vector<std::string> records_extractor_segments,
+	                                       CompiledOperationSelector selector);
 	static CompiledRelation
 	Relation(std::string name, std::vector<CompiledColumn> columns, std::vector<CompiledRelationInput> inputs,
 	         std::vector<CompiledPredicateMapping> predicate_mappings, std::vector<CompiledOperation> operations,

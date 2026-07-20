@@ -100,6 +100,9 @@ void ValidateColumn(const CompiledColumn &column) {
 	if (column.logical_type != CompiledScalarTypeName(column.ScalarType())) {
 		throw std::invalid_argument("compiled relation column type spelling disagrees with structural authority");
 	}
+	if (!internal::MatchesStructuralFieldExtractor(column.extractor, column.ExtractorSegments())) {
+		throw std::invalid_argument("compiled relation column extractor disagrees with structural authority");
+	}
 }
 
 void ValidateOperation(const CompiledOperation &operation) {
@@ -279,17 +282,33 @@ const CompiledInputDefault &CompiledRelationInput::Default() const {
 
 CompiledColumn::CompiledColumn(std::string name_p, std::string logical_type_p, bool nullable_p, std::string extractor_p)
     : name(std::move(name_p)), logical_type(std::move(logical_type_p)), nullable(nullable_p),
-      extractor(std::move(extractor_p)), scalar_type(ScalarTypeFromName(logical_type)) {
+      extractor(std::move(extractor_p)), scalar_type(ScalarTypeFromName(logical_type)),
+      extractor_segments(internal::ParseLegacyJsonExtractorSegments(extractor)) {
 }
 
 CompiledColumn::CompiledColumn(std::string name_p, CompiledScalarType type_p, bool nullable_p, std::string extractor_p)
     : name(std::move(name_p)), logical_type(CompiledScalarTypeName(type_p)), nullable(nullable_p),
-      extractor(std::move(extractor_p)), scalar_type(type_p) {
+      extractor(std::move(extractor_p)), scalar_type(type_p),
+      extractor_segments(internal::ParseLegacyJsonExtractorSegments(extractor)) {
 	ValidateScalarType(scalar_type);
+}
+
+CompiledColumn::CompiledColumn(std::string name_p, CompiledScalarType type_p, bool nullable_p, std::string extractor_p,
+                               std::vector<std::string> extractor_segments_p)
+    : name(std::move(name_p)), logical_type(CompiledScalarTypeName(type_p)), nullable(nullable_p),
+      extractor(std::move(extractor_p)), scalar_type(type_p), extractor_segments(std::move(extractor_segments_p)) {
+	ValidateScalarType(scalar_type);
+	if (!internal::MatchesStructuralFieldExtractor(extractor, extractor_segments)) {
+		throw std::invalid_argument("compiled relation column extractor disagrees with its structural segments");
+	}
 }
 
 CompiledScalarType CompiledColumn::ScalarType() const {
 	return scalar_type;
+}
+
+const std::vector<std::string> &CompiledColumn::ExtractorSegments() const {
+	return extractor_segments;
 }
 
 CompiledAuthenticationPolicy::CompiledAuthenticationPolicy(CompiledCredentialRequirement requirement_p,

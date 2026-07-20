@@ -244,7 +244,7 @@ void TestControlledProfileRejectsDomainOccurrenceAndEncodingDrift() {
 	RequireInvalid("controlled exact proof accepted a fixed-field encoding collision", []() {
 		auto operation = ControlledExactOperation();
 		auto rest = operation.Rest();
-		rest.request.query_parameters.push_back({"visibility", "all"});
+		rest.request.query_parameters.push_back(ConnectorCatalogTestAccess::FixedQuery("visibility", "all"));
 		auto changed = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest), operation.selector);
 		ControlledExactRelation(std::move(changed), ControlledExactMapping());
 	});

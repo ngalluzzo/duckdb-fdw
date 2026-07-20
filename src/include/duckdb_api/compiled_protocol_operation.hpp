@@ -16,6 +16,7 @@ class CompiledModelBuilder;
 }
 
 class CompiledConnector;
+class CompiledScalarValue;
 CompiledConnector BuildNativeGithubConnector();
 
 // Source cardinality is a declaration for Relational Semantics to interpret.
@@ -50,13 +51,25 @@ enum class CompiledResponseSource { JSON_PATH_MANY, ROOT_ARRAY, ROOT_OBJECT };
 // installed native catalog selects HTTPS exclusively.
 enum class CompiledUrlScheme { HTTP, HTTPS };
 
-enum class CompiledQueryValueSource { FIXED, RELATION_INPUT, CONDITIONAL_INPUT };
+enum class CompiledQueryValueSource { FIXED, RELATION_INPUT, CONDITIONAL_INPUT, PAGE_SIZE, PAGE_NUMBER };
+enum class CompiledQueryEncoding { FORM_URLENCODED };
 
-// One ordered REST query field. Fixed values retain their canonical encoded
-// bytes; relation and operation-conditional sources retain a typed source ID
-// and exact omission behavior for Semantics. No caller can supply an encoded
-// target or reinterpret a fixed field as a binding.
+// Canonically encodes one concrete typed value under the closed request
+// encoding carried by a compiled query field. NULL is represented by omission
+// policy and is deliberately rejected here. VARCHAR accepts canonical UTF-8
+// without U+0000-U+001F or U+007F-U+009F; space becomes `+`, unreserved ASCII
+// remains literal, and every other UTF-8 byte uses uppercase `%HH`.
+std::string EncodeCompiledQueryScalar(const CompiledScalarValue &value,
+                                      CompiledQueryEncoding encoding = CompiledQueryEncoding::FORM_URLENCODED);
+
+// One ordered REST query field. Every fixed value retains both its decoded
+// typed scalar and canonical encoded bytes. Dynamic sources retain a typed
+// source ID and exact omission behavior for Semantics, while structural page
+// sources retain BIGINT initial values. Consumers never percent-decode bytes to
+// reconstruct source authority.
 struct CompiledQueryParameter {
+	// Compatibility construction for invalid-input and migration tests. A
+	// validated operation rejects this encoded-only shape.
 	CompiledQueryParameter(std::string name, std::string encoded_value);
 	CompiledQueryParameter(std::string name, CompiledQueryValueSource source, std::string source_id,
 	                       bool omit_when_unbound, bool omit_when_null);
@@ -65,8 +78,17 @@ struct CompiledQueryParameter {
 	std::string encoded_value;
 	CompiledQueryValueSource source;
 	std::string source_id;
+	CompiledQueryEncoding encoding;
 	bool omit_when_unbound;
 	bool omit_when_null;
+
+	bool HasDecodedValue() const;
+	const CompiledScalarValue &DecodedValue() const;
+
+private:
+	friend class internal::CompiledModelBuilder;
+	CompiledQueryParameter(std::string name, CompiledQueryValueSource source, CompiledScalarValue decoded_value);
+	std::shared_ptr<const CompiledScalarValue> decoded_value;
 };
 
 // One non-sensitive fixed HTTP header. Authorization is deliberately
@@ -246,6 +268,10 @@ struct CompiledRestOperation {
 	CompiledRestRequest request;
 	CompiledResponseSource response_source;
 	std::string records_extractor;
+	// JSON_PATH_MANY retains its non-empty terminal collection path as decoded
+	// `[A-Za-z_][A-Za-z0-9_]*` field segments. Root variants carry `$` and an
+	// empty segment vector; array syntax never enters a structural segment.
+	std::vector<std::string> records_extractor_segments;
 };
 
 // Exhaustive immutable built-in protocol value. Wrong-variant access fails;
@@ -263,6 +289,7 @@ public:
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
+	friend class internal::CompiledModelBuilder;
 	friend class CompiledOperation;
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 
@@ -373,10 +400,15 @@ public:
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
+	friend class internal::CompiledModelBuilder;
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 
 	CompiledOperation(std::string name, bool fallback, CompiledOperationCardinality cardinality,
 	                  CompiledGraphqlOperation operation, CompiledOperationSelector selector);
+	CompiledOperation(std::string name, bool fallback, CompiledOperationCardinality cardinality,
+	                  CompiledPagination pagination, CompiledRestRequest request,
+	                  CompiledResponseSource response_source, std::string records_extractor,
+	                  std::vector<std::string> records_extractor_segments, CompiledOperationSelector selector);
 
 	CompiledProtocolOperation protocol_operation;
 };

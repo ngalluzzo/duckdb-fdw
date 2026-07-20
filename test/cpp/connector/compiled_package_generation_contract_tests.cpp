@@ -1,6 +1,7 @@
 #include "duckdb_api/compiled_package_generation.hpp"
 #include "duckdb_api/connector.hpp"
 #include "duckdb_api/internal/connector/compiled_model_builder.hpp"
+#include "duckdb_api/package_compatibility.hpp"
 #include "connector/support/catalog_test_access.hpp"
 #include "support/require.hpp"
 
@@ -86,13 +87,17 @@ std::string Digest(char digit = 'a') {
 }
 
 duckdb_api::CompiledConnector BuildPackageConnector(std::string connector_id = "acme",
-                                                    std::string package_version = "1.2.3",
-                                                    bool legacy_selector = false) {
+                                                    std::string package_version = "1.2.3", bool legacy_selector = false,
+                                                    const std::string *fixed_query = nullptr,
+                                                    bool changed_structure = false) {
 	const duckdb_api::CompiledHttpOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
 	                                               duckdb_api::CompiledHttpHost("service.example"), 443};
 	std::vector<duckdb_api::CompiledColumn> columns;
-	columns.push_back(CompiledModelBuilder::Column("id", CompiledScalarType::BIGINT, false, "$.id"));
-	columns.push_back(CompiledModelBuilder::Column("label", CompiledScalarType::VARCHAR, true, "$.label"));
+	columns.push_back(CompiledModelBuilder::Column("id", CompiledScalarType::BIGINT, false, "$.id", {"id"}));
+	columns.push_back(changed_structure ? CompiledModelBuilder::Column("label", CompiledScalarType::VARCHAR, true,
+	                                                                   "$.payload.label", {"payload", "label"})
+	                                    : CompiledModelBuilder::Column("label", CompiledScalarType::VARCHAR, true,
+	                                                                   "$.label", {"label"}));
 
 	std::vector<duckdb_api::CompiledRelationInput> inputs;
 	inputs.push_back(
@@ -106,18 +111,18 @@ duckdb_api::CompiledConnector BuildPackageConnector(std::string connector_id = "
 	std::vector<duckdb_api::CompiledOperation> operations;
 	auto selector =
 	    legacy_selector ? duckdb_api::CompiledOperationSelector() : CompiledModelBuilder::V1OperationSelector({});
-	operations.push_back(duckdb_api::CompiledOperation {"list_rows",
-	                                                    true,
-	                                                    duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
-	                                                    duckdb_api::CompiledProtocol::REST,
-	                                                    duckdb_api::CompiledHttpMethod::GET,
-	                                                    duckdb_api::CompiledReplaySafety::SAFE,
-	                                                    false,
-	                                                    CompiledModelBuilder::DisabledPagination(),
-	                                                    {origin, "/rows", {}, {{"Accept", "application/json"}}},
-	                                                    duckdb_api::CompiledResponseSource::ROOT_ARRAY,
-	                                                    "$",
-	                                                    std::move(selector)});
+	std::vector<duckdb_api::CompiledQueryParameter> query;
+	if (fixed_query != nullptr) {
+		query.push_back(
+		    CompiledModelBuilder::FixedQueryParameter("filter", CompiledModelBuilder::Varchar(*fixed_query)));
+	}
+	operations.push_back(CompiledModelBuilder::RestOperation(
+	    "list_rows", true, duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	    CompiledModelBuilder::DisabledPagination(),
+	    {origin, "/rows", std::move(query), {{"Accept", "application/json"}}},
+	    duckdb_api::CompiledResponseSource::JSON_PATH_MANY, changed_structure ? "$.payload.records[*]" : "$.records[*]",
+	    changed_structure ? std::vector<std::string>({"payload", "records"}) : std::vector<std::string>({"records"}),
+	    std::move(selector)));
 
 	std::vector<duckdb_api::CompiledRelation> relations;
 	relations.push_back(CompiledModelBuilder::Relation(
@@ -129,9 +134,37 @@ duckdb_api::CompiledConnector BuildPackageConnector(std::string connector_id = "
 	    duckdb_api::CompiledNetworkPolicy {{"https"}, {"service.example"}, false, false, false, false, 65536});
 }
 
-duckdb_api::CompiledPackageGeneration BuildGeneration() {
-	auto identity = CompiledModelBuilder::PackageIdentity("duckdb_api/v1", "acme", "1.2.3", Digest());
-	return CompiledModelBuilder::PackageGeneration(std::move(identity), BuildPackageConnector());
+duckdb_api::CompiledPackageGeneration BuildGeneration(const std::string &version = "1.2.3", char digest = 'a',
+                                                      const std::string *fixed_query = nullptr,
+                                                      bool changed_structure = false) {
+	auto identity = CompiledModelBuilder::PackageIdentity("duckdb_api/v1", "acme", version, Digest(digest));
+	return CompiledModelBuilder::PackageGeneration(
+	    std::move(identity), BuildPackageConnector("acme", version, false, fixed_query, changed_structure));
+}
+
+duckdb_api::CompiledRelation BuildRelationWithQuery(std::vector<duckdb_api::CompiledQueryParameter> query) {
+	const duckdb_api::CompiledHttpOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledHttpHost("service.example"), 443};
+	std::vector<duckdb_api::CompiledColumn> columns;
+	columns.push_back(CompiledModelBuilder::Column("id", CompiledScalarType::BIGINT, false, "$.id", {"id"}));
+	std::vector<duckdb_api::CompiledOperation> operations;
+	operations.push_back(CompiledModelBuilder::RestOperation(
+	    "list_rows", true, duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	    CompiledModelBuilder::DisabledPagination(), {origin, "/rows", std::move(query), {}},
+	    duckdb_api::CompiledResponseSource::ROOT_ARRAY, "$", {}, CompiledModelBuilder::V1OperationSelector({})));
+	return CompiledModelBuilder::Relation("rows", std::move(columns), {}, {}, std::move(operations),
+	                                      CompiledModelBuilder::AnonymousAuthentication(),
+	                                      CompiledModelBuilder::UnpaginatedResources(10, 64));
+}
+
+duckdb_api::CompiledRelation BuildRelationWithOperation(duckdb_api::CompiledOperation operation) {
+	std::vector<duckdb_api::CompiledColumn> columns;
+	columns.push_back(CompiledModelBuilder::Column("id", CompiledScalarType::BIGINT, false, "$.id", {"id"}));
+	std::vector<duckdb_api::CompiledOperation> operations;
+	operations.push_back(std::move(operation));
+	return CompiledModelBuilder::Relation("rows", std::move(columns), {}, {}, std::move(operations),
+	                                      CompiledModelBuilder::AnonymousAuthentication(),
+	                                      CompiledModelBuilder::UnpaginatedResources(10, 64));
 }
 
 void TestTypedValuesAndDefaultPresence() {
@@ -162,6 +195,187 @@ void TestTypedValuesAndDefaultPresence() {
 	Require(!absent.HasDefault() && present_null.HasDefault() && present_null.Value().IsNull(),
 	        "absent default and present typed NULL default collapsed");
 	RequireThrows<std::logic_error>([&]() { (void)absent.Value(); }, "absent default exposed a value");
+}
+
+void TestQueryScalarEncodingAndSourceLaws() {
+	const auto boolean_value = CompiledModelBuilder::Boolean(true);
+	const auto bigint_value = CompiledModelBuilder::Bigint(-42);
+	const auto varchar_value = CompiledModelBuilder::Varchar(u8"a b/é");
+	Require(duckdb_api::EncodeCompiledQueryScalar(boolean_value) == "true" &&
+	            duckdb_api::EncodeCompiledQueryScalar(bigint_value) == "-42" &&
+	            duckdb_api::EncodeCompiledQueryScalar(varchar_value) == "a+b%2F%C3%A9" &&
+	            duckdb_api::EncodeCompiledQueryScalar(CompiledModelBuilder::Varchar("")) == "",
+	        "typed query scalar encoding drifted from canonical FORM_URLENCODED bytes");
+	RequireThrows<std::invalid_argument>(
+	    []() { (void)duckdb_api::EncodeCompiledQueryScalar(CompiledModelBuilder::Null(CompiledScalarType::VARCHAR)); },
+	    "typed NULL acquired query bytes instead of omission ownership");
+
+	const std::vector<std::string> invalid_text = {std::string("a\0b", 3),
+	                                               std::string("a") + static_cast<char>(0x1f) + "b",
+	                                               std::string("a") + static_cast<char>(0x7f) + "b",
+	                                               std::string("\xc2\x80", 2),
+	                                               std::string("\xc0\xaf", 2),
+	                                               std::string("\xed\xa0\x80", 3),
+	                                               std::string("\xf4\x90\x80\x80", 4)};
+	for (const auto &value : invalid_text) {
+		RequireThrows<std::invalid_argument>(
+		    [&value]() { (void)duckdb_api::EncodeCompiledQueryScalar(CompiledModelBuilder::Varchar(value)); },
+		    "invalid, NUL, or control-bearing UTF-8 acquired query bytes");
+	}
+
+	const auto fixed = CompiledModelBuilder::FixedQueryParameter("filter", CompiledModelBuilder::Varchar(u8"a b/é"));
+	const auto relation = CompiledModelBuilder::RelationInputQueryParameter("q", "search");
+	const auto conditional = CompiledModelBuilder::ConditionalInputQueryParameter("visibility", "visibility");
+	const auto page_size = CompiledModelBuilder::PageSizeQueryParameter("batch", 100);
+	const auto page_number = CompiledModelBuilder::PageNumberQueryParameter("cursor_page", 1);
+	Require(fixed.source == duckdb_api::CompiledQueryValueSource::FIXED && fixed.source_id.empty() &&
+	            fixed.encoding == duckdb_api::CompiledQueryEncoding::FORM_URLENCODED && fixed.HasDecodedValue() &&
+	            fixed.DecodedValue().Type() == CompiledScalarType::VARCHAR &&
+	            fixed.DecodedValue().Varchar() == u8"a b/é" && fixed.encoded_value == "a+b%2F%C3%A9" &&
+	            !fixed.omit_when_unbound && !fixed.omit_when_null,
+	        "fixed query field lost decoded VARCHAR, encoded bytes, or closed omission policy");
+	Require(relation.source == duckdb_api::CompiledQueryValueSource::RELATION_INPUT && relation.source_id == "search" &&
+	            !relation.HasDecodedValue() && relation.encoded_value.empty() && relation.omit_when_unbound &&
+	            relation.omit_when_null,
+	        "relation-input query field lost source identity or omission policy");
+	Require(conditional.source == duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT &&
+	            conditional.source_id == "visibility" && !conditional.HasDecodedValue() &&
+	            conditional.encoded_value.empty() && conditional.omit_when_unbound && !conditional.omit_when_null,
+	        "conditional query field lost source identity or omission policy");
+	Require(page_size.source == duckdb_api::CompiledQueryValueSource::PAGE_SIZE && page_size.source_id.empty() &&
+	            page_size.HasDecodedValue() && page_size.DecodedValue().Type() == CompiledScalarType::BIGINT &&
+	            page_size.DecodedValue().Bigint() == 100 && page_size.encoded_value == "100" &&
+	            !page_size.omit_when_unbound && !page_size.omit_when_null &&
+	            page_number.source == duckdb_api::CompiledQueryValueSource::PAGE_NUMBER &&
+	            page_number.DecodedValue().Bigint() == 1,
+	        "page query fields lost closed roles or structural BIGINT initial values");
+	RequireThrows<std::invalid_argument>([]() { (void)CompiledModelBuilder::PageSizeQueryParameter("page_size", 0); },
+	                                     "zero page size entered a structural query field");
+
+	auto mismatched = fixed;
+	mismatched.encoded_value = "a%20b";
+	RequireThrows<std::invalid_argument>([&]() { (void)BuildRelationWithQuery({mismatched}); },
+	                                     "fixed query bytes disagreed with their decoded scalar");
+	RequireThrows<std::invalid_argument>(
+	    []() { (void)BuildRelationWithQuery({duckdb_api::CompiledQueryParameter("filter", "already%20encoded")}); },
+	    "encoded-only compatibility query entered a validated operation");
+	auto contradictory_relation = relation;
+	contradictory_relation.omit_when_null = false;
+	RequireThrows<std::invalid_argument>([&]() { (void)BuildRelationWithQuery({contradictory_relation}); },
+	                                     "relation-input query accepted conditional omission policy");
+	auto contradictory_conditional = conditional;
+	contradictory_conditional.source_id.clear();
+	RequireThrows<std::invalid_argument>([&]() { (void)BuildRelationWithQuery({contradictory_conditional}); },
+	                                     "conditional query accepted an absent source identifier");
+	auto wrong_source = fixed;
+	wrong_source.source = duckdb_api::CompiledQueryValueSource::RELATION_INPUT;
+	wrong_source.source_id = "search";
+	wrong_source.omit_when_unbound = true;
+	wrong_source.omit_when_null = true;
+	RequireThrows<std::invalid_argument>([&]() { (void)BuildRelationWithQuery({wrong_source}); },
+	                                     "relation-input tag retained a contradictory concrete scalar");
+	auto unknown_source = fixed;
+	unknown_source.source = static_cast<duckdb_api::CompiledQueryValueSource>(127);
+	RequireThrows<std::invalid_argument>([&]() { (void)BuildRelationWithQuery({unknown_source}); },
+	                                     "unknown query source entered a validated operation");
+	auto unknown_encoding = fixed;
+	unknown_encoding.encoding = static_cast<duckdb_api::CompiledQueryEncoding>(127);
+	RequireThrows<std::invalid_argument>([&]() { (void)BuildRelationWithQuery({unknown_encoding}); },
+	                                     "unknown query encoding entered a validated operation");
+	for (const auto &name : {std::string(""), std::string(64, 'a'), std::string("bad/name"),
+	                         std::string("bad\0name", 8), std::string(u8"é")}) {
+		auto invalid_name = fixed;
+		invalid_name.name = name;
+		RequireThrows<std::invalid_argument>([&]() { (void)BuildRelationWithQuery({invalid_name}); },
+		                                     "query name outside exact ASCII grammar entered a validated operation");
+	}
+	std::vector<duckdb_api::CompiledQueryParameter> excessive_query;
+	for (std::size_t index = 0; index < 65; index++) {
+		excessive_query.push_back(CompiledModelBuilder::FixedQueryParameter(
+		    "field" + std::to_string(index), CompiledModelBuilder::Varchar("value")));
+	}
+	RequireThrows<std::invalid_argument>([&]() { (void)BuildRelationWithQuery(std::move(excessive_query)); },
+	                                     "65 query fields entered immutable compiled IR");
+	RequireThrows<std::invalid_argument>([&]() { (void)BuildRelationWithQuery({page_size}); },
+	                                     "disabled pagination accepted a structural page role");
+}
+
+void TestStructuralExtractorLaws() {
+	const auto nested =
+	    CompiledModelBuilder::Column("id", CompiledScalarType::BIGINT, false, "$.record.id", {"record", "id"});
+	Require(nested.ExtractorSegments() == std::vector<std::string>({"record", "id"}),
+	        "column lost its decoded extractor segments");
+	for (const auto &segment : {std::string("items[0]"), std::string("items[*]"), std::string("bad.segment"),
+	                            std::string("9records"), std::string("records\n")}) {
+		RequireThrows<std::invalid_argument>(
+		    [&segment]() {
+			    (void)CompiledModelBuilder::Column("id", CompiledScalarType::BIGINT, false, "$." + segment, {segment});
+		    },
+		    "invalid structural column segment escaped Connector validation");
+	}
+
+	const duckdb_api::CompiledHttpOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                               duckdb_api::CompiledHttpHost("service.example"), 443};
+	auto records_operation =
+	    CompiledModelBuilder::RestOperation("list_rows", true, duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	                                        CompiledModelBuilder::DisabledPagination(), {origin, "/rows", {}, {}},
+	                                        duckdb_api::CompiledResponseSource::JSON_PATH_MANY, "$.records[*]",
+	                                        {"records"}, CompiledModelBuilder::V1OperationSelector({}));
+	const auto relation = BuildRelationWithOperation(std::move(records_operation));
+	Require(relation.Operation().Rest().records_extractor_segments == std::vector<std::string>({"records"}),
+	        "REST operation lost its terminal collection segments");
+
+	const auto require_invalid_records = [&origin](std::string extractor, std::vector<std::string> segments) {
+		auto operation = CompiledModelBuilder::RestOperation(
+		    "list_rows", true, duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+		    CompiledModelBuilder::DisabledPagination(), {origin, "/rows", {}, {}},
+		    duckdb_api::CompiledResponseSource::JSON_PATH_MANY, std::move(extractor), std::move(segments),
+		    CompiledModelBuilder::V1OperationSelector({}));
+		(void)BuildRelationWithOperation(std::move(operation));
+	};
+	RequireThrows<std::invalid_argument>([&]() { require_invalid_records("$.records[*]", {"other"}); },
+	                                     "record extractor disagreed with its structural segments");
+	RequireThrows<std::invalid_argument>(
+	    [&]() { require_invalid_records("$.items[*].records[*]", {"items[*]", "records"}); },
+	    "interior array syntax entered structural record segments");
+	RequireThrows<std::invalid_argument>([&]() { require_invalid_records("$.records\n[*]", {"records\n"}); },
+	                                     "control-bearing structural record segment was accepted");
+
+	auto root_with_segments =
+	    CompiledModelBuilder::RestOperation("list_rows", true, duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	                                        CompiledModelBuilder::DisabledPagination(), {origin, "/rows", {}, {}},
+	                                        duckdb_api::CompiledResponseSource::ROOT_ARRAY, "$", {"records"},
+	                                        CompiledModelBuilder::V1OperationSelector({}));
+	RequireThrows<std::invalid_argument>([&]() { (void)BuildRelationWithOperation(std::move(root_with_segments)); },
+	                                     "root response retained contradictory extractor segments");
+}
+
+void TestGenerationSnapshotAndCompatibilitySensitivity() {
+	const std::string active_value = u8"a b/é";
+	const std::string changed_value = "a+b";
+	const auto active = BuildGeneration("1.2.3", 'a', &active_value);
+	const auto candidate = BuildGeneration("1.3.0", 'b', &changed_value);
+	Require(active.Connector().Relations()[0].Snapshot().find("filter=fixed.VARCHAR:a+b%2F%C3%A9") !=
+	                std::string::npos &&
+	            active.Connector().Relations()[0].Snapshot() != candidate.Connector().Relations()[0].Snapshot(),
+	        "generation snapshot omitted decoded fixed-query identity or canonical bytes");
+	Require(duckdb_api::ClassifyPackageReload(active, candidate).Classification() ==
+	            duckdb_api::PackageReloadClassification::INCOMPATIBLE_RELOAD,
+	        "package compatibility ignored a fixed-query scalar change");
+	const auto structural_candidate = BuildGeneration("1.3.0", 'c', &active_value, true);
+	const auto &active_relation = active.Connector().Relations()[0];
+	const auto &changed_relation = structural_candidate.Connector().Relations()[0];
+	Require(active_relation.Columns()[1].ExtractorSegments() == std::vector<std::string>({"label"}) &&
+	            changed_relation.Columns()[1].ExtractorSegments() == std::vector<std::string>({"payload", "label"}) &&
+	            active_relation.Operation().Rest().records_extractor_segments ==
+	                std::vector<std::string>({"records"}) &&
+	            changed_relation.Operation().Rest().records_extractor_segments ==
+	                std::vector<std::string>({"payload", "records"}) &&
+	            active_relation.Snapshot() != changed_relation.Snapshot(),
+	        "generation snapshot ignored structural record or column extractor segments");
+	Require(duckdb_api::ClassifyPackageReload(active, structural_candidate).Classification() ==
+	            duckdb_api::PackageReloadClassification::INCOMPATIBLE_RELOAD,
+	        "package compatibility ignored structural record or column extractor segments");
 }
 
 void TestInputValidationAndOrdering() {
@@ -454,8 +668,22 @@ void TestNativeCompatibility() {
 		for (const auto &column : relation.Columns()) {
 			Require(std::string(duckdb_api::CompiledScalarTypeName(column.ScalarType())) == column.logical_type,
 			        "native column string and structural type diverged");
+			Require(!column.ExtractorSegments().empty(),
+			        "native column did not project its legacy extractor as structural segments");
 		}
 	}
+	const auto &search_query = native.Relations()[0].Operation().Rest().request.query_parameters;
+	Require(search_query.size() == 2 && search_query[0].source == duckdb_api::CompiledQueryValueSource::FIXED &&
+	            search_query[0].HasDecodedValue() && search_query[0].DecodedValue().Varchar() == "duckdb in:login" &&
+	            search_query[0].encoded_value == "duckdb+in%3Alogin" && search_query[1].HasDecodedValue() &&
+	            search_query[1].DecodedValue().Varchar() == "3",
+	        "native fixed query projection requires percent-decoding or lost author VARCHAR authority");
+	const auto &page_query = native.Relations()[2].Operation().Rest().request.query_parameters;
+	Require(page_query.size() == 2 && page_query[0].source == duckdb_api::CompiledQueryValueSource::PAGE_SIZE &&
+	            page_query[0].DecodedValue().Bigint() == 100 &&
+	            page_query[1].source == duckdb_api::CompiledQueryValueSource::PAGE_NUMBER &&
+	            page_query[1].DecodedValue().Bigint() == 1,
+	        "native pagination projection lost closed structural page roles");
 	Require(native.Snapshot().find("origin=native_product_metadata;connector=github;version=0.7.0") == 0,
 	        "package origin support changed native safe provenance");
 }
@@ -465,10 +693,13 @@ void TestNativeCompatibility() {
 int main() {
 	try {
 		TestTypedValuesAndDefaultPresence();
+		TestQueryScalarEncodingAndSourceLaws();
+		TestStructuralExtractorLaws();
 		TestInputValidationAndOrdering();
 		TestTaggedRequiredInputReferences();
 		TestStableIdentityValidation();
 		TestQueryProjectionAndLifetime();
+		TestGenerationSnapshotAndCompatibilitySensitivity();
 		TestNativeCompatibility();
 		std::cout << "compiled package generation contract tests passed" << std::endl;
 		return EXIT_SUCCESS;

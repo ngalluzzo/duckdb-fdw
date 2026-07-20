@@ -144,16 +144,16 @@ bool HasFixedQueryField(const CompiledOperation &operation, const std::string &n
 	return false;
 }
 
-bool HasConditionalQueryBinding(const CompiledOperation &operation, const std::string &id) {
+const CompiledQueryParameter *FindConditionalQueryBinding(const CompiledOperation &operation, const std::string &id) {
 	if (operation.Protocol() != CompiledProtocol::REST) {
-		return false;
+		return nullptr;
 	}
 	for (const auto &parameter : operation.Rest().request.query_parameters) {
 		if (parameter.source == CompiledQueryValueSource::CONDITIONAL_INPUT && parameter.source_id == id) {
-			return true;
+			return &parameter;
 		}
 	}
-	return false;
+	return nullptr;
 }
 
 const CompiledOperation *FindOperation(const std::vector<CompiledOperation> &operations, const std::string &name) {
@@ -371,17 +371,22 @@ void ValidatePredicateMappings(const std::string &relation_name, const std::vect
 		if (operation->Protocol() != CompiledProtocol::REST) {
 			throw std::invalid_argument("compiled predicate mapping cannot target a GraphQL operation");
 		}
-		if (package_mapping && !HasConditionalQueryBinding(*operation, mapping.RemoteInputName())) {
+		const auto *conditional_binding =
+		    package_mapping ? FindConditionalQueryBinding(*operation, mapping.RemoteInputName()) : nullptr;
+		if (package_mapping && conditional_binding == nullptr) {
 			throw std::invalid_argument("compiled package predicate lacks its conditional request binding");
 		}
+		// Package mappings name a provenance source. Collision authority belongs
+		// to the emitted wire key retained by that source's request binding.
+		const auto &remote_query_name = package_mapping ? conditional_binding->name : mapping.RemoteInputName();
 		const auto &pagination = operation->Rest().pagination;
 		const bool collides_with_pagination = pagination.Strategy() == CompiledPaginationStrategy::LINK_HEADER &&
-		                                      (mapping.RemoteInputName() == pagination.PageSizeParameter() ||
-		                                       mapping.RemoteInputName() == pagination.PageNumberParameter());
-		if (HasFixedQueryField(*operation, mapping.RemoteInputName()) || collides_with_pagination) {
+		                                      (remote_query_name == pagination.PageSizeParameter() ||
+		                                       remote_query_name == pagination.PageNumberParameter());
+		if (HasFixedQueryField(*operation, remote_query_name) || collides_with_pagination) {
 			throw std::invalid_argument("compiled predicate mapping conflicts with a fixed or pagination query field");
 		}
-		if (mapping.RemoteInputName() == "visibility" && HasFixedQueryField(*operation, "type")) {
+		if (!package_mapping && mapping.RemoteInputName() == "visibility" && HasFixedQueryField(*operation, "type")) {
 			throw std::invalid_argument("compiled visibility mapping conflicts with a fixed legacy type field");
 		}
 		for (std::size_t other = index + 1; other < mappings.size(); other++) {

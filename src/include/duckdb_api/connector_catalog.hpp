@@ -132,15 +132,20 @@ struct CompiledColumn {
 	bool nullable;
 	std::string extractor;
 
-	// Returns retained structural authority without parsing logical_type.
+	// Returns retained `[A-Za-z_][A-Za-z0-9_]*` path segments without asking a
+	// consumer to parse extractor syntax.
 	CompiledScalarType ScalarType() const;
+	const std::vector<std::string> &ExtractorSegments() const;
 
 private:
 	friend class internal::CompiledModelBuilder;
 
 	CompiledColumn(std::string name, CompiledScalarType type, bool nullable, std::string extractor);
+	CompiledColumn(std::string name, CompiledScalarType type, bool nullable, std::string extractor,
+	               std::vector<std::string> extractor_segments);
 
 	CompiledScalarType scalar_type;
+	std::vector<std::string> extractor_segments;
 };
 
 // Closed native predicate vocabulary. This first private pre-1.0 service is

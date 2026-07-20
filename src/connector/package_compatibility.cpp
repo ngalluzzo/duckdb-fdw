@@ -13,6 +13,24 @@ bool SameOrigin(const CompiledHttpOrigin &left, const CompiledHttpOrigin &right)
 	return left.scheme == right.scheme && left.host.Value() == right.host.Value() && left.port == right.port;
 }
 
+bool SameScalar(const CompiledScalarValue &left, const CompiledScalarValue &right) {
+	if (left.Type() != right.Type() || left.IsNull() != right.IsNull()) {
+		return false;
+	}
+	if (left.IsNull()) {
+		return true;
+	}
+	switch (left.Type()) {
+	case CompiledScalarType::BOOLEAN:
+		return left.Boolean() == right.Boolean();
+	case CompiledScalarType::BIGINT:
+		return left.Bigint() == right.Bigint();
+	case CompiledScalarType::VARCHAR:
+		return left.Varchar() == right.Varchar();
+	}
+	return false;
+}
+
 bool SameQuery(const std::vector<CompiledQueryParameter> &left, const std::vector<CompiledQueryParameter> &right) {
 	if (left.size() != right.size()) {
 		return false;
@@ -20,8 +38,11 @@ bool SameQuery(const std::vector<CompiledQueryParameter> &left, const std::vecto
 	for (std::size_t index = 0; index < left.size(); index++) {
 		if (left[index].name != right[index].name || left[index].encoded_value != right[index].encoded_value ||
 		    left[index].source != right[index].source || left[index].source_id != right[index].source_id ||
+		    left[index].encoding != right[index].encoding ||
 		    left[index].omit_when_unbound != right[index].omit_when_unbound ||
-		    left[index].omit_when_null != right[index].omit_when_null) {
+		    left[index].omit_when_null != right[index].omit_when_null ||
+		    left[index].HasDecodedValue() != right[index].HasDecodedValue() ||
+		    (left[index].HasDecodedValue() && !SameScalar(left[index].DecodedValue(), right[index].DecodedValue()))) {
 			return false;
 		}
 	}
@@ -65,7 +86,8 @@ bool SameRest(const CompiledRestOperation &left, const CompiledRestOperation &ri
 	       SameOrigin(left.request.origin, right.request.origin) && left.request.path == right.request.path &&
 	       SameQuery(left.request.query_parameters, right.request.query_parameters) &&
 	       SameHeaders(left.request.headers, right.request.headers) && left.response_source == right.response_source &&
-	       left.records_extractor == right.records_extractor;
+	       left.records_extractor == right.records_extractor &&
+	       left.records_extractor_segments == right.records_extractor_segments;
 }
 
 bool SameGraphqlVariables(const std::vector<CompiledGraphqlVariable> &left,
@@ -140,24 +162,6 @@ bool SameOperation(const CompiledOperation &left, const CompiledOperation &right
 	return false;
 }
 
-bool SameScalar(const CompiledScalarValue &left, const CompiledScalarValue &right) {
-	if (left.Type() != right.Type() || left.IsNull() != right.IsNull()) {
-		return false;
-	}
-	if (left.IsNull()) {
-		return true;
-	}
-	switch (left.Type()) {
-	case CompiledScalarType::BOOLEAN:
-		return left.Boolean() == right.Boolean();
-	case CompiledScalarType::BIGINT:
-		return left.Bigint() == right.Bigint();
-	case CompiledScalarType::VARCHAR:
-		return left.Varchar() == right.Varchar();
-	}
-	return false;
-}
-
 bool SameDefault(const CompiledInputDefault &left, const CompiledInputDefault &right) {
 	return left.HasDefault() == right.HasDefault() && (!left.HasDefault() || SameScalar(left.Value(), right.Value()));
 }
@@ -169,7 +173,7 @@ bool SameInput(const CompiledRelationInput &left, const CompiledRelationInput &r
 
 bool SameColumn(const CompiledColumn &left, const CompiledColumn &right) {
 	return left.name == right.name && left.ScalarType() == right.ScalarType() && left.nullable == right.nullable &&
-	       left.extractor == right.extractor;
+	       left.extractor == right.extractor && left.ExtractorSegments() == right.ExtractorSegments();
 }
 
 bool SamePredicate(const CompiledPredicateMapping &left, const CompiledPredicateMapping &right) {

@@ -77,7 +77,8 @@ Operation(std::vector<duckdb_api::CompiledQueryParameter> extra_query = {},
                                                                                                  "page", 1, 1, 32)) {
 	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
 	                                               duckdb_api::CompiledRestHost("api.github.com"), 443};
-	std::vector<duckdb_api::CompiledQueryParameter> query = {{"per_page", "100"}, {"page", "1"}};
+	std::vector<duckdb_api::CompiledQueryParameter> query = {ConnectorCatalogTestAccess::PageSizeQuery("per_page", 100),
+	                                                         ConnectorCatalogTestAccess::PageNumberQuery("page", 1)};
 	query.insert(query.end(), extra_query.begin(), extra_query.end());
 	return duckdb_api::CompiledOperation {"github_authenticated_repositories",
 	                                      true,
@@ -127,15 +128,20 @@ duckdb_api::CompiledPredicateMapping PackageMapping(const std::string &literal, 
 duckdb_api::CompiledOperation
 PackageOperation(bool second_conditional_input = false, const std::string &name = "package_predicate_operation",
                  const std::string &path = "/fixtures/package-predicates",
-                 duckdb_api::CompiledPagination pagination = CompiledModelBuilder::DisabledPagination()) {
+                 duckdb_api::CompiledPagination pagination = CompiledModelBuilder::DisabledPagination(),
+                 const std::string &query_name = "visibility", const std::string &source_id = "visibility",
+                 std::vector<duckdb_api::CompiledQueryParameter> additional_query = {}) {
 	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
 	                                               duckdb_api::CompiledRestHost("predicate-proof.invalid"), 443};
 	std::vector<duckdb_api::CompiledQueryParameter> query;
 	query.push_back(duckdb_api::CompiledQueryParameter(
-	    "visibility", duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT, "visibility", true, false));
+	    query_name, duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT, source_id, true, false));
 	if (second_conditional_input) {
 		query.push_back(duckdb_api::CompiledQueryParameter(
 		    "state", duckdb_api::CompiledQueryValueSource::CONDITIONAL_INPUT, "state", true, false));
+	}
+	for (auto &parameter : additional_query) {
+		query.push_back(std::move(parameter));
 	}
 	return duckdb_api::CompiledOperation {
 	    name,
@@ -149,7 +155,7 @@ PackageOperation(bool second_conditional_input = false, const std::string &name 
 	    {origin, path, std::move(query), {{"X-Connector-Fixture", "package-predicates"}}},
 	    duckdb_api::CompiledResponseSource::ROOT_ARRAY,
 	    "$",
-	    CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::ConditionalInputReference("visibility")})};
+	    CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::ConditionalInputReference(source_id)})};
 }
 
 duckdb_api::CompiledRelation PackageRelation(duckdb_api::CompiledOperation operation,
@@ -314,13 +320,17 @@ void TestInvalidValuesAndBindings() {
 		         {Mapping("visibility", duckdb_api::CompiledPredicateOperator::EQUALS,
 		                  duckdb_api::CompiledPredicateLiteral::VARCHAR_PRIVATE, "other_operation")});
 	});
-	RequireInvalid("relation accepted a fixed visibility collision",
-	               []() { Relation(Columns(), Operation({{"visibility", "all"}}), {Mapping()}); });
-	RequireInvalid("relation accepted a fixed legacy-type conflict",
-	               []() { Relation(Columns(), Operation({{"type", "all"}}), {Mapping()}); });
+	RequireInvalid("relation accepted a fixed visibility collision", []() {
+		Relation(Columns(), Operation({ConnectorCatalogTestAccess::FixedQuery("visibility", "all")}), {Mapping()});
+	});
+	RequireInvalid("relation accepted a fixed legacy-type conflict", []() {
+		Relation(Columns(), Operation({ConnectorCatalogTestAccess::FixedQuery("type", "all")}), {Mapping()});
+	});
 	RequireInvalid("relation accepted a pagination-field collision", []() {
 		auto pagination = ConnectorCatalogTestAccess::SequentialLink("per_page", 100, "visibility", 1, 1, 2);
-		Relation(Columns(), Operation({{"visibility", "1"}}, std::move(pagination)), {Mapping()});
+		Relation(Columns(),
+		         Operation({ConnectorCatalogTestAccess::PageNumberQuery("visibility", 1)}, std::move(pagination)),
+		         {Mapping()});
 	});
 	RequireInvalid("relation accepted duplicate predicate mappings",
 	               []() { Relation(Columns(), Operation(), {Mapping(), Mapping()}); });
@@ -421,6 +431,30 @@ void TestPackageCandidateLocalPredicateConflicts() {
 		PackageRelation(operation, {PackageMapping("private", "private", identities),
 		                            PackageMapping("public", "public", identities, "state")});
 	});
+	{
+		// A source identifier is provenance, not a query key. It may share
+		// spelling with an unrelated fixed key when its own emitted name does
+		// not collide.
+		const auto operation = PackageOperation(
+		    false, "package_predicate_operation", "/fixtures/package-predicates",
+		    CompiledModelBuilder::DisabledPagination(), "access", "page",
+		    {CompiledModelBuilder::FixedQueryParameter("page", CompiledModelBuilder::Varchar("all"))});
+		const auto identities =
+		    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
+		const auto relation = PackageRelation(operation, {PackageMapping("private", "private", identities, "page")});
+		Require(relation.PredicateMappings().size() == 1,
+		        "package predicate treated its provenance source as an emitted query key");
+	}
+	RequireInvalid("package operation accepted a true emitted-name collision", []() {
+		const auto operation = PackageOperation(
+		    false, "package_predicate_operation", "/fixtures/package-predicates",
+		    CompiledModelBuilder::DisabledPagination(), "access", "predicate_value",
+		    {CompiledModelBuilder::FixedQueryParameter("access", CompiledModelBuilder::Varchar("all"))});
+		const auto identities =
+		    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
+		PackageRelation(operation,
+		                {PackageMapping("private", "private", identities, "predicate_value")});
+	});
 
 	const auto empty_mapping_relation = PackageRelation(operation, {PackageMapping("", "", identities)});
 	Require(empty_mapping_relation.PredicateMappings()[0].EncodedRemoteValue().empty(),
@@ -448,6 +482,48 @@ void TestPackagePredicateGenerationBinding() {
 	    PackageGeneration(PACKAGE_DIGEST, operation, {PackageMapping("private", "private", identities)});
 	Require(generation.Connector().FindRelation(PACKAGE_RELATION) != nullptr,
 	        "valid package predicate identity failed generation validation");
+
+	{
+		auto operation = PackageOperation();
+		operation.fallback = true;
+		auto rest = operation.Rest();
+		auto orphan = ConnectorCatalogTestAccess::RestOperation(
+		    operation, std::move(rest), CompiledModelBuilder::V1OperationSelector({}));
+		const auto relation = PackageRelation(orphan, {});
+		Require(relation.PredicateMappings().empty(),
+		        "orphan conditional counterexample failed before package request validation");
+		RequireInvalid("package generation accepted an orphan conditional request binding", [&orphan]() {
+			PackageGeneration(PACKAGE_DIGEST, orphan, {});
+		});
+	}
+	{
+		const auto operation = PackageOperation(
+		    false, "package_predicate_operation", "/fixtures/package-predicates",
+		    CompiledModelBuilder::DisabledPagination(), "visibility", "visibility",
+		    {CompiledModelBuilder::ConditionalInputQueryParameter("access", "visibility")});
+		const auto identities =
+		    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
+		const auto relation = PackageRelation(operation, {PackageMapping("private", "private", identities)});
+		Require(relation.PredicateMappings().size() == 1,
+		        "duplicate-source counterexample failed before package request validation");
+		RequireInvalid("package generation accepted two wire fields for one conditional source", [&]() {
+			PackageGeneration(PACKAGE_DIGEST, operation, {PackageMapping("private", "private", identities)});
+		});
+	}
+	{
+		const auto operation = PackageOperation(
+		    false, "package_predicate_operation", "/fixtures/package-predicates",
+		    CompiledModelBuilder::DisabledPagination(), "visibility", "visibility",
+		    {CompiledModelBuilder::ConditionalInputQueryParameter("state", "state")});
+		const auto identities =
+		    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
+		const auto relation = PackageRelation(operation, {PackageMapping("private", "private", identities)});
+		Require(relation.PredicateMappings().size() == 1,
+		        "distinct-source counterexample failed before package request validation");
+		RequireInvalid("package generation accepted distinct conditional request sources", [&]() {
+			PackageGeneration(PACKAGE_DIGEST, operation, {PackageMapping("private", "private", identities)});
+		});
+	}
 
 	const auto patch_operation = PackageOperation();
 	const std::string patch_digest = "sha256.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";

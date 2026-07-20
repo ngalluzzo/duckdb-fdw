@@ -104,9 +104,11 @@ duckdb_api::CompiledOperation BuildDisabledOperation() {
 	                                      duckdb_api::CompiledOperationSelector()};
 }
 
-duckdb_api::CompiledOperation BuildPaginatedOperation(
-    duckdb_api::CompiledPagination pagination,
-    std::vector<duckdb_api::CompiledQueryParameter> query_parameters = {{"page_size", "5"}, {"page", "1"}}) {
+duckdb_api::CompiledOperation
+BuildPaginatedOperation(duckdb_api::CompiledPagination pagination,
+                        std::vector<duckdb_api::CompiledQueryParameter> query_parameters = {
+                            ConnectorCatalogTestAccess::PageSizeQuery("page_size", 5),
+                            ConnectorCatalogTestAccess::PageNumberQuery("page", 1)}) {
 	const duckdb_api::CompiledRestOrigin origin = {duckdb_api::CompiledUrlScheme::HTTPS,
 	                                               duckdb_api::CompiledRestHost("api.github.com"), 443};
 	return duckdb_api::CompiledOperation {
@@ -184,6 +186,15 @@ void TestClosedValuesAndExplanation() {
 void TestPaginationProfileValidation() {
 	RequireInvalid("Link pagination accepted an empty page-size parameter",
 	               []() { (void)ConnectorCatalogTestAccess::SequentialLink("", 5, "page", 1, 1, 4); });
+	for (const auto &name : {std::string("bad name"), std::string("bad%name"), std::string("bad\0name", 8),
+	                         std::string("bad\tname"), std::string(u8"página"), std::string(64, 'a')}) {
+		RequireInvalid("Link pagination accepted a page-size name outside the shared query grammar", [&name]() {
+			(void)ConnectorCatalogTestAccess::SequentialLink(name, 5, "page", 1, 1, 4);
+		});
+		RequireInvalid("Link pagination accepted a page-number name outside the shared query grammar", [&name]() {
+			(void)ConnectorCatalogTestAccess::SequentialLink("page_size", 5, name, 1, 1, 4);
+		});
+	}
 	RequireInvalid("Link pagination accepted duplicate page parameter names",
 	               []() { (void)ConnectorCatalogTestAccess::SequentialLink("page", 5, "page", 1, 1, 4); });
 	RequireInvalid("Link pagination accepted a zero page size",
@@ -194,20 +205,62 @@ void TestPaginationProfileValidation() {
 	               []() { (void)ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", 1, 2, 4); });
 	RequireInvalid("Link pagination accepted an empty scan page budget",
 	               []() { (void)ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", 1, 1, 0); });
+	const auto bigint_max = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+	RequireInvalid("Link pagination accepted a page sequence beyond BIGINT request authority", [=]() {
+		(void)ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", bigint_max, 1, 2);
+	});
+	{
+		auto operation = BuildPaginatedOperation(
+		    ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", bigint_max - 1, 1, 2),
+		    {ConnectorCatalogTestAccess::PageSizeQuery("page_size", 5),
+		     ConnectorCatalogTestAccess::PageNumberQuery("page", bigint_max - 1)});
+		const auto relation = ConnectorCatalogTestAccess::Relation(
+		    "bigint_boundary_pages", Columns(), std::move(operation), ConnectorCatalogTestAccess::RequiredBearer(),
+		    ConnectorCatalogTestAccess::PaginatedResources(1024, 2048, 5, 10, 64));
+		Require(relation.Operation().Rest().pagination.FirstPage() == bigint_max - 1,
+		        "Link pagination rejected its last representable two-page sequence");
+	}
 
 	RequireInvalid("Link pagination inferred a mismatched fixed page size", []() {
 		auto operation =
 		    BuildPaginatedOperation(ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", 1, 1, 4),
-		                            {{"page_size", "4"}, {"page", "1"}});
+		                            {ConnectorCatalogTestAccess::PageSizeQuery("page_size", 4),
+		                             ConnectorCatalogTestAccess::PageNumberQuery("page", 1)});
 		ConnectorCatalogTestAccess::Relation("mismatched_page_size", Columns(), std::move(operation),
 		                                     ConnectorCatalogTestAccess::RequiredBearer(),
 		                                     ConnectorCatalogTestAccess::PaginatedResources(1024, 4096, 5, 20, 64));
 	});
-	RequireInvalid("Link pagination inferred reordered fixed bindings", []() {
+	{
 		auto operation =
 		    BuildPaginatedOperation(ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", 1, 1, 4),
-		                            {{"page", "1"}, {"page_size", "5"}});
-		ConnectorCatalogTestAccess::Relation("reordered_page_bindings", Columns(), std::move(operation),
+		                            {ConnectorCatalogTestAccess::PageNumberQuery("page", 1),
+		                             ConnectorCatalogTestAccess::FixedQuery("filter", "a b"),
+		                             ConnectorCatalogTestAccess::PageSizeQuery("page_size", 5)});
+		const auto relation = ConnectorCatalogTestAccess::Relation(
+		    "reordered_page_bindings", Columns(), std::move(operation), ConnectorCatalogTestAccess::RequiredBearer(),
+		    ConnectorCatalogTestAccess::PaginatedResources(1024, 4096, 5, 20, 64));
+		Require(relation.Operation().Rest().request.query_parameters.size() == 3 &&
+		            relation.Operation().Rest().request.query_parameters[0].source ==
+		                duckdb_api::CompiledQueryValueSource::PAGE_NUMBER &&
+		            relation.Operation().Rest().request.query_parameters[2].source ==
+		                duckdb_api::CompiledQueryValueSource::PAGE_SIZE,
+		        "Link pagination recovered page roles from order or parameter spelling");
+	}
+	RequireInvalid("Link pagination accepted swapped structural page roles", []() {
+		auto operation =
+		    BuildPaginatedOperation(ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", 1, 1, 4),
+		                            {ConnectorCatalogTestAccess::PageNumberQuery("page_size", 5),
+		                             ConnectorCatalogTestAccess::PageSizeQuery("page", 1)});
+		ConnectorCatalogTestAccess::Relation("swapped_page_roles", Columns(), std::move(operation),
+		                                     ConnectorCatalogTestAccess::RequiredBearer(),
+		                                     ConnectorCatalogTestAccess::PaginatedResources(1024, 4096, 5, 20, 64));
+	});
+	RequireInvalid("Link pagination accepted duplicate structural page-size roles", []() {
+		auto operation =
+		    BuildPaginatedOperation(ConnectorCatalogTestAccess::SequentialLink("page_size", 5, "page", 1, 1, 4),
+		                            {ConnectorCatalogTestAccess::PageSizeQuery("page_size", 5),
+		                             ConnectorCatalogTestAccess::PageSizeQuery("page", 1)});
+		ConnectorCatalogTestAccess::Relation("duplicate_page_roles", Columns(), std::move(operation),
 		                                     ConnectorCatalogTestAccess::RequiredBearer(),
 		                                     ConnectorCatalogTestAccess::PaginatedResources(1024, 4096, 5, 20, 64));
 	});

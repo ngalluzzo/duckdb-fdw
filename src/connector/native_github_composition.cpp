@@ -1,4 +1,5 @@
 #include "duckdb_api/connector.hpp"
+#include "duckdb_api/internal/connector/compiled_model_builder.hpp"
 #include "duckdb_api/internal/connector/graphql_operation_declaration.hpp"
 
 #include <utility>
@@ -18,6 +19,7 @@ constexpr std::uint64_t REPOSITORY_MAX_RESPONSE_BYTES_PER_SCAN = 64ULL * 1024ULL
 } // namespace
 
 CompiledConnector BuildNativeGithubConnector() {
+	using internal::CompiledModelBuilder;
 	const CompiledHttpOrigin github_origin = {CompiledUrlScheme::HTTPS, CompiledHttpHost("api.github.com"), 443};
 	const std::vector<CompiledColumn> columns = {{"id", "BIGINT", false, "$.id"},
 	                                             {"login", "VARCHAR", false, "$.login"},
@@ -40,25 +42,32 @@ CompiledConnector BuildNativeGithubConnector() {
 	const std::vector<CompiledHttpHeader> headers = {{"Accept", "application/vnd.github+json"},
 	                                                 {"User-Agent", "duckdb-api/0.6.0"},
 	                                                 {"X-GitHub-Api-Version", "2022-11-28"}};
+	std::vector<CompiledQueryParameter> search_query;
+	search_query.push_back(
+	    CompiledModelBuilder::FixedQueryParameter("q", CompiledModelBuilder::Varchar("duckdb in:login")));
+	search_query.push_back(CompiledModelBuilder::FixedQueryParameter("per_page", CompiledModelBuilder::Varchar("3")));
+	std::vector<CompiledQueryParameter> repository_query;
+	repository_query.push_back(CompiledModelBuilder::PageSizeQueryParameter("per_page", 100));
+	repository_query.push_back(CompiledModelBuilder::PageNumberQueryParameter("page", 1));
 
 	std::vector<CompiledRelation> relations;
-	relations.push_back(CompiledRelation(
-	    "duckdb_login_search_page", columns, {},
-	    CompiledOperation {"github_search_duckdb_login_page",
-	                       true,
-	                       CompiledOperationCardinality::ZERO_TO_MANY,
-	                       CompiledProtocol::REST,
-	                       CompiledHttpMethod::GET,
-	                       CompiledReplaySafety::SAFE,
-	                       false,
-	                       CompiledPagination::Disabled(),
-	                       {github_origin, "/search/users", {{"q", "duckdb+in%3Alogin"}, {"per_page", "3"}}, headers},
-	                       CompiledResponseSource::JSON_PATH_MANY,
-	                       "$.items[*]",
-	                       CompiledOperationSelector()},
-	    CompiledAuthenticationPolicy::Anonymous(),
-	    CompiledResourceCeilings {PREVIOUS_RELATION_MAX_RESPONSE_BYTES, PREVIOUS_RELATION_MAX_RESPONSE_BYTES, 3, 3,
-	                              256}));
+	relations.push_back(
+	    CompiledRelation("duckdb_login_search_page", columns, {},
+	                     CompiledOperation {"github_search_duckdb_login_page",
+	                                        true,
+	                                        CompiledOperationCardinality::ZERO_TO_MANY,
+	                                        CompiledProtocol::REST,
+	                                        CompiledHttpMethod::GET,
+	                                        CompiledReplaySafety::SAFE,
+	                                        false,
+	                                        CompiledPagination::Disabled(),
+	                                        {github_origin, "/search/users", std::move(search_query), headers},
+	                                        CompiledResponseSource::JSON_PATH_MANY,
+	                                        "$.items[*]",
+	                                        CompiledOperationSelector()},
+	                     CompiledAuthenticationPolicy::Anonymous(),
+	                     CompiledResourceCeilings {PREVIOUS_RELATION_MAX_RESPONSE_BYTES,
+	                                               PREVIOUS_RELATION_MAX_RESPONSE_BYTES, 3, 3, 256}));
 	relations.push_back(CompiledRelation("authenticated_user", columns, {},
 	                                     CompiledOperation {"github_authenticated_user",
 	                                                        true,
@@ -93,7 +102,7 @@ CompiledConnector BuildNativeGithubConnector() {
 	                       CompiledReplaySafety::SAFE,
 	                       false,
 	                       CompiledPagination("per_page", 100, "page", 1, 1, 32),
-	                       {github_origin, "/user/repos", {{"per_page", "100"}, {"page", "1"}}, headers},
+	                       {github_origin, "/user/repos", std::move(repository_query), headers},
 	                       CompiledResponseSource::ROOT_ARRAY,
 	                       "$",
 	                       CompiledOperationSelector()},
