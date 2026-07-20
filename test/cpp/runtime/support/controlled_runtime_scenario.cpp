@@ -30,6 +30,13 @@ std::string GraphqlNode(const char *language) {
 	       ",\"isPrivate\":false,\"isArchived\":false,\"updatedAt\":\"2026-07-01T00:00:00Z\"}";
 }
 
+std::string GraphqlRelationalNode(const char *id, int64_t stars, bool archived) {
+	return std::string("{\"id\":\"") + id + "\",\"nameWithOwner\":\"fixture/" + id +
+	       "\",\"owner\":{\"login\":\"fixture\"},\"stargazerCount\":" + std::to_string(stars) +
+	       ",\"primaryLanguage\":null,\"isPrivate\":false,\"isArchived\":" + (archived ? "true" : "false") +
+	       ",\"updatedAt\":\"2026-07-01T00:00:00Z\"}";
+}
+
 std::string GraphqlPage(const std::string &node, bool has_next, const char *cursor) {
 	return "{\"data\":{\"viewer\":{\"repositories\":{\"nodes\":[" + node +
 	       "],\"pageInfo\":{\"hasNextPage\":" + (has_next ? "true" : "false") + ",\"endCursor\":" + cursor +
@@ -69,6 +76,12 @@ std::shared_ptr<ControlledRuntimeScenario> BuildControlledRuntimeScenario(Contro
 		runtime->RespondSequence({first_page, second_page, first_page, second_page});
 		break;
 	}
+	case ControlledRuntimeScenarioId::GRAPHQL_RELATIONAL_COMPOSITION:
+		runtime->Respond(200, GraphqlPage(GraphqlRelationalNode("R-archived-high", 999, true) + "," +
+		                                      GraphqlRelationalNode("R-active-low", 7, false) + "," +
+		                                      GraphqlRelationalNode("R-active-high", 42, false),
+		                                  false, "null"));
+		break;
 	case ControlledRuntimeScenarioId::GRAPHQL_APPLICATION_ERROR:
 		has_terminal_stage = true;
 		terminal_stage = duckdb_api::ErrorStage::REMOTE_PROTOCOL;

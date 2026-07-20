@@ -55,6 +55,28 @@ void TestPositiveGraphqlScenarioOwnsNullDuplicateAndCursorBytes() {
 	        "two complete opens exposed or lost the positive scenario's bounded transport state");
 }
 
+void TestRelationalCompositionScenarioOwnsMutationSensitiveRows() {
+	auto scenario =
+	    duckdb_api_test::BuildControlledRuntimeScenario(ControlledRuntimeScenarioId::GRAPHQL_RELATIONAL_COMPOSITION);
+	NeverCancelled control;
+	auto stream = OpenGraphql(scenario->Executor(), control, "scenario_relational_token");
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 3,
+	        "relational-composition scenario did not produce its complete source batch");
+	Require(batch.rows[0].values[0].varchar_value == "R-archived-high" && batch.rows[0].values[3].bigint_value == 999 &&
+	            batch.rows[0].values[6].boolean_value,
+	        "relational-composition scenario lost its highest-star archived row");
+	Require(batch.rows[1].values[0].varchar_value == "R-active-low" && batch.rows[1].values[3].bigint_value == 7 &&
+	            !batch.rows[1].values[6].boolean_value && batch.rows[2].values[0].varchar_value == "R-active-high" &&
+	            batch.rows[2].values[3].bigint_value == 42 && !batch.rows[2].values[6].boolean_value,
+	        "relational-composition scenario lost its low-before-high active rows");
+	Require(!stream->Next(control, batch), "relational-composition scenario did not exhaust cleanly");
+	const auto observation = scenario->Observation();
+	Require(observation.request_count == 1 && observation.request_count == observation.expected_request_count &&
+	            !observation.has_terminal_stage,
+	        "relational-composition scenario exposed or lost its bounded transport state");
+}
+
 void TestApplicationAndLateStatusScenariosExposeOnlySafeStages() {
 	NeverCancelled control;
 	duckdb_api::TypedBatch batch;
@@ -114,6 +136,7 @@ void TestRetainedRestScenarioUsesTheSamePublicExecutorBoundary() {
 int main() {
 	try {
 		TestPositiveGraphqlScenarioOwnsNullDuplicateAndCursorBytes();
+		TestRelationalCompositionScenarioOwnsMutationSensitiveRows();
 		TestApplicationAndLateStatusScenariosExposeOnlySafeStages();
 		TestRetainedRestScenarioUsesTheSamePublicExecutorBoundary();
 		std::cout << "Controlled Runtime scenario tests passed\n";
