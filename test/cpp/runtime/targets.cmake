@@ -207,7 +207,7 @@ target_link_libraries(
 # instead and never receives this target's broad support include directory.
 add_library(
   duckdb_api_runtime_loopback_curl_test_service STATIC
-  test/cpp/runtime/support/loopback_curl_runtime.cpp)
+  ${REMOTE_RUNTIME_LOOPBACK_PRODUCT_SOURCES})
 configure_duckdb_api_cpp_target(duckdb_api_runtime_loopback_curl_test_service)
 target_include_directories(
   duckdb_api_runtime_loopback_curl_test_service

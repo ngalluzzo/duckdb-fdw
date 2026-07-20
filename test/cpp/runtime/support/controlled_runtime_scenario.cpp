@@ -61,12 +61,14 @@ std::shared_ptr<ControlledRuntimeScenario> BuildControlledRuntimeScenario(Contro
 	case ControlledRuntimeScenarioId::RETAINED_REST_USER:
 		runtime->Respond(200, "{\"id\":11,\"login\":\"duckdb\",\"site_admin\":false}");
 		break;
-	case ControlledRuntimeScenarioId::GRAPHQL_MULTI_PAGE_NULL_DUPLICATE:
-		expected_request_count = 2;
-		runtime->RespondSequence(
-		    {ControlledResponse(200, GraphqlPage(GraphqlNode("null"), true, "\"runtime-owned-next\"")),
-		     ControlledResponse(200, GraphqlPage(GraphqlNode("{\"name\":\"C++\"}"), false, "null"))});
+	case ControlledRuntimeScenarioId::GRAPHQL_MULTI_PAGE_NULL_DUPLICATE: {
+		expected_request_count = 4;
+		const auto first_page =
+		    ControlledResponse(200, GraphqlPage(GraphqlNode("null"), true, "\"runtime-owned-next\""));
+		const auto second_page = ControlledResponse(200, GraphqlPage(GraphqlNode("{\"name\":\"C++\"}"), false, "null"));
+		runtime->RespondSequence({first_page, second_page, first_page, second_page});
 		break;
+	}
 	case ControlledRuntimeScenarioId::GRAPHQL_APPLICATION_ERROR:
 		has_terminal_stage = true;
 		terminal_stage = duckdb_api::ErrorStage::REMOTE_PROTOCOL;

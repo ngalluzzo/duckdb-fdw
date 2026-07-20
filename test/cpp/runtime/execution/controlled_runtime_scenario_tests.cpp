@@ -22,32 +22,37 @@ public:
 using duckdb_api_test::ControlledRuntimeScenarioId;
 using duckdb_api_test::Require;
 
-std::unique_ptr<duckdb_api::BatchStream>
-OpenGraphql(const std::shared_ptr<duckdb_api_test::ControlledRuntimeScenario> &scenario, NeverCancelled &control,
-            std::string token) {
-	return scenario->Executor()->OpenWithAuthorization(
-	    duckdb_api_test::BuildValidGraphqlScanPlanFixture("scenario_secret"),
-	    duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+std::unique_ptr<duckdb_api::BatchStream> OpenGraphql(const std::shared_ptr<const duckdb_api::ScanExecutor> &executor,
+                                                     NeverCancelled &control, std::string token) {
+	return executor->OpenWithAuthorization(duckdb_api_test::BuildValidGraphqlScanPlanFixture("scenario_secret"),
+	                                       duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+}
+
+void RequireNullDuplicateScan(duckdb_api::BatchStream &stream, NeverCancelled &control) {
+	duckdb_api::TypedBatch batch;
+	Require(stream.Next(control, batch) && batch.rows.size() == 1 &&
+	            batch.rows[0].values[0].varchar_value == "R-duplicate" && !batch.rows[0].values[4].valid,
+	        "positive named scenario lost its first nullable occurrence");
+	Require(stream.Next(control, batch) && batch.rows.size() == 1 &&
+	            batch.rows[0].values[0].varchar_value == "R-duplicate" && batch.rows[0].values[4].valid &&
+	            batch.rows[0].values[4].varchar_value == "C++",
+	        "positive named scenario deduplicated or lost its second-page value");
+	Require(!stream.Next(control, batch), "positive named scenario did not exhaust cleanly");
 }
 
 void TestPositiveGraphqlScenarioOwnsNullDuplicateAndCursorBytes() {
 	auto scenario =
 	    duckdb_api_test::BuildControlledRuntimeScenario(ControlledRuntimeScenarioId::GRAPHQL_MULTI_PAGE_NULL_DUPLICATE);
+	const auto executor = scenario->Executor();
 	NeverCancelled control;
-	auto stream = OpenGraphql(scenario, control, "scenario_positive_token");
-	duckdb_api::TypedBatch batch;
-	Require(stream->Next(control, batch) && batch.rows.size() == 1 &&
-	            batch.rows[0].values[0].varchar_value == "R-duplicate" && !batch.rows[0].values[4].valid,
-	        "positive named scenario lost its first nullable occurrence");
-	Require(stream->Next(control, batch) && batch.rows.size() == 1 &&
-	            batch.rows[0].values[0].varchar_value == "R-duplicate" && batch.rows[0].values[4].valid &&
-	            batch.rows[0].values[4].varchar_value == "C++",
-	        "positive named scenario deduplicated or lost its second-page value");
-	Require(!stream->Next(control, batch), "positive named scenario did not exhaust cleanly");
+	auto first = OpenGraphql(executor, control, "scenario_positive_first_token");
+	RequireNullDuplicateScan(*first, control);
+	auto second = OpenGraphql(executor, control, "scenario_positive_second_token");
+	RequireNullDuplicateScan(*second, control);
 	const auto observation = scenario->Observation();
-	Require(observation.request_count == 2 && observation.request_count == observation.expected_request_count &&
+	Require(observation.request_count == 4 && observation.request_count == observation.expected_request_count &&
 	            !observation.has_terminal_stage,
-	        "positive named scenario exposed or lost its bounded transport state");
+	        "two complete opens exposed or lost the positive scenario's bounded transport state");
 }
 
 void TestApplicationAndLateStatusScenariosExposeOnlySafeStages() {
@@ -55,7 +60,7 @@ void TestApplicationAndLateStatusScenariosExposeOnlySafeStages() {
 	duckdb_api::TypedBatch batch;
 	auto application =
 	    duckdb_api_test::BuildControlledRuntimeScenario(ControlledRuntimeScenarioId::GRAPHQL_APPLICATION_ERROR);
-	auto failed = OpenGraphql(application, control, "scenario_application_token");
+	auto failed = OpenGraphql(application->Executor(), control, "scenario_application_token");
 	try {
 		(void)failed->Next(control, batch);
 		throw std::runtime_error("application-error scenario must fail");
@@ -71,7 +76,7 @@ void TestApplicationAndLateStatusScenariosExposeOnlySafeStages() {
 	        "application-error scenario did not publish its safe expected stage");
 
 	auto late = duckdb_api_test::BuildControlledRuntimeScenario(ControlledRuntimeScenarioId::GRAPHQL_LATE_HTTP_STATUS);
-	auto late_stream = OpenGraphql(late, control, "scenario_late_token");
+	auto late_stream = OpenGraphql(late->Executor(), control, "scenario_late_token");
 	Require(late_stream->Next(control, batch) && batch.rows.size() == 1,
 	        "late-status named scenario did not publish its committed page");
 	try {
