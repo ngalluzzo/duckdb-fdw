@@ -12,6 +12,7 @@ namespace internal {
 // dependent eligibility, specificity, priority, and selection remain owned by
 // Relational Semantics.
 void ValidateOperationSelectorReferences(const CompiledOperation &operation,
+                                         const std::vector<CompiledRelationInput> &relation_inputs,
                                          const std::vector<CompiledPredicateMapping> &mappings);
 
 } // namespace internal

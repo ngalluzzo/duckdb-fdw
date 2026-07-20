@@ -110,6 +110,16 @@ public:
 		                                    std::move(operation), std::move(authentication), resource_ceilings);
 	}
 
+	static duckdb_api::CompiledRelation Relation(
+	    std::string name, std::vector<duckdb_api::CompiledColumn> columns,
+	    std::vector<duckdb_api::CompiledRelationInput> inputs, std::vector<duckdb_api::CompiledOperation> operations,
+	    duckdb_api::CompiledAuthenticationPolicy authentication, duckdb_api::CompiledResourceCeilings resource_ceilings,
+	    std::vector<duckdb_api::CompiledPredicateMapping> predicate_mappings = {}) {
+		return duckdb_api::CompiledRelation(std::move(name), std::move(columns), std::move(inputs),
+		                                    std::move(predicate_mappings), std::move(operations),
+		                                    std::move(authentication), resource_ceilings);
+	}
+
 	static duckdb_api::CompiledRelation
 	Relation(std::string name, std::vector<duckdb_api::CompiledColumn> columns,
 	         std::vector<duckdb_api::CompiledOperation> operations,

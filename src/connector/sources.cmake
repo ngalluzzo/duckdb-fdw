@@ -6,6 +6,8 @@ set(CONNECTOR_CATALOG_SOURCES
     src/connector/compiled_package_generation.cpp
     src/connector/graphql_operation_declaration.cpp
     src/connector/operation_selector.cpp
+    src/connector/package_compatibility.cpp
+    src/connector/package_semver.cpp
     src/connector/pagination_declaration.cpp
     src/connector/predicate_declaration.cpp
     src/connector/predicate_proof_profile.cpp

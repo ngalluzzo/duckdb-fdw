@@ -11,6 +11,20 @@ target_link_libraries(
   duckdb_api_connector_fixture_service
   PUBLIC duckdb_api_connector_metadata_service)
 
+# Connector-owned package generation fixtures are a separate provider service.
+# Future Semantics tests link this target and cannot reach the private compiler
+# builder or Connector implementation sources through its public includes.
+add_library(
+  duckdb_api_package_generation_fixture_service STATIC
+  ${CONNECTOR_PACKAGE_TEST_SERVICE_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_package_generation_fixture_service)
+target_include_directories(
+  duckdb_api_package_generation_fixture_service
+  PUBLIC test/cpp)
+target_link_libraries(
+  duckdb_api_package_generation_fixture_service
+  PUBLIC duckdb_api_connector_metadata_service)
+
 add_executable(
   duckdb_api_connector_tests
   test/cpp/connector/connector_contract_tests.cpp
@@ -38,6 +52,17 @@ target_include_directories(
 target_link_libraries(
   duckdb_api_compiled_package_generation_tests
   PRIVATE duckdb_api_connector_metadata_service)
+
+add_executable(
+  duckdb_api_package_compatibility_tests
+  test/cpp/connector/package_compatibility_contract_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_package_compatibility_tests)
+target_include_directories(
+  duckdb_api_package_compatibility_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_package_compatibility_tests
+  PRIVATE duckdb_api_package_generation_fixture_service)
 
 add_executable(
   duckdb_api_connector_catalog_fixture_tests

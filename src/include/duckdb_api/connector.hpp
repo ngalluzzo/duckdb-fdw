@@ -2,6 +2,8 @@
 
 #include "duckdb_api/compiled_package_generation.hpp"
 #include "duckdb_api/connector_catalog.hpp"
+#include "duckdb_api/package_compatibility.hpp"
+#include "duckdb_api/package_semver.hpp"
 
 namespace duckdb_api {
 

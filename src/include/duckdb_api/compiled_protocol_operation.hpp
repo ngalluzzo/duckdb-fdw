@@ -281,6 +281,7 @@ public:
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
+	friend class internal::CompiledModelBuilder;
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 
 	CompiledOperationSelector(std::vector<std::string> required_inputs,

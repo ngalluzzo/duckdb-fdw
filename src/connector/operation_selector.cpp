@@ -47,15 +47,18 @@ bool SelectorSetsOverlap(const std::vector<std::string> &left, const std::vector
 }
 
 bool SelectorInputIsRepresentable(const CompiledOperation &operation,
+                                  const std::vector<CompiledRelationInput> &relation_inputs,
                                   const std::vector<CompiledPredicateMapping> &mappings, const std::string &input) {
+	for (const auto &relation_input : relation_inputs) {
+		if (relation_input.Name() == input) {
+			return true;
+		}
+	}
 	for (const auto &mapping : mappings) {
 		if (mapping.OperationName() == operation.name && mapping.RemoteInputName() == input) {
 			return true;
 		}
 	}
-	// The private native catalog currently declares no non-predicate inputs.
-	// Extend this bounded check when such compiled input declarations exist;
-	// arbitrary selector strings are never treated as representable inputs.
 	return false;
 }
 
@@ -108,10 +111,11 @@ std::int32_t CompiledOperationSelector::Priority() const {
 namespace internal {
 
 void ValidateOperationSelectorReferences(const CompiledOperation &operation,
+                                         const std::vector<CompiledRelationInput> &relation_inputs,
                                          const std::vector<CompiledPredicateMapping> &mappings) {
-	const auto validate = [&operation, &mappings](const std::vector<std::string> &inputs) {
+	const auto validate = [&operation, &relation_inputs, &mappings](const std::vector<std::string> &inputs) {
 		for (const auto &input : inputs) {
-			if (!SelectorInputIsRepresentable(operation, mappings, input)) {
+			if (!SelectorInputIsRepresentable(operation, relation_inputs, mappings, input)) {
 				throw std::invalid_argument("compiled operation selector references an unrepresentable input");
 			}
 		}

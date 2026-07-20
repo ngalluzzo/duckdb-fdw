@@ -412,7 +412,7 @@ CompiledRelation::CompiledRelation(std::string name_p, std::vector<CompiledColum
 	}
 	internal::ValidatePredicateMappings(name, columns, operations, authentication, predicate_mappings);
 	for (const auto &operation : operations) {
-		internal::ValidateOperationSelectorReferences(operation, predicate_mappings);
+		internal::ValidateOperationSelectorReferences(operation, inputs, predicate_mappings);
 	}
 	for (const auto &operation : operations) {
 		if (operation.Protocol() == CompiledProtocol::GRAPHQL) {

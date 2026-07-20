@@ -1,7 +1,7 @@
 #include "duckdb_api/compiled_package_generation.hpp"
 #include "duckdb_api/internal/connector/compiled_model_builder.hpp"
+#include "duckdb_api/package_semver.hpp"
 
-#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -27,38 +27,6 @@ bool IsIdentifier(const std::string &value) {
 		}
 	}
 	return true;
-}
-
-bool IsCanonicalVersionComponent(const std::string &component) {
-	if (component.empty() || (component.size() > 1 && component.front() == '0')) {
-		return false;
-	}
-	std::uint64_t value = 0;
-	for (const auto character : component) {
-		if (!IsAsciiDigit(character)) {
-			return false;
-		}
-		const auto digit = static_cast<std::uint64_t>(character - '0');
-		if (value > (std::numeric_limits<std::uint32_t>::max() - digit) / 10) {
-			return false;
-		}
-		value = value * 10 + digit;
-	}
-	return true;
-}
-
-bool IsCanonicalPackageVersion(const std::string &version) {
-	std::size_t first = version.find('.');
-	if (first == std::string::npos) {
-		return false;
-	}
-	std::size_t second = version.find('.', first + 1);
-	if (second == std::string::npos || version.find('.', second + 1) != std::string::npos) {
-		return false;
-	}
-	return IsCanonicalVersionComponent(version.substr(0, first)) &&
-	       IsCanonicalVersionComponent(version.substr(first + 1, second - first - 1)) &&
-	       IsCanonicalVersionComponent(version.substr(second + 1));
 }
 
 bool IsPackageDigest(const std::string &digest) {
@@ -104,10 +72,10 @@ CompiledPackageIdentity::CompiledPackageIdentity(std::string spec_identifier_p, 
                                                  std::string package_version_p, std::string package_digest_p)
     : spec_identifier(std::move(spec_identifier_p)), connector_id(std::move(connector_id_p)),
       package_version(std::move(package_version_p)), package_digest(std::move(package_digest_p)) {
-	if (spec_identifier != "duckdb_api/v1" || !IsIdentifier(connector_id) ||
-	    !IsCanonicalPackageVersion(package_version) || !IsPackageDigest(package_digest)) {
+	if (spec_identifier != "duckdb_api/v1" || !IsIdentifier(connector_id) || !IsPackageDigest(package_digest)) {
 		throw std::invalid_argument("compiled package contains an invalid stable identity");
 	}
+	(void)PackageSemVer::Parse(package_version);
 }
 
 const std::string &CompiledPackageIdentity::SpecIdentifier() const {
@@ -274,6 +242,14 @@ CompiledColumn CompiledModelBuilder::Column(std::string name, CompiledScalarType
 
 CompiledPagination CompiledModelBuilder::DisabledPagination() {
 	return CompiledPagination::Disabled();
+}
+
+CompiledOperationSelector CompiledModelBuilder::OperationSelector(std::vector<std::string> required_inputs,
+                                                                  std::vector<std::vector<std::string>> any_input_sets,
+                                                                  std::vector<std::string> forbidden_inputs,
+                                                                  std::int32_t priority) {
+	return CompiledOperationSelector(std::move(required_inputs), std::move(any_input_sets), std::move(forbidden_inputs),
+	                                 priority);
 }
 
 CompiledAuthenticationPolicy CompiledModelBuilder::AnonymousAuthentication() {
