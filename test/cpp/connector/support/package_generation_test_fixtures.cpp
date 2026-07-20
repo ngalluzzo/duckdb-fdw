@@ -12,6 +12,7 @@ namespace duckdb_api_test {
 const char PACKAGE_TYPED_RELATION[] = "typed_records";
 const char PACKAGE_DISTINCT_RELATION[] = "distinct_status";
 const char PACKAGE_PREDICATE_RELATION[] = "controlled_exact_repositories";
+const char PACKAGE_REST_MATERIALIZATION_RELATION[] = "materialized_records";
 
 namespace {
 
@@ -339,6 +340,42 @@ duckdb_api::CompiledPackageGeneration BuildTypedPredicateGeneration(const std::s
 	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
 }
 
+duckdb_api::CompiledPackageGeneration BuildRestMaterializationGeneration(const std::string &version, char digest_fill) {
+	std::vector<duckdb_api::CompiledColumn> columns;
+	columns.push_back(CompiledModelBuilder::Column("record_id", CompiledScalarType::BIGINT, false,
+	                                               "$.identity.record_id", {"identity", "record_id"}));
+	columns.push_back(CompiledModelBuilder::Column("label", CompiledScalarType::VARCHAR, true, "$.attributes.label",
+	                                               {"attributes", "label"}));
+	std::vector<duckdb_api::CompiledRelationInput> inputs;
+	inputs.push_back(
+	    CompiledModelBuilder::Input("scope", CompiledScalarType::VARCHAR, false, CompiledModelBuilder::NoDefault()));
+	std::vector<CompiledOperation> operations;
+	operations.push_back(CompiledModelBuilder::RestOperation(
+	    "materialized_records_by_scope", false, CompiledOperationCardinality::ZERO_TO_MANY,
+	    CompiledModelBuilder::LinkPagination("per_page", 25, "page", 1, 2, 4),
+	    {Origin("api.github.com"),
+	     "/fixtures/materialized-records",
+	     {CompiledModelBuilder::FixedQueryParameter("view", CompiledModelBuilder::Varchar("summary")),
+	      CompiledModelBuilder::RelationInputQueryParameter("scope_name", "scope"),
+	      CompiledModelBuilder::PageSizeQueryParameter("per_page", 25),
+	      CompiledModelBuilder::PageNumberQueryParameter("page", 1)},
+	     {{"X-Connector-Fixture", "rest-materialization"}}},
+	    CompiledResponseSource::JSON_PATH_MANY, "$.payload.records[*]", {"payload", "records"},
+	    CompiledModelBuilder::V1OperationSelector({CompiledModelBuilder::RelationInputReference("scope")})));
+	std::vector<CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    PACKAGE_REST_MATERIALIZATION_RELATION, std::move(columns), std::move(inputs), std::move(operations),
+	    ConnectorCatalogTestAccess::Anonymous(),
+	    ConnectorCatalogTestAccess::PaginatedResources(1024, 4096, 25, 100, 256)));
+	const auto digest = Digest(digest_fill);
+	auto identity =
+	    CompiledModelBuilder::PackageIdentity("duckdb_api/v1", "rest_materialization_package", version, digest);
+	auto connector = CompiledModelBuilder::Connector(CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA,
+	                                                 "rest_materialization_package", version, std::move(relations),
+	                                                 NetworkPolicy(false));
+	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
+}
+
 } // namespace
 
 duckdb_api::CompiledPackageGeneration BuildTypedFallbackPackageGenerationFixture(const std::string &package_version,
@@ -359,6 +396,11 @@ duckdb_api::CompiledPackageGeneration BuildPredicateConflictPackageGenerationFix
 duckdb_api::CompiledPackageGeneration BuildTypedPredicatePackageGenerationFixture(const std::string &package_version,
                                                                                   char digest_fill) {
 	return BuildTypedPredicateGeneration(package_version, digest_fill);
+}
+
+duckdb_api::CompiledPackageGeneration
+BuildRestMaterializationPackageGenerationFixture(const std::string &package_version, char digest_fill) {
+	return BuildRestMaterializationGeneration(package_version, digest_fill);
 }
 
 duckdb_api::CompiledPackageGeneration BuildDistinctPackageGenerationFixture(const std::string &package_version,

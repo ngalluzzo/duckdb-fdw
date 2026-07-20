@@ -9,6 +9,7 @@ namespace duckdb_api_test {
 extern const char PACKAGE_TYPED_RELATION[];
 extern const char PACKAGE_DISTINCT_RELATION[];
 extern const char PACKAGE_PREDICATE_RELATION[];
+extern const char PACKAGE_REST_MATERIALIZATION_RELATION[];
 
 // Closed structural variants used to prove every RFC 0013 reload category.
 // They are valid immutable generations, not malformed-construction probes.
@@ -64,6 +65,14 @@ BuildPredicateConflictPackageGenerationFixture(const std::string &package_versio
 // request materialization without compiler-private construction access.
 duckdb_api::CompiledPackageGeneration
 BuildTypedPredicatePackageGenerationFixture(const std::string &package_version = "1.2.3", char digest_fill = 'f');
+
+// One anonymous, predicate-free REST relation for the public planning and
+// materialization boundary. Its operation preserves ordered fixed,
+// relation-input, page-size, and page-number bindings plus nested structural
+// records and result paths. Consumers use only immutable Connector APIs.
+duckdb_api::CompiledPackageGeneration
+BuildRestMaterializationPackageGenerationFixture(const std::string &package_version = "1.2.3",
+                                                  char digest_fill = '7');
 
 // One-relation valid package whose name, schema, input shape, and response
 // structure differ from the typed fixture relation.

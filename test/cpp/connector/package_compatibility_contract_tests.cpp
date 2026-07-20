@@ -229,6 +229,31 @@ void TestPackageGenerationFixtureBoundary() {
 		                duckdb_api::CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1,
 		        "typed predicate fixture lost an independent package equality mapping or fallback");
 	}
+
+	const auto materialization = duckdb_api_test::BuildRestMaterializationPackageGenerationFixture();
+	const auto *materialized =
+	    materialization.Connector().FindRelation(duckdb_api_test::PACKAGE_REST_MATERIALIZATION_RELATION);
+	Require(materialized != nullptr && materialized->PredicateMappings().empty() &&
+	            materialized->Authentication().Requirement() == duckdb_api::CompiledCredentialRequirement::NONE &&
+	            materialized->Inputs().size() == 1 && materialized->Inputs()[0].Name() == "scope" &&
+	            materialized->Operations().size() == 1,
+	        "REST materialization fixture lost its anonymous predicate-free public shape");
+	const auto &materialized_operation = materialized->Operations()[0];
+	const auto &materialized_rest = materialized_operation.Rest();
+	const auto &materialized_query = materialized_rest.request.query_parameters;
+	Require(materialized_query.size() == 4 &&
+	            materialized_query[0].source == duckdb_api::CompiledQueryValueSource::FIXED &&
+	            materialized_query[0].name == "view" &&
+	            materialized_query[1].source == duckdb_api::CompiledQueryValueSource::RELATION_INPUT &&
+	            materialized_query[1].name == "scope_name" && materialized_query[1].source_id == "scope" &&
+	            materialized_query[2].source == duckdb_api::CompiledQueryValueSource::PAGE_SIZE &&
+	            materialized_query[2].name == "per_page" &&
+	            materialized_query[3].source == duckdb_api::CompiledQueryValueSource::PAGE_NUMBER &&
+	            materialized_query[3].name == "page" && materialized_rest.pagination.PageIncrement() == 2 &&
+	            materialized_rest.records_extractor_segments == std::vector<std::string>({"payload", "records"}) &&
+	            materialized->Columns()[0].ExtractorSegments() == std::vector<std::string>({"identity", "record_id"}) &&
+	            materialized->Columns()[1].ExtractorSegments() == std::vector<std::string>({"attributes", "label"}),
+	        "REST materialization fixture lost query order, pagination, or nested structural paths");
 	Require(typed_predicates.Connector()
 	                .FindRelation("boolean_predicates")
 	                ->PredicateMappings()[0]
