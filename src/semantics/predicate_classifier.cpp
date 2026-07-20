@@ -57,10 +57,6 @@ bool IsKnownBaseDomain(CompiledPredicateBaseDomain domain) {
 	case CompiledPredicateBaseDomain::CONTROLLED_DUPLICATE_REPOSITORY_OCCURRENCES:
 	case CompiledPredicateBaseDomain::PACKAGE_DECLARED_OCCURRENCE_DOMAIN:
 		return true;
-	case CompiledPredicateBaseDomain::PACKAGE_DECLARED_OCCURRENCE_DOMAIN:
-		// Package proof validation belongs to the package-selection slice. Keep
-		// the existing planner closed to that authority until it lands.
-		return false;
 	}
 	return false;
 }
