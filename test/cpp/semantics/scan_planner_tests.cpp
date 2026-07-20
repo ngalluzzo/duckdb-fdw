@@ -201,7 +201,8 @@ void TestUnavailableRelationalCounterexamples() {
 	const auto valid = BuildAnonymousScanRequest(connector, relation.Name());
 
 	auto request = valid;
-	request.explicit_inputs.push_back("secret=selector");
+	request.explicit_inputs = duckdb_api::ExplicitInputs(
+	    {duckdb_api::ExplicitInput::Varchar("secret", "selector")});
 	RequireRequestRejected(connector, request, "a logical selector encoded as an explicit input");
 	request = valid;
 	request.projected_columns.pop_back();
