@@ -1,1911 +1,385 @@
-# DuckDB “Any API” Connector — Architecture
+# Architecture
 
-> Query well-structured HTTP APIs as relational data in DuckDB, with explicit
-> semantic pushdown, bounded streaming execution, pagination, enrichment,
-> shared auth and transport infrastructure, and an escape hatch for custom code.
+DuckDB API is a DuckDB-native relational adapter for well-structured HTTP and
+GraphQL APIs. A local declarative package defines typed relations; the
+extension compiles one immutable generation, plans conservatively, executes
+through a bounded remote runtime, and returns ordinary DuckDB rows.
 
-**Status:** Design proposal, revision 0.7; GraphQL repository analytics is
-accepted by RFC 0011, conservative relational composition by RFC 0010,
-predicate-selective repository scans by RFC 0008, the
-bounded repository-traversal native profile by RFC 0007, its authenticated
-capability base by RFC 0006, its live REST base by RFC 0005, and the
-distribution and native v1 boundary by RFC 0009.
-
-**Integration profiles:** The native C++ table-function product selected for
-v1, a possible future portable C Extension API implementation, and an optional
-future deep DuckDB catalog/optimizer shell over the same semantic contracts
-
----
-
-## 1. Executive Summary
-
-This project adds a DuckDB-native relational adapter layer for HTTP APIs. A user
-should be able to query API-backed relations alongside local DuckDB tables,
-Parquet, CSV, and other attached data sources:
-
-```sql
-SELECT
-    r.full_name,
-    r.stars,
-    c.mrr
-FROM github_repository(full_name := 'duckdb/duckdb') AS r
-LEFT JOIN stripe_customer() AS c
-    ON c.metadata_repo = r.full_name;
-```
-
-The central abstraction is not “make an HTTP request.” It is:
-
-> A connector translates a relational scan request into a remote request plan,
-> states exactly which relational semantics the remote source preserves, and
-> yields bounded columnar batches back to DuckDB.
-
-The design deliberately separates:
-
-1. **DuckDB integration** — bind, plan, scan, cancellation, and result vectors.
-2. **Relational planning** — projection, predicates, ordering, limits, and
-   residual local work.
-3. **Protocol compilation** — REST/OpenAPI, GraphQL, OData, or custom adapters.
-4. **Transport infrastructure** — auth, HTTP, rate limits, retries, caching,
-   security policy, and observability.
-5. **Connector authoring** — declarative specifications for common APIs and
-   trusted Rust or sandboxed WASM for exceptional cases.
-
-The current unreleased `0.7.0` source uses a native C++ table function to query
-four fixed GitHub relations on one exact DuckDB and platform-dependency cell:
-the retained anonymous and authenticated REST relations plus an authenticated
-GraphQL repository-analytics relation. The REST repository relation retains
-one safe predicate-selective path and the conservative composition evidence
-from `0.6.0`. The GraphQL relation proves that a second protocol can share the
-same permanent metadata, planning, authorization, transport, resource,
-streaming, cancellation, and close boundaries without acquiring relational or
-caller-selected request authority. RFC 0009 selects that permanent native C++
-table-function lineage for v1 on an exact tested compatibility matrix. A
-Rust/stable-C-API implementation and a custom attached catalog or logical-plan
-optimizer are optional future profiles, not v1 requirements or public ABI
-commitments.
-
----
-
-## 2. Product Contract
-
-### 2.1 Intended capabilities
-
-- **Relational access to well-structured HTTP APIs.** API resources appear as
-  typed relations that can be filtered, projected, limited, and joined.
-- **Embedded execution.** No mandatory server, daemon, subprocess, or external
-  metadata catalog.
-- **Correct pushdown.** Remote execution is an optimization; the connector must
-  state what was pushed, what remains local, and whether the remote semantics
-  are exact.
-- **Bounded streaming.** Responses are converted incrementally into DuckDB data
-  chunks with cancellation and backpressure.
-- **Shared operational infrastructure.** Auth, pagination, rate limiting,
-  retries, caching, and security controls are implemented once.
-- **Tiered connector authoring.** The common case is declarative. Complex cases
-  can supply protocol-specific code without changing the DuckDB-facing layer.
-- **DuckDB interoperability.** API data can be joined with local tables and
-  files, copied into DuckDB, or exported to formats such as Parquet.
-- **Safe defaults.** Secrets are host-scoped; redirects, private IP access,
-  response size, decompression, concurrency, and retries are bounded.
-
-### 2.2 Explicit exclusions
-
-- `INSERT`, `UPDATE`, or `DELETE` against remote APIs.
-- Cross-API transactions or snapshot consistency guarantees.
-- WebSocket, SSE, Kafka, or other continuous streams.
-- A universal adapter for arbitrary web pages or undocumented endpoints.
-- Automatic relational modeling of every GraphQL schema.
-- Requiring a custom DuckDB storage catalog.
-- A general-purpose workflow engine.
-- PostgreSQL FDW protocol or API compatibility. The project is FDW-like in
-  purpose but DuckDB-native in implementation and semantics.
-
-### 2.3 Product claim
-
-The product should not promise “every API with no code.” The defensible claim is:
-
-> A declarative relational adapter for well-structured HTTP APIs, with
-> protocol-specific compilers and a custom-code escape hatch.
-
-The v1 claim is narrower: local declarative, read-only, static-schema packages
-over the protocol set proven before freeze. The custom-code escape hatch,
-dynamic schemas, and other capabilities outside RFC 0009's accepted candidate
-subset remain post-v1 design directions.
-
----
-
-## 3. Design Principles
-
-1. **Plan before execution.** A connector must produce an inspectable scan plan
-   before network work begins.
-2. **Correctness is local by default.** Unsupported or approximate predicates
-   remain as DuckDB residual filters.
-3. **Pushdown has semantics, not just capability flags.** Every accepted
-   predicate, ordering, and limit records its accuracy.
-4. **Pull at the DuckDB boundary.** DuckDB asks for the next batch; internal
-   async workers may prefetch only within bounded queues.
-5. **Separate input parameters from output columns.** Endpoint arguments are
-   not necessarily relation columns.
-6. **Protocol compilers share a runtime, not a request language.** REST and
-   GraphQL have different planning models.
-7. **Sequential by default, parallel by proof.** Pagination and enrichment become
-   parallel only when the source declares that execution is independent and
-   stable.
-8. **Secrets are capabilities.** A credential is authorized for specific hosts,
-   headers, and scopes, not handed unrestrictedly to connector code.
-9. **Schema is versioned.** Static schemas change with connector versions;
-   dynamic schemas refresh explicitly.
-10. **Deep DuckDB integration is optional.** The connector model must remain
-    useful through ordinary table functions.
-
----
-
-## 4. High-Level System
-
-```mermaid
-flowchart LR
-    U[DuckDB SQL query] --> B[DuckDB bind phase]
-    B --> R[Relational ScanRequest]
-    R --> P[Connector planner]
-
-    subgraph PLAN[Planning]
-        P --> PC[Protocol compiler]
-        PC --> SP[ScanPlan]
-        SP --> RP[Remote operations]
-        SP --> LP[Residual DuckDB operations]
-    end
-
-    RP --> X[Execution runtime]
-
-    subgraph RUNTIME[Shared runtime]
-        X --> SEC[Secret and network policy]
-        X --> AUTH[Auth provider]
-        X --> RATE[Rate limiter]
-        X --> RETRY[Retry controller]
-        X --> CACHE[Request cache and single-flight]
-        X --> HTTP[HTTP transport]
-    end
-
-    HTTP --> API[Remote HTTP or GraphQL API]
-    API --> DEC[Streaming decoder]
-    DEC --> ENR[Optional column providers]
-    ENR --> CHUNK[DuckDB DataChunk]
-    CHUNK --> LP
-    LP --> OUT[Query result]
-```
-
-The important boundary is `ScanPlan`. DuckDB-facing code does not need to know
-whether a relation is backed by REST, GraphQL, OData, or custom code. The
-protocol compiler does not need to know how DuckDB vectors are allocated. The
-execution runtime does not decide relational correctness.
-
----
-
-## 5. DuckDB Integration Strategy
-
-The architecture has one selected v1 product profile and two possible future
-integration levels. They should not be conflated.
-
-```mermaid
-flowchart TB
-    CORE[Possible future portable Rust connector core]
-
-    subgraph P[Selected native v1 lineage]
-        NATIVE[DuckDB native C++ extension]
-        DISPATCH[duckdb_api_scan dispatcher]
-        LIVE[Fixed GitHub REST and GraphQL relations]
-        NATIVE --> DISPATCH --> LIVE
-    end
-
-    subgraph A[Future Profile A — portable table functions]
-        CAPI[DuckDB C Extension API]
-        TF[Table functions]
-        VIEW[Optional generated views or macros]
-        CAPI --> TF --> VIEW
-    end
-
-    subgraph B[Future Profile B — deep integration]
-        CPP[Thin C++ extension shell]
-        CAT[StorageExtension and catalog]
-        OPT[OptimizerExtension]
-        CPP --> CAT
-        CPP --> OPT
-    end
-
-    CORE --> CAPI
-    CORE -. stable FFI boundary .-> CPP
-```
-
-### 5.0 Current native C++ preview
-
-RFCs 0005 through 0011 define the current deliberately narrow native profile.
-It is a source-built DuckDB C++ extension named `duckdb_api`, on the unreleased
-`0.7.0` source line, with one project-defined SQL function and four compiled-in
-relations. The
-anonymous `github.duckdb_login_search_page` relation and capability-scoped
-`github.authenticated_user` relation retain their accepted `0.4.0` behavior.
-The anonymous query remains:
-
-```sql
-SELECT id, login, site_admin
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'duckdb_login_search_page'
-);
-```
-
-Its complete base-row domain is the zero-to-three `items` in one
-fixed response from
-`https://api.github.com/search/users?q=duckdb+in%3Alogin&per_page=3`; it is not
-the domain of all GitHub users or all matching search results. The fixed `q`
-and `per_page` fields define the source and are not DuckDB predicate or limit
-pushdown. Required `id`, `login`, and `site_admin` values decode strictly as
-`BIGINT`, `VARCHAR`, and `BOOLEAN`; this extraction requirement does not claim
-DuckDB-visible `NOT NULL` metadata.
-
-Authenticated relations use an explicitly named temporary DuckDB secret:
-
-```sql
-CREATE TEMPORARY SECRET github_default (
-    TYPE duckdb_api,
-    PROVIDER config,
-    TOKEN 'github-token-value'
-);
-
-SELECT id, login, site_admin
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_user',
-    secret := 'github_default'
-);
-```
-
-Each successful fixed `GET /user` response produces exactly one required
-`BIGINT`, `VARCHAR`, `BOOLEAN` row. Bind, `DESCRIBE`, `EXPLAIN`, and `PREPARE`
-retain only the logical secret name. Global scan initialization resolves that
-name from DuckDB's temporary `memory` storage only; a persistent-only name is
-not found, and a same-named persistent entry is ignored. Each execution sees
-the current value, so replacement or drop affects the next execution of an
-already prepared statement without changing a running scan.
-
-The repository relation reuses that execution-time capability without
-granting any caller-selected request authority:
-
-```sql
-SELECT id, full_name, private, fork, archived, visibility
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_repositories',
-    secret := 'github_default'
-)
-ORDER BY id;
-```
-
-The first request is exactly `GET /user/repos?per_page=100&page=1` at
-`https://api.github.com:443`. Each accepted response is a root JSON array of
-required `id BIGINT`, `full_name VARCHAR`, `private BOOLEAN`, `fork BOOLEAN`,
-`archived BOOLEAN`, and trailing `visibility VARCHAR` values. The base relation
-is the duplicate-preserving bag across every accepted page of a mutable source.
-It promises neither remote ordering nor snapshot consistency; the example's
-local `ORDER BY` belongs to DuckDB.
-
-The one installed selective predicate is
-`authenticated_repositories.visibility = 'private'`. The pinned DuckDB
-complex-filter callback translates exact typed `BIGINT`, `VARCHAR`, and
-`BOOLEAN` equalities plus exposed `AND`, `OR`, and `NOT` structure into a
-bounded protocol-neutral candidate. It leaves every offered expression in
-DuckDB. Unsupported structure retains an opaque position; exceeding the shared
-depth or node budget collapses the complete candidate instead of selecting a
-partial branch.
-
-Relational Semantics—not the adapter—matches Connector's reviewed same-field
-mapping and may select the typed `visibility=private` input. The immutable plan
-records `Superset` accuracy and DuckDB as the sole filter and residual owner.
-For a conjunction, an unsupported child contributes remote `TRUE`, so the
-supported conjunct may still narrow traversal. `OR`, `NOT`, more than one
-incompatible safe input, other values, `NULL`, missing capabilities, or absent
-mapping evidence use the complete traversal and DuckDB filtering. Controlled,
-non-installable Connector fixtures additionally prove `Exact`, explicit
-predicate ambiguity, and deterministic operation selection through the same
-production decision service. Each operation publishes immutable required,
-alternative, forbidden, priority, and fallback facts. Semantics derives
-candidate-scoped mapped inputs, ranks eligible non-fallback operations by
-specificity and then priority, consults the sole fallback only when none is
-eligible, and fails a top-rank tie instead of using declaration order. Query
-does not parse SQL text, Runtime does not interpret classifications, and
-ordinary planning remains offline.
-
-Pagination is pull-driven and sequential. Remote Runtime retains only bounded
-physical `Link` values from the terminal response header section, recognizes
-the registered `next` relation case-insensitively, and accepts exactly one
-next target. The target must remain at the exact operation origin and
-`/user/repos` path, contain `per_page=100`, `page=current+1`, and exactly the
-selected immutable `visibility=private` field when present, and never repeat a
-page. Runtime reconstructs each request from the admitted immutable plan
-profile rather than replaying the received URL. Missing `next` means clean exhaustion. An
-empty page with a valid `next` is crossed inside the same pull, so a successful
-`BatchStream::Next` always returns a nonempty schema-aligned batch and only
-`false` reports clean exhaustion.
-
-The repository scan permits one attempt per page, at most 32 pages and 32
-requests, 16 KiB of response headers and 8 MiB of wire and decompressed body per
-page, 512 KiB of headers and 64 MiB of wire and decompressed body per scan, 100
-records per page and 3,200 per scan, 512 bytes per extracted string, 2 MiB of
-retained decoded-page memory, 64 output rows per batch, one active request, and
-30 seconds for the scan. These are hard ceilings, not estimates or retry
-authority. A malformed or escaping transition, exhausted budget, cancellation,
-close, status failure, decode failure, or schema failure is terminal and can
-never be reported as a complete-looking truncated relation.
-
-The fourth relation, `github.viewer_repository_metrics`, uses the same
-execution-time secret capability and public SQL function for one fixed
-GraphQL query profile:
-
-```sql
-SELECT full_name, stars, primary_language, updated_at
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'viewer_repository_metrics',
-    secret := 'github_default'
-)
-WHERE archived = FALSE
-ORDER BY stars DESC
-LIMIT 10;
-```
-
-Its eight columns are required `id VARCHAR`, `full_name VARCHAR`,
-`owner_login VARCHAR`, `stars BIGINT`, `private BOOLEAN`, `archived BOOLEAN`,
-and `updated_at VARCHAR`, plus nullable `primary_language VARCHAR`. The fixed
-query selects `viewer.repositories` for the complete owner, collaborator, and
-organization-member affiliation set, 100 rows at a time, using a nullable
-forward cursor and fixed `UPDATED_AT DESC` enumeration. That enumeration is
-cursor mechanics, not DuckDB-visible ordering or snapshot authority. The base
-relation is the duplicate-preserving occurrence bag across a mutable complete
-traversal; Runtime never deduplicates and DuckDB owns every relational
-operator.
-
-Connector Experience owns the exact canonical query bytes, identity, SHA-256
-digest, variable and response paths, schema/nullability, endpoint, and cursor
-declaration. Relational Semantics copies the validated facts into the closed
-REST-or-GraphQL planned-operation sum and derives query replay safety; it does
-not infer meaning by parsing the document. Runtime independently recomputes
-the digest and admits only that complete typed profile. A label, operation-kind
-flag, relation name, explanation string, or caller-supplied document grants no
-authority.
-
-DuckDB-owned residual predicates remain opaque to Runtime. Runtime admits the
-canonical GraphQL request profile when the plan keeps the remote predicate
-`TRUE`, marks its accuracy unsupported, assigns residual and all relational
-ownership to DuckDB, supplies no conditional input, and delegates no ordering,
-limit or offset to the remote or Runtime. It does not require an unrestricted
-local predicate or reinterpret Semantics' classification category, reason or
-explanation.
-
-For each page, Runtime serializes the complete compact JSON request from the
-immutable document, fixed `pageSize=100`, and stream-owned nullable cursor. It
-intersects the plan's 8 KiB per-body ceiling with the 16 KiB host ceiling and
-debits a 256 KiB scan body budget before bearer placement or transport. It
-sends one `application/json` POST to
-`https://api.github.com:443/graphql`, fully validates the JSON and GraphQL
-envelope before publishing the page, and fails every nonempty top-level
-`errors` array even when data is present. Required missing, null, duplicate, or
-wrongly typed values fail; a null primary language becomes a typed invalid
-`VARCHAR` and then SQL `NULL`.
-
-Cursor traversal is sequential with no prefetch. When `hasNextPage` is true,
-`endCursor` must be a nonempty string not previously used by the scan; it
-grants only the next variable value and never destination, document, or
-selection authority. The same 32-page, 100-row-per-page, 3,200-row-per-scan,
-64-row-batch, concurrency-one, response, decode, string, memory, nesting, and
-30-second ceilings used by the repository traversal remain enforced. GraphQL
-errors, invalid cursors, later-page failures, resource exhaustion,
-cancellation, close, and destruction use the standard terminal stream and
-capability-release rules.
-
-The `TOKEN` value is limited to 8,192 bytes at both DuckDB secret creation and
-resolution. Remote Runtime independently applies the same capability limit and
-a 16,384-byte aggregate ceiling to project-supplied request fields, counting
-each field as `name + ": " + value + "\r\n"` before concatenation. The 8 KiB
-token limit reserves the other half of the native header envelope for fixed
-and libcurl-generated fields. On the supported cell, the controlled real-curl
-oracle additionally requires the complete emitted header block, including
-dependency-generated fields and final framing, to fit within 16 KiB. A token
-or aggregate overflow fails before network I/O as a redacted `resource` error
-with field `header_bytes`.
-
-The implementation is native C++ end to end and introduces neither Rust nor a
-cross-language FFI. Connector Experience supplies immutable compiled native
-metadata with a typed `{scheme, host, port}` origin and structural request
-fields. Query Experience supplies a conservative, protocol-neutral
-`ScanRequest`. Relational Semantics validates those values without I/O and
-returns the only constructible immutable `ScanPlan`, whose typed executable
-operation is separate from its safe explanation snapshot. Remote Runtime
-consumes the executable plan facts through `ScanExecutor`; it may reject an
-unsupported capability but does not rebuild the plan or reinterpret relational
-ownership. Query remains the only DuckDB-aware layer and translates batches
-and structured errors at the adapter edge.
-
-The native capability profile exposes no projection, generic filter execution,
-ordering, limit, offset, or progress delegation. It exposes only the retained
-structured-filter advisory described above. The adapter requests each
-relation's complete fixed schema, leaves ordering and bounds undelegated, and
-assigns every filter, projection, ordering, limit, and offset to DuckDB. The
-baseline records `TRUE` remotely; a selected visibility query records
-`visibility_equals_private` remotely and the complete retained filter as
-DuckDB-owned. Query carries the typed remote candidate separately from the
-retained-predicate scope. The plan records one of `Exact`, `Superset`,
-`Unsupported`, or `Ambiguous` with a structured reason; an invalid declaration
-or operation decision produces no plan. Exactness never transfers residual
-ownership in this profile. Plans grant no remote or runtime ordering, limit, or
-offset. Ordinary bind,
-`DESCRIBE`, `EXPLAIN`, `PREPARE`, and planning read only immutable metadata and
-acquire no network or credential authority.
-
-Execution opens one synchronous pull stream for the exact HTTPS authority
-`api.github.com:443`. Single-response relations permit one wire attempt; the
-repository relation permits one attempt for each accepted sequential page. The
-anonymous relation sends no credential. An authenticated relation moves one
-opaque scan-scoped
-authorization capability into Remote Runtime, which alone validates the
-plan-declared bearer authenticator, `Authorization` placement, and final
-destination before request decoration. Remote Runtime enforces post-DNS
-destination policy, TLS verification, strict JSON extraction, and each
-relation's wall, response, header, decompressed, record, string, decoded-memory,
-nesting, batch, and concurrency ceilings. The two existing relations retain
-their five-second, 64 KiB response, 256-byte string, and two-row batch
-narrowings. DuckDB interruption reaches transfer and decoding. Stream cancel,
-close, and destruction are idempotent and non-throwing; connection close is
-bounded by the hard execution deadline but is not promised to cancel promptly.
-
-The installed composition contains only the four fixed public HTTPS relations and
-runtime service. Deterministic correctness evidence uses a separate private,
-non-installable composition whose compiled connector selects a controlled
-loopback service; it traverses the same registration, bind/copy, planning,
-executor, stream, error-translation, and `DataChunk` path. Artifact inventory
-and negative canaries prove that loopback metadata and authority-selection
-seams are absent from the installed artifact. The public GitHub execution is
-upstream compatibility evidence only; changing live row identity or order
-cannot invalidate the controlled relational oracle.
-
-The profile adds no token table-function argument, implicit secret selection,
-persistent or environment secret source, caller-selected URL or header, proxy,
-redirect, retry, rate-limit wait, parallel page, resume, cache, provider,
-caller-selected GraphQL document, variables, endpoint, selection, mutation,
-introspection, partial-data policy, connector-package loader, YAML compiler,
-runtime file path, or public native ABI. It intentionally replaces
-the historical `example.items` fixture relation rather than shipping a second
-product relation. The `0.1.0`/`0.2.0` fixture behavior remains historical
-release evidence, not a fallback: a live failure returns a bounded diagnostic
-and never fixture rows.
-
-The supported compatibility cell is DuckDB 1.5.4 at commit `08e34c447b` with
-platform `osx_arm64`, macOS 26.5.2 on Apple Silicon arm64, Apple clang 17 in
-C++11 mode, CMake 4.1.2, and Ninja 1.13.0. Installation is a clean source build
-and unsigned direct local load. No public binary distribution or broader
-native ABI compatibility follows from this profile.
-
-#### 5.0.1 Accepted distribution and support policy
-
-RFC 0009 supersedes RFC 0004 as the current decision while carrying forward
-DuckDB Community Extensions as the ordinary-user distribution and trust
-channel. Source build remains the contributor path. A verified
-unsigned artifact may be used only for controlled preview and diagnostic work;
-it is not ordinary-user guidance because enabling unsigned extensions weakens
-signature policy for the whole DuckDB process.
-
-RFC 0009 removes Community publication from the completed `0.2.0` gate so
-product learning can continue, but publication evidence remains mandatory
-before ordinary-user guidance and `1.0.0`. The initial stable compatibility
-matrix contains the latest stable DuckDB release at release time and only the
-exact Community CI platform rows that pass the complete clean-install,
-restart, load-by-name, version, and accepted-query oracle. Release evidence
-records the DuckDB commit and every claimed row.
-Failed, excluded, untested, older, nightly, non-Community, or absent rows remain
-unclaimed even when they happen to work.
-
-Project versions, Git tags, and descriptor source refs are immutable; a fix
-uses a new SemVer. Before `1.0`, the project makes no backport commitment.
-DuckDB governs the Community endpoint, signing pipeline, served artifacts, and
-local-cache behavior, so the project guarantees neither Community rollback,
-historical-version selection, nor continued upstream availability. Project
-support is best-effort through GitHub Issues with no service-level commitment.
-These are policy boundaries, not publication evidence; ordinary installation
-guidance requires the current RFC's delivery gates to pass.
-
-#### 5.0.2 Accepted v1 integration direction
-
-RFC 0009 makes the permanent native C++ table-function extension the intended
-`1.0.0` product profile. V1 supports only the exact DuckDB, platform,
-architecture, toolchain, and installation rows that pass the complete release
-oracle. This decision publishes no C++ ABI and does not make DuckDB internal
-headers a connector-author interface.
-
-The current fixed relations and `duckdb_api_scan` spelling remain pre-v1
-preview surfaces. Query Experience must decide their v1 disposition and
-migration before package registration depends on SQL naming. The native lineage
-may evolve substantially behind that reviewed public boundary without a
-language migration.
-
-### 5.1 Future Profile A: portable Rust table-function extension
-
-This is a possible later compatibility profile, not a v1 gate. It requires its
-own RFC, permanent implementation, parity evidence, and support matrix before
-it may share or replace any native product claim.
-
-Responsibilities:
-
-- Register table functions through DuckDB’s C Extension API.
-- Bind a relation schema and named input parameters.
-- Receive requested column IDs and any additional scan metadata exposed by the
-  active DuckDB API capability profile.
-- Produce data chunks through a pull-oriented scan callback.
-- Support cancellation, cardinality hints, and progress where exposed.
-- Generate optional schemas, views, or macros for friendlier SQL.
-
-Example SQL:
-
-```sql
-INSTALL api;
-LOAD api;
-
-CREATE SECRET github_default (
-    TYPE api,
-    PROVIDER github,
-    TOKEN getenv('GITHUB_TOKEN')
-);
-
-SELECT full_name, stars
-FROM github_repository(
-    full_name := 'duckdb/duckdb',
-    secret := 'github_default'
-);
-```
-
-An ergonomic layer may generate schemas or table macros without changing the
-underlying contract:
-
-```sql
-SELECT full_name, stars
-FROM api.github_repository(full_name := 'duckdb/duckdb');
-```
-
-That syntax is convenience, not a requirement of the connector contract.
-
-### 5.2 Future Profile B: catalog and optimizer integration
-
-A thin C++ shell may expose capabilities that are not available through the
-portable table-function surface:
-
-- `ATTACH ... (TYPE httpapi, ...)`.
-- A custom catalog containing schemas and tables.
-- Planner-visible relation metadata.
-- Logical-plan rewrites for exact `ORDER BY`, `LIMIT`, or `TopN` pushdown.
-- Version-specific DuckDB internal hooks.
-
-Catalog syntax illustration:
-
-```sql
-ATTACH 'github' AS github (
-    TYPE httpapi,
-    connector 'github',
-    secret 'github_default'
-);
-
-SELECT full_name, stars
-FROM github.repository
-WHERE full_name = 'duckdb/duckdb';
-```
-
-If implemented, the C++ layer must remain thin. HTTP, auth, connector
-specifications, planning, and execution should remain in a shared core behind a
-small explicitly versioned boundary.
-
-### 5.3 DuckDB capability contract
-
-The DuckDB adapter reports the metadata and lifecycle signals that it can
-actually provide:
-
-```rust
-pub struct DuckDbAdapterCapabilities {
-    pub projection: bool,
-    pub filters: PushdownMetadataCapability,
-    pub ordering: PushdownMetadataCapability,
-    pub limit: PushdownMetadataCapability,
-    pub offset: PushdownMetadataCapability,
-    pub progress: bool,
-    pub cancellation: CancellationCapability,
-    pub secret_manager: bool,
-}
-```
-
-```rust
-pub enum PushdownMetadataCapability {
-    Unavailable,
-    AdvisoryRetainedByDuckDb,
-    DelegatedToRuntime,
-}
-```
-
-The future portable baseline assumes named parameters, schema binding,
-cardinality hints, projection IDs, and data-chunk production. Filters,
-ordering, limits, offsets, progress, cancellation signals, and secret-manager
-access are used only when the active DuckDB API exposes them.
-
-Missing or advisory-only capabilities change optimization and ergonomics,
-never correctness:
-
-- With `Unavailable` filter metadata, `ScanRequest.predicate` is `TRUE`;
-  predicates remain in DuckDB and cannot select a remote operation. Required
-  remote keys must be supplied as explicit table-function inputs.
-- With unavailable ordering, limit, or offset metadata, the corresponding
-  request fields are empty and DuckDB performs those operations locally.
-- Advisory metadata may guide safe remote optimization, but the corresponding
-  DuckDB operator remains authoritative. Delegated metadata assigns the
-  operation to the runtime, which must execute it locally when remote pushdown
-  is unsafe. Closing the scan still cancels unused remote work where lifecycle
-  signals permit.
-- Without a cancellation signal, the runtime applies its own request deadlines
-  and cancels work when the scan state is closed. The adapter must not claim
-  responsive query cancellation unless that behavior is verified.
-- Without secret-manager access, the adapter must use an explicitly documented
-  host credential path; it must not read arbitrary environment variables or
-  files from connector packages.
-
-Every supported DuckDB version and integration profile has a tested capability
-matrix. Planner tests use that matrix rather than assuming one universal
-surface. An adapter must not delegate a limit, offset, or ordering operation
-past an unavailable or DuckDB-owned row-removing or ordering prerequisite. It
-retains the dependent DuckDB operator or rejects the scan instead of applying
-it early.
-
-### 5.4 Why the split matters
-
-The native table-function profile, a pure-Rust C Extension API implementation,
-and DuckDB's C++ storage/optimizer internals are different compatibility
-surfaces. V1 chooses the already proven first path and an evidence-derived
-matrix. A future portable path can reduce internal-version coupling; the deep
-catalog path remains optional because making it mandatory would make DuckDB
-optimizer coupling the primary project risk.
-
----
-
-## 6. Core Relational Contract
-
-### 6.1 Relation metadata
-
-A connector exposes one or more relations:
-
-```rust
-pub struct RelationSpec {
-    pub id: RelationId,
-    pub name: String,
-    pub description: Option<String>,
-    pub inputs: Vec<InputSpec>,
-    pub columns: Vec<ColumnSpec>,
-    pub operations: Vec<OperationSpec>,
-    pub schema_mode: SchemaMode,
-}
-```
-
-Inputs and columns are distinct.
-
-```rust
-pub struct InputSpec {
-    pub name: String,
-    pub logical_type: LogicalType,
-    pub required: InputRequirement,
-    pub allowed_values: Option<Vec<Value>>,
-    pub sensitive: bool,
-}
-
-pub struct ColumnSpec {
-    pub id: ColumnId,
-    pub name: String,
-    pub logical_type: LogicalType,
-    pub nullable: bool,
-    pub provider: ColumnProviderId,
-}
-```
-
-Examples of inputs:
-
-- `full_name` used in `/repos/{inputs.full_name|path_segments(2)}`.
-- `created_after` translated to a query parameter.
-- `sort` used only to choose remote ordering.
-- `workspace` selecting an implicit API partition.
-
-Inputs may be exposed as named table-function arguments. A catalog adapter
-may additionally bind predicates on designated virtual columns to those inputs.
-
-### 6.2 Scan request
-
-DuckDB-facing code converts the query into a protocol-neutral request:
-
-```rust
-pub struct ScanRequest {
-    pub relation: RelationId,
-    pub inputs: BTreeMap<String, Value>,
-    pub projection: Vec<ColumnId>,
-    pub predicate: Predicate,
-    pub ordering: Vec<Ordering>,
-    pub limit: Option<u64>,
-    pub offset: Option<u64>,
-    pub adapter_capabilities: DuckDbAdapterCapabilities,
-    pub query_context: QueryContext,
-}
-```
-
-Fields unsupported by the active DuckDB adapter use conservative values:
-`Predicate::True`, an empty ordering, and no limit or offset. The connector
-planner never infers unavailable query structure.
-
-### 6.3 Scan plan
-
-The connector returns a complete execution contract:
-
-```rust
-pub struct ScanPlan {
-    pub operation: OperationPlan,
-    pub remote_predicate: Predicate,
-    pub residual_predicate: Predicate,
-    pub residual_execution: ResidualExecution,
-    pub remote_projection: RemoteProjection,
-    pub local_projection: Vec<ColumnId>,
-    pub remote_ordering: Vec<RemoteOrdering>,
-    pub duckdb_ordering: Vec<Ordering>,
-    pub remote_limit: Option<u64>,
-    pub local_limit: Option<u64>,
-    pub local_offset: Option<u64>,
-    pub pagination: PaginationPlan,
-    pub partitions: PartitionPlan,
-    pub column_providers: ColumnProviderPlan,
-    pub estimated_rows: Option<u64>,
-    pub cache_policy: CachePolicy,
-}
-```
-
-The plan must be inspectable in tests and through an `EXPLAIN` helper.
-
-`ResidualExecution` assigns every row-removing residual to exactly one owner:
-DuckDB for `AdvisoryRetainedByDuckDb`, and the runtime for
-`DelegatedToRuntime`. With unavailable metadata, DuckDB owns the unseen filter.
-Limits and offsets are applied only after that owner evaluates the residual.
-
-### 6.4 Pushdown accuracy
-
-Every pushed operation declares its semantic relationship to DuckDB:
-
-```rust
-pub enum PushdownAccuracy {
-    Exact,
-    Superset,
-    Unsupported,
-}
-```
-
-- **Exact:** Remote evaluation is equivalent to DuckDB evaluation for the
-  represented expression.
-- **Superset:** Remote evaluation may return extra rows. The designated residual
-  owner must re-evaluate the predicate with DuckDB-equivalent semantics.
-- **Unsupported:** The expression remains entirely local.
-
-`Subset` is excluded from relational scans. Discovery APIs that return subsets
-must expose that incompleteness explicitly and must never be treated as complete
-relations.
-
-### 6.5 Limit and ordering safety
-
-`LIMIT` may be pushed only when all row-removing remote predicates are exact,
-or when the runtime owns residual evaluation and can continue fetching until
-the residual filter has produced the requested number of rows.
-
-`ORDER BY` may be pushed only when the connector can prove compatibility for:
-
-- Direction.
-- Null placement.
-- Collation and case sensitivity.
-- Type conversion.
-- Stable tie behavior where pagination depends on ordering.
-
-A remote ordering can still be used as a performance hint without eliminating
-DuckDB’s local ordering node.
-
-`duckdb_ordering` records ordering that the adapter retains in DuckDB. This
-runtime contract does not implement a general local sort. A delegated ordering
-is accepted only when remote ordering is exact; otherwise the adapter must
-retain the DuckDB ordering operator or reject the scan.
-
----
-
-## 7. Planning Flow
-
-```mermaid
-flowchart TD
-    Q[ScanRequest] --> BASE[Resolve operation-independent inputs]
-    BASE --> CAND[Evaluate each operation candidate]
-    CAND --> MAP[Apply candidate-scoped predicate mappings]
-    MAP --> ELIG[Validate bindings and selector eligibility]
-    ELIG --> RANK[Rank by specificity, then priority]
-    RANK --> OP[Select one operation or fail ambiguity]
-    OP --> PR[Translate projection]
-    PR --> PF[Classify selected predicate tree]
-    PF --> EX[Exact remote predicates]
-    PF --> SU[Superset remote predicates]
-    PF --> UN[Unsupported predicates]
-
-    EX --> OR[Evaluate ordering compatibility]
-    SU --> OR
-    UN --> OR
-
-    OR --> LM{Is remote limit safe?}
-    LM -->|Yes| RL[Push remote limit]
-    LM -->|No| LL[Retain local limit]
-
-    RL --> PG[Build pagination plan]
-    LL --> PG
-
-    PG --> CP[Select required column providers]
-    CP --> SP[Return ScanPlan]
-```
-
-The planner is deterministic and side-effect free. It does not make network
-calls simply to estimate cardinality. Network-backed discovery is reserved for
-explicit attach, refresh, or execution operations.
-
----
-
-## 8. Execution Model
-
-### 8.1 Pull-oriented scan
-
-The DuckDB boundary is pull-oriented:
-
-```rust
-pub trait BatchStream: Send {
-    fn next_batch(&mut self, output: &mut DataChunk) -> Result<BatchStatus>;
-    fn progress(&self) -> Option<f64>;
-    fn cancel(&mut self);
-}
-```
-
-The internal implementation may use async HTTP and bounded producer queues, but
-connector authors should not manage arbitrary row channels.
-
-### 8.2 Execution sequence
-
-```mermaid
-sequenceDiagram
-    participant D as DuckDB
-    participant S as Scan executor
-    participant R as Runtime
-    participant A as Remote API
-    participant P as Column providers
-
-    D->>S: next_batch(output_chunk)
-    S->>R: open or resume page request
-    R->>R: acquire rate limits
-    R->>R: apply auth and network policy
-    R->>A: HTTP request
-    A-->>R: streaming response
-    R-->>S: decoded source items
-    S->>P: enrich only requested columns
-    P-->>S: enrichment values
-    S->>S: apply decoding and row assembly
-    S-->>D: populated DataChunk
-
-    alt DuckDB requests another batch
-        D->>S: next_batch(output_chunk)
-    else query cancelled or limit satisfied
-        D->>S: cancel
-        S->>R: abort in-flight work
-    end
-```
-
-### 8.3 Backpressure
-
-The runtime must bound:
-
-- In-flight HTTP requests.
-- Buffered response bytes.
-- Decoded but unconsumed rows.
-- Concurrent enrichment calls.
-- Per-connection and global memory.
-
-A conservative default is one active page request per local scan state and a
-small bounded decoded-item queue. Prefetching the next page can be enabled only
-when the paginator is sequentially safe and memory remains below its budget.
-
-### 8.4 Cancellation
-
-DuckDB cancellation must propagate to:
-
-- Active HTTP request bodies.
-- Retry sleeps.
-- Rate-limit waits.
-- Pagination loops.
-- Enrichment tasks.
-- WASM guest execution.
-
-Cancellation is not an error eligible for retry.
-
----
-
-## 9. Connector and Protocol Layers
-
-```mermaid
-flowchart TB
-    SPEC[Connector definition]
-
-    SPEC --> T1[Tier 1: declarative relation spec]
-    SPEC --> T2[Tier 2: declarative plus transforms]
-    SPEC --> T3[Tier 3: custom Rust or WASM]
-
-    T1 --> REST[REST or OpenAPI compiler]
-    T2 --> REST
-    T1 --> GQL[GraphQL compiler]
-    T2 --> GQL
-    T3 --> CUSTOM[Custom protocol compiler]
-
-    REST --> PLAN[Common ScanPlan]
-    GQL --> PLAN
-    CUSTOM --> PLAN
-
-    PLAN --> RUN[Shared execution runtime]
-```
-
-### 9.1 Tier 1: declarative relations
-
-Tier 1 describes endpoints, inputs, columns, pagination, auth references, and
-pushdown mappings.
-
-```yaml
-connector: github
-version: 1
-
-relations:
-  repository:
-    description: GitHub repositories visible to the authenticated principal
-
-    inputs:
-      full_name:
-        type: VARCHAR
-        operations: [get]
-      visibility:
-        type: VARCHAR
-        operations: [list]
-        values: [all, public, private]
-      sort:
-        type: VARCHAR
-        operations: [list]
-        values: [created, updated, pushed, full_name]
-
-    columns:
-      id:
-        type: BIGINT
-        extract: .id
-      full_name:
-        type: VARCHAR
-        extract: .full_name
-      stars:
-        type: INTEGER
-        extract: .stargazers_count
-      private:
-        type: BOOLEAN
-        extract: .private
-      hooks:
-        type: JSON
-        provider: repository_hooks
-
-    operations:
-      get:
-        when:
-          required_inputs: [full_name]
-        request:
-          method: GET
-          path: /repos/{inputs.full_name|path_segments(2)}
-        response:
-          item: .
-
-      list:
-        request:
-          method: GET
-          path: /user/repos
-          query:
-            visibility: $inputs.visibility
-            sort: $inputs.sort
-        response:
-          items: .[]
-        pagination:
-          type: link_header
-          relation: next
-
-    predicates:
-      full_name:
-        operators: [eq]
-        operation: get
-        accuracy: exact
-      visibility:
-        operators: [eq]
-        bind: query.visibility
-        accuracy: exact
-
-    providers:
-      repository_hooks:
-        requires: [full_name]
-        provides: [hooks]
-        mode: per_row
-        request:
-          method: GET
-          path: /repos/{inputs.full_name|path_segments(2)}/hooks
-        pagination:
-          type: page_number
-          page_param: page
-          page_size_param: per_page
-          page_size: 100
-```
-
-The example above illustrates the intended concepts. The companion connector
-specification is authoritative for syntax and validation.
-
-### 9.2 Tier 2: transforms (post-v1 candidate)
-
-Tier 2 adds constrained transforms for response envelopes and column extraction:
-
-- JSON Pointer or JSONPath for simple extraction.
-- A JQ-compatible expression engine for complex unwrapping.
-- Declarative scalar conversion and null handling.
-- Explicit error behavior for absent or malformed values.
-
-Transforms should be pure and resource-bounded. They do not receive unrestricted
-network or secret access.
-
-### 9.3 Tier 3: custom code (post-v1 candidate)
-
-Complex APIs may require custom logic for:
-
-- AWS SigV4 request signing.
-- OAuth installation flows.
-- GraphQL document generation.
-- Nonstandard pagination.
-- Binary payloads.
-- Domain-specific type conversion.
-
-Trusted connectors may compile as native Rust modules. Untrusted community
-connectors should use WASM with capability-based host functions.
-
----
-
-## 10. Protocol Compilers
-
-### 10.1 REST and OpenAPI
-
-The REST compiler maps:
-
-- Inputs to path, query, header, or body fields.
-- Predicates to documented endpoint filters.
-- Projection to API-specific `fields`, `$select`, sparse fieldsets, or no-op.
-- Ordering to supported sort keys and directions.
-- Response envelopes to item streams.
-- Pagination metadata to a paginator state machine.
-
-OpenAPI can bootstrap types and endpoints, but generated relations still need
-human review. OpenAPI usually does not fully describe filtering semantics,
-pagination consistency, rate limits, or relational identity.
-
-### 10.2 GraphQL
-
-GraphQL is a separate compiler, not REST with a different response decoder.
-
-It must model:
-
-- Root fields and arguments.
-- Object, list, and connection return shapes.
-- Selection-set generation from requested columns.
-- Nested fields and cardinality.
-- Relay pagination.
-- Input enums and custom scalars.
-- Query complexity or depth limits.
-- Stable relation identity.
-
-For generated queries, the compiler should omit unrequested fields from the
-selection set. `@include` directives are useful for prewritten documents but are
-not the required generic representation.
-
-### 10.3 OData and additional compilers
-
-OData is a useful optional compiler because its relational operations are
-explicit: `$filter`, `$select`, `$orderby`, `$top`, and `$skip`. Other protocol
-compilers can be added without changing the common scan contract.
-
----
-
-## 11. Predicate Translation
-
-### 11.1 Predicate representation
-
-Use a protocol-neutral expression tree:
-
-```rust
-pub enum Predicate {
-    True,
-    Compare {
-        column: ColumnId,
-        op: CompareOp,
-        value: ScalarValue,
-    },
-    In {
-        column: ColumnId,
-        values: Vec<ScalarValue>,
-    },
-    IsNull {
-        column: ColumnId,
-        negated: bool,
-    },
-    And(Vec<Predicate>),
-    Or(Vec<Predicate>),
-    Not(Box<Predicate>),
-}
-```
-
-An adapter may support a smaller predicate subset while preserving the same
-plan shape.
-
-### 11.2 Translation result
-
-```rust
-pub struct PredicateTranslation {
-    pub remote: Option<RemotePredicate>,
-    pub residual: Predicate,
-    pub accuracy: PushdownAccuracy,
-    pub reason: Option<String>,
-}
-```
-
-The `reason` supports diagnostics such as:
-
-- “API comparison is case-insensitive; retained as residual.”
-- “Timestamp endpoint accepts day precision only.”
-- “OR across different remote parameters is unsupported.”
-
-### 11.3 Predicate composition
-
-Remote filtering is safe only when it cannot discard a row for which DuckDB's
-predicate is `TRUE`. For a DuckDB predicate `D` and remote predicate `R`, every
-pushed translation must prove `D => R`. `Exact` additionally proves `R => D`.
-
-The planner applies these conservative composition rules:
-
-- `AND`: safe remote approximations may be conjoined. The original subtree
-  remains residual unless the complete conjunction is exact.
-- `OR`: a remote disjunction is safe only when every branch has a safe remote
-  approximation. If any branch is unsupported, the remote result is `TRUE` and
-  the complete disjunction remains residual.
-- `NOT`: negation is pushed only when its child is exact. Negating a superset
-  approximation can create an unsafe subset.
-- `IS NULL`, `IS NOT NULL`, `IN`, `NOT IN`, comparisons, and string predicates
-  are exact only when remote null behavior, coercion, collation, and type
-  conversion match DuckDB.
-- A `NULL` inside `IN` or `NOT IN` is handled with DuckDB three-valued logic;
-  it is never dropped as a request-encoding convenience.
-
-When proof is unavailable, the planner uses `Predicate::True` remotely and
-retains the original expression locally. Property tests cover every composition
-rule against DuckDB evaluation over the same fixture rows.
-
-### 11.4 `IN` fan-out
-
-`IN` over a required lookup key may become multiple independent lookup
-operations only when:
-
-- Each lookup is exact.
-- Result identity is stable.
-- Duplicates are deduplicated or preserved according to SQL semantics.
-- Concurrency is bounded.
-- The source’s rate limit permits fan-out.
-
-This is an operation-planning choice, not a generic filter behavior.
-
----
-
-## 12. Pagination
-
-Pagination is represented as a state machine with explicit capabilities.
-
-```rust
-pub struct PaginationPlan {
-    pub strategy: PaginationStrategy,
-    pub dependency: PageDependency,
-    pub consistency: PageConsistency,
-    pub supports_total: bool,
-    pub supports_resume: bool,
-    pub stable_ordering: Option<Vec<RemoteOrdering>>,
-}
-
-pub enum PageDependency {
-    Sequential,
-    Independent,
-}
-```
-
-### 12.1 Strategies
-
-| Strategy           | Typical signal            | Usually parallelizable? |
-| ------------------ | ------------------------- | ----------------------: |
-| Page number        | `page=N`                  |               Sometimes |
-| Offset             | `offset=N`                |               Sometimes |
-| Opaque cursor      | `next_cursor`             |                      No |
-| Continuation token | `nextPageToken`           |                      No |
-| Link header        | `Link: <...>; rel="next"` |              Usually no |
-| GraphQL Relay      | `pageInfo.endCursor`      |                      No |
-
-### 12.2 Sequential by default
-
-The generic runtime uses sequential pagination by default. A connector may
-opt into independent page fetching only when it declares:
-
-- Independent page addressing.
-- Stable deterministic ordering.
-- Acceptable behavior under concurrent source mutation.
-- A known or discoverable range.
-
-### 12.3 Early exit
-
-Pagination stops when any of these becomes true:
-
-- DuckDB cancels the query.
-- The exact local result limit is satisfied.
-- The source reports no next page.
-- A configured row, page, byte, or time budget is exhausted.
-
-When residual predicates exist, the runtime cannot stop after merely receiving
-`LIMIT N` remote rows. It must continue until `N` rows survive local filtering,
-or the source is exhausted.
-
----
-
-## 13. Column Providers and Lazy Enrichment
-
-Lazy enrichment is modeled as a column-provider graph, not as a second generic
-list operation.
-
-```rust
-pub struct ColumnProviderSpec {
-    pub id: ColumnProviderId,
-    pub requires: Vec<ColumnId>,
-    pub provides: Vec<ColumnId>,
-    pub mode: ProviderMode,
-    pub max_concurrency: usize,
-    pub max_batch_size: Option<usize>,
-}
-
-pub enum ProviderMode {
-    PerRow,
-    Batch,
-    Singleton,
-}
-```
-
-```mermaid
-flowchart LR
-    BASE[Base repository row] --> ID[full_name available]
-    ID --> META[Metadata provider]
-    ID --> HOOKS[Hooks provider]
-    META --> LICENSE[License provider]
-
-    META --> C1[description]
-    META --> C2[topics]
-    HOOKS --> C3[hooks]
-    LICENSE --> C4[license_text]
-```
-
-Rules:
-
-1. Only providers needed by the requested projection are scheduled.
-2. Providers that supply multiple columns execute once per applicable row or
-   batch.
-3. Dependencies form an acyclic graph validated at connector load time.
-4. Per-row calls are bounded by provider and connection concurrency limits.
-5. Batch providers are preferred when the source supports multi-key lookup.
-6. Provider output cannot change relation cardinality.
-7. A missing provider value fails by default. It may become `NULL` only when
-   every affected column is nullable and the connector explicitly declares
-   unambiguous absence semantics; authentication and policy errors always fail.
-
-### 13.1 Retry boundary
-
-The correctness invariant is:
-
-> Never replay an operation after output from that operation’s replay unit has
-> been committed to DuckDB.
-
-Examples:
-
-- A page request can retry before any row from that page is emitted.
-- A per-row provider can retry before that row is emitted, even if prior rows
-  have already been returned.
-- A batch provider can retry before any row in the batch is committed.
-
-This is more precise than disabling all retries after the query emits its first
-row.
-
----
-
-## 14. Authentication, Secrets, and Network Security
-
-### 14.1 DuckDB secret integration
-
-Credentials should integrate with DuckDB’s secret model rather than live only in
-connector YAML or environment variables.
-
-Connector definitions refer to logical secret fields:
-
-```yaml
-secret_schema:
-  provider: github
-  fields:
-    token:
-      required: true
-      sensitive: true
-```
-
-The user supplies a named secret through DuckDB. The runtime resolves it into a
-short-lived auth context for the query.
-
-### 14.2 Auth providers
-
-Built-in providers are selected by connector demand. Useful providers include:
-
-- Bearer token.
-- Basic auth.
-- OAuth2 client credentials.
-- OAuth2 refresh token.
-- GitHub App installation token.
-- AWS SigV4.
-
-Each provider implements request decoration and refresh without exposing raw
-secret material to transforms or unrelated hosts.
-
-### 14.3 Capability-based network policy
-
-A declarative HTTP connector is also an SSRF and secret-exfiltration surface.
-Every connector or connection needs explicit capabilities:
-
-```yaml
-network_policy:
-  allowed_hosts:
-    - api.github.com
-  allowed_schemes: [https]
-  redirects: same_origin
-  private_ips: deny
-  link_local_ips: deny
-  max_response_bytes: 104857600
-  max_decompressed_bytes: 524288000
-  connect_timeout_ms: 10000
-  request_timeout_ms: 60000
-
-secret_bindings:
-  github_token:
-    allowed_hosts: [api.github.com]
-    allowed_auth_providers: [bearer]
-    allowed_headers: [Authorization]
-```
-
-Required defenses include:
-
-- DNS resolution and private-address checks on every redirect.
-- Same-origin or allowlisted redirects.
-- Response and decompressed-size limits.
-- Header and URL logging redaction.
-- TLS verification enabled by default.
-- Disabled access to cloud metadata endpoints by default.
-- No arbitrary filesystem or process access for WASM connectors.
-
-WASM protects host memory. It does not replace network and secret policy.
-
-### 14.4 Host-enforced resource budgets
-
-Every scan runs under a host budget that a connector may narrow but never
-widen:
-
-```rust
-pub struct ResourceBudget {
-    pub max_requests: u64,
-    pub max_pages: u64,
-    pub max_rows: u64,
-    pub max_response_bytes: u64,
-    pub max_decompressed_bytes: u64,
-    pub max_provider_calls: u64,
-    pub max_wall_time: Duration,
-    pub max_concurrency: usize,
-}
-```
-
-Budget exhaustion is a stable policy error with counters describing the limit
-that was reached. Rate limits protect the upstream service; resource budgets
-protect the DuckDB process and the user from unexpectedly expensive scans.
-
-Network, secret, response-size, decompression, timeout, proxy, and budget
-enforcement are prerequisites of remote execution. They are not optional
-hardening layers.
-
----
-
-## 15. Rate Limiting and Retry
-
-### 15.1 Rate limits
-
-Rate limits are shared across relations that use the same upstream quota.
-
-```rust
-pub struct RateLimitDefinition {
-    pub name: String,
-    pub fill_rate_per_second: f64,
-    pub bucket_size: u64,
-    pub max_concurrency: u64,
-    pub scope: Vec<ScopeDimension>,
-    pub selector: Option<CallSelector>,
-}
-```
-
-Typical scope dimensions:
-
-- Connection or secret principal.
-- API service.
-- Tenant, workspace, region, or account.
-- Endpoint family.
-
-A call may be subject to multiple limiters. Acquisition must avoid holding one
-scarce permit while waiting indefinitely for another.
-
-The runtime should also learn from server signals where available:
-
-- `Retry-After`.
-- Remaining-quota headers.
-- Reset timestamps.
-- GraphQL cost budgets.
-
-### 15.2 Retry policy
-
-```rust
-pub struct RetryPolicy {
-    pub max_attempts: u32,
-    pub max_elapsed: Duration,
-    pub backoff: BackoffStrategy,
-    pub retryable_statuses: BTreeSet<u16>,
-    pub retry_transport_errors: bool,
-    pub respect_retry_after: bool,
-}
-```
-
-Retry only operations whose declared and validated replay safety is `Safe`.
-Do not retry:
-
-- Cancellation.
-- Authentication failures that refresh cannot resolve.
-- Schema or decoding errors.
-- Policy violations.
-- Requests whose replay unit has emitted output.
-
-Status outcome mappings, such as treating a lookup `404` as an empty relation,
-must be explicit per operation.
-
----
-
-## 16. Caching and Single-Flight
-
-Caching is deliberately conservative.
-
-### 16.1 Cache layers
-
-1. **HTTP validation cache** using `ETag`, `If-None-Match`,
-   `Last-Modified`, and `If-Modified-Since` where supported.
-2. **Exact request cache** keyed by normalized request identity.
-3. **Single-flight** for identical in-flight requests.
-4. **Per-query provider memoization** for identical enrichment calls.
-
-### 16.2 Cache identity
-
-Cache keys must include all values that can affect the response:
-
-- Connector and connector-spec version.
-- Auth principal or tenant identity, without storing raw secrets.
-- Method, URL, query, and relevant request body.
-- Relevant headers and API version.
-- Projection or field selection.
-- Pagination cursor or page.
-- Source-specific locale and time-zone settings.
-
-### 16.3 Predicate-subsumption cache exclusion
-
-Serving a narrower query from a broader cached query is outside this cache
-contract. It requires
-proof that the cached result is complete, compatible, sufficiently projected,
-and semantically exact. That is a query optimizer and materialized-view problem,
-not an exact-request cache feature.
-
-### 16.4 DuckDB materialization
-
-DuckDB already provides the durable snapshot path:
-
-```sql
-CREATE TABLE repository_snapshot AS
-SELECT *
-FROM github_repository();
-```
-
-Export to Parquet is explicit:
-
-```sql
-COPY (
-    SELECT * FROM github_repository()
-) TO 'repository_snapshot.parquet' (
-    FORMAT parquet
-);
-```
-
-These are DuckDB capabilities over any scan source, not a special connector
-cache layer.
-
----
-
-## 17. Schema and Catalog Behavior
-
-### 17.1 Static schema
-
-Static relations are versioned with the connector definition. An API adding an
-unknown response field does not mutate the relation. Removing or changing a
-required field produces a decoding or compatibility error until the connector
-is updated.
-
-### 17.2 Dynamic schema
-
-Dynamic relations may discover columns from an explicit metadata endpoint or
-GraphQL introspection. Discovery occurs during an explicit operation such as:
-
-```sql
-CALL api_refresh_schema('github', 'dynamic_relation');
-```
-
-A catalog adapter may expose `REFRESH` semantics. Planning must not
-silently make arbitrary discovery requests after a missing-column error.
-
-### 17.3 Type conversion
-
-Every column defines:
-
-- DuckDB logical type.
-- Source extraction expression.
-- Missing-value behavior.
-- Null behavior.
-- Optional source type metadata.
-
-Conversion is strict: incompatible values, overflow, and precision loss fail
-the query. A permissive conversion mode would require an explicit connector
-syntax and compiled runtime contract and is not implied by this design.
-
----
-
-## 18. Observability and Explainability
-
-An API scan must be diagnosable without exposing secrets.
-
-### 18.1 Plan explanation
-
-Provide an explain helper in the table-function product:
-
-```sql
-SELECT *
-FROM api_explain_scan(
-    connector := 'github',
-    relation := 'repository',
-    inputs := {'full_name': 'duckdb/duckdb'}
-);
-```
-
-It should show:
-
-- Selected operation.
-- Remote and residual predicates.
-- Pushdown accuracy.
-- Remote projection.
-- Pagination mode.
-- Required column providers.
-- Remote and local limits/orderings.
-- Estimated request count and cardinality when known.
-
-Example conceptual output:
+The central contract is:
 
 ```text
-operation: get_repository
-remote predicate: full_name = 'duckdb/duckdb' [exact]
-residual predicate: TRUE
-remote projection: id, full_name, stargazers_count
-pagination: none
-providers: none
-remote limit: 1
+package source
+    -> immutable CompiledPackageGeneration
+    -> typed ScanRequest
+    -> immutable ScanPlan
+    -> bounded BatchStream
+    -> DuckDB vectors
 ```
 
-### 18.2 Runtime metrics
+Each transition has one owner. Source syntax cannot become runtime authority,
+SQL names cannot become relational meaning, and received network data cannot
+widen a compiled plan.
 
-Collect per-query and per-connection counters:
+## Product surface
 
-- Requests started, completed, retried, and failed.
-- Rows and bytes decoded.
-- Time waiting on rate limits.
-- Cache hits and misses.
-- Pages fetched.
-- Provider calls and batches.
-- Residual rows rejected.
-- Time to first row.
-- Peak buffered bytes.
+An author explicitly loads an absolute local package root:
 
-### 18.3 Logging
-
-Structured logs must redact:
-
-- Authorization headers.
-- Secret query parameters.
-- Sensitive request bodies.
-- Connector-defined sensitive inputs.
-
----
-
-## 19. Error Model
-
-Errors should preserve source context while remaining stable for SQL clients.
-
-```rust
-pub enum ConnectorErrorKind {
-    Configuration,
-    Authentication,
-    Authorization,
-    RateLimited,
-    Transport,
-    Timeout,
-    RemoteResponse,
-    Decode,
-    Schema,
-    Policy,
-    Cancelled,
-    Internal,
-}
+```sql
+CALL duckdb_api_load_connector(
+    package_root := '/absolute/path/to/github'
+);
 ```
 
-Each error includes:
+An accepted package publishes one table function per relation in
+`system.main`, named:
 
-- Connector and relation.
-- Operation.
-- Redacted endpoint identity.
-- Retryability.
-- Source status or error code.
-- Whether any output in the replay unit was committed.
-- A user-facing message and optional diagnostic detail.
+```text
+<connector_id>_<relation_id>
+```
 
-SQL errors should not expose access tokens, signed URLs, or sensitive payloads.
+The repository GitHub package therefore exposes:
 
----
+```sql
+FROM github_duckdb_login_search_page();
 
-## 20. Testing Strategy
+FROM github_authenticated_user(
+    secret := 'github_default'
+);
 
-### 20.1 Unit tests
+FROM github_authenticated_repositories(
+    secret := 'github_default'
+);
 
-- Predicate classification and residual generation.
-- Limit-safety decisions.
-- Ordering compatibility.
-- Pagination state machines.
-- Provider DAG validation.
-- Secret host restrictions.
-- Cache-key normalization.
-- Retry replay boundaries.
-- Type conversion and null behavior.
+FROM github_viewer_repository_metrics(
+    secret := 'github_default'
+);
+```
 
-### 20.2 Contract tests
+Relation inputs become named arguments. Authenticated relations additionally
+receive the reserved `secret VARCHAR` Query argument. Connector and relation
+identity are captured by the registered function and are not caller
+arguments.
 
-Every connector runs against recorded fixtures that validate:
+Reload uses the active connector's retained canonical root:
 
-- Bound schema.
-- Generated requests.
-- Pagination transitions.
-- Projection behavior.
-- Exact and residual predicates.
-- Error mapping.
-- Cancellation.
-- Rate-limit response handling.
+```sql
+CALL duckdb_api_reload_connector(connector := 'github');
+```
 
-Recorded tests must preserve headers and pagination signals while removing
-secrets and personal data.
+Load and reload return connector, package version, spec version, package
+digest, relation count, and whether publication changed. Three read-only table
+functions expose active connector, relation, and argument metadata without
+package roots or credentials:
 
-### 20.3 Property tests
+```sql
+FROM duckdb_api_loaded_connectors();
+FROM duckdb_api_loaded_relations();
+FROM duckdb_api_relation_arguments();
+```
 
-Useful properties include:
+The `0.8.0` product retains the native `duckdb_api_scan` dispatcher for its
+four `0.7.0` preview relations as a deprecated migration surface. It is not an
+active package and does not appear in package introspection. `0.9.0` removes
+that dispatcher before the public API candidate is frozen.
 
-- Remote exact predicate plus no residual equals local DuckDB evaluation over
-  the same fixture.
-- Superset pushdown followed by residual filtering equals local evaluation.
-- Retrying before replay-unit commit does not duplicate rows.
-- Pagination emits every fixture item exactly once in stable sources.
-- Projection changes requests but not values of retained columns.
+## Responsibility boundaries
 
-### 20.4 Controlled and live tests
+| Boundary | Owns | Does not own |
+| --- | --- | --- |
+| Connector Experience | Source custody, YAML, closed validation, compilation, package identity, diagnostics, compatibility, fixtures, immutable metadata | DuckDB catalog mutation, relational implication, transport, credentials |
+| Query Experience | DuckDB names and arguments, bind, catalog MVCC publication, management/introspection SQL, vector output, user diagnostics | Package parsing, defaults, operation selection, request policy |
+| Relational Semantics | Input resolution, operation selection, predicate implication, residual ownership, budget intersection, `ScanPlan` | Package syntax, DuckDB catalog state, network execution |
+| Remote Runtime | Plan admission, authorization, requests, transport, decode, pagination, resources, streams, generation retention | YAML, SQL names, relational proof, catalog timestamps |
+| Lead composition | Connects bounded team services and owns one observable publication point | A new catch-all subsystem or second semantic model |
 
-Deterministic controlled services are the correctness oracle for exact
-requests, rows, relational operators, failures, cancellation, and teardown.
-Separate live tests verify current upstream compatibility under strict budgets;
-they are not the primary correctness oracle and normal CI must not depend on
-changing public row identity or order.
+Source modules follow those responsibilities rather than a team-directory
+facade. Focused targets link provider services; consumers do not compile a
+provider's production sources or import its private builders.
 
----
+## Immutable generations
 
-## 21. Validation Connector Corpus
+Package compilation yields one shared `CompiledPackageGeneration`:
 
-The design is continuously validated against connectors that stress different
-parts of the abstraction. They form a compatibility corpus for every supported
-implementation.
+```text
+identity
+├── spec identifier
+├── connector identifier
+├── package SemVer
+└── source digest
 
-### GitHub
+ordered relations
+├── structural outputs and nullability
+├── structural inputs and typed default presence
+├── authentication shape
+├── operations and selectors
+├── predicates and proof facts
+├── network and resource envelope
+└── safe source coordinates and explanation
+```
 
-Validates:
+The generalized compiled model is the only semantic model for package and
+native migration behavior. The compiler does not retain an independently
+authoritative YAML-shaped model.
 
-- Get versus list routing.
-- Link and page-number pagination.
-- REST plus possible GraphQL compiler work.
-- Projection-dependent selection.
-- Per-row and batch enrichment.
-- Multiple auth modes.
+Query receives only package identity, ordered structural outputs and inputs,
+typed defaults, authentication shape, safe source references, and an opaque
+generation handle. It cannot inspect protocol, predicate, policy, or compiler
+state. Semantics receives the complete compiled facts. Runtime receives only
+the resulting plan.
 
-### Stripe
+Generation state is immutable after construction. A bound function, prepared
+plan, transaction, introspection scan, or active remote scan retains shared
+ownership of the exact generation it observed. Reload never changes an
+accepted plan or redirects execution to a newer generation by name.
 
-Validates:
+## Package compilation
 
-- Cursor pagination.
-- Nested objects.
-- Stable resource IDs.
-- Expandable fields and optional enrichment.
-- Strict account-scoped secret identity.
+Compilation performs local work only:
 
-### Slack or an OData service
+1. Open the explicit absolute root and every admitted leaf without following
+   links.
+2. Capture deterministic directory and file identity before the first read.
+3. Read a bounded immutable semantic-source snapshot.
+4. Repeat directory and file identity capture and reject any change.
+5. Compute the length-framed source digest.
+6. Parse the bounded YAML failsafe subset with source spans.
+7. Apply the exact byte-copied v1 schemas.
+8. Validate identifiers, references, types, selectors, auth, policy, resources,
+   predicates, REST, and generated GraphQL.
+9. Construct and validate the complete immutable generation.
+10. Classify compatibility against any active generation.
 
-Slack validates workspace partitions, cursor pagination, and rate-limit
-pressure. OData validates broad declarative predicate, projection, ordering,
-and limit translation.
+Compilation performs no network I/O and resolves no credential. Unsupported,
+unknown, unsafe, stale, or over-budget source produces bounded deterministic
+diagnostics and no candidate generation.
 
-CSV-over-HTTP is not a core connector test because DuckDB already has a strong
-remote-file path.
+The complete author syntax and resource ceilings are defined in
+[CONNECTOR_SPECIFICATIONS.md](CONNECTOR_SPECIFICATIONS.md).
 
----
+## Query binding and planning
 
-## 22. Hard Parts
+Ordinary bind, `DESCRIBE`, `EXPLAIN`, and `PREPARE` read no package source,
+resolve no secret, and perform no network I/O.
 
-1. **Semantic pushdown.** Mapping syntax is easy; proving equivalence across
-   collation, nulls, time precision, and source behavior is hard.
-2. **Limit correctness.** Residual predicates and unstable pagination make
-   apparently simple limit pushdown incorrect.
-3. **GraphQL relation design.** A schema graph does not automatically define
-   sensible flat relations.
-4. **Auth lifecycle.** Refresh, installation tokens, signing, tenant identity,
-   and revocation vary significantly.
-5. **Network security.** A connector with secrets and arbitrary URLs is a
-   privileged execution surface.
-6. **Hydration economics.** Rich schemas can silently become thousands of API
-   calls without projection awareness, batching, and budgets.
-7. **Pagination consistency.** Mutable datasets can duplicate or omit rows even
-   when the paginator implementation is mechanically correct.
-8. **DuckDB version coupling.** Catalog and optimizer hooks may require tracking
-   DuckDB internals across releases.
-9. **Error reproducibility.** Live APIs change, so fixture capture and request
-   explanations are essential.
-10. **Declarative-language restraint.** The spec must not become an unsafe,
-    poorly implemented programming language.
+The generated relation function captures connector and relation identity from
+its immutable registration descriptor. Query converts only explicitly supplied
+named relation arguments into ordered structural inputs:
 
----
+- absence means omitted;
+- a present SQL NULL remains a typed present NULL; and
+- a present value retains its `BOOLEAN`, `BIGINT`, or `VARCHAR` type.
 
-## 23. Unresolved Design Questions
+Query does not apply defaults or binder-requiredness to relation-origin
+arguments. It synthesizes and validates the separate logical secret selector
+for authenticated relations, but never resolves the secret during bind.
 
-- Which DuckDB API capability profiles and versions are supported by automated
-  compatibility tests?
-- Should input parameters remain table-function-only, or should the portable
-  layer generate virtual-column views for predicate ergonomics?
-- Which transforms belong in Tier 2, and which require connector code?
-- How should dynamic GraphQL relations be named and flattened?
-- Is a custom attached catalog materially better than generated schemas and
-  macros for real workloads?
-- What signed-native versus WASM trust model is acceptable for community
-  connectors?
-- How should connector specifications be packaged, versioned, and distributed?
-- Can DuckDB’s standard `EXPLAIN` be enriched without relying on unstable
-  optimizer internals, or is a connector-specific explain function sufficient?
+Query supplies the full output-schema closure and every bounded DuckDB
+predicate structure it can observe. Missing DuckDB capabilities are false
+facts, not permission to reconstruct SQL text.
 
----
+Relational Semantics then:
 
-## 24. Reference Systems and What We Reuse
+1. validates generation, relation, request, and adapter capabilities;
+2. resolves omitted, NULL, and typed relation-input values;
+3. applies a default only to an omitted input;
+4. derives candidate-local conditional predicate inputs;
+5. selects one eligible operation or fails a tie/missing fallback;
+6. classifies every possible remote predicate as exact, superset, unsupported,
+   or ambiguous from structured proof facts;
+7. computes the complete projection closure and intersects all budgets; and
+8. produces one immutable `ScanPlan` with exact residual ownership.
 
-### DuckDB Postgres extension and shared database connector patterns
+Planning is deterministic and side-effect free.
 
-Reuse conceptually:
+## Relational correctness
 
-- Bind, global state, local state, and scan separation.
-- Projection and filter information at scan time.
-- Cardinality and progress hooks.
-- Connection pooling.
-- Optional optimizer integration as a separate capability profile.
+Remote work is an optimization. DuckDB owns correctness.
 
-Do not assume database-oriented connector internals are a stable reusable SDK
-for HTTP adapters.
+For DuckDB predicate `D` and remotely applied predicate `R`, safe pushdown
+requires:
 
-### Steampipe Plugin SDK
+```text
+D implies R
+```
 
-Reuse conceptually:
+Exact pushdown additionally requires:
 
-- Shared connector metadata.
-- Required key columns.
-- Partition fan-out.
-- Scoped multi-dimensional rate limits.
-- Retry and status-outcome policies.
-- Lazy-column economics and function-level deduplication.
-- Strong fixture-based plugin testing.
+```text
+R implies D
+```
 
-Change:
+The proof domain is an occurrence bag, not merely a set of equal row values.
+Duplicate multiplicity, SQL three-valued logic, unknown restricted
+occurrences, changed rows, extra rows, and lost true rows are part of the law.
 
-- Use an explicit relational `ScanPlan`.
-- Keep DuckDB execution pull-oriented.
-- Provide paginator state machines centrally.
-- Separate base scans from cardinality-preserving column providers.
-- Make pushdown accuracy explicit.
+Every residual has exactly one owner. The extension retains every DuckDB
+predicate offered to it, including predicates whose remote mapping is exact.
+Projection, ordering, limit, and offset remain DuckDB-owned in the v1 package
+contract. Limit and offset apply only after required filtering and ordering.
 
-### Steampipe GitHub plugin
+Provider or pagination values cannot make a base operation eligible. A
+superset restriction retains the complete DuckDB residual. Unsupported or
+ambiguous structure uses the unrestricted fallback only when that fallback is
+complete and eligible; invalid state produces no plan.
 
-Reuse as a concrete source of API patterns:
+## Execution and authorization
 
-- Multiple pagination styles.
-- Qualifier-to-request translation.
-- Projection-aware GraphQL selection.
-- Auth client reuse.
-- Rate-limit error classification.
-- Endpoint-specific enrichment.
+Runtime admission validates the complete closed `ScanPlan` before credential
+materialization, DNS, socket creation, or transport observation. Admission is
+based on typed executable facts and content identity, never connector ID,
+relation name, package version, source path, SQL name, or explanation prose.
 
-### DuckDB extension surfaces
+An authenticated scan carries a logical DuckDB secret reference until global
+execution initialization. Query resolves exactly that name through the pinned
+Secret Manager integration and moves an opaque authorization capability into
+Runtime. Runtime validates authenticator, placement, destination, and network
+policy before decorating a request. The credential value never enters package
+source, compiled explanation, `ScanPlan`, diagnostics, fixtures, digests, or
+catalog introspection.
 
-- Current DuckDB extensions overview: <https://duckdb.org/docs/current/extensions/overview.html>
-- Experimental Rust C Extension API template: <https://github.com/duckdb/extension-template-rs>
-- C/C++ C Extension API template: <https://github.com/duckdb/extension-template-c>
-- DuckDB Postgres extension: <https://github.com/duckdb/duckdb-postgres>
-- DuckDB documentation: <https://duckdb.org/docs/current/>
+The host and package network policies are intersected. Package policy can
+narrow but never widen exact HTTPS origin, redirect, proxy, private/link-local/
+loopback address, cookie, netrc, TLS, header, or response authority.
 
-### Other inspirations
+## Requests, responses, and pagination
 
-- PostgreSQL FDW and Multicorn for adapter-contract thinking.
-- OpenAPI for endpoint and type bootstrapping.
-- OData for explicit relational query semantics.
-- Airbyte and Singer for connector packaging lessons, though not for execution
-  semantics.
+REST and GraphQL have distinct compiled and planned operation values. They
+share authorization, policy, resource accounting, transport, cancellation,
+and stream machinery; they do not share an untyped request language.
 
----
+Runtime constructs the initial request from the admitted plan. Received Link
+metadata and GraphQL cursors are untrusted continuation data. A continuation
+may change only the validated next-page component within the compiled exact
+target. It cannot change scheme, host, port, path, credential placement, fixed
+query fields, document, operation, or resource policy.
 
-## 25. Decision Summary
+Pagination is sequential unless independence and consistency are proven. The
+v1 package contract supports only sequential mutable Link or forward Relay
+cursor traversal with one page in flight. No prefetch, parallel page work,
+retry, cache, resume, deduplication, stable ordering, or snapshot claim is
+implied.
 
-| Area                       | Decision                                                               |
-| -------------------------- | ---------------------------------------------------------------------- |
-| Native product             | V1 lineage: C++ table-function extension on an exact evidence-derived matrix; current unreleased `0.7.0` source has four fixed GitHub relations across REST and one closed GraphQL query profile, plus one retained REST superset `visibility = 'private'` restriction |
-| Portable integration       | Possible post-v1 Rust C Extension API profile requiring its own RFC and parity evidence |
-| Deep integration           | Possible post-v1 thin C++ catalog/optimizer shell                      |
-| Core abstraction           | `ScanRequest` → explicit `ScanPlan` → `BatchStream`                    |
-| DuckDB metadata            | Capability-profiled; unavailable metadata uses conservative defaults  |
-| Pushdown                   | Exact, superset, or unsupported with residual work                     |
-| Residual ownership         | Exactly one of DuckDB or the runtime evaluates each residual           |
-| SQL inputs                 | Separate named inputs from returned columns                            |
-| Execution                  | Pull-oriented at DuckDB boundary; bounded async internally             |
-| Pagination                 | Sequential generic runtime; parallel only by declared proof            |
-| Enrichment                 | Cardinality-preserving column providers with DAG dependencies; outside the accepted v1 package subset unless separately proven |
-| REST vs GraphQL            | Separate protocol compilers over a shared runtime                      |
-| Auth                       | DuckDB secrets plus capability-scoped providers                        |
-| Security                   | Host allowlists, redirect policy, private-IP blocking, size limits     |
-| Resource safety            | Host-enforced request, page, row, byte, time, provider, and concurrency budgets |
-| Retry                      | Per replay unit; never after commitment; author-configurable retry is outside the accepted v1 subset unless separately proven |
-| Cache                      | Exact-only design; author-configurable cache and single-flight are outside the accepted v1 subset unless separately proven |
-| Schema drift               | Versioned static schema; explicit refresh for dynamic schema           |
-| Declarative spec           | Ground abstractions in multiple independently implemented connectors  |
-| Materialization            | Native DuckDB CTAS or explicit Parquet export                          |
+Response decoding is strict and lossless for the planned structural type.
+Every output batch has the planned arity and kind. Missing required fields,
+wrong JSON types, lossy integers, schema drift, GraphQL errors, invalid
+pagination, and resource exhaustion are terminal failures, not partial success
+or fallback.
 
-The design succeeds when connector authors can focus on the semantics of one API
-while DuckDB users receive predictable relational behavior, and when every
-optimization can be disabled without changing query correctness.
+## Bounded streaming lifecycle
+
+`ScanExecutor::Open` is deterministic and performs no network I/O. The first
+pull begins the single scan deadline and the first possible request. A
+`BatchStream` is pull-driven:
+
+- `Next == true` yields one nonempty schema-aligned batch;
+- `Next == false` alone means clean exhaustion; and
+- any error is terminal and stable on repeated pulls.
+
+Work is bounded by page, scan, response, record, extracted-string, generated
+document/body, retained-memory, and elapsed-time ceilings. Arithmetic is
+checked unsigned arithmetic; values are never wrapped, clamped, or treated as
+unlimited.
+
+Pagination respects backpressure and has at most one request in progress.
+Decoded page state is released before requesting the next page. Cancellation
+is checked during request construction, transport, decode, page transition,
+batch transfer, compilation, and publication waiting. `Cancel`, `Close`, and
+destructors are non-throwing and idempotent. Terminal failure, cancellation,
+early close, or destruction releases transport, response, decoded page,
+continuation, authorization, and admitted-plan state.
+
+V1 performs one attempt. A declaration of replay safety is necessary but not
+sufficient for a future retry; an uncommitted replay unit would also be
+required.
+
+## Atomic catalog publication
+
+Package compilation and Runtime staging happen outside the Query publication
+lock. At the publication point, Query:
+
+1. acquires a cancelable DatabaseInstance-scoped publication guard;
+2. rejects a stale base generation;
+3. checks the complete candidate name set case-insensitively against candidate,
+   active-package, table-function/overload, and table-macro owners;
+4. begins one DuckDB system-catalog transaction;
+5. replaces only names owned by the same connector and refreshes management
+   and introspection functions against the same immutable registry snapshot;
+6. commits or rolls back while still holding the guard; and
+7. releases an unpublished candidate on every failure path.
+
+There is one observable commit point: DuckDB catalog MVCC. The system does not
+publish a second independently visible mutable registry.
+
+Load fails if the connector ID is already active. Reload uses Connector's
+normalized compatibility result. An identical digest is a successful no-op.
+Any collision, stale publisher, cancellation, incompatibility, catalog error,
+or late failure leaves every old function and registry entry usable.
+
+Management calls are DatabaseInstance-scoped administrative operations. They
+require autocommit, reject multiple invocations in one statement, perform work
+only on the first materialized pull, and follow DuckDB relational demand. A
+transaction that predates publication continues to observe its complete old
+catalog and registry snapshot until it ends.
+
+The DatabaseInstance-owned lifecycle sentry rejects queued and future
+publication after close, lets a lock owner drain, and releases generations
+after their final owners. The pinned DuckDB profile does not provide an
+active-shutdown callback; dynamic extension DSO unload remains unsupported.
+
+## Diagnostics and explanation
+
+Connector compilation, Semantics planning, Runtime execution, and Query
+publication own distinct structured errors. Query maps them at one DuckDB
+exception boundary.
+
+Safe diagnostics may contain stable codes, phases, structural identifiers,
+bounded field names, and safe package-relative source coordinates. They never
+contain absolute roots, YAML scalar content, secret names or values, generated
+GraphQL documents, request bodies, response bodies, rows, cursors, or remote
+messages.
+
+Explanation is derived from typed immutable facts and is never parsed for
+authority. It distinguishes operation/protocol identity, predicate accuracy,
+residual owner, pagination strategy, resource envelope, and safe provenance
+without claiming unsupported ordering, snapshot, retry, cache, or remote
+relational behavior.
+
+## Compatibility and support boundary
+
+The implementation is a native C++ DuckDB table-function extension on the
+exact tested DuckDB and platform dependency cell. The compiled types and
+private builders are not a public binary plugin ABI.
+
+`duckdb_api/v1` is the stable local-package syntax family defined by
+[CONNECTOR_SPECIFICATIONS.md](CONNECTOR_SPECIFICATIONS.md). Package SemVer
+does not grant execution authority. Reload compatibility is a normalized
+compiled-descriptor decision, not an inference from version alone.
+
+The product is read-only and static-schema. It does not promise writes,
+cross-source transactions, snapshot consistency, remote ordering, arbitrary
+GraphQL, dynamic schema discovery, package distribution, automatic connector
+discovery, OpenAPI import, custom native/WASM code, providers, partitions,
+retries, caching, or a custom DuckDB storage catalog. Adding those capabilities
+requires an accepted contract and executable evidence; implementations must
+reject unsupported declarations rather than silently ignore them.
+
+## Verification boundary
+
+Correctness is proven primarily with deterministic controlled fixtures:
+
+- closed schema and YAML mutation tests;
+- source identity and digest vectors;
+- input/selector and relational law matrices;
+- exact request, response, pagination, resource, and failure observations;
+- native/package differentials for all four GitHub relations;
+- actual DuckDB bind, prepare, repeat, composition, collision, reload, MVCC,
+  cancellation, and shutdown tests; and
+- clean-host build and direct-load evidence on the pinned product cell.
+
+Live services are compatibility probes, not correctness oracles. They never
+record credentials, personal data, response samples, or remote messages.
+
+The internal value and lifecycle contracts are specified in
+[RUNTIME_CONTRACTS.md](RUNTIME_CONTRACTS.md). Team accountability and delivery
+process are defined separately in `docs/TEAM_TOPOLOGY.md` and
+`docs/PRODUCT_DELIVERY.md`; they do not change runtime behavior.
