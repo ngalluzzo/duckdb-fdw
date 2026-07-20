@@ -11,6 +11,7 @@ set(RELATIONAL_PLANNER_SOURCES
     src/semantics/input_resolution.cpp
     src/semantics/operation_selection.cpp
     src/semantics/predicate_classifier.cpp
+    src/semantics/rest_operation_planner.cpp
     src/semantics/scan_planner.cpp
     src/semantics/scan_planner_validation.cpp)
 set(RELATIONAL_PLANNING_SOURCES

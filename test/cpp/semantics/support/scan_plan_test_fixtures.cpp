@@ -73,6 +73,7 @@ public:
 	static duckdb_api::ScanPlan DistinctRestQueryPath(const std::string &secret_name);
 	static duckdb_api::ScanPlan Graphql(const std::string &secret_name, GraphqlLocalResidualProfile profile);
 	static bool RejectsRestQueryBinding(RestQueryBindingConstructionCounterexample counterexample);
+	static bool RejectsPackagePredicateMaterialization(PackagePredicatePlanCounterexample counterexample);
 
 private:
 	static duckdb_api::ScanPlan Common(std::string connector, std::string version, std::string relation,
@@ -347,14 +348,21 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::DistinctRestQueryPath(const std::st
 	                       {"active", "compat-boolean", false, "compat-active-path"}};
 	EnablePagination(plan, "page_size", 25, "page", 4, 1024, 4096, 25, 100, 128);
 	RequireBearer(plan, secret_name);
-	plan.remote_predicate = duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN;
-	plan.remote_accuracy = duckdb_api::RemotePredicateAccuracy::UNSUPPORTED;
-	plan.residual_predicate = duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER;
-	plan.conditional_input = duckdb_api::PlannedConditionalInput::NONE;
-	plan.predicate_category = duckdb_api::PredicateDecisionCategory::UNSUPPORTED;
-	plan.predicate_reason = duckdb_api::PredicateDecisionReason::MAPPING_UNAVAILABLE;
+	plan.remote_predicate = duckdb_api::PlannedPredicate::TYPED_EQUALITY;
+	plan.remote_accuracy = duckdb_api::RemotePredicateAccuracy::SUPERSET;
+	plan.residual_predicate = duckdb_api::PlannedPredicate::TYPED_EQUALITY;
+	plan.conditional_input = duckdb_api::PlannedConditionalInput::REST_QUERY_BINDING;
+	plan.typed_equality =
+	    std::shared_ptr<const duckdb_api::PlannedEqualityPredicate>(new duckdb_api::PlannedEqualityPredicate(
+	        "label", duckdb_api::PlannedPredicateOperator::EQUALS, duckdb_api::PlannedRestScalarKind::VARCHAR, false, 0,
+	        "private", "visibility", "sha256.package-proof-activity-private",
+	        "sha256.package-domain-activity-occurrences",
+	        duckdb_api::PlannedOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES));
+	plan.predicate_category = duckdb_api::PredicateDecisionCategory::SUPERSET;
+	plan.predicate_reason = duckdb_api::PredicateDecisionReason::SELECTED_SUPERSET_MAPPING;
 	plan.classification_reason =
-	    "query/path fixture intentionally withholds package predicate authority until generic materialization";
+	    "generic typed equality selects one exact conditional source id while DuckDB retains the predicate";
+	plan.ValidatePredicateMaterialization();
 	return plan;
 }
 
@@ -439,6 +447,73 @@ bool ScanPlanFixtureBuilder::RejectsRestQueryBinding(RestQueryBindingConstructio
 		                                          std::move(encoded_value));
 		return false;
 	} catch (const std::invalid_argument &) {
+		return true;
+	}
+}
+
+bool ScanPlanFixtureBuilder::RejectsPackagePredicateMaterialization(PackagePredicatePlanCounterexample counterexample) {
+	auto plan = DistinctRestQueryPath("predicate_materialization_law_secret");
+	switch (counterexample) {
+	case PackagePredicatePlanCounterexample::MISSING_TYPED_EQUALITY:
+		plan.typed_equality.reset();
+		break;
+	case PackagePredicatePlanCounterexample::NATIVE_REMOTE_DISCRIMINANT:
+		plan.remote_predicate = duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE;
+		break;
+	case PackagePredicatePlanCounterexample::CONDITIONAL_INPUT_NONE:
+		plan.conditional_input = duckdb_api::PlannedConditionalInput::NONE;
+		break;
+	case PackagePredicatePlanCounterexample::UNKNOWN_CONDITIONAL_INPUT:
+		plan.conditional_input = static_cast<duckdb_api::PlannedConditionalInput>(127);
+		break;
+	case PackagePredicatePlanCounterexample::RESIDUAL_TRUE:
+		plan.residual_predicate = duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN;
+		break;
+	case PackagePredicatePlanCounterexample::ACCURACY_CATEGORY_MISMATCH:
+		plan.predicate_category = duckdb_api::PredicateDecisionCategory::EXACT;
+		break;
+	case PackagePredicatePlanCounterexample::EXACT_WITH_SUPERSET_OCCURRENCE_LAW:
+		plan.remote_accuracy = duckdb_api::RemotePredicateAccuracy::EXACT;
+		plan.predicate_category = duckdb_api::PredicateDecisionCategory::EXACT;
+		break;
+	case PackagePredicatePlanCounterexample::OTHER_COLUMN:
+		plan.typed_equality =
+		    std::shared_ptr<const duckdb_api::PlannedEqualityPredicate>(new duckdb_api::PlannedEqualityPredicate(
+		        "other_label", duckdb_api::PlannedPredicateOperator::EQUALS, duckdb_api::PlannedRestScalarKind::VARCHAR,
+		        false, 0, "private", "visibility", "sha256.package-proof-activity-private",
+		        "sha256.package-domain-activity-occurrences",
+		        duckdb_api::PlannedOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES));
+		break;
+	case PackagePredicatePlanCounterexample::OTHER_CONDITIONAL_SOURCE_ID:
+		plan.typed_equality =
+		    std::shared_ptr<const duckdb_api::PlannedEqualityPredicate>(new duckdb_api::PlannedEqualityPredicate(
+		        "label", duckdb_api::PlannedPredicateOperator::EQUALS, duckdb_api::PlannedRestScalarKind::VARCHAR,
+		        false, 0, "private", "other_visibility", "sha256.package-proof-activity-private",
+		        "sha256.package-domain-activity-occurrences",
+		        duckdb_api::PlannedOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES));
+		break;
+	case PackagePredicatePlanCounterexample::OTHER_TYPED_VALUE:
+		plan.typed_equality =
+		    std::shared_ptr<const duckdb_api::PlannedEqualityPredicate>(new duckdb_api::PlannedEqualityPredicate(
+		        "label", duckdb_api::PlannedPredicateOperator::EQUALS, duckdb_api::PlannedRestScalarKind::VARCHAR,
+		        false, 0, "public", "visibility", "sha256.package-proof-activity-private",
+		        "sha256.package-domain-activity-occurrences",
+		        duckdb_api::PlannedOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES));
+		break;
+	case PackagePredicatePlanCounterexample::RESIDUAL_ONLY_EMITS_BINDING:
+		plan.remote_predicate = duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN;
+		plan.remote_accuracy = duckdb_api::RemotePredicateAccuracy::UNSUPPORTED;
+		plan.conditional_input = duckdb_api::PlannedConditionalInput::NONE;
+		plan.predicate_category = duckdb_api::PredicateDecisionCategory::UNSUPPORTED;
+		plan.predicate_reason = duckdb_api::PredicateDecisionReason::CAPABILITY_UNAVAILABLE;
+		break;
+	default:
+		throw std::invalid_argument("unknown package predicate plan-law counterexample");
+	}
+	try {
+		plan.ValidatePredicateMaterialization();
+		return false;
+	} catch (const std::logic_error &) {
 		return true;
 	}
 }
@@ -592,6 +667,10 @@ duckdb_api::ScanPlan BuildDistinctRestQueryPathScanPlanFixture(const std::string
 
 bool RestQueryBindingConstructionRejects(RestQueryBindingConstructionCounterexample counterexample) {
 	return ScanPlanFixtureBuilder::RejectsRestQueryBinding(counterexample);
+}
+
+bool PackagePredicateMaterializationRejects(PackagePredicatePlanCounterexample counterexample) {
+	return ScanPlanFixtureBuilder::RejectsPackagePredicateMaterialization(counterexample);
 }
 
 duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::string &exact_logical_secret_name) {

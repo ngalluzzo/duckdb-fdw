@@ -8,6 +8,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace duckdb_api {
@@ -32,6 +33,14 @@ bool Contains(const std::vector<std::string> &values, const std::string &expecte
 
 bool OriginsEqual(const CompiledRestOrigin &left, const CompiledRestOrigin &right) {
 	return left.scheme == right.scheme && left.host.Value() == right.host.Value() && left.port == right.port;
+}
+
+bool FitsBigintPageSequence(std::uint64_t first_page, std::uint64_t page_increment, std::uint64_t max_pages_per_scan) {
+	if (first_page == 0 || page_increment == 0 || max_pages_per_scan == 0) {
+		return false;
+	}
+	const auto bigint_max = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+	return first_page <= bigint_max && max_pages_per_scan - 1 <= (bigint_max - first_page) / page_increment;
 }
 
 std::vector<std::string> ProjectedColumnNames(const std::vector<CompiledColumn> &columns) {
@@ -111,8 +120,10 @@ void ValidatePagination(const CompiledOperation &operation, const CompiledResour
 	}
 	if (pagination.PageSizeParameter().empty() || pagination.PageNumberParameter().empty() ||
 	    pagination.PageSizeParameter() == pagination.PageNumberParameter() || pagination.PageSize() == 0 ||
-	    pagination.FirstPage() == 0 || pagination.PageIncrement() != 1 || pagination.MaxPagesPerScan() == 0 ||
-	    pagination.MaxPagesPerScan() > PAGINATION_MAX_PAGES_PER_SCAN) {
+	    pagination.PageSize() > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
+	    pagination.FirstPage() == 0 || pagination.PageIncrement() == 0 || pagination.MaxPagesPerScan() == 0 ||
+	    pagination.MaxPagesPerScan() > PAGINATION_MAX_PAGES_PER_SCAN ||
+	    !FitsBigintPageSequence(pagination.FirstPage(), pagination.PageIncrement(), pagination.MaxPagesPerScan())) {
 		throw std::logic_error("selected pagination contains an unsupported typed page transition");
 	}
 
@@ -120,10 +131,31 @@ void ValidatePagination(const CompiledOperation &operation, const CompiledResour
 	// proves consistency; this planner never discovers pagination by parsing query
 	// text or parameter names.
 	const auto &query = rest.request.query_parameters;
-	if (query.size() != 2 || query[0].name != pagination.PageSizeParameter() ||
-	    query[0].encoded_value != std::to_string(pagination.PageSize()) ||
-	    query[1].name != pagination.PageNumberParameter() ||
-	    query[1].encoded_value != std::to_string(pagination.FirstPage())) {
+	const CompiledQueryParameter *page_size = nullptr;
+	const CompiledQueryParameter *page_number = nullptr;
+	for (const auto &field : query) {
+		if (field.source == CompiledQueryValueSource::PAGE_SIZE) {
+			if (page_size != nullptr) {
+				throw std::logic_error("selected pagination contains duplicate page-size bindings");
+			}
+			page_size = &field;
+		}
+		if (field.source == CompiledQueryValueSource::PAGE_NUMBER) {
+			if (page_number != nullptr) {
+				throw std::logic_error("selected pagination contains duplicate page-number bindings");
+			}
+			page_number = &field;
+		}
+	}
+	if (page_size == nullptr || page_number == nullptr || !page_size->HasDecodedValue() ||
+	    !page_number->HasDecodedValue() || page_size->DecodedValue().Type() != CompiledScalarType::BIGINT ||
+	    page_number->DecodedValue().Type() != CompiledScalarType::BIGINT || page_size->DecodedValue().IsNull() ||
+	    page_number->DecodedValue().IsNull() || page_size->name != pagination.PageSizeParameter() ||
+	    page_size->DecodedValue().Bigint() != static_cast<std::int64_t>(pagination.PageSize()) ||
+	    page_size->encoded_value != std::to_string(pagination.PageSize()) ||
+	    page_number->name != pagination.PageNumberParameter() ||
+	    page_number->DecodedValue().Bigint() != static_cast<std::int64_t>(pagination.FirstPage()) ||
+	    page_number->encoded_value != std::to_string(pagination.FirstPage())) {
 		throw std::logic_error("selected pagination disagrees with its structural initial request");
 	}
 	if (!ceilings.HasResponseByteNarrowing() || ceilings.MaxResponseBytesPerPage() == 0 ||
@@ -355,10 +387,10 @@ SelectedRelationOperation ValidateAndSelectOperation(const CompiledConnector &co
 		ValidateOperation(*relation, operation, connector.NetworkPolicy());
 	}
 
-	const auto resolved_inputs = input_resolution::ResolveRelationInputs(*relation, request.explicit_inputs);
+	auto resolved_inputs = input_resolution::ResolveRelationInputs(*relation, request.explicit_inputs);
 	const auto &operation = operation_selection::SelectOperation(*relation, request, resolved_inputs);
 	ValidateAuthentication(*relation, operation, request);
-	return {relation, &operation};
+	return {relation, &operation, std::move(resolved_inputs)};
 }
 
 } // namespace scan_planner_internal

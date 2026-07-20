@@ -12,6 +12,7 @@
 void RunPredicateCompositionLawTests();
 void RunInputResolutionLawTests();
 void RunOperationSelectionLawTests();
+void RunPermanentRestScanPlanFixtureTests();
 
 namespace {
 
@@ -398,6 +399,7 @@ int main() {
 		RunPredicateCompositionLawTests();
 		RunInputResolutionLawTests();
 		RunOperationSelectionLawTests();
+		RunPermanentRestScanPlanFixtureTests();
 		TestExactSelectionHasNoFallback();
 		TestCandidateSpecificOperationSelectionAndFallback();
 		TestEqualRankedOperationSelectionFailsBeforePlanConstruction();

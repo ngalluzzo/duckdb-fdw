@@ -1,6 +1,22 @@
-# Relational Semantics owns this non-installable fixture service. Focused
-# Runtime tests consume its ScanPlan factories without compiling or importing
-# Connector, Query, or planner internals.
+# Real planner-produced positive plans live in a separate provider so the
+# value-only Runtime fixture service below retains no Connector or Query
+# dependency. Runtime consumers link this bounded Semantics API, never
+# Connector-private construction or planner sources directly.
+add_library(
+  duckdb_api_semantics_materialized_fixture_service STATIC
+  ${RELATIONAL_MATERIALIZED_PLAN_TEST_SERVICE_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_semantics_materialized_fixture_service)
+target_include_directories(
+  duckdb_api_semantics_materialized_fixture_service
+  PUBLIC test/cpp)
+target_link_libraries(
+  duckdb_api_semantics_materialized_fixture_service
+  PUBLIC duckdb_api_relational_planning_service
+         duckdb_api_package_generation_fixture_service)
+
+# Relational Semantics owns this non-installable plan-only fixture service.
+# Focused Runtime tests consume its ScanPlan factories without compiling or
+# importing Connector, Query, or planner internals.
 add_library(
   duckdb_api_semantics_fixture_service STATIC
   ${RELATIONAL_PLAN_TEST_SERVICE_SOURCES}
@@ -24,6 +40,7 @@ target_include_directories(
 target_link_libraries(
   duckdb_api_scan_planner_tests
   PRIVATE duckdb_api_semantics_fixture_service
+          duckdb_api_semantics_materialized_fixture_service
           duckdb_api_connector_fixture_service
           duckdb_api_package_generation_fixture_service
           duckdb_api_relational_planning_service

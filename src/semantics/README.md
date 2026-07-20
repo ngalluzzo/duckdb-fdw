@@ -58,6 +58,7 @@ grant limit, truncation, or retry authority.
 | --- | --- | --- |
 | Closed protocol-neutral request predicate | `relational_predicate.cpp`, `duckdb_api/relational_predicate.hpp` | `duckdb_api_scan_planner_tests` |
 | Exact/Superset proof matching, composition, and fallback | `predicate_classifier.cpp` | `duckdb_api_scan_planner_tests` |
+| Ordered REST bindings and structural response paths | `rest_operation_planner.cpp`, `scan_plan_builder.hpp` | `duckdb_api_scan_planner_tests`, `duckdb_api_scan_plan_fixture_tests` |
 | Plan values, guarded payloads, or resource predicates | `scan_plan.cpp`, `duckdb_api/scan_plan.hpp` | `duckdb_api_scan_plan_contract_tests` |
 | Exhaustive REST/GraphQL planned operation value | `planned_protocol_operation.cpp`, `duckdb_api/planned_protocol_operation.hpp` | `duckdb_api_scan_plan_contract_tests`, `duckdb_api_graphql_semantics_tests` |
 | Canonical GraphQL admission and replay derivation | `graphql_operation_planner.cpp` | `duckdb_api_graphql_semantics_tests` |
@@ -66,6 +67,7 @@ grant limit, truncation, or retry authority.
 | Connector, request, authorization, or pagination admission | `scan_planner_validation.cpp` | `duckdb_api_scan_planner_tests`, `duckdb_api_scan_plan_pagination_contract_tests` |
 | Private normalization shared by construction and validation | `scan_planner_internal.hpp` | `duckdb_api_scan_planner_tests` |
 | Reusable plan fixtures for Runtime consumers | `test/cpp/semantics/support/scan_plan_test_fixtures.*`, `graphql_scan_plan_test_fixtures.*` | `duckdb_api_scan_plan_fixture_tests`, `duckdb_api_graphql_semantics_tests` |
+| Real planner-produced permanent REST fixture | `test/cpp/semantics/support/permanent_rest_scan_plan_test_fixtures.*` | `duckdb_api_scan_planner_tests`; Runtime links `duckdb_api_semantics_materialized_fixture_service` |
 
 `relational_predicate.hpp` is the smaller service below Query request
 construction and Semantics classification. `scan_plan.hpp` is the value-only
@@ -74,17 +76,21 @@ planner-construction dependency. `scan_planner.hpp` is the separate planning
 entry point used by Query. Keep those dependency directions intact.
 
 Runtime must exhaustively inspect `ScanPlan::Operation().Protocol()` and then
-use the guarded `Rest()` or `Graphql()` payload. For REST, only
-`ScanPlan::ConditionalInput()` supplies predicate-derived request selection;
-fixed query parameters, Connector provenance, and safe explanation do not
-duplicate or supersede that authority. For GraphQL, Runtime consumes the typed
-document, variable, response, and cursor plan without parsing relation names,
-source snapshots, or explanation to recover authority.
+use the guarded `Rest()` or `Graphql()` payload. For REST, the ordered typed
+`query_bindings` are the complete package request fields after omission and
+operation selection. `ScanPlan::ConditionalInput()` identifies whether one of
+them came from a predicate mapping; the native encoded-only mirror,
+Connector provenance, and safe explanation do not duplicate or supersede that
+authority. For GraphQL, Runtime consumes the typed document, variable,
+response, and cursor plan without parsing relation names, source snapshots, or
+explanation to recover authority.
 
 `PredicateCategory()` and `PredicateReason()` are the stable diagnostic
 contract. `ClassificationReason()` and `Snapshot()` are safe prose and must
-never be parsed for execution decisions. Exact and Superset remain independent
-of residual ownership: both retain the offered DuckDB filter in this profile.
+never be parsed for execution decisions. Package plan provenance excludes
+author defaults and predicate literals; typed predicate explanation records
+only kind and presence. Exact and Superset remain independent of residual
+ownership: both retain the offered DuckDB filter in this profile.
 
 ## Correctness checklist
 

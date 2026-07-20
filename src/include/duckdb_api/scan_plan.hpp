@@ -3,6 +3,7 @@
 #include "duckdb_api/planned_protocol_operation.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -67,13 +68,13 @@ enum class BaseDomain {
 	SUCCESSFUL_ROOT_OBJECT
 };
 
-// Closed executable predicate vocabulary for the accepted native profile. A
-// visibility predicate is meaningful only for the bound required VARCHAR
-// response field admitted by the planner. COMPLETE_DUCKDB_FILTER records that
-// the retained residual is larger than the typed candidate without carrying an
-// expression or SQL text. Runtime must never infer meaning from explanation or
-// output values.
-enum class PlannedPredicate { TRUE_FOR_BASE_DOMAIN, VISIBILITY_EQUALS_PRIVATE, COMPLETE_DUCKDB_FILTER };
+// Closed executable predicate vocabulary. TYPED_EQUALITY is interpreted only
+// through ScanPlan::TypedEquality(); it never acquires meaning from a column,
+// connector, or operation name. VISIBILITY_EQUALS_PRIVATE is the explicit
+// native 0.7 compatibility bridge and must never represent a package mapping.
+// COMPLETE_DUCKDB_FILTER records that the retained residual is larger than the
+// typed candidate without carrying an expression or SQL text.
+enum class PlannedPredicate { TRUE_FOR_BASE_DOMAIN, VISIBILITY_EQUALS_PRIVATE, TYPED_EQUALITY, COMPLETE_DUCKDB_FILTER };
 
 // Accuracy describes the relationship between the complete DuckDB predicate D
 // and emitted remote restriction R. It never transfers residual ownership or
@@ -100,13 +101,67 @@ enum class PredicateDecisionReason {
 	AMBIGUOUS_CONDITIONAL_INPUT
 };
 
-// The sole predicate-derived execution authority. Runtime consumes this typed
-// value with the base operation and pagination target; no raw query parameter,
-// snapshot, or Connector declaration is an alternative authority.
-enum class PlannedConditionalInput { NONE, VISIBILITY_PRIVATE };
+// The predicate-derived request-materialization discriminant.
+// REST_QUERY_BINDING requires one matching PlannedRestQueryBinding and a typed
+// equality atom. VISIBILITY_PRIVATE remains the native 0.7 compatibility
+// bridge. No raw query parameter, snapshot, or Connector declaration is an
+// alternative authority.
+enum class PlannedConditionalInput { NONE, VISIBILITY_PRIVATE, REST_QUERY_BINDING };
+enum class PlannedPredicateOperator { EQUALS };
+enum class PlannedOccurrencePreservation {
+	PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES,
+	PRESERVES_ALL_MATCHING_BASE_OCCURRENCES
+};
 enum class RelationalOwner { DUCKDB };
 enum class RelationalDelegation { NONE };
 enum class FeatureState { DISABLED, ENABLED };
+
+// One package-independent typed equality and its occurrence proof. This value
+// describes relational meaning and preserves the exact conditional source ID;
+// it does not carry emitted request bytes. When the equality is selected
+// remotely, the matching PlannedRestQueryBinding is the sole request
+// authority. In a conservative fallback the same atom may describe a retained
+// DuckDB residual while ConditionalInput() remains NONE. Opaque proof/domain
+// identities are safe provenance, not names that consumers may reinterpret.
+class PlannedEqualityPredicate {
+public:
+	PlannedEqualityPredicate(const PlannedEqualityPredicate &) = default;
+	PlannedEqualityPredicate(PlannedEqualityPredicate &&) = default;
+	PlannedEqualityPredicate &operator=(const PlannedEqualityPredicate &) = delete;
+	PlannedEqualityPredicate &operator=(PlannedEqualityPredicate &&) = delete;
+
+	const std::string &ColumnName() const noexcept;
+	PlannedPredicateOperator Operator() const noexcept;
+	PlannedRestScalarKind Kind() const noexcept;
+	bool BooleanValue() const;
+	std::int64_t BigintValue() const;
+	const std::string &VarcharValue() const;
+	const std::string &ConditionalInputId() const noexcept;
+	const std::string &ProofIdentity() const noexcept;
+	const std::string &BaseDomainIdentity() const noexcept;
+	PlannedOccurrencePreservation OccurrencePreservation() const noexcept;
+
+private:
+	friend class ScanPlanBuilder;
+	friend class duckdb_api_test::ScanPlanFixtureBuilder;
+	friend class duckdb_api_test::ScanPlanTestAccess;
+
+	PlannedEqualityPredicate(std::string column_name, PlannedPredicateOperator predicate_operator,
+	                         PlannedRestScalarKind kind, bool boolean_value, std::int64_t bigint_value,
+	                         std::string varchar_value, std::string conditional_input_id, std::string proof_identity,
+	                         std::string base_domain_identity, PlannedOccurrencePreservation occurrence_preservation);
+
+	std::string column_name;
+	PlannedPredicateOperator predicate_operator;
+	PlannedRestScalarKind kind;
+	bool boolean_value;
+	std::int64_t bigint_value;
+	std::string varchar_value;
+	std::string conditional_input_id;
+	std::string proof_identity;
+	std::string base_domain_identity;
+	PlannedOccurrencePreservation occurrence_preservation;
+};
 
 enum class PlannedCredentialRequirement { NONE, REQUIRED };
 enum class PlannedAuthenticator { NONE, BEARER };
@@ -346,6 +401,9 @@ public:
 	PlannedPredicate ResidualPredicate() const;
 	RelationalOwner ResidualOwner() const;
 	PlannedConditionalInput ConditionalInput() const;
+	// Null for unrestricted, opaque-complete, and native 0.7 plans. The pointed
+	// value follows ScanPlan's immutable shared lifetime.
+	const PlannedEqualityPredicate *TypedEquality() const noexcept;
 	PredicateDecisionCategory PredicateCategory() const;
 	PredicateDecisionReason PredicateReason() const;
 	const RelationalOwnership &Ownership() const;
@@ -368,6 +426,11 @@ public:
 	const NetworkCapability &Network() const;
 	const ResourceBudgets &Budgets() const;
 	const std::string &ClassificationReason() const;
+
+	// Checks the cross-field laws between predicate classification, the typed
+	// equality, and REST request materialization. It performs no I/O and throws
+	// std::logic_error before an incoherent plan can be executed.
+	void ValidatePredicateMaterialization() const;
 
 	// Stable, locale-independent explanation of semantic and executable facts.
 	// Logical secret names use Semantics' safe hex rendering; resolved credential
@@ -393,6 +456,7 @@ private:
 	PlannedPredicate residual_predicate;
 	RelationalOwner residual_owner;
 	PlannedConditionalInput conditional_input;
+	std::shared_ptr<const PlannedEqualityPredicate> typed_equality;
 	PredicateDecisionCategory predicate_category;
 	PredicateDecisionReason predicate_reason;
 	RelationalOwnership ownership;

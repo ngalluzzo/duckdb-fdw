@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb_api/scan_planner.hpp"
+#include "input_resolution.hpp"
 
 #include <cstdint>
 #include <stdexcept>
@@ -142,6 +143,7 @@ std::uint64_t BoundedProduct(std::uint64_t left, std::uint64_t right, std::uint6
 struct SelectedRelationOperation {
 	const CompiledRelation *relation;
 	const CompiledOperation *operation;
+	input_resolution::ResolvedRelationInputs resolved_inputs;
 };
 
 SelectedRelationOperation ValidateAndSelectOperation(const CompiledConnector &connector, const ScanRequest &request);

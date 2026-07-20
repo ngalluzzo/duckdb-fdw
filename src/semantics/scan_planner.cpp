@@ -1,6 +1,7 @@
 #include "duckdb_api/scan_planner.hpp"
 
 #include "predicate_classifier.hpp"
+#include "scan_plan_builder.hpp"
 #include "scan_planner_internal.hpp"
 
 #include <algorithm>
@@ -17,11 +18,6 @@ PlanningErrorCode PlanningError::Code() const noexcept {
 	return code;
 }
 
-class ScanPlanBuilder {
-public:
-	static ScanPlan Build(const CompiledConnector &connector, const ScanRequest &request);
-};
-
 ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRequest &request) {
 	using namespace scan_planner_internal;
 
@@ -34,30 +30,22 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	result.connector_name = connector.ConnectorName();
 	result.connector_version = connector.Version();
 	result.relation_name = relation.Name();
-	result.source_snapshot = relation.Snapshot();
+	// Native 0.7 retains its established catalog explanation. Package relation
+	// snapshots include author scalar defaults and predicate literals, so the
+	// executable plan keeps only stable structural provenance; typed plan fields
+	// carry the selected authority and safe explanation renders presence only.
+	result.source_snapshot =
+	    connector.Origin() == CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA
+	        ? relation.Snapshot()
+	        : "origin=package_compiled_metadata;relation=" + relation.Name() + ";operation=" + operation.name;
 	CompiledHttpOrigin operation_origin = operation.Protocol() == CompiledProtocol::REST
 	                                          ? operation.Rest().request.origin
 	                                          : operation.Graphql().endpoint_origin;
 	if (operation.Protocol() == CompiledProtocol::REST) {
 		const auto &rest = operation.Rest();
 		result.domain = PlanBaseDomain(rest.response_source, rest.pagination.Strategy());
-		PlannedRestOperation planned {
-		    operation.name,
-		    PlanMethod(rest.method),
-		    PlanCardinality(operation.cardinality),
-		    PlanReplaySafety(rest.replay_safety),
-		    {PlanUrlScheme(rest.request.origin.scheme), rest.request.origin.host.Value(), rest.request.origin.port},
-		    rest.request.path,
-		    {},
-		    {},
-		    PlanResponseSource(rest.response_source),
-		    rest.records_extractor};
-		for (const auto &query : rest.request.query_parameters) {
-			planned.query_parameters.push_back({query.name, query.encoded_value});
-		}
-		for (const auto &header : rest.request.headers) {
-			planned.headers.push_back({header.name, header.value});
-		}
+		auto planned =
+		    BuildRestOperation(connector.Origin(), relation, operation, selected.resolved_inputs, predicate_decision);
 		result.operation =
 		    std::make_shared<const PlannedProtocolOperation>(PlannedProtocolOperation::FromRest(std::move(planned)));
 	} else {
@@ -74,6 +62,13 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	result.residual_predicate = predicate_decision.residual_predicate;
 	result.residual_owner = predicate_decision.residual_owner;
 	result.conditional_input = predicate_decision.conditional_input;
+	if (predicate_decision.typed_equality.present) {
+		const auto &equality = predicate_decision.typed_equality;
+		result.typed_equality = std::shared_ptr<const PlannedEqualityPredicate>(new PlannedEqualityPredicate(
+		    equality.column_name, PlannedPredicateOperator::EQUALS, equality.kind, equality.boolean_value,
+		    equality.bigint_value, equality.varchar_value, equality.conditional_input_id, equality.proof_identity,
+		    equality.base_domain_identity, equality.occurrence_preservation));
+	}
 	result.predicate_category = predicate_decision.category;
 	result.predicate_reason = predicate_decision.reason_code;
 	result.ownership = {RelationalOwner::DUCKDB, RelationalOwner::DUCKDB, RelationalOwner::DUCKDB,
@@ -273,6 +268,7 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    predicate_decision.reason +
 		    "; selected JSON-path records define the complete base domain; DuckDB retains all relational operators";
 	}
+	result.ValidatePredicateMaterialization();
 	return result;
 }
 

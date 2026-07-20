@@ -4,11 +4,28 @@
 #include "duckdb_api/scan_plan.hpp"
 #include "duckdb_api/scan_request.hpp"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
 namespace duckdb_api {
 namespace predicate_classifier {
+
+// Package-independent semantic atom copied into ScanPlan only after the
+// selected operation is known. The struct is internal construction data, not
+// request authority; REST bytes remain PlannedRestQueryBinding's concern.
+struct TypedEqualityDecision {
+	bool present;
+	std::string column_name;
+	PlannedRestScalarKind kind;
+	bool boolean_value;
+	std::int64_t bigint_value;
+	std::string varchar_value;
+	std::string conditional_input_id;
+	std::string proof_identity;
+	std::string base_domain_identity;
+	PlannedOccurrencePreservation occurrence_preservation;
+};
 
 // Complete semantic decision consumed by ScanPlan construction. The typed
 // conditional input is the only predicate-derived Runtime authority. Category
@@ -19,6 +36,7 @@ struct PredicatePlanDecision {
 	PlannedPredicate residual_predicate;
 	RelationalOwner residual_owner;
 	PlannedConditionalInput conditional_input;
+	TypedEqualityDecision typed_equality;
 	PredicateDecisionCategory category;
 	PredicateDecisionReason reason_code;
 	std::string reason;

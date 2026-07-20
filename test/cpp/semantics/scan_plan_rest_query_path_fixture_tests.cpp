@@ -16,6 +16,12 @@ static_assert(!std::is_default_constructible<duckdb_api::PlannedRestQueryBinding
               "REST query bindings require complete typed construction");
 static_assert(!std::is_copy_assignable<duckdb_api::PlannedRestQueryBinding>::value,
               "REST query bindings must not expose post-construction mutation");
+static_assert(std::is_copy_constructible<duckdb_api::PlannedEqualityPredicate>::value,
+              "immutable typed equality must be safe to retain with a copied plan");
+static_assert(!std::is_default_constructible<duckdb_api::PlannedEqualityPredicate>::value,
+              "typed equality requires complete semantic construction");
+static_assert(!std::is_copy_assignable<duckdb_api::PlannedEqualityPredicate>::value,
+              "typed equality must not expose post-construction mutation");
 
 namespace duckdb_api_test {
 namespace scan_plan_fixture_contract {
@@ -51,13 +57,28 @@ void TestRestQueryPathFixture(const std::string &canary) {
 	            plan.SecretReference().Name() == "rest_query_path_secret" &&
 	            plan.SourceSnapshot().find("rest_query_path_secret") == std::string::npos,
 	        "REST query/path fixture lost its package identity or exact logical secret handle");
-	Require(plan.RemotePredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
-	            plan.RemoteAccuracy() == duckdb_api::RemotePredicateAccuracy::UNSUPPORTED &&
-	            plan.ResidualPredicate() == duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER &&
-	            plan.ConditionalInput() == duckdb_api::PlannedConditionalInput::NONE &&
-	            plan.PredicateCategory() == duckdb_api::PredicateDecisionCategory::UNSUPPORTED &&
-	            plan.PredicateReason() == duckdb_api::PredicateDecisionReason::MAPPING_UNAVAILABLE,
-	        "REST query/path fixture borrowed native 0.7 predicate or conditional authority");
+	Require(plan.RemotePredicate() == duckdb_api::PlannedPredicate::TYPED_EQUALITY &&
+	            plan.RemoteAccuracy() == duckdb_api::RemotePredicateAccuracy::SUPERSET &&
+	            plan.ResidualPredicate() == duckdb_api::PlannedPredicate::TYPED_EQUALITY &&
+	            plan.ConditionalInput() == duckdb_api::PlannedConditionalInput::REST_QUERY_BINDING &&
+	            plan.PredicateCategory() == duckdb_api::PredicateDecisionCategory::SUPERSET &&
+	            plan.PredicateReason() == duckdb_api::PredicateDecisionReason::SELECTED_SUPERSET_MAPPING,
+	        "REST query/path fixture lost its generic typed predicate decision");
+	const auto *equality = plan.TypedEquality();
+	Require(equality != nullptr && equality->ColumnName() == "label" &&
+	            equality->Operator() == duckdb_api::PlannedPredicateOperator::EQUALS &&
+	            equality->Kind() == duckdb_api::PlannedRestScalarKind::VARCHAR &&
+	            equality->VarcharValue() == "private" && equality->ConditionalInputId() == "visibility" &&
+	            equality->ProofIdentity() == "sha256.package-proof-activity-private" &&
+	            equality->BaseDomainIdentity() == "sha256.package-domain-activity-occurrences" &&
+	            equality->OccurrencePreservation() ==
+	                duckdb_api::PlannedOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES,
+	        "REST query/path fixture lost typed equality, proof, domain, or occurrence identity");
+	Require(plan.RemotePredicate() != duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE &&
+	            plan.ResidualPredicate() != duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE &&
+	            plan.ConditionalInput() != duckdb_api::PlannedConditionalInput::VISIBILITY_PRIVATE,
+	        "package predicate fixture borrowed native 0.7 visibility authority");
+	plan.ValidatePredicateMaterialization();
 
 	const auto &operation = plan.Operation().Rest();
 	Require(operation.query_bindings.size() == 8 && operation.query_parameters.size() == 1 &&
@@ -117,6 +138,10 @@ void TestRestQueryPathFixture(const std::string &canary) {
 	                  "BIGINT REST query binding exposed a VARCHAR payload");
 	RequireLogicError([&operation]() { (void)operation.query_bindings[4].BooleanValue(); },
 	                  "VARCHAR REST query binding exposed a BOOLEAN payload");
+	RequireLogicError([equality]() { (void)equality->BooleanValue(); },
+	                  "VARCHAR typed equality exposed a BOOLEAN payload");
+	RequireLogicError([equality]() { (void)equality->BigintValue(); },
+	                  "VARCHAR typed equality exposed a BIGINT payload");
 
 	Require(operation.response_source == duckdb_api::PlannedResponseSource::JSON_PATH_MANY &&
 	            operation.records_path.segments == std::vector<std::string>({"payload", "records"}) &&
@@ -154,6 +179,30 @@ void TestRestQueryPathFixture(const std::string &canary) {
 		sentinel_rejected = true;
 	}
 	Require(sentinel_rejected, "REST binding constructor-law provider accepted its enum sentinel");
+
+	const auto predicate_count = static_cast<std::size_t>(PackagePredicatePlanCounterexample::COUNT);
+	Require(predicate_count == 11, "closed package predicate plan-law catalog changed without review");
+	for (std::size_t value = 0; value < predicate_count; value++) {
+		Require(PackagePredicateMaterializationRejects(static_cast<PackagePredicatePlanCounterexample>(value)),
+		        "ScanPlan validation accepted an incoherent typed predicate materialization");
+	}
+	sentinel_rejected = false;
+	try {
+		(void)PackagePredicateMaterializationRejects(PackagePredicatePlanCounterexample::COUNT);
+	} catch (const std::invalid_argument &) {
+		sentinel_rejected = true;
+	}
+	Require(sentinel_rejected, "package predicate plan-law provider accepted its enum sentinel");
+	const auto explanation = plan.Snapshot();
+	Require(explanation.find("remote_predicate=typed_equality") != std::string::npos &&
+	            explanation.find("conditional_input=rest_query_binding") != std::string::npos &&
+	            explanation.find("typed_equality=[column_hex:6c6162656c,operator:equals,kind:varchar,value:present") !=
+	                std::string::npos &&
+	            explanation.find("conditional_input_id_hex:7669736962696c697479") != std::string::npos &&
+	            explanation.find("occurrences:all_matching_base_occurrences") != std::string::npos,
+	        "generic typed predicate explanation omitted safe structured authority or proof facts");
+	Require(explanation.find(canary) == std::string::npos && explanation.find("value:hex:") == std::string::npos,
+	        "generic typed predicate explanation exposed a literal directly or through reversible hex");
 	RequireCanaryAbsent(plan, canary);
 }
 

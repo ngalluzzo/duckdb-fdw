@@ -18,6 +18,74 @@ struct MatchedCandidate {
 	const RequestedPredicate *candidate;
 };
 
+TypedEqualityDecision NoTypedEquality() {
+	return {false,
+	        "",
+	        PlannedRestScalarKind::VARCHAR,
+	        false,
+	        0,
+	        "",
+	        "",
+	        "",
+	        "",
+	        PlannedOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES};
+}
+
+PlannedRestScalarKind PlanScalarKind(CompiledScalarType kind) {
+	switch (kind) {
+	case CompiledScalarType::BOOLEAN:
+		return PlannedRestScalarKind::BOOLEAN;
+	case CompiledScalarType::BIGINT:
+		return PlannedRestScalarKind::BIGINT;
+	case CompiledScalarType::VARCHAR:
+		return PlannedRestScalarKind::VARCHAR;
+	}
+	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
+	                    "package predicate mapping contains an unknown scalar kind");
+}
+
+PlannedOccurrencePreservation PlanOccurrencePreservation(CompiledPredicateOccurrencePreservation preservation) {
+	switch (preservation) {
+	case CompiledPredicateOccurrencePreservation::PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES:
+		return PlannedOccurrencePreservation::PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES;
+	case CompiledPredicateOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES:
+		return PlannedOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES;
+	}
+	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
+	                    "package predicate mapping contains an unknown occurrence law");
+}
+
+TypedEqualityDecision PlanTypedEquality(const CompiledPredicateMapping &mapping) {
+	if (mapping.Literal() != CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL || mapping.TypedLiteral().IsNull()) {
+		return NoTypedEquality();
+	}
+	const auto &literal = mapping.TypedLiteral();
+	bool boolean_value = false;
+	std::int64_t bigint_value = 0;
+	std::string varchar_value;
+	switch (literal.Type()) {
+	case CompiledScalarType::BOOLEAN:
+		boolean_value = literal.Boolean();
+		break;
+	case CompiledScalarType::BIGINT:
+		bigint_value = literal.Bigint();
+		break;
+	case CompiledScalarType::VARCHAR:
+		varchar_value = literal.Varchar();
+		break;
+	}
+	return {true,
+	        mapping.ColumnName(),
+	        PlanScalarKind(literal.Type()),
+	        boolean_value,
+	        bigint_value,
+	        std::move(varchar_value),
+	        mapping.RemoteInputName(),
+	        mapping.ProofIdentityValue(),
+	        mapping.BaseDomainValue(),
+	        PlanOccurrencePreservation(mapping.OccurrencePreservation())};
+}
+
 const char *ReasonText(PredicateDecisionReason reason) {
 	switch (reason) {
 	case PredicateDecisionReason::NO_REMOTE_CANDIDATE:
@@ -271,7 +339,9 @@ PlannedPredicate ResidualPredicate(const CompiledRelation &relation, const Compi
 		if (request.requested_predicate.Kind() == RequestedPredicateKind::COMPARISON) {
 			for (const auto &mapping : relation.PredicateMappings()) {
 				if (MappingMatches(relation, operation, mapping, request.requested_predicate)) {
-					return PlannedPredicate::VISIBILITY_EQUALS_PRIVATE;
+					return mapping.Literal() == CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL
+					           ? PlannedPredicate::TYPED_EQUALITY
+					           : PlannedPredicate::VISIBILITY_EQUALS_PRIVATE;
 				}
 			}
 		}
@@ -281,14 +351,31 @@ PlannedPredicate ResidualPredicate(const CompiledRelation &relation, const Compi
 	                    "predicate decision received an unknown retained-filter scope");
 }
 
+TypedEqualityDecision ResidualTypedEquality(const CompiledRelation &relation, const CompiledOperation &operation,
+                                            const ScanRequest &request, PlannedPredicate residual) {
+	if (residual != PlannedPredicate::TYPED_EQUALITY ||
+	    request.requested_predicate.Kind() != RequestedPredicateKind::COMPARISON) {
+		return NoTypedEquality();
+	}
+	for (const auto &mapping : relation.PredicateMappings()) {
+		if (MappingMatches(relation, operation, mapping, request.requested_predicate)) {
+			return PlanTypedEquality(mapping);
+		}
+	}
+	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
+	                    "typed residual predicate lost its validated package mapping");
+}
+
 PredicatePlanDecision Fallback(const CompiledRelation &relation, const CompiledOperation &operation,
                                const ScanRequest &request, PredicateDecisionCategory category,
                                PredicateDecisionReason reason) {
+	const auto residual = ResidualPredicate(relation, operation, request);
 	return {PlannedPredicate::TRUE_FOR_BASE_DOMAIN,
 	        RemotePredicateAccuracy::UNSUPPORTED,
-	        ResidualPredicate(relation, operation, request),
+	        residual,
 	        RelationalOwner::DUCKDB,
 	        PlannedConditionalInput::NONE,
+	        ResidualTypedEquality(relation, operation, request, residual),
 	        category,
 	        reason,
 	        ReasonText(reason)};
@@ -417,13 +504,6 @@ PredicatePlanDecision Classify(const CompiledRelation &relation, const CompiledO
 	}
 
 	const auto &mapping = *matches.front().mapping;
-	if (mapping.Literal() == CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL) {
-		// Selection can reason about the package binding before Runtime's typed
-		// request field exists, but a complete ScanPlan must never relabel that
-		// binding as the legacy visibility-private authority.
-		throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
-		                    "package predicate request materialization is not present in this planning slice");
-	}
 	const bool exact =
 	    mapping.Accuracy() == CompiledPredicateAccuracy::EXACT && !contains_unmapped_structure &&
 	    (IsSingleComparison(request.requested_predicate) ||
@@ -432,11 +512,13 @@ PredicatePlanDecision Classify(const CompiledRelation &relation, const CompiledO
 	const auto accuracy = exact ? RemotePredicateAccuracy::EXACT : RemotePredicateAccuracy::SUPERSET;
 	const auto reason =
 	    exact ? PredicateDecisionReason::SELECTED_EXACT_MAPPING : PredicateDecisionReason::SELECTED_SUPERSET_MAPPING;
-	return {PlannedPredicate::VISIBILITY_EQUALS_PRIVATE,
+	const bool package_mapping = mapping.Literal() == CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL;
+	return {package_mapping ? PlannedPredicate::TYPED_EQUALITY : PlannedPredicate::VISIBILITY_EQUALS_PRIVATE,
 	        accuracy,
 	        ResidualPredicate(relation, operation, request),
 	        RelationalOwner::DUCKDB,
-	        PlannedConditionalInput::VISIBILITY_PRIVATE,
+	        package_mapping ? PlannedConditionalInput::REST_QUERY_BINDING : PlannedConditionalInput::VISIBILITY_PRIVATE,
+	        PlanTypedEquality(mapping),
 	        category,
 	        reason,
 	        ReasonText(reason)};

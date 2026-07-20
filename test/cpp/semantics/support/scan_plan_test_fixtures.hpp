@@ -167,18 +167,36 @@ enum class RestQueryBindingConstructionCounterexample {
 	COUNT
 };
 
+// Cross-field law probes for a package-independent typed predicate plan. Each
+// mutation starts from one complete valid plan and changes only the named
+// predicate/materialization relationship.
+enum class PackagePredicatePlanCounterexample {
+	MISSING_TYPED_EQUALITY,
+	NATIVE_REMOTE_DISCRIMINANT,
+	CONDITIONAL_INPUT_NONE,
+	UNKNOWN_CONDITIONAL_INPUT,
+	RESIDUAL_TRUE,
+	ACCURACY_CATEGORY_MISMATCH,
+	EXACT_WITH_SUPERSET_OCCURRENCE_LAW,
+	OTHER_COLUMN,
+	OTHER_CONDITIONAL_SOURCE_ID,
+	OTHER_TYPED_VALUE,
+	RESIDUAL_ONLY_EMITS_BINDING,
+	COUNT
+};
+
 duckdb_api::ScanPlan BuildValidAnonymousPlanFixture();
 duckdb_api::ScanPlan BuildValidAuthenticatedPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidPaginatedPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::string &exact_logical_secret_name);
 // Bounded package-like REST query/path provider for Runtime consumer tests. It
 // contains fixed, relation-input, conditional-input, page-size, and page-number
-// query bindings plus multi-segment record and result-column paths. Its neutral
-// predicate fields deliberately withhold package predicate authority; package
-// planner tests must use the generic typed decision added with materialization.
-// No builder or mutation surface escapes.
+// query bindings plus multi-segment record and result-column paths. A generic
+// typed equality selects the conditional binding without borrowing the native
+// 0.7 visibility enums. No builder or mutation surface escapes.
 duckdb_api::ScanPlan BuildDistinctRestQueryPathScanPlanFixture(const std::string &exact_logical_secret_name);
 bool RestQueryBindingConstructionRejects(RestQueryBindingConstructionCounterexample counterexample);
+bool PackagePredicateMaterializationRejects(PackagePredicatePlanCounterexample counterexample);
 // Closed RFC 0008 plan-only fixture. Runtime consumers receive the typed
 // conditional input and classification without Connector or Query dependencies.
 duckdb_api::ScanPlan BuildVisibilityPrivatePlanFixture(const std::string &exact_logical_secret_name);

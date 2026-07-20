@@ -118,6 +118,8 @@ const char *PredicateName(PlannedPredicate predicate, BaseDomain domain) {
 		throw std::logic_error("scan plan contains an unknown base domain for its unrestricted predicate");
 	case PlannedPredicate::VISIBILITY_EQUALS_PRIVATE:
 		return "visibility_equals_private";
+	case PlannedPredicate::TYPED_EQUALITY:
+		return "typed_equality";
 	case PlannedPredicate::COMPLETE_DUCKDB_FILTER:
 		return "complete_duckdb_filter";
 	}
@@ -180,8 +182,40 @@ const char *ConditionalInputName(PlannedConditionalInput input) {
 		return "none";
 	case PlannedConditionalInput::VISIBILITY_PRIVATE:
 		return "visibility_private";
+	case PlannedConditionalInput::REST_QUERY_BINDING:
+		return "rest_query_binding";
 	}
 	throw std::logic_error("scan plan contains an unknown conditional input");
+}
+
+const char *PredicateOperatorName(PlannedPredicateOperator predicate_operator) {
+	switch (predicate_operator) {
+	case PlannedPredicateOperator::EQUALS:
+		return "equals";
+	}
+	throw std::logic_error("scan plan contains an unknown typed predicate operator");
+}
+
+const char *RestScalarKindName(PlannedRestScalarKind kind) {
+	switch (kind) {
+	case PlannedRestScalarKind::BOOLEAN:
+		return "boolean";
+	case PlannedRestScalarKind::BIGINT:
+		return "bigint";
+	case PlannedRestScalarKind::VARCHAR:
+		return "varchar";
+	}
+	throw std::logic_error("scan plan contains an unknown REST scalar kind");
+}
+
+const char *OccurrencePreservationName(PlannedOccurrencePreservation preservation) {
+	switch (preservation) {
+	case PlannedOccurrencePreservation::PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES:
+		return "exact_matching_base_occurrences";
+	case PlannedOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES:
+		return "all_matching_base_occurrences";
+	}
+	throw std::logic_error("scan plan contains an unknown occurrence-preservation law");
 }
 
 const char *PaginationStrategyName(PlannedPaginationStrategy strategy) {
@@ -329,6 +363,28 @@ void AppendOrigin(std::ostringstream &result, const PlannedRestOrigin &origin) {
 	result << "[scheme:" << UrlSchemeName(origin.scheme) << ",host:" << origin.host << ",port:" << origin.port << ']';
 }
 
+void AppendHex(std::ostringstream &result, const std::string &value) {
+	static const char HEX_DIGITS[] = "0123456789abcdef";
+	for (const char character : value) {
+		const auto byte = static_cast<unsigned char>(character);
+		result << HEX_DIGITS[byte >> 4U] << HEX_DIGITS[byte & 0x0FU];
+	}
+}
+
+void AppendTypedEquality(std::ostringstream &result, const PlannedEqualityPredicate &predicate) {
+	result << "column_hex:";
+	AppendHex(result, predicate.ColumnName());
+	result << ",operator:" << PredicateOperatorName(predicate.Operator())
+	       << ",kind:" << RestScalarKindName(predicate.Kind()) << ",value:present";
+	result << ",conditional_input_id_hex:";
+	AppendHex(result, predicate.ConditionalInputId());
+	result << ",proof_identity_hex:";
+	AppendHex(result, predicate.ProofIdentity());
+	result << ",base_domain_identity_hex:";
+	AppendHex(result, predicate.BaseDomainIdentity());
+	result << ",occurrences:" << OccurrencePreservationName(predicate.OccurrencePreservation());
+}
+
 void AppendScanBudgets(std::ostringstream &result, const ScanResourceBudgets &budgets) {
 	result << "request_attempts:" << budgets.request_attempts << ",pages:" << budgets.pages
 	       << ",response_bytes:" << budgets.response_bytes << ",header_bytes:" << budgets.header_bytes
@@ -415,9 +471,15 @@ std::string ScanPlan::Snapshot() const {
 	       << ";residual_owner=" << OwnerName(residual_owner)
 	       << ";conditional_input=" << ConditionalInputName(conditional_input)
 	       << ";predicate_decision=category:" << PredicateCategoryName(predicate_category)
-	       << ",reason:" << PredicateReasonName(predicate_reason) << ";owners=filter:" << OwnerName(ownership.filter)
-	       << ",projection:" << OwnerName(ownership.projection) << ",ordering:" << OwnerName(ownership.ordering)
-	       << ",limit:" << OwnerName(ownership.limit) << ",offset:" << OwnerName(ownership.offset)
+	       << ",reason:" << PredicateReasonName(predicate_reason);
+	if (typed_equality) {
+		result << ";typed_equality=[";
+		AppendTypedEquality(result, *typed_equality);
+		result << ']';
+	}
+	result << ";owners=filter:" << OwnerName(ownership.filter) << ",projection:" << OwnerName(ownership.projection)
+	       << ",ordering:" << OwnerName(ownership.ordering) << ",limit:" << OwnerName(ownership.limit)
+	       << ",offset:" << OwnerName(ownership.offset)
 	       << ";delegation=remote_ordering:" << DelegationName(remote_ordering)
 	       << ",runtime_ordering:" << DelegationName(runtime_ordering)
 	       << ",remote_limit:" << DelegationName(remote_limit) << ",remote_offset:" << DelegationName(remote_offset)

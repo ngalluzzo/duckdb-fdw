@@ -99,7 +99,8 @@ void TestNativeSupersetAndControlledExact() {
 	            superset.PredicateCategory() == duckdb_api::PredicateDecisionCategory::SUPERSET &&
 	            superset.PredicateReason() == duckdb_api::PredicateDecisionReason::SELECTED_SUPERSET_MAPPING &&
 	            superset.ResidualPredicate() == duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE &&
-	            superset.ConditionalInput() == duckdb_api::PlannedConditionalInput::VISIBILITY_PRIVATE,
+	            superset.ConditionalInput() == duckdb_api::PlannedConditionalInput::VISIBILITY_PRIVATE &&
+	            superset.TypedEquality() == nullptr,
 	        "native validated mapping did not produce the Superset decision");
 	RequireDuckDbEnvelope(superset, "native Superset decision");
 
@@ -115,7 +116,8 @@ void TestNativeSupersetAndControlledExact() {
 	            exact.PredicateReason() == duckdb_api::PredicateDecisionReason::SELECTED_EXACT_MAPPING &&
 	            exact.ResidualPredicate() == duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE &&
 	            exact.ResidualOwner() == duckdb_api::RelationalOwner::DUCKDB &&
-	            exact.ConditionalInput() == duckdb_api::PlannedConditionalInput::VISIBILITY_PRIVATE,
+	            exact.ConditionalInput() == duckdb_api::PlannedConditionalInput::VISIBILITY_PRIVATE &&
+	            exact.TypedEquality() == nullptr,
 	        "controlled validated mapping did not produce Exact with retained DuckDB ownership");
 	Require(exact.OutputColumns().size() == controlled_relation.Columns().size(),
 	        "Exact decision lost its complete output closure");
