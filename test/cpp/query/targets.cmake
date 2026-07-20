@@ -82,6 +82,27 @@ target_include_directories(
   PRIVATE test/cpp src src/query/duckdb)
 configure_duckdb_api_cpp_target(duckdb_api_graphql_query_contract_tests)
 
+# Query's whole-product GraphQL oracle uses actual DuckDB registration and
+# consumes only Runtime's named scenario service. Runtime owns all scripted
+# protocol material and exposes only ScanExecutor plus safe counters/stages.
+add_executable(
+  duckdb_api_graphql_product_contract_tests
+  test/cpp/query/integration/graphql_product_contract_tests.cpp
+  ${QUERY_DUCKDB_SECRET_SOURCES}
+  ${QUERY_DUCKDB_ADAPTER_SUPPORT_SOURCES}
+  src/query/duckdb/table_function_adapter.cpp)
+target_link_libraries(
+  duckdb_api_graphql_product_contract_tests
+  PRIVATE duckdb_api_relational_planning_service
+          duckdb_api_runtime_controlled_service
+          dummy_static_extension_loader
+          duckdb_static
+          Threads::Threads)
+target_include_directories(
+  duckdb_api_graphql_product_contract_tests
+  PRIVATE test/cpp src src/query/duckdb)
+configure_duckdb_api_cpp_target(duckdb_api_graphql_product_contract_tests)
+
 add_executable(
   duckdb_api_adapter_stream_contract_tests
   test/cpp/query/duckdb/duckdb_adapter_stream_contract_tests.cpp

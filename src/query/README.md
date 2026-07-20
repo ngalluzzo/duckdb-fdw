@@ -55,6 +55,7 @@ behind their public interfaces; do not reproduce those rules in the adapter.
 | Extension identity, load order, or initialization containment | `duckdb/extension_entrypoint.cpp`, `duckdb_api_extension.hpp` | `test/sql/duckdb_api.test`, `test/python/source_demo_contract.py` |
 | Controlled end-to-end composition | `test/cpp/query/integration/` | `test/python/live_rest_product_contract.py`, `test/python/authenticated_relation_product_contract.py`, `test/python/repository_pagination_product_contract.py` |
 | GraphQL bind, explanation, nullable rows, SQL composition, and protocol errors through provider APIs | unchanged generic adapter plus `duckdb/scan_plan_explanation.*` | `duckdb_api_graphql_query_contract_tests` |
+| Actual-DuckDB GraphQL result, prepare/repeat, and retained-REST composition through named Runtime scenarios | unchanged generic registration and adapter | `duckdb_api_graphql_product_contract_tests` |
 
 Production and test inventories are in `src/query/{sources,targets}.cmake` and
 `test/cpp/query/{sources,targets}.cmake`. Shared test helpers live under

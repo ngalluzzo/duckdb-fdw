@@ -31,6 +31,8 @@ const char *InitializationStageName(duckdb_api::ErrorStage stage) {
 		return "authentication";
 	case duckdb_api::ErrorStage::AUTHORIZATION:
 		return "authorization";
+	case duckdb_api::ErrorStage::REMOTE_PROTOCOL:
+		return "remote_protocol";
 	}
 	return "internal";
 }
