@@ -17,6 +17,9 @@ const char *PredicateNameForExplanation(duckdb_api::PlannedPredicate predicate) 
 	if (predicate == duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE) {
 		return "visibility_equals_private";
 	}
+	if (predicate == duckdb_api::PlannedPredicate::TYPED_EQUALITY) {
+		return "typed_equality";
+	}
 	if (predicate == duckdb_api::PlannedPredicate::COMPLETE_DUCKDB_FILTER) {
 		return "complete_duckdb_filter";
 	}

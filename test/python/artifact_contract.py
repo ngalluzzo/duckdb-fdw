@@ -597,7 +597,7 @@ def main() -> int:
         for marker in (
             "Relation",
             "Remote Predicate",
-            "visibility_equals_private",
+            "typed_equality",
             "Remote Accuracy",
             "superset",
             "Residual Predicate",
