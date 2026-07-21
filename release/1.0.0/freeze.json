@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "freeze_version": "1.0.0-candidate",
+  "produced_by_release": "0.9.0",
+  "status": "candidate",
+  "purpose": "The enumerated 1.0.0 public contract frozen by the 0.9.0 release for compatibility rehearsal (1.0.0-rc.N) and publication (1.0.0). A reviewer can read release/1.0.0/freeze.md alongside this declaration without inspecting product source.",
+  "authority_chain": [
+    "AGENTS.md invariants are the floor; accepted RFCs cannot weaken them.",
+    "ROADMAP.md section '1.0.0 - narrow stable contract' states the public outcome.",
+    "RFC 0009 sets the intended stable boundary and the six SemVer-governed categories.",
+    "docs/ARCHITECTURE.md, docs/CONNECTOR_SPECIFICATIONS.md, docs/RUNTIME_CONTRACTS.md define current behavior.",
+    "Accepted RFCs 0010, 0011, 0012, 0013, 0014 bind specific decisions propagated into those contracts.",
+    "release/public-surface/inventory.json is the SQL-surface compatibility oracle.",
+    "release/<version>/pins.json and public_contract.json are per-release identity and contract evidence."
+  ],
+  "version_domains": [
+    {
+      "domain": "project_extension",
+      "contract": "SemVer for the documented duckdb-fdw product surface and observable behavior.",
+      "authority": "ROADMAP.md Versioning model"
+    },
+    {
+      "domain": "connector_spec",
+      "contract": "Compatibility identifier for the declarative authoring language.",
+      "value": "duckdb_api/v1",
+      "authority": "RFC 0013"
+    },
+    {
+      "domain": "connector_package",
+      "contract": "Independent SemVer for one connector's relations, inputs, policies, schemas, and upstream adaptations.",
+      "authority": "RFC 0013"
+    },
+    {
+      "domain": "duckdb_compatibility",
+      "contract": "Tested matrix of DuckDB release, integration profile, platform, architecture, and installation mode.",
+      "authority": "ROADMAP.md Release gate; evidence-derived at 0.9.0"
+    }
+  ],
+  "connector_spec": {
+    "identifier": "duckdb_api/v1",
+    "authority": "RFC 0013",
+    "syntax_authority": "docs/CONNECTOR_SPECIFICATIONS.md",
+    "schema_authority": "src/connector/package/assets/connector-package-v1.schema.json"
+  },
+  "integration_profile": {
+    "profile": "native_cpp_duckdb_table_function_extension",
+    "public_abi": false,
+    "deep_native_catalog_optimizer_integration": false,
+    "authority": "RFC 0009"
+  },
+  "sql_surface": {
+    "authority": "release/public-surface/inventory.json",
+    "contract_authority": "release/public-surface/query-contract.json",
+    "decision": "RFC 0012",
+    "release_view": "0.9.0",
+    "active": [
+      "sql.table_function.system.main.github_duckdb_login_search_page",
+      "sql.table_function.system.main.github_authenticated_user",
+      "sql.table_function.system.main.github_authenticated_repositories",
+      "sql.table_function.system.main.github_viewer_repository_metrics",
+      "sql.table_function.system.main.duckdb_api_load_connector",
+      "sql.table_function.system.main.duckdb_api_reload_connector",
+      "sql.table_function.system.main.duckdb_api_loaded_connectors",
+      "sql.table_function.system.main.duckdb_api_loaded_relations",
+      "sql.table_function.system.main.duckdb_api_relation_arguments"
+    ],
+    "removed": [
+      "sql.table_function.system.main.duckdb_api_scan"
+    ]
+  },
+  "pagination_strategies": {
+    "rest": [
+      "disabled",
+      "link_next"
+    ],
+    "graphql": [
+      "relay_forward"
+    ],
+    "schema_authority": "src/connector/package/assets/connector-package-v1.schema.json",
+    "syntax_authority": "docs/CONNECTOR_SPECIFICATIONS.md",
+    "rejected_diagnostic": {
+      "code": "DUCKDB_API_UNSUPPORTED_DECLARATION",
+      "phase": "SCHEMA"
+    }
+  },
+  "diagnostics": {
+    "vocabulary_authority": "docs/CONNECTOR_SPECIFICATIONS.md#diagnostics",
+    "redaction": "Absolute roots, source scalar content, credentials, generated documents, request/response bodies, rows, cursors, and remote messages are never diagnostic fields."
+  },
+  "relational_ownership": {
+    "filter": "duckdb",
+    "projection": "duckdb",
+    "ordering": "duckdb",
+    "limit": "duckdb",
+    "offset": "duckdb",
+    "residual": "exactly_one_owner",
+    "pushdown_law": "D implies R for safety; exactness additionally requires R implies D over the occurrence bag with multiplicity.",
+    "authority": "docs/ARCHITECTURE.md Relational correctness; RFC 0010"
+  },
+  "distribution_and_support": {
+    "ordinary_user_channel": "DuckDB Community Extensions",
+    "contributor_path": "source build",
+    "license": "MIT",
+    "support_policy_authority": "RFC 0014",
+    "support_policy": "best-effort, latest-release-only, no LTS, no backports",
+    "security_reporting_authority": "SECURITY.md",
+    "initial_stable_release_requirement": "latest stable DuckDB release at release time; only exact passing Community platform rows"
+  },
+  "exclusions": [
+    "deep_native_catalog_and_optimizer_integration_profile",
+    "public_rust_native_plugin_wasm_or_columnar_binary_abi",
+    "custom_protocol_or_pagination_binary_abis",
+    "internal_types_and_traits_public",
+    "central_connector_discovery_or_distribution_registry",
+    "git_fetch_dependency_resolution_lockfiles",
+    "connector_package_signing_or_trust_infrastructure",
+    "tier2_jq_compatible_transforms",
+    "tier3_native_or_wasm_custom_code",
+    "column_providers",
+    "partitions",
+    "automatic_retry_or_rate_limit_waiting",
+    "author_configurable_cache_or_single_flight",
+    "openapi_or_graphql_introspection_importers",
+    "authenticators_beyond_anonymous_and_capability_scoped_bearer",
+    "dynamic_schemas",
+    "write_back_transactions_or_continuous_streams",
+    "compatibility_with_arbitrary_upstream_api_drift",
+    "pagination_body_url_offset_or_cursor_in_body_strategies",
+    "raw_graphql_documents",
+    "author_remote_projection_order_or_limit_pushdown_declarations"
+  ],
+  "fast_follows": [
+    {
+      "id": "end_to_end_fixture_execution",
+      "scope": "PackageFixtureExecutionService has no concrete Semantics/Runtime wiring. Fixtures today prove schema validation, exact coverage-key agreement, and payload-digest agreement, but do not execute expected rows or diagnostics against real compiled behavior, for either repository package.",
+      "status": "recorded_during_0.9.0_freeze",
+      "decision": "Freeze proceeds on the coverage/digest evidence basis; real end-to-end fixture execution is a post-freeze increment, not a 1.0.0 blocker.",
+      "authority": "docs/goals/public-connector-authoring-candidate.md completion record"
+    }
+  ],
+  "not_yet_frozen": [
+    {
+      "item": "supported_duckdb_profile_platform_architecture_installation_matrix_rows",
+      "reason": "Evidence-derived at 0.9.0 per ROADMAP; not enumerable until Step 4 evidence completes.",
+      "authority": "ROADMAP.md Release-governance decision"
+    },
+    {
+      "item": "release/1.0.0/pins.json and public_contract.json",
+      "reason": "Produced at 1.0.0 shipment after matrix derivation and 1.0.0-rc.N rehearsal.",
+      "authority": "ROADMAP.md 1.0.0"
+    }
+  ],
+  "rfc_authorities": {
+    "scope": "Accepted RFCs whose decisions bind the 1.0.0 boundary directly. Pre-boundary product RFCs 0006, 0007, and 0008 are propagated through the system-design contracts cited in authority_chain; RFC 0015 establishes post-v1 team accountability only and is cited in the exclusions, not here.",
+    "accepted": [
+      "RFC 0009",
+      "RFC 0010",
+      "RFC 0011",
+      "RFC 0012",
+      "RFC 0013",
+      "RFC 0014"
+    ]
+  }
+}

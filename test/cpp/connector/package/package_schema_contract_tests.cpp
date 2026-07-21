@@ -246,6 +246,18 @@ void TestInvalidIdentifiersStayDiagnosticOnly() {
 	}
 }
 
+void TestUnsupportedPaginationStrategyRejected() {
+	TemporaryPackage package;
+	duckdb_api_test::WriteGithubPackage(package);
+	package.Write("relations/authenticated_repositories.yaml",
+	              duckdb_api_test::ReplaceOnce(GithubRelation("authenticated_repositories"), "strategy: link_next",
+	                                           "strategy: body_url_next"));
+	NeverCancel cancellation;
+	RequireFirstDiagnostic(duckdb_api_test::CompileRoot(package.Root(), cancellation),
+	                       PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+	                       "a response-body URL pagination strategy escaped the closed v1 pagination set");
+}
+
 void TestDiagnosticCodePhaseContract() {
 	{
 		TemporaryPackage package;
@@ -283,6 +295,7 @@ int main() {
 		TestExtractorByteLimit();
 		TestInvalidIdentifiersStayDiagnosticOnly();
 		TestDiagnosticCodePhaseContract();
+		TestUnsupportedPaginationStrategyRejected();
 		std::cout << "package schema contract tests passed" << std::endl;
 		return 0;
 	} catch (const std::exception &error) {

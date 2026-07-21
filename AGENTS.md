@@ -199,6 +199,8 @@ Documentation and agent changes must pass:
 ruby scripts/validate-agent-assets.rb
 python3 -I -B scripts/verify-public-surface-inventory.py
 python3 -I -B test/python/public_surface_inventory_tests.py
+python3 -I -B scripts/verify-contract-freeze.py
+python3 -I -B test/python/contract_freeze_tests.py
 git diff --check
 git diff --cached --check
 ```

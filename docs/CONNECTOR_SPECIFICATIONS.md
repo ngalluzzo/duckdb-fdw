@@ -330,6 +330,16 @@ Pagination is pull-driven, one page at a time, bounded by positive page and
 scan ceilings, and does not grant ordering, snapshot, parallelism, resume,
 deduplication, retry, or cache guarantees.
 
+The REST pagination strategy set is closed at `{disabled, link_next}`. Common
+real-world shapes outside this set are rejected by the closed schema rather
+than silently reinterpreted: response-body-embedded next URLs (for example an
+`info.next` absolute link in the JSON body), numeric offset or page-number
+traversal, cursor-in-body strategies, and reverse or bidirectional traversal.
+GraphQL REST-like body pagination is likewise outside the structured GraphQL
+profile below. A later accepted contract and pre-freeze evidence would be
+required to admit any such strategy; the compiler rejects the declaration
+today (verified as `DUCKDB_API_UNSUPPORTED_DECLARATION` in the schema phase).
+
 ## Structured GraphQL operations
 
 GraphQL authoring is structured; raw documents are not accepted. A query
@@ -505,8 +515,9 @@ schemas. It does not contain author-chosen SQL names, automatic discovery,
 URLs as package roots, OpenAPI or GraphQL introspection import, raw GraphQL
 documents, dynamic schemas, write operations, connection profiles,
 partitions, providers, enrichment, retries, caching, rate-limit waiting,
-remote projection/order/limit declarations, custom native code, WASM, or a
-public C++ ABI.
+remote projection/order/limit declarations, response-body-URL,
+offset/page-number, or cursor-in-body pagination strategies, custom native
+code, WASM, or a public C++ ABI.
 
 Adding any such capability requires a later accepted contract. An
 implementation must reject the declaration rather than accept and ignore it.

@@ -274,3 +274,56 @@ here. `make build`, `make test`, the source-identity, native-dependency,
 agent-asset, and public-inventory gates, and the fresh-root
 `scripts/run-native-product-tests.sh` gate all pass with this oracle wired into
 both the developer and release test lists.
+
+**Step 3 delivered: 1.0.0 contract freeze (2026-07-21).** The complete `1.0.0`
+public contract is now enumerated as one discoverable, machine-cross-checked
+artifact pair at [`release/1.0.0/`](../../release/1.0.0):
+
+- `release/1.0.0/freeze.md` is the readable enumeration of the six RFC 0009
+  SemVer-governed categories, the four distinct version domains, the explicit
+  exclusions, the recorded evidence limitations, and what is not yet frozen.
+  It cites authority for each layer and cross-references the machine oracles
+  rather than duplicating them.
+- `release/1.0.0/freeze.json` is the machine-checkable declaration. A new gate
+  (`scripts/verify-contract-freeze.py` plus the `contract_freeze` verifier
+  module) and mutation suite (`test/python/contract_freeze_tests.py`) assert
+  that the freeze agrees with its authoritative sources: the frozen SQL active
+  and removed surfaces equal `release/public-surface/inventory.json`'s `0.9.0`
+  release view exactly; the connector-spec identifier equals the schema const;
+  the REST and GraphQL pagination strategy sets equal the schema's closed
+  `oneOf`; the four version domains are intact; the mandatory exclusion set is
+  present; and every cited RFC resolves to Accepted. The gate is wired into
+  `AGENTS.md` "Current verification".
+
+Two decision-critical boundaries recorded during the first trial were resolved
+under product-manager direction rather than decided silently, per this goal's
+governance rule:
+
+1. **Pagination exclusion (product-manager decision: explicit exclusion).** v1's
+   REST pagination strategy set is closed at `{disabled, link_next}` and
+   GraphQL at `{relay_forward}`. Response-body-embedded next URLs, offset/page-
+   number traversal, and cursor-in-body strategies — the common shape the Rick
+   and Morty trial could not represent — are now an explicit `1.0.0` exclusion
+   in `docs/CONNECTOR_SPECIFICATIONS.md` (closed-set description and
+   compatibility-boundary enumeration) and `release/1.0.0/freeze.json`. No RFC
+   was required: the closed `oneOf` already rejects these strategies today. A
+   new schema-layer oracle
+   (`test/cpp/connector/package/package_schema_contract_tests.cpp`,
+   `TestUnsupportedPaginationStrategyRejected`) pins the rejection at
+   `DUCKDB_API_UNSUPPORTED_DECLARATION` in the schema phase, so the exclusion
+   rests on direct validation evidence rather than prose. Adding any such
+   strategy remains a post-`1.0.0` RFC candidate.
+2. **Fixture-execution evidence scope (product-manager decision: freeze now,
+   record fast-follow).** The freeze proceeds on the schema, coverage-key, and
+   payload-digest agreement basis already proven for both packages. Real
+   end-to-end fixture execution (`PackageFixtureExecutionService` has no
+   concrete Semantics/Runtime wiring) is recorded as a `1.0.0` fast-follow in
+   `release/1.0.0/freeze.json` and `freeze.md`, not a blocker. The mutation
+   suite fails closed if that fast-follow entry is removed.
+
+This step introduces no new public SQL, lifecycle mechanism, or compatibility
+surface, and no new relational, security, resource, or lifecycle behavior. The
+`1.0.0` contract is therefore frozen as a candidate; the supported
+DuckDB/profile/platform/architecture/installation matrix (step 4) and the
+per-release `release/1.0.0/pins.json` / `public_contract.json` (at shipment)
+remain the unfrozen `1.0.0` inputs and are marked as such in the freeze.
