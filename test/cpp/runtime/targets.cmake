@@ -148,6 +148,39 @@ target_link_libraries(
   PRIVATE duckdb_api_runtime_executor_service
           Threads::Threads)
 
+# Connector's fixture orchestrator consumes this bounded Runtime test service.
+# The public include exposes only ScanPlan, controlled response/auth state, and
+# safe observations; exact transport programming remains Runtime-private.
+add_library(
+  duckdb_api_runtime_package_fixture_service STATIC
+  ${REMOTE_RUNTIME_PACKAGE_FIXTURE_SERVICE_SOURCES})
+configure_duckdb_api_cpp_target(
+  duckdb_api_runtime_package_fixture_service)
+target_include_directories(
+  duckdb_api_runtime_package_fixture_service
+  PUBLIC test/cpp/runtime/service
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_runtime_package_fixture_service
+  PUBLIC duckdb_api_runtime_interface_service
+         duckdb_api_scan_plan_service
+  PRIVATE duckdb_api_runtime_programmable_test_service
+          Threads::Threads)
+
+add_executable(
+  duckdb_api_package_fixture_execution_tests
+  test/cpp/runtime/execution/package_fixture_execution_tests.cpp)
+configure_duckdb_api_cpp_target(
+  duckdb_api_package_fixture_execution_tests)
+target_include_directories(
+  duckdb_api_package_fixture_execution_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_package_fixture_execution_tests
+  PRIVATE duckdb_api_runtime_package_fixture_service
+          duckdb_api_semantics_fixture_service
+          Threads::Threads)
+
 # The sole Query-facing Runtime test service. Only this dedicated include
 # directory is public; its implementation selects Runtime-owned named scenarios
 # and returns a public ScanExecutor plus safe counters/stages.

@@ -73,6 +73,17 @@ publication port. Headers under
 `duckdb_api/internal/runtime/` are private. Production and test inventories are
 in the package `sources.cmake` and `targets.cmake` files.
 
+The non-installed `runtime/service/package_fixture_execution.hpp` service is
+the Runtime half of offline connector-package fixtures. Its caller provides an
+immutable Semantics plan, a closed anonymous/bearer-present/bearer-missing
+state, and identity-verified response pages. A fresh private controlled
+transport then runs the ordinary admission, authentication, request, decoder,
+pagination, and stream services. The observation contains typed rows or only a
+stable Runtime error stage/field, the safe plan snapshot, and exact requests
+with authorization bytes redacted. It exposes no Connector generation,
+package source, YAML, expected result, occurrence identity, coverage key, or
+live-network authority.
+
 ## Before changing execution code
 
 - Admit the complete plan and authorization capability before materializing
@@ -132,6 +143,7 @@ Tests mirror the production directories under `test/cpp/runtime/`:
 | GraphQL admission and request bytes | `duckdb_api_graphql_plan_admission_tests`, `duckdb_api_package_http_execution_tests` |
 | GraphQL envelope and cursor state | `duckdb_api_graphql_response_decoder_tests`, `duckdb_api_graphql_cursor_pagination_tests` |
 | GraphQL pull execution | `duckdb_api_graphql_paginated_scan_tests` |
+| Offline package fixture execution | `duckdb_api_runtime_package_fixture_service`, `duckdb_api_package_fixture_execution_tests` (`runtime/service/package_fixture_execution.hpp`) |
 | Consumer-controlled named scenarios | `duckdb_api_runtime_controlled_service`, `duckdb_api_controlled_runtime_scenario_tests` (`runtime/service/controlled_runtime_scenario.hpp`) |
 | Runtime-private programmable and curl fixtures | `duckdb_api_runtime_programmable_test_service`, `duckdb_api_runtime_loopback_curl_test_service` (`runtime/support/controlled_http_transport.hpp`, `runtime/support/loopback_curl_runtime.hpp`) |
 | REST admission, executor, and page lifecycle | `duckdb_api_rest_plan_admission_tests`, `duckdb_api_http_scan_executor_tests`, `duckdb_api_http_scan_executor_policy_tests`, `duckdb_api_http_scan_pagination_tests` |
