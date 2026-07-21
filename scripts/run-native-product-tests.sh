@@ -9,6 +9,7 @@ fi
 
 readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "${REPOSITORY_ROOT}/scripts/lib/release-common.sh"
+source "${REPOSITORY_ROOT}/scripts/lib/native-test-suite.sh"
 readonly BUILD_ROOT="$(release_resolve_path "$1")"
 readonly BUILD_PROFILE="${2:-debug}"
 readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.8.0/pins.json"
@@ -172,182 +173,11 @@ if find "${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/repository" -type f \
     echo "private controlled artifact entered DuckDB's install repository" >&2
     exit 1
 fi
-python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
-    configuration "${PINS_FILE}" "${VERIFIED_SDK_ROOT}" \
-    "${NATIVE_TEST_ROOT}/duckdb_api_native_dependencies.json" >/dev/null
-python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-product-sources.py" \
-    "${PINS_FILE}" "${NATIVE_TEST_ROOT}/duckdb_api_product_sources.json" >/dev/null
-"${NATIVE_TEST_ROOT}/duckdb_api_native_dependency_identity" \
-    >"${BUILD_ROOT}/observed-native-runtime.json"
-python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
-    runtime "${PINS_FILE}" "${BUILD_ROOT}/observed-native-runtime.json" >/dev/null
-python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
-    linkage "${PINS_FILE}" transport \
-    "${NATIVE_TEST_ROOT}/duckdb_api_native_dependency_identity" >/dev/null
-python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
-    linkage "${PINS_FILE}" transport "${CONTROLLED_ARTIFACT}" >/dev/null
-for target in \
-    duckdb_api_connector_tests \
-    duckdb_api_connector_catalog_fixture_tests \
-    duckdb_api_compiled_package_generation_tests \
-    duckdb_api_failsafe_yaml_tests \
-    duckdb_api_package_digest_tests \
-    duckdb_api_package_source_tests \
-    duckdb_api_local_package_compiler_tests \
-    duckdb_api_local_package_reload_fixture_tests \
-    duckdb_api_package_compatibility_tests \
-    duckdb_api_package_compiler_contract_tests \
-    duckdb_api_package_graphql_renderer_tests \
-    duckdb_api_package_predicate_compiler_tests \
-    duckdb_api_package_schema_contract_tests \
-    duckdb_api_package_compiler_fixture_tests \
-    duckdb_api_scan_request_tests \
-    duckdb_api_typed_value_adapter_tests \
-    duckdb_api_scan_planner_tests \
-    duckdb_api_scan_plan_contract_tests \
-    duckdb_api_scan_plan_pagination_contract_tests \
-    duckdb_api_scan_plan_fixture_tests \
-    duckdb_api_graphql_semantics_tests \
-    duckdb_api_package_rest_planning_tests \
-    duckdb_api_repository_graphql_fixture_consumer_tests \
-    duckdb_api_execution_contract_tests \
-    duckdb_api_runtime_generation_contract_tests \
-    duckdb_api_runtime_generation_lifecycle_tests \
-    duckdb_api_authorization_contract_tests \
-    duckdb_api_network_policy_tests \
-    duckdb_api_uri_reference_tests \
-    duckdb_api_link_pagination_tests \
-    duckdb_api_scan_resource_accounting_tests \
-    duckdb_api_request_validation_tests \
-    duckdb_api_http_transport_contract_tests \
-    duckdb_api_decoded_page_buffer_tests \
-    duckdb_api_json_decoder_tests \
-    duckdb_api_json_root_array_decoder_tests \
-    duckdb_api_graphql_response_decoder_tests \
-    duckdb_api_graphql_cursor_pagination_tests \
-    duckdb_api_controlled_runtime_scenario_tests \
-    duckdb_api_http_scan_executor_tests \
-    duckdb_api_http_scan_pagination_tests \
-    duckdb_api_http_scan_executor_policy_tests \
-    duckdb_api_graphql_paginated_scan_tests \
-    duckdb_api_graphql_plan_admission_tests \
-    duckdb_api_package_http_execution_tests \
-    duckdb_api_duckdb_secret_tests \
-    duckdb_api_adapter_tests \
-    duckdb_api_graphql_query_contract_tests \
-    duckdb_api_graphql_product_contract_tests \
-    duckdb_api_adapter_stream_contract_tests \
-    duckdb_api_package_generation_composition_tests \
-    duckdb_api_package_query_surface_tests \
-    duckdb_api_package_product_contract_tests \
-    duckdb_api_cross_package_migration_tests; do
-    python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
-        linkage "${PINS_FILE}" curl-free "${NATIVE_TEST_ROOT}/${target}" >/dev/null
-done
-for target in \
-    duckdb_api_curl_http_transport_tests \
-    duckdb_api_curl_http_budget_tests \
-    duckdb_api_curl_http_lifecycle_tests \
-    duckdb_api_curl_transfer_policy_tests \
-    duckdb_api_curl_link_metadata_tests \
-    duckdb_api_curl_http_pagination_tests \
-    duckdb_api_curl_tls_security_tests; do
-    python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
-        linkage "${PINS_FILE}" transport "${NATIVE_TEST_ROOT}/${target}" >/dev/null
-done
-if ! strings "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_transport_tests" |
-    grep -F 'duckdb_api_private_curl_option_observer_v1' >/dev/null; then
-    echo "private curl option observer canary is missing from its focused target" >&2
-    exit 1
-fi
-for target in "${ARTIFACT}" "${CONTROLLED_ARTIFACT}" \
-    "${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/duckdb"; do
-    if strings "${target}" |
-        grep -F 'duckdb_api_private_curl_option_observer_v1' >/dev/null; then
-        echo "private curl option observer canary entered a product artifact" >&2
-        exit 1
-    fi
-done
+verify_native_build_output "${PROJECT_SOURCE}/scripts" "${NATIVE_TEST_ROOT}" \
+    "${PINS_FILE}" "${VERIFIED_SDK_ROOT}" "${BUILD_ROOT}/observed-native-runtime.json" \
+    "${ARTIFACT}" "${CONTROLLED_ARTIFACT}" "${TEMPLATE_ROOT}/build/${BUILD_PROFILE}/duckdb"
 python3 -I -B "${PROJECT_SOURCE}/scripts/test-native-dependencies.py"
-"${NATIVE_TEST_ROOT}/duckdb_api_connector_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_connector_catalog_fixture_tests"
-(
-    cd "${PROJECT_SOURCE}"
-    "${NATIVE_TEST_ROOT}/duckdb_api_failsafe_yaml_tests"
-    "${NATIVE_TEST_ROOT}/duckdb_api_package_digest_tests"
-    "${NATIVE_TEST_ROOT}/duckdb_api_package_source_tests"
-    "${NATIVE_TEST_ROOT}/duckdb_api_local_package_compiler_tests"
-    "${NATIVE_TEST_ROOT}/duckdb_api_local_package_reload_fixture_tests" "${PROJECT_SOURCE}"
-    "${NATIVE_TEST_ROOT}/duckdb_api_compiled_package_generation_tests"
-    "${NATIVE_TEST_ROOT}/duckdb_api_package_compatibility_tests"
-    "${NATIVE_TEST_ROOT}/duckdb_api_package_compiler_contract_tests"
-    "${NATIVE_TEST_ROOT}/duckdb_api_package_graphql_renderer_tests"
-    "${NATIVE_TEST_ROOT}/duckdb_api_package_predicate_compiler_tests"
-    "${NATIVE_TEST_ROOT}/duckdb_api_package_schema_contract_tests"
-    "${NATIVE_TEST_ROOT}/duckdb_api_package_compiler_fixture_tests" "${PROJECT_SOURCE}"
-    "${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_candidate_tests" "${PROJECT_SOURCE}"
-    "${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_coverage_tests" "${PROJECT_SOURCE}"
-    "${NATIVE_TEST_ROOT}/duckdb_api_rickandmorty_package_compiler_tests" "${PROJECT_SOURCE}"
-    "${NATIVE_TEST_ROOT}/duckdb_api_cross_package_migration_tests" "${PROJECT_SOURCE}"
-)
-"${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_typed_value_adapter_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_scan_planner_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_contract_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_pagination_contract_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_fixture_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_semantics_input_resolution_observation_service_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_graphql_semantics_tests" "${PROJECT_SOURCE}"
-"${NATIVE_TEST_ROOT}/duckdb_api_package_rest_planning_tests" "${PROJECT_SOURCE}"
-"${NATIVE_TEST_ROOT}/duckdb_api_repository_graphql_fixture_consumer_tests" "${PROJECT_SOURCE}"
-"${NATIVE_TEST_ROOT}/duckdb_api_runtime_rest_predicate_fixture_consumer_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_execution_contract_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_runtime_generation_contract_tests" "${PROJECT_SOURCE}"
-"${NATIVE_TEST_ROOT}/duckdb_api_runtime_generation_lifecycle_tests" "${PROJECT_SOURCE}"
-"${NATIVE_TEST_ROOT}/duckdb_api_authorization_contract_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_network_policy_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_uri_reference_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_link_pagination_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_scan_resource_accounting_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_request_validation_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_http_transport_contract_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_decoded_page_buffer_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_json_decoder_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_json_root_array_decoder_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_graphql_response_decoder_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_graphql_cursor_pagination_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_controlled_runtime_scenario_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_http_scan_pagination_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_policy_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_rest_plan_admission_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_graphql_paginated_scan_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_graphql_plan_admission_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_package_http_execution_tests" "${PROJECT_SOURCE}"
-"${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_cancellation_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_column_variant_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_execution_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_failure_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_graphql_body_variant_tests" "${PROJECT_SOURCE}"
-"${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_pagination_variant_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_resource_variant_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_curl_http_transport_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_curl_http_budget_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_curl_http_lifecycle_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_curl_transfer_policy_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_curl_link_metadata_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_curl_http_pagination_tests"
-python3 -I -B "${PROJECT_SOURCE}/test/python/runtime_curl_tls_tests.py" \
-    "${NATIVE_TEST_ROOT}/duckdb_api_curl_tls_security_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_adapter_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_graphql_query_contract_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_graphql_product_contract_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_adapter_stream_contract_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_duckdb_secret_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_package_generation_composition_tests" "${PROJECT_SOURCE}"
-"${NATIVE_TEST_ROOT}/duckdb_api_query_package_fixture_publication_tests"
-"${NATIVE_TEST_ROOT}/duckdb_api_package_query_surface_tests" "${PROJECT_SOURCE}"
-"${NATIVE_TEST_ROOT}/duckdb_api_package_product_contract_tests" "${PROJECT_SOURCE}"
+run_native_test_binaries "${NATIVE_TEST_ROOT}" "${PROJECT_SOURCE}" "python3"
 (
     cd "${TEMPLATE_ROOT}"
     "./build/${BUILD_PROFILE}/test/unittest" --require duckdb_api 'test/*'

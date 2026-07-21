@@ -12,6 +12,7 @@ readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Environment bootstrap and build operations have different change drivers.
 # Keep this file as the stable consumer-facing command boundary.
 source "${REPOSITORY_ROOT}/scripts/lib/native-dev-environment.sh"
+source "${REPOSITORY_ROOT}/scripts/lib/native-test-suite.sh"
 source "${REPOSITORY_ROOT}/scripts/lib/native-dev-build.sh"
 
 usage() {
