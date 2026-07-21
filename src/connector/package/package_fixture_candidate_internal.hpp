@@ -1,0 +1,40 @@
+#pragma once
+
+#include "duckdb_api/internal/connector/package/package_digest.hpp"
+#include "duckdb_api/package_fixture_candidates.hpp"
+
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace duckdb_api {
+namespace connector {
+namespace internal {
+
+// Private temporary source tree. The random absolute path and source files are
+// implementation state only; consumers receive the compiled candidate whose
+// retained descriptor stays valid for this object's lifetime.
+class PrivatePackageSourceCopy {
+public:
+	static std::unique_ptr<PrivatePackageSourceCopy> Create(const std::vector<SemanticSourceFile> &files,
+	                                                        PackageCancellation &cancellation);
+	~PrivatePackageSourceCopy() noexcept;
+
+	PrivatePackageSourceCopy(const PrivatePackageSourceCopy &) = delete;
+	PrivatePackageSourceCopy &operator=(const PrivatePackageSourceCopy &) = delete;
+
+	const std::string &Root() const noexcept;
+
+private:
+	PrivatePackageSourceCopy(std::string root, std::vector<std::string> files);
+	std::string root;
+	std::vector<std::string> files;
+};
+
+std::vector<SemanticSourceFile> BuildFixtureCandidateSources(const CompiledLocalPackage &active,
+                                                             const PackageFixtureCoverageEntry &coverage_entry,
+                                                             PackageCancellation &cancellation);
+
+} // namespace internal
+} // namespace connector
+} // namespace duckdb_api
