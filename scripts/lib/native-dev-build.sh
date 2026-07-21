@@ -167,6 +167,7 @@ run_build() {
         duckdb_api_uri_reference_tests \
         duckdb_api_link_pagination_tests \
         duckdb_api_scan_resource_accounting_tests \
+        duckdb_api_request_validation_tests \
         duckdb_api_http_transport_contract_tests \
         duckdb_api_decoded_page_buffer_tests \
         duckdb_api_json_decoder_tests \
@@ -266,6 +267,7 @@ run_tests() {
     "${NATIVE_TEST_ROOT}/duckdb_api_uri_reference_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_link_pagination_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_resource_accounting_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_request_validation_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_http_transport_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_decoded_page_buffer_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_json_decoder_tests"

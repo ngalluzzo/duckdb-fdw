@@ -81,32 +81,71 @@ bool IsRuntimeOwnedHeader(const std::string &name) noexcept {
 	       ContainsAsciiIgnoreCase(name, "api-key") || ContainsAsciiIgnoreCase(name, "apikey");
 }
 
+bool TryParseIpv4Component(const std::string &host, std::size_t begin, std::size_t end, uint64_t maximum,
+                           bool bounded) noexcept {
+	if (begin == end) {
+		return false;
+	}
+	uint64_t base = 10;
+	if (end - begin >= 2 && host[begin] == '0' && (host[begin + 1] == 'x' || host[begin + 1] == 'X')) {
+		base = 16;
+		begin += 2;
+		if (begin == end) {
+			return false;
+		}
+	} else if (end - begin > 1 && host[begin] == '0') {
+		base = 8;
+		begin++;
+	}
+	uint64_t value = 0;
+	for (std::size_t index = begin; index < end; index++) {
+		const auto character = host[index];
+		uint64_t digit = 0;
+		if (character >= '0' && character <= '9') {
+			digit = static_cast<uint64_t>(character - '0');
+		} else if (character >= 'a' && character <= 'f') {
+			digit = static_cast<uint64_t>(character - 'a') + 10;
+		} else if (character >= 'A' && character <= 'F') {
+			digit = static_cast<uint64_t>(character - 'A') + 10;
+		} else {
+			return false;
+		}
+		if (digit >= base || (bounded && value > (maximum - digit) / base)) {
+			return false;
+		}
+		if (bounded) {
+			value = value * base + digit;
+		}
+	}
+	return true;
+}
+
+// Reject every legacy numeric IPv4 form accepted by the supported resolver:
+// one to four decimal, octal, or hexadecimal components with inet_aton-style
+// width allocation. Parsing is ASCII-only and bounded, so numeric-looking DNS
+// labels outside that exact address grammar remain ordinary host names.
 bool IsIpv4Literal(const std::string &host) noexcept {
+	std::size_t component_count = 1;
+	for (const auto character : host) {
+		if (character == '.' && ++component_count > 4) {
+			return false;
+		}
+	}
+	const uint64_t final_maximum[] = {0, 0xffffffffULL, 0xffffffULL, 0xffffULL, 0xffULL};
 	std::size_t begin = 0;
-	std::size_t components = 0;
-	while (begin <= host.size()) {
+	for (std::size_t component = 0; component < component_count; component++) {
 		const auto end = host.find('.', begin);
 		const auto component_end = end == std::string::npos ? host.size() : end;
-		if (component_end == begin || component_end - begin > 3) {
+		const auto maximum = component + 1 == component_count ? final_maximum[component_count] : 0xffULL;
+		// Darwin's supported resolver accepts an arbitrarily long single numeric
+		// component and truncates it to an IPv4 address. Multi-component forms
+		// retain inet_aton width limits.
+		if (!TryParseIpv4Component(host, begin, component_end, maximum, component_count != 1)) {
 			return false;
 		}
-		unsigned int value = 0;
-		for (std::size_t index = begin; index < component_end; index++) {
-			if (host[index] < '0' || host[index] > '9') {
-				return false;
-			}
-			value = value * 10U + static_cast<unsigned int>(host[index] - '0');
-		}
-		if (value > 255U) {
-			return false;
-		}
-		components++;
-		if (end == std::string::npos) {
-			break;
-		}
-		begin = end + 1;
+		begin = component_end + 1;
 	}
-	return components == 4;
+	return true;
 }
 
 } // namespace

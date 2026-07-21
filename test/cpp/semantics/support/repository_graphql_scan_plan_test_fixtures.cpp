@@ -40,6 +40,84 @@ duckdb_api::ScanPlan BuildNonGithubPackageRestPlan(const std::string &absolute_r
 	return planning.Plan(generation.QueryRegistration().GenerationHandle(), request);
 }
 
+namespace {
+
+duckdb_api::ScanPlan BuildRepositoryGithubPackageRestPlan(const std::string &absolute_repository_root,
+                                                          const std::string &logical_secret_name) {
+	const auto generation = CompileRepositoryGithubGenerationFixture(absolute_repository_root);
+	const duckdb_api::PackageBoundScanPlanningService planning(generation);
+	auto request = duckdb_api::BuildConservativeScanRequest(
+	    generation.Connector(), "authenticated_user", duckdb_api::LogicalSecretReference::Named(logical_secret_name));
+	return planning.Plan(generation.QueryRegistration().GenerationHandle(), request);
+}
+
+const char *NumericOrigin(PackageHttpNumericOriginCounterexample counterexample) {
+	switch (counterexample) {
+	case PackageHttpNumericOriginCounterexample::LOOPBACK_TWO_COMPONENT_DECIMAL:
+		return "127.1";
+	case PackageHttpNumericOriginCounterexample::LOOPBACK_SINGLE_DECIMAL:
+		return "2130706433";
+	case PackageHttpNumericOriginCounterexample::LOOPBACK_SINGLE_HEX:
+		return "0x7f000001";
+	case PackageHttpNumericOriginCounterexample::LOOPBACK_SINGLE_HEX_UPPERCASE:
+		return "0X7F000001";
+	case PackageHttpNumericOriginCounterexample::LOOPBACK_TWO_COMPONENT_HEX_UPPERCASE:
+		return "0X7f.1";
+	case PackageHttpNumericOriginCounterexample::PUBLIC_SINGLE_DECIMAL:
+		return "134744072";
+	case PackageHttpNumericOriginCounterexample::PUBLIC_SINGLE_HEX:
+		return "0x08080808";
+	case PackageHttpNumericOriginCounterexample::PUBLIC_MAX_HEX_UPPERCASE:
+		return "0XFFFFFFFF";
+	case PackageHttpNumericOriginCounterexample::PUBLIC_FOUR_COMPONENT_OCTAL:
+		return "010.010.010.010";
+	case PackageHttpNumericOriginCounterexample::COUNT:
+		break;
+	}
+	throw std::invalid_argument("unknown package numeric-origin counterexample");
+}
+
+} // namespace
+
+duckdb_api::ScanPlan
+ScanPlanTestAccess::PackageHttpNumericOrigin(duckdb_api::ScanPlan plan,
+                                             PackageHttpNumericOriginCounterexample counterexample) {
+	const std::string host = NumericOrigin(counterexample);
+	if (plan.Operation().Protocol() == duckdb_api::PlannedProtocol::REST) {
+		auto operation = plan.Operation().Rest();
+		operation.origin.host = host;
+		ReplaceRest(plan, std::move(operation));
+	} else if (plan.Operation().Protocol() == duckdb_api::PlannedProtocol::GRAPHQL) {
+		auto operation = plan.Operation().Graphql();
+		operation.origin.host = host;
+		ReplaceGraphql(plan, std::move(operation));
+	} else {
+		throw std::invalid_argument("package numeric-origin counterexample requires HTTP protocol");
+	}
+	if (plan.network.allowed_hosts.size() != 1 || !plan.authentication_obligation.has_destination) {
+		throw std::invalid_argument("package numeric-origin counterexample lost its authority baseline");
+	}
+	plan.network.allowed_hosts[0] = host;
+	plan.authentication_obligation.destination.host = host;
+	return plan;
+}
+
+duckdb_api::ScanPlan
+BuildRepositoryPackageGraphqlNumericOriginCounterexample(const std::string &absolute_repository_root,
+                                                         const std::string &logical_secret_name,
+                                                         PackageHttpNumericOriginCounterexample counterexample) {
+	return ScanPlanTestAccess::PackageHttpNumericOrigin(
+	    BuildRepositoryGithubPackageGraphqlPlan(absolute_repository_root, logical_secret_name), counterexample);
+}
+
+duckdb_api::ScanPlan
+BuildRepositoryPackageRestNumericOriginCounterexample(const std::string &absolute_repository_root,
+                                                      const std::string &logical_secret_name,
+                                                      PackageHttpNumericOriginCounterexample counterexample) {
+	return ScanPlanTestAccess::PackageHttpNumericOrigin(
+	    BuildRepositoryGithubPackageRestPlan(absolute_repository_root, logical_secret_name), counterexample);
+}
+
 duckdb_api::ScanPlan
 ScanPlanTestAccess::PackageGraphqlRecipe(duckdb_api::ScanPlan plan,
                                          PackageGraphqlRuntimeRecipeCounterexample counterexample) {

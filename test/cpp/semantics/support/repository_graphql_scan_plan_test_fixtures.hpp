@@ -52,6 +52,22 @@ enum class PackageGraphqlRuntimeRecipeCounterexample {
 	COUNT
 };
 
+// Resolver-equivalent numeric origins supplied as coherent immutable plans.
+// Runtime must reject these before authorization or transport even though the
+// operation, credential destination, and network capability agree exactly.
+enum class PackageHttpNumericOriginCounterexample {
+	LOOPBACK_TWO_COMPONENT_DECIMAL,
+	LOOPBACK_SINGLE_DECIMAL,
+	LOOPBACK_SINGLE_HEX,
+	LOOPBACK_SINGLE_HEX_UPPERCASE,
+	LOOPBACK_TWO_COMPONENT_HEX_UPPERCASE,
+	PUBLIC_SINGLE_DECIMAL,
+	PUBLIC_SINGLE_HEX,
+	PUBLIC_MAX_HEX_UPPERCASE,
+	PUBLIC_FOUR_COMPONENT_OCTAL,
+	COUNT
+};
+
 // Produces the real repository GitHub package's GraphQL plan through one exact
 // compiled generation and its matching opaque handle. The bounded API exposes
 // only Semantics' immutable ScanPlan; Runtime consumers do not compile or
@@ -65,6 +81,17 @@ duckdb_api::ScanPlan BuildRepositoryGithubPackageGraphqlPlan(const std::string &
 // Connector/private construction surface.
 duckdb_api::ScanPlan BuildNonGithubPackageGraphqlPlan(const std::string &absolute_repository_root);
 duckdb_api::ScanPlan BuildNonGithubPackageRestPlan(const std::string &absolute_repository_root);
+
+// Compiles the real authenticated repository package, then returns one closed
+// coherent invalid-origin variation through Semantics' fixture service.
+duckdb_api::ScanPlan
+BuildRepositoryPackageGraphqlNumericOriginCounterexample(const std::string &absolute_repository_root,
+                                                         const std::string &logical_secret_name,
+                                                         PackageHttpNumericOriginCounterexample counterexample);
+duckdb_api::ScanPlan
+BuildRepositoryPackageRestNumericOriginCounterexample(const std::string &absolute_repository_root,
+                                                      const std::string &logical_secret_name,
+                                                      PackageHttpNumericOriginCounterexample counterexample);
 
 duckdb_api::ScanPlan
 BuildPackageGraphqlRuntimeRecipeCounterexample(const std::string &absolute_repository_root,

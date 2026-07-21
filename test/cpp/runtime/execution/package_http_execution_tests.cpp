@@ -8,12 +8,14 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
 
 using duckdb_api_test::ControlledResponse;
 using duckdb_api_test::PackageGraphqlRuntimeRecipeCounterexample;
+using duckdb_api_test::PackageHttpNumericOriginCounterexample;
 using duckdb_api_test::Require;
 
 class NeverCancelled final : public duckdb_api::ExecutionControl {
@@ -142,6 +144,34 @@ void TestDestinationAndAddressWideningIssueZeroRequests() {
 	}
 }
 
+void TestNumericOriginsFailBeforeCredentialOrTransport(const std::string &repository_root) {
+	const auto count = static_cast<std::size_t>(PackageHttpNumericOriginCounterexample::COUNT);
+	Require(count == 9, "package numeric-origin counterexample corpus changed without updating the execution oracle");
+	NeverCancelled control;
+	for (std::size_t value = 0; value < count; value++) {
+		const auto counterexample = static_cast<PackageHttpNumericOriginCounterexample>(value);
+		for (std::size_t protocol = 0; protocol < 2; protocol++) {
+			const auto runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+			std::string token = "numeric_origin_credential_canary";
+			runtime->ExpectBearer("Bearer " + token);
+			const auto plan = protocol == 0 ? duckdb_api_test::BuildRepositoryPackageRestNumericOriginCounterexample(
+			                                      repository_root, "numeric_origin_secret", counterexample)
+			                                : duckdb_api_test::BuildRepositoryPackageGraphqlNumericOriginCounterexample(
+			                                      repository_root, "numeric_origin_secret", counterexample);
+			bool rejected = false;
+			try {
+				(void)runtime->Executor()->OpenWithAuthorization(
+				    plan, duckdb_api::ScanAuthorization::Bearer(std::move(token)), control);
+			} catch (const duckdb_api::ExecutionError &error) {
+				rejected = error.Stage() == duckdb_api::ErrorStage::POLICY;
+			}
+			Require(rejected && runtime->Observations().empty() && runtime->ConsumeBearerExpectation(0),
+			        "numeric package origin reached credential placement or transport for variation " +
+			            std::to_string(value) + ":" + std::to_string(protocol));
+		}
+	}
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -152,6 +182,7 @@ int main(int argc, char **argv) {
 		TestNondefaultPortRestAndLinkContinuation(repository_root);
 		TestPackageRecipeCounterexamplesIssueZeroRequests(repository_root);
 		TestDestinationAndAddressWideningIssueZeroRequests();
+		TestNumericOriginsFailBeforeCredentialOrTransport(repository_root);
 		std::cout << "package HTTP execution tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

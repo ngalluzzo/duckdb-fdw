@@ -24,6 +24,25 @@ void TestCanonicalRequestLiteralGrammar() {
 	        "noncanonical or invalid form-urlencoded values were admitted");
 }
 
+void TestNumericIpv4AliasesAreNotDnsHosts() {
+	using duckdb_api::internal::IsSafeDnsHost;
+	const char *const numeric_aliases[] = {
+	    "0",          "2130706433",   "0x7f000001",      "0X7F000001",   "4294967296",    "0x100000000",
+	    "9999999999", "017700000001", "127.1",           "0x7f.1",       "0X7f.1",        "0177.01",
+	    "127.0.1",    "0x7f.0.1",     "0177.0.01",       "127.0.0.1",    "0x7f.0.0.1",    "0177.0.0.01",
+	    "134744072",  "0x08080808",   "010.010.010.010", "255.16777215", "255.255.65535", "255.255.255.255",
+	    "4294967295", "0xffffffff",   "0XFFFFFFFF"};
+	for (const auto *alias : numeric_aliases) {
+		Require(!IsSafeDnsHost(alias), std::string("numeric IPv4 alias was admitted as DNS: ") + alias);
+	}
+
+	const char *const dns_hosts[] = {"api.example.com", "example123", "deadbeef", "09", "0x",
+	                                 "256.1.1.1",       "1.16777216", "1.1.65536"};
+	for (const auto *host : dns_hosts) {
+		Require(IsSafeDnsHost(host), std::string("legitimate DNS host was classified as IPv4: ") + host);
+	}
+}
+
 void TestStructuralPathBoundaries() {
 	using duckdb_api::internal::IsGraphqlName;
 	using duckdb_api::internal::IsSafeGraphqlPath;
@@ -66,6 +85,7 @@ void TestSignedPageSequenceBoundaries() {
 int main() {
 	try {
 		TestCanonicalRequestLiteralGrammar();
+		TestNumericIpv4AliasesAreNotDnsHosts();
 		TestStructuralPathBoundaries();
 		TestSignedPageSequenceBoundaries();
 		std::cout << "Request validation tests passed" << std::endl;
