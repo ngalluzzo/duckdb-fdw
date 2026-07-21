@@ -204,3 +204,18 @@ target_link_libraries(
           duckdb_api_semantics_package_graphql_fixture_service
           duckdb_api_content_digest_service
           duckdb_api_relational_planning_service)
+
+# Closed REST planner oracle proving native/package plan parity for the three
+# REST GitHub relations, mirroring duckdb_api_graphql_semantics_tests' native/
+# package differential for the GraphQL relation.
+add_executable(
+  duckdb_api_package_rest_planning_tests
+  test/cpp/semantics/package_rest_planning_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_package_rest_planning_tests)
+target_include_directories(duckdb_api_package_rest_planning_tests PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_package_rest_planning_tests
+  PRIVATE duckdb_api_connector_fixture_service
+          duckdb_api_package_compiler_fixture_service
+          duckdb_api_package_bound_planning_service
+          duckdb_api_semantics_package_graphql_fixture_service)

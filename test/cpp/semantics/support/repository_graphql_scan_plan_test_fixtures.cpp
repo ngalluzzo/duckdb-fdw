@@ -56,16 +56,25 @@ BuildNonGithubPackageGraphqlUnreachableBodyAuthorityCounterexample(const std::st
 	    BuildNonGithubPackageGraphqlPlan(absolute_repository_root));
 }
 
-namespace {
-
 duckdb_api::ScanPlan BuildRepositoryGithubPackageRestPlan(const std::string &absolute_repository_root,
+                                                          const std::string &relation_name,
                                                           const std::string &logical_secret_name) {
 	const auto generation = CompileRepositoryGithubGenerationFixture(absolute_repository_root);
 	const duckdb_api::PackageBoundScanPlanningService planning(generation);
 	auto request = duckdb_api::BuildConservativeScanRequest(
-	    generation.Connector(), "authenticated_user", duckdb_api::LogicalSecretReference::Named(logical_secret_name));
+	    generation.Connector(), relation_name, duckdb_api::LogicalSecretReference::Named(logical_secret_name));
 	return planning.Plan(generation.QueryRegistration().GenerationHandle(), request);
 }
+
+duckdb_api::ScanPlan BuildRepositoryGithubPackageAnonymousSearchPlan(const std::string &absolute_repository_root) {
+	const auto generation = CompileRepositoryGithubGenerationFixture(absolute_repository_root);
+	const duckdb_api::PackageBoundScanPlanningService planning(generation);
+	auto request = duckdb_api::BuildConservativeScanRequest(generation.Connector(), "duckdb_login_search_page",
+	                                                        duckdb_api::LogicalSecretReference());
+	return planning.Plan(generation.QueryRegistration().GenerationHandle(), request);
+}
+
+namespace {
 
 const char *NumericOrigin(PackageHttpNumericOriginCounterexample counterexample) {
 	switch (counterexample) {
@@ -148,7 +157,8 @@ BuildRepositoryPackageRestNumericOriginCounterexample(const std::string &absolut
                                                       const std::string &logical_secret_name,
                                                       PackageHttpNumericOriginCounterexample counterexample) {
 	return ScanPlanTestAccess::PackageHttpNumericOrigin(
-	    BuildRepositoryGithubPackageRestPlan(absolute_repository_root, logical_secret_name), counterexample);
+	    BuildRepositoryGithubPackageRestPlan(absolute_repository_root, "authenticated_user", logical_secret_name),
+	    counterexample);
 }
 
 duckdb_api::ScanPlan

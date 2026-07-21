@@ -75,6 +75,18 @@ enum class PackageHttpNumericOriginCounterexample {
 duckdb_api::ScanPlan BuildRepositoryGithubPackageGraphqlPlan(const std::string &absolute_repository_root,
                                                              const std::string &logical_secret_name);
 
+// Produces the real repository GitHub package's REST plan for the named
+// bearer-authenticated relation ("authenticated_user" or
+// "authenticated_repositories") through the same bounded planning service.
+duckdb_api::ScanPlan BuildRepositoryGithubPackageRestPlan(const std::string &absolute_repository_root,
+                                                          const std::string &relation_name,
+                                                          const std::string &logical_secret_name);
+
+// Produces the real repository GitHub package's anonymous
+// duckdb_login_search_page REST plan through the same bounded planning
+// service.
+duckdb_api::ScanPlan BuildRepositoryGithubPackageAnonymousSearchPlan(const std::string &absolute_repository_root);
+
 // Produces the real non-GitHub package's :8443 GraphQL candidate and REST
 // fallback through the same bounded Semantics planning service. Both carry a
 // fixed synthetic logical credential reference (capability only, never secret

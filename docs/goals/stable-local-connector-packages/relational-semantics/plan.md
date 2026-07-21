@@ -2,12 +2,14 @@
 
 ## Outcome and authority
 
-Status: **In progress as of 2026-07-21; supporting subsystem.** The Connector
-and Remote Runtime interactions are confirmed exited to X-as-a-Service by
-source/test-dependency audit. The Query interaction remains Collaboration:
-the goal's acceptance evidence requires native/package plan differentials for
-all four GitHub relations, but only the GraphQL relation has one (tracked as
-[duckdb-fdw#1](https://github.com/ngalluzzo/duckdb-fdw/issues/1); see also
+Status: **All interactions confirmed exited as of 2026-07-21; supporting
+subsystem.** The Connector and Remote Runtime interactions were already
+exited to X-as-a-Service by source/test-dependency audit. The Query
+interaction is now also exited: the goal's acceptance evidence requires
+native/package plan differentials for all four GitHub relations, and
+`test/cpp/semantics/package_rest_planning_tests.cpp` closed
+[duckdb-fdw#1](https://github.com/ngalluzzo/duckdb-fdw/issues/1) by adding the
+missing REST-relation proof alongside the existing GraphQL one (see also
 [the goal's Completion record](../stable-local-connector-packages.md)).
 
 Relational Semantics will turn generalized compiled package facts and a typed

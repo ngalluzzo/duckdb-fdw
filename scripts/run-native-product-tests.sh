@@ -208,6 +208,7 @@ for target in \
     duckdb_api_scan_plan_pagination_contract_tests \
     duckdb_api_scan_plan_fixture_tests \
     duckdb_api_graphql_semantics_tests \
+    duckdb_api_package_rest_planning_tests \
     duckdb_api_repository_graphql_fixture_consumer_tests \
     duckdb_api_execution_contract_tests \
     duckdb_api_runtime_generation_contract_tests \
@@ -294,6 +295,7 @@ python3 -I -B "${PROJECT_SOURCE}/scripts/test-native-dependencies.py"
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_fixture_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_semantics_input_resolution_observation_service_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_graphql_semantics_tests" "${PROJECT_SOURCE}"
+"${NATIVE_TEST_ROOT}/duckdb_api_package_rest_planning_tests" "${PROJECT_SOURCE}"
 "${NATIVE_TEST_ROOT}/duckdb_api_repository_graphql_fixture_consumer_tests" "${PROJECT_SOURCE}"
 "${NATIVE_TEST_ROOT}/duckdb_api_runtime_rest_predicate_fixture_consumer_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_execution_contract_tests"
