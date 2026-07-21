@@ -1,6 +1,6 @@
 #include "connector/support/package_compiler_test_fixtures.hpp"
 
-#include "duckdb_api/package_fixture_candidates.hpp"
+#include "connector/support/package_fixture_candidates.hpp"
 #include "support/require.hpp"
 
 #include <iostream>

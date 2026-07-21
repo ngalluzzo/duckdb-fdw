@@ -32,6 +32,10 @@ struct ExpectedColumn {
 using PackageFiles = std::map<std::string, std::string>;
 
 const std::vector<std::string> EXPECTED_GITHUB_PACKAGE_FILES = {"connector.yaml",
+                                                                "fixtures/github_authenticated_user.json",
+                                                                "fixtures/github_repositories_page_1.json",
+                                                                "fixtures/github_repositories_page_2.json",
+                                                                "fixtures/github_search_page.json",
                                                                 "fixtures/index.yaml",
                                                                 "fixtures/private_visibility_duplicates.json",
                                                                 "fixtures/private_visibility_duplicates_base.json",

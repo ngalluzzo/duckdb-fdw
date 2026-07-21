@@ -48,11 +48,6 @@ set(CONNECTOR_PACKAGE_COMPILER_SOURCES
     src/connector/package/package_schema_reader.cpp)
 set(CONNECTOR_PACKAGE_FIXTURE_SOURCES
     src/connector/package/package_fixture_assets.cpp
-    src/connector/package/package_fixture_candidate_mutations.cpp
-    src/connector/package/package_fixture_candidate_diagnostics.cpp
-    src/connector/package/package_fixture_candidate_source.cpp
-    src/connector/package/package_fixture_candidates.cpp
-    src/connector/package/package_fixture_diagnostics.cpp
     src/connector/package/package_fixture_comparison.cpp
     src/connector/package/package_fixture_coverage.cpp
     src/connector/package/package_fixture_index.cpp
@@ -60,9 +55,15 @@ set(CONNECTOR_PACKAGE_FIXTURE_SOURCES
     src/connector/package/package_fixture_index_transcript.cpp
     src/connector/package/package_fixture_index_validation.cpp
     src/connector/package/package_fixture_limits.cpp
-    src/connector/package/package_fixture_reload_variants.cpp
     src/connector/package/package_fixture_runner.cpp
     src/connector/package/package_fixture_source.cpp)
+# Connector's own candidate/mutation-generation fixture harness (proving
+# compiler diagnostics, cancellation checkpoints, and reload classification
+# against synthesized source variants) is test-only tooling, not a runtime
+# capability the shipped extension needs. It lives under
+# test/cpp/connector/support/ as CONNECTOR_PACKAGE_FIXTURE_CANDIDATE_TEST_SOURCES
+# so it is excluded from native_product_sources and the public/controlled
+# build graphs.
 set(CONNECTOR_NATIVE_PROFILE_SOURCES
     src/connector/native_github_composition.cpp)
 set(CONNECTOR_METADATA_IMPLEMENTATION_SOURCES

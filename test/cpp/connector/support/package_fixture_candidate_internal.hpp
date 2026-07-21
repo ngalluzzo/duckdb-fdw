@@ -1,7 +1,7 @@
 #pragma once
 
 #include "duckdb_api/internal/connector/package/package_digest.hpp"
-#include "duckdb_api/package_fixture_candidates.hpp"
+#include "connector/support/package_fixture_candidates.hpp"
 
 #include <memory>
 #include <string>

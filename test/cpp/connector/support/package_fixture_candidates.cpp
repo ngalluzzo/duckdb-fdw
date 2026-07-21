@@ -1,4 +1,4 @@
-#include "duckdb_api/package_fixture_candidates.hpp"
+#include "connector/support/package_fixture_candidates.hpp"
 
 #include "package_fixture_candidate_internal.hpp"
 #include "package_compiler_internal.hpp"

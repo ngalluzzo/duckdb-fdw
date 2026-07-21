@@ -104,6 +104,23 @@ target_link_libraries(
   PRIVATE duckdb_api_package_fixture_service
           duckdb_api_package_compiler_fixture_service)
 
+# Connector's own candidate/mutation fixture harness. It compiles synthesized
+# source variants through the real production compiler and therefore includes
+# Connector's private compiler/source headers directly; this is the owning
+# team's own test tooling, not a cross-team fixture consumer.
+add_library(
+  duckdb_api_package_fixture_candidate_test_service STATIC
+  ${CONNECTOR_PACKAGE_FIXTURE_CANDIDATE_TEST_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_package_fixture_candidate_test_service)
+target_include_directories(
+  duckdb_api_package_fixture_candidate_test_service
+  PUBLIC test/cpp
+  PRIVATE src/connector/package)
+target_link_libraries(
+  duckdb_api_package_fixture_candidate_test_service
+  PUBLIC duckdb_api_package_fixture_service
+  PRIVATE duckdb_api_package_compiler_service)
+
 add_executable(
   duckdb_api_package_fixture_candidate_tests
   test/cpp/connector/package/package_fixture_candidate_tests.cpp)
@@ -113,7 +130,7 @@ target_include_directories(
   PRIVATE test/cpp)
 target_link_libraries(
   duckdb_api_package_fixture_candidate_tests
-  PRIVATE duckdb_api_package_fixture_service
+  PRIVATE duckdb_api_package_fixture_candidate_test_service
           duckdb_api_package_compiler_fixture_service)
 
 add_executable(
