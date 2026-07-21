@@ -140,8 +140,9 @@ fixture uses together after Semantics consumes `RequiredInputReferences()`.
   behavior;
 - `duckdb_api_local_package_reload_fixture_tests` for the real-source no-op,
   compatible-patch, and incompatible-major consumer fixture variants;
-- `duckdb_api_package_compiler_fixture_tests` for the real repository GitHub
-  package projected through the bounded Query-consumer fixture service;
+- `duckdb_api_package_compiler_fixture_tests` for the permanent repository
+  GitHub package, its exact RFC 0013 machine-file drift gate, and its projection
+  through the bounded Query-consumer fixture service;
 - `duckdb_api_connector_catalog_fixture_tests` for the bounded fixture API.
 
 Run `make build` before invoking a focused binary from

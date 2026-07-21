@@ -67,7 +67,7 @@ inline std::string ReplaceOnce(std::string value, const std::string &before, con
 }
 
 inline void WriteGithubPackage(TemporaryPackage &package, const std::string &graphql_relation = std::string()) {
-	const std::string github = "docs/rfcs/evidence/0013/github/";
+	const std::string github = "connectors/github/";
 	package.Write("connector.yaml", ReadFile(github + "connector.yaml"));
 	for (const auto &relation : {"duckdb_login_search_page", "authenticated_user", "authenticated_repositories"}) {
 		package.Write("relations/" + std::string(relation) + ".yaml",

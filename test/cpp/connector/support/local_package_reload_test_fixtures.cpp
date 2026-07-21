@@ -142,7 +142,7 @@ LocalPackageReloadFixture BuildRepositoryGithubLocalPackageReloadFixture(const s
 		if (::mkdir((root + "/relations").c_str(), 0700) != 0) {
 			throw std::runtime_error("could not create local-package reload fixture relations");
 		}
-		const std::string evidence = absolute_repository_root + "/docs/rfcs/evidence/0013/github/";
+		const std::string evidence = absolute_repository_root + "/connectors/github/";
 		const auto baseline_manifest = ReadFile(evidence + "connector.yaml");
 		WriteFile(root + "/connector.yaml", baseline_manifest);
 		for (const auto &relation : {"authenticated_repositories", "authenticated_user", "duckdb_login_search_page",

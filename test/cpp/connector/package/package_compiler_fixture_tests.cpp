@@ -3,8 +3,15 @@
 #include "support/require.hpp"
 
 #include <cstddef>
+#include <dirent.h>
+#include <fstream>
 #include <iostream>
+#include <map>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
 #include <string>
+#include <sys/stat.h>
 #include <vector>
 
 namespace {
@@ -19,6 +26,124 @@ struct ExpectedColumn {
 	CompiledScalarType type;
 	bool nullable;
 };
+
+using MachineFiles = std::map<std::string, std::string>;
+
+const std::vector<std::string> EXPECTED_GITHUB_MACHINE_FILES = {"connector.yaml",
+                                                                "fixtures/index.yaml",
+                                                                "fixtures/private_visibility_duplicates.json",
+                                                                "fixtures/private_visibility_duplicates_base.json",
+                                                                "fixtures/private_visibility_false_or_null.json",
+                                                                "fixtures/private_visibility_false_or_null_base.json",
+                                                                "fixtures/private_visibility_matching.json",
+                                                                "fixtures/private_visibility_matching_base.json",
+                                                                "fixtures/viewer_repository_metrics_page_1.json",
+                                                                "fixtures/viewer_repository_metrics_page_2.json",
+                                                                "relations/authenticated_repositories.yaml",
+                                                                "relations/authenticated_user.yaml",
+                                                                "relations/duckdb_login_search_page.yaml",
+                                                                "relations/viewer_repository_metrics.yaml"};
+
+bool IsMachineFile(const std::string &name) {
+	const auto yaml = std::string(".yaml");
+	const auto json = std::string(".json");
+	return (name.size() >= yaml.size() && name.compare(name.size() - yaml.size(), yaml.size(), yaml) == 0) ||
+	       (name.size() >= json.size() && name.compare(name.size() - json.size(), json.size(), json) == 0);
+}
+
+std::string ReadBytes(const std::string &path) {
+	std::ifstream input(path.c_str(), std::ios::binary);
+	if (!input) {
+		throw std::runtime_error("could not read GitHub package drift input: " + path);
+	}
+	std::ostringstream output;
+	output << input.rdbuf();
+	return output.str();
+}
+
+void CollectMachineFiles(const std::string &root, const std::string &relative, MachineFiles &files) {
+	const auto directory_path = relative.empty() ? root : root + "/" + relative;
+	std::unique_ptr<DIR, int (*)(DIR *)> directory(::opendir(directory_path.c_str()), ::closedir);
+	if (!directory) {
+		throw std::runtime_error("could not inventory GitHub package drift root: " + directory_path);
+	}
+	while (const auto *entry = ::readdir(directory.get())) {
+		const std::string name = entry->d_name;
+		if (name == "." || name == "..") {
+			continue;
+		}
+		const auto child_relative = relative.empty() ? name : relative + "/" + name;
+		const auto child_path = root + "/" + child_relative;
+		struct stat status;
+		if (::lstat(child_path.c_str(), &status) != 0) {
+			throw std::runtime_error("could not inspect GitHub package drift input: " + child_path);
+		}
+		if (S_ISLNK(status.st_mode)) {
+			throw std::runtime_error("GitHub package drift input contains a symbolic link: " + child_relative);
+		}
+		if (S_ISDIR(status.st_mode)) {
+			CollectMachineFiles(root, child_relative, files);
+		} else if (S_ISREG(status.st_mode) && IsMachineFile(name)) {
+			files.emplace(child_relative, ReadBytes(child_path));
+		} else if (!S_ISREG(status.st_mode)) {
+			throw std::runtime_error("GitHub package drift input contains a special file: " + child_relative);
+		}
+	}
+}
+
+MachineFiles InventoryMachineFiles(const std::string &root) {
+	MachineFiles files;
+	CollectMachineFiles(root, "", files);
+	return files;
+}
+
+std::vector<std::string> MachineFileNames(const MachineFiles &files) {
+	std::vector<std::string> names;
+	for (const auto &entry : files) {
+		names.push_back(entry.first);
+	}
+	return names;
+}
+
+void RequireExactGithubMachineMirror(const MachineFiles &product, const MachineFiles &evidence) {
+	Require(MachineFileNames(product) == EXPECTED_GITHUB_MACHINE_FILES,
+	        "permanent GitHub package machine-file inventory drifted");
+	Require(MachineFileNames(evidence) == EXPECTED_GITHUB_MACHINE_FILES,
+	        "RFC 0013 GitHub evidence machine-file inventory drifted");
+	Require(product == evidence,
+	        "permanent GitHub package machine-readable bytes differ from accepted RFC 0013 evidence");
+}
+
+void RequireMirrorFailure(const MachineFiles &product, const MachineFiles &evidence, const std::string &message) {
+	try {
+		RequireExactGithubMachineMirror(product, evidence);
+	} catch (const std::runtime_error &) {
+		return;
+	}
+	throw std::runtime_error(message);
+}
+
+void TestPermanentGithubPackageTracksAcceptedEvidence(const std::string &repository_root) {
+	const auto product = InventoryMachineFiles(repository_root + "/connectors/github");
+	const auto evidence = InventoryMachineFiles(repository_root + "/docs/rfcs/evidence/0013/github");
+	RequireExactGithubMachineMirror(product, evidence);
+
+	auto extra_product = product;
+	extra_product["fixtures/unexpected.json"] = "{}\n";
+	RequireMirrorFailure(extra_product, evidence, "drift gate accepted an extra permanent-package file");
+	auto extra_evidence = evidence;
+	extra_evidence["relations/unexpected.yaml"] = "kind: relation\n";
+	RequireMirrorFailure(product, extra_evidence, "drift gate accepted an extra RFC-evidence file");
+	auto changed_product = product;
+	changed_product["connector.yaml"] += "\n";
+	RequireMirrorFailure(changed_product, evidence, "drift gate accepted changed semantic package bytes");
+
+	const auto readme = ReadBytes(repository_root + "/connectors/github/README.md");
+	Require(readme.find("CALL duckdb_api_load_connector") != std::string::npos &&
+	            readme.find("CREATE TEMPORARY SECRET github_default") != std::string::npos &&
+	            readme.find("make test") != std::string::npos,
+	        "permanent GitHub package README omits load, secret, or validation guidance");
+}
 
 class NeverCancel final : public duckdb_api::connector::PackageCancellation {
 public:
@@ -50,6 +175,7 @@ void RequireRelation(const CompiledRegistrationRelation &relation, const char *n
 int main(int argc, char **argv) {
 	try {
 		Require(argc == 2, "usage: package_compiler_fixture_tests ABSOLUTE_REPOSITORY_ROOT");
+		TestPermanentGithubPackageTracksAcceptedEvidence(argv[1]);
 		const auto registration = duckdb_api_test::CompileRepositoryGithubRegistrationFixture(argv[1]);
 		const auto &identity = registration.Identity();
 		Require(identity.SpecIdentifier() == "duckdb_api/v1" && identity.ConnectorId() == "github" &&

@@ -48,15 +48,15 @@ void TestFramingVectors() {
 
 void TestAcceptedGithubDigest() {
 	std::vector<SemanticSourceFile> files = {
-	    {"connector.yaml", ReadFile("docs/rfcs/evidence/0013/github/connector.yaml")},
+	    {"connector.yaml", ReadFile("connectors/github/connector.yaml")},
 	    {"relations/authenticated_repositories.yaml",
-	     ReadFile("docs/rfcs/evidence/0013/github/relations/authenticated_repositories.yaml")},
+	     ReadFile("connectors/github/relations/authenticated_repositories.yaml")},
 	    {"relations/authenticated_user.yaml",
-	     ReadFile("docs/rfcs/evidence/0013/github/relations/authenticated_user.yaml")},
+	     ReadFile("connectors/github/relations/authenticated_user.yaml")},
 	    {"relations/duckdb_login_search_page.yaml",
-	     ReadFile("docs/rfcs/evidence/0013/github/relations/duckdb_login_search_page.yaml")},
+	     ReadFile("connectors/github/relations/duckdb_login_search_page.yaml")},
 	    {"relations/viewer_repository_metrics.yaml",
-	     ReadFile("docs/rfcs/evidence/0013/github/relations/viewer_repository_metrics.yaml")}};
+	     ReadFile("connectors/github/relations/viewer_repository_metrics.yaml")}};
 	const auto expected = "sha256.b286e6f7481b437b243dfe2ce017a59d601d909272b9d2b35788fb78753ff23b";
 	Require(Digest(files) == expected, "accepted GitHub package digest drifted");
 	std::reverse(files.begin(), files.end());

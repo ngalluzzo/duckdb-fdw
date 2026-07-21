@@ -355,7 +355,7 @@ exactly 1. `partial_data` is exactly `fail_on_any_error`. Positive document,
 request-body, page, record, and scan limits are mandatory.
 
 The repository package contains complete REST and GraphQL examples under
-[`docs/rfcs/evidence/0013/github`](rfcs/evidence/0013/github).
+[`connectors/github`](../connectors/github).
 
 ## Predicate mappings and DuckDB ownership
 

@@ -313,7 +313,7 @@ BuildGithubPackageQueryStaging(const std::string &absolute_repository_root,
 	// fixture fails if catalog-only assertions cross that unprovisioned port.
 	return std::shared_ptr<PackageQueryStagingService>(
 	    new PackageQueryStagingService(std::move(initial), std::move(replacement),
-	                                   absolute_repository_root + "/docs/rfcs/evidence/0013/github", probe));
+	                                   absolute_repository_root + "/connectors/github", probe));
 }
 
 std::shared_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator>

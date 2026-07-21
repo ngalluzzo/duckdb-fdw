@@ -87,12 +87,12 @@ std::string CreateGithubPackage(const std::string &parent, const std::string &na
 	const auto root = parent + "/" + name;
 	MakeDirectory(root);
 	MakeDirectory(root + "/relations");
-	WriteFile(root + "/connector.yaml", ReadFile("docs/rfcs/evidence/0013/github/connector.yaml"));
+	WriteFile(root + "/connector.yaml", ReadFile("connectors/github/connector.yaml"));
 	const std::vector<std::string> relations = {"authenticated_repositories", "authenticated_user",
 	                                            "duckdb_login_search_page", "viewer_repository_metrics"};
 	for (const auto &relation : relations) {
 		WriteFile(root + "/relations/" + relation + ".yaml",
-		          ReadFile("docs/rfcs/evidence/0013/github/relations/" + relation + ".yaml"));
+		          ReadFile("connectors/github/relations/" + relation + ".yaml"));
 	}
 	return root;
 }
@@ -281,7 +281,7 @@ void TestLinksSpecialFilesAndUnlistedYaml() {
 		TempTree tree;
 		const auto root = CreateGithubPackage(tree.Path(), "github");
 		const auto outside = tree.Path() + "/outside.yaml";
-		WriteFile(outside, ReadFile("docs/rfcs/evidence/0013/github/connector.yaml"));
+		WriteFile(outside, ReadFile("connectors/github/connector.yaml"));
 		Require(::unlink((root + "/connector.yaml").c_str()) == 0 &&
 		            ::link(outside.c_str(), (root + "/connector.yaml").c_str()) == 0,
 		        "could not create hard-linked manifest");

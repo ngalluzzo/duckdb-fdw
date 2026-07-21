@@ -129,7 +129,7 @@ duckdb_api::CompiledLocalPackage
 CompileRepositoryGithubLocalPackageFixture(const std::string &absolute_repository_root) {
 	NeverCancel cancellation;
 	const auto result = duckdb_api::connector::CompileLocalPackageRoot(
-	    absolute_repository_root + "/docs/rfcs/evidence/0013/github", cancellation);
+	    absolute_repository_root + "/connectors/github", cancellation);
 	if (!result.Succeeded() || result.Package() == nullptr) {
 		throw std::runtime_error("repository GitHub connector package fixture did not compile");
 	}
@@ -148,7 +148,7 @@ CompileRepositoryDistinctLocalPackageFixture(const std::string &absolute_reposit
 		if (::mkdir((root + "/relations").c_str(), 0700) != 0) {
 			throw std::runtime_error("could not create distinct local-package fixture relations");
 		}
-		const std::string evidence = absolute_repository_root + "/docs/rfcs/evidence/0013/github/";
+		const std::string evidence = absolute_repository_root + "/connectors/github/";
 		WriteFile(root + "/connector.yaml", WithDistinctConnectorId(ReadFile(evidence + "connector.yaml")));
 		for (const auto &relation : {"authenticated_repositories", "authenticated_user", "duckdb_login_search_page",
 		                             "viewer_repository_metrics"}) {

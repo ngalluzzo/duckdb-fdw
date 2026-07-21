@@ -20,7 +20,7 @@ void TestCompiledGithubPackageIsThePublishedSqlSurface(const std::string &absolu
 	duckdb::DuckDB database(nullptr);
 	(void)RegisterPackageQuerySurface(database, staging);
 	duckdb::Connection connection(database);
-	const auto package_root = absolute_repository_root + "/docs/rfcs/evidence/0013/github";
+	const auto package_root = absolute_repository_root + "/connectors/github";
 	RequirePackageQuerySuccess(connection,
 	                           "CALL system.main.duckdb_api_load_connector(package_root := '" + package_root + "')");
 

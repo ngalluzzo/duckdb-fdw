@@ -11,7 +11,7 @@ using duckdb_api_test::Require;
 using duckdb_api_test::TemporaryPackage;
 
 std::string GithubRelation(const std::string &name) {
-	return duckdb_api_test::ReadFile("docs/rfcs/evidence/0013/github/relations/" + name + ".yaml");
+	return duckdb_api_test::ReadFile("connectors/github/relations/" + name + ".yaml");
 }
 
 void RequireFirstDiagnostic(const duckdb_api::connector::PackageCompileResult &result, PackageDiagnosticCode code,
@@ -231,7 +231,7 @@ void TestInvalidIdentifiersStayDiagnosticOnly() {
 	TemporaryPackage package;
 	duckdb_api_test::WriteGithubPackage(package);
 	package.Write("connector.yaml", duckdb_api_test::ReplaceOnce(
-	                                    duckdb_api_test::ReadFile("docs/rfcs/evidence/0013/github/connector.yaml"),
+	                                    duckdb_api_test::ReadFile("connectors/github/connector.yaml"),
 	                                    "id: github", "id: \"NOT SAFE!\""));
 	package.Write("relations/authenticated_user.yaml",
 	              duckdb_api_test::ReplaceOnce(GithubRelation("authenticated_user"), "id: authenticated_user",
@@ -261,7 +261,7 @@ void TestDiagnosticCodePhaseContract() {
 		TemporaryPackage package;
 		duckdb_api_test::WriteGithubPackage(package);
 		package.Write("connector.yaml", duckdb_api_test::ReplaceOnce(
-		                                    duckdb_api_test::ReadFile("docs/rfcs/evidence/0013/github/connector.yaml"),
+		                                    duckdb_api_test::ReadFile("connectors/github/connector.yaml"),
 		                                    "redirects: deny", "redirects: allow"));
 		NeverCancel cancellation;
 		RequireFirstDiagnostic(duckdb_api_test::CompileRoot(package.Root(), cancellation),

@@ -37,11 +37,11 @@ void RequireFailure(const std::string &source, FailsafeYamlErrorCode expected,
 }
 
 void TestAcceptedGithubSemanticSources() {
-	const std::vector<std::string> files = {"docs/rfcs/evidence/0013/github/connector.yaml",
-	                                        "docs/rfcs/evidence/0013/github/relations/authenticated_repositories.yaml",
-	                                        "docs/rfcs/evidence/0013/github/relations/authenticated_user.yaml",
-	                                        "docs/rfcs/evidence/0013/github/relations/duckdb_login_search_page.yaml",
-	                                        "docs/rfcs/evidence/0013/github/relations/viewer_repository_metrics.yaml"};
+	const std::vector<std::string> files = {"connectors/github/connector.yaml",
+	                                        "connectors/github/relations/authenticated_repositories.yaml",
+	                                        "connectors/github/relations/authenticated_user.yaml",
+	                                        "connectors/github/relations/duckdb_login_search_page.yaml",
+	                                        "connectors/github/relations/viewer_repository_metrics.yaml"};
 	NeverCancel cancellation;
 	FailsafeYamlBudget budget(FailsafeYamlLimits::V1());
 	for (const auto &file : files) {

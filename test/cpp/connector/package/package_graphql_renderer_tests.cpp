@@ -13,7 +13,7 @@ using duckdb_api_test::Require;
 using duckdb_api_test::TemporaryPackage;
 
 std::string GraphqlSource() {
-	return duckdb_api_test::ReadFile("docs/rfcs/evidence/0013/github/relations/viewer_repository_metrics.yaml");
+	return duckdb_api_test::ReadFile("connectors/github/relations/viewer_repository_metrics.yaml");
 }
 
 duckdb_api::CompiledGraphqlOperation CompileGraphql(const std::string &source, TemporaryPackage &package) {
