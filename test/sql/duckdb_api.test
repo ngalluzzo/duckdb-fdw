@@ -1,5 +1,5 @@
 # name: test/sql/duckdb_api.test
-# description: static public SQL and secret contract for 0.7.0
+# description: static public SQL and secret contract for 0.8.0
 # group: [duckdb_api]
 
 statement error
@@ -14,7 +14,7 @@ SELECT extension_version
 FROM duckdb_extensions()
 WHERE extension_name = 'duckdb_api';
 ----
-0.7.0
+0.8.0
 
 query TT
 SELECT type, default_provider
