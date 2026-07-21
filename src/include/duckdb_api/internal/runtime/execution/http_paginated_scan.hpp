@@ -9,15 +9,14 @@
 namespace duckdb_api {
 namespace internal {
 
-// Closed Remote Runtime service for RFC 0007's authenticated repository
-// profile. Plan admission occurs before this construction boundary. Open owns
-// one moved authorization capability and returns the ordinary BatchStream team
-// API; no pagination type crosses into Query Experience.
+// Closed Remote Runtime service for a sequential paginated REST profile. Plan
+// admission occurs before this construction boundary. Open owns one moved
+// authorization capability and returns the ordinary BatchStream team API; no
+// pagination type crosses into Query Experience.
 std::unique_ptr<BatchStream>
-OpenAuthenticatedRepositoriesScan(const ScanPlan &plan,
-                                  std::unique_ptr<const AdmittedRepositoryRequestProfile> admitted_profile,
-                                  ScanAuthorization authorization, std::shared_ptr<const HttpTransport> transport,
-                                  uint64_t max_wall_milliseconds, ExecutionControl &control);
+OpenPaginatedRestScan(std::unique_ptr<const AdmittedPaginatedRestRequestProfile> admitted_profile,
+                      ScanAuthorization authorization, std::shared_ptr<const HttpTransport> transport,
+                      uint64_t max_wall_milliseconds, ExecutionControl &control);
 
 } // namespace internal
 } // namespace duckdb_api

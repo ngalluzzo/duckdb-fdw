@@ -173,7 +173,11 @@ HttpRequest BuildAdmittedGraphqlRequest(const AdmittedGraphqlRequestProfile &pro
 		body.reserve(profile.Document().size() + (cursor ? cursor->size() : 0) + 80);
 		body += "{\"query\":";
 		AppendJsonString(profile.Document(), body);
-		body += ",\"variables\":{\"pageSize\":" + std::to_string(profile.PageSize()) + ",\"cursor\":";
+		body += ",\"variables\":{";
+		AppendJsonString(profile.PageSizeVariable(), body);
+		body += ":" + std::to_string(profile.PageSize()) + ",";
+		AppendJsonString(profile.CursorVariable(), body);
+		body += ":";
 		if (cursor) {
 			AppendJsonString(*cursor, body);
 		} else {
@@ -200,6 +204,29 @@ HttpRequest BuildAdmittedGraphqlRequest(const AdmittedGraphqlRequestProfile &pro
 	} catch (const std::bad_alloc &) {
 		throw ExecutionError(ErrorStage::RESOURCE, "request_body_bytes",
 		                     "GraphQL request could not be allocated within its body budget");
+	}
+}
+
+bool IsAdmittedGraphqlBody(const AdmittedGraphqlRequestProfile &profile, const std::string &body) noexcept {
+	try {
+		std::string prefix = "{\"query\":";
+		AppendJsonString(profile.Document(), prefix);
+		prefix += ",\"variables\":{";
+		AppendJsonString(profile.PageSizeVariable(), prefix);
+		prefix += ":" + std::to_string(profile.PageSize()) + ",";
+		AppendJsonString(profile.CursorVariable(), prefix);
+		prefix += ":";
+		if (body.compare(0, prefix.size(), prefix) != 0 || body.size() <= prefix.size() + 2 ||
+		    body.compare(body.size() - 2, 2, "}}") != 0) {
+			return false;
+		}
+		const auto cursor_size = body.size() - prefix.size() - 2;
+		if (cursor_size == 4 && body.compare(prefix.size(), cursor_size, "null") == 0) {
+			return true;
+		}
+		return IsCanonicalCursorToken(body, prefix.size(), cursor_size);
+	} catch (...) {
+		return false;
 	}
 }
 

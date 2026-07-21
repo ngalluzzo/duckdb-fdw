@@ -13,9 +13,8 @@ namespace internal {
 
 struct HttpExecutionProfile;
 
-// One Runtime-private source for the exact admitted document bytes. Request
-// serialization and the installed transport's defense-in-depth classifier use
-// this identity rather than maintaining lookalike document prefixes.
+// Retained only by the fixed 0.7 production curl classifier. Generic admitted
+// profiles use their own copied document bytes and never compare this value.
 const char *CanonicalGraphqlDocumentBytes() noexcept;
 
 struct AdmittedGraphqlColumn {
@@ -25,10 +24,13 @@ struct AdmittedGraphqlColumn {
 	std::vector<std::string> response_path;
 };
 
-// Immutable Runtime authority for the sole installed GraphQL operation. The
-// complete ScanPlan is checked once, before authorization materialization or
-// I/O. Downstream services consume this closed value and therefore cannot
-// reinterpret a relation name, Connector declaration, or planner-private fact.
+// Immutable authority for one forward sequential GraphQL traversal. Admission
+// copies the exact endpoint, public headers, generated document, variables,
+// response paths, typed nullable columns, cursor contract, and page/scan
+// budgets from a completely validated plan. Streams retain only this profile;
+// provenance names, classification labels, explanations, source bytes, and
+// credentials never enter it. Read-only copies are safe across stream-owned
+// lifetimes, while cancellation and close remain the stream's responsibility.
 class AdmittedGraphqlRequestProfile {
 public:
 	AdmittedGraphqlRequestProfile(const AdmittedGraphqlRequestProfile &) = default;
@@ -44,16 +46,25 @@ public:
 	const std::vector<HttpHeader> &Headers() const;
 	const std::string &Document() const;
 	const std::vector<AdmittedGraphqlColumn> &Columns() const;
+	const std::string &PageSizeVariable() const;
+	const std::string &CursorVariable() const;
+	const std::vector<std::string> &NodesPath() const;
+	const std::vector<std::string> &ErrorsPath() const;
+	const std::vector<std::string> &PageInfoPath() const;
+	const std::vector<std::string> &HasNextPagePath() const;
+	const std::vector<std::string> &EndCursorPath() const;
 	uint64_t PageSize() const;
 	uint64_t MaxPages() const;
 	uint64_t MaxRequestBodyBytes() const;
 	uint64_t MaxScanBodyBytes() const;
+	bool RequiresBearer() const;
+	const ResourceBudgets &PageBudgets() const;
+	const ScanResourceBudgets &ScanBudgets() const;
 
 private:
 	friend std::unique_ptr<const AdmittedGraphqlRequestProfile> TryAdmitGraphqlPlan(const ScanPlan &,
 	                                                                                const HttpExecutionProfile &);
-
-	AdmittedGraphqlRequestProfile();
+	AdmittedGraphqlRequestProfile(const ScanPlan &plan, bool requires_bearer);
 
 	std::string method;
 	std::string scheme;
@@ -63,16 +74,27 @@ private:
 	std::vector<HttpHeader> headers;
 	std::string document;
 	std::vector<AdmittedGraphqlColumn> columns;
+	std::string page_size_variable;
+	std::string cursor_variable;
+	std::vector<std::string> nodes_path;
+	std::vector<std::string> errors_path;
+	std::vector<std::string> page_info_path;
+	std::vector<std::string> has_next_page_path;
+	std::vector<std::string> end_cursor_path;
 	uint64_t page_size;
 	uint64_t max_pages;
 	uint64_t max_request_body_bytes;
 	uint64_t max_scan_body_bytes;
+	bool requires_bearer;
+	ResourceBudgets page_budgets;
+	ScanResourceBudgets scan_budgets;
 };
 
-// Returns null for every plan outside the exact accepted profile. Malformed
-// protocol sums are also rejected here rather than leaking provider errors.
 std::unique_ptr<const AdmittedGraphqlRequestProfile> TryAdmitGraphqlPlan(const ScanPlan &plan,
                                                                          const HttpExecutionProfile &profile);
+// A null result is a complete pre-authorization policy/contract denial.
+// Allocation exhaustion is the sole structured error; admission performs no
+// credential materialization, request serialization, or transport I/O.
 
 } // namespace internal
 } // namespace duckdb_api

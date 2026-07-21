@@ -1,0 +1,206 @@
+#include "duckdb_api/internal/runtime/execution/http_plan_admission.hpp"
+#include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
+#include "runtime/support/controlled_http_transport.hpp"
+#include "semantics/support/runtime_rest_predicate_plan_test_fixtures.hpp"
+#include "semantics/support/scan_plan_test_fixtures.hpp"
+#include "support/require.hpp"
+
+#include <cstdlib>
+#include <iostream>
+#include <string>
+
+namespace {
+
+using duckdb_api_test::Require;
+
+class NeverCancelledControl final : public duckdb_api::ExecutionControl {
+public:
+	bool IsCancellationRequested() const noexcept override {
+		return false;
+	}
+};
+
+duckdb_api::internal::HttpExecutionProfile RepositoryExecutionProfile() {
+	return {duckdb_api::PlannedUrlScheme::HTTPS,
+	        "api.github.com",
+	        443,
+	        false,
+	        false,
+	        false,
+	        duckdb_api::MAX_EXECUTION_MILLISECONDS,
+	        duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE};
+}
+
+duckdb_api::internal::HttpExecutionProfile PredicateProofExecutionProfile() {
+	return {duckdb_api::PlannedUrlScheme::HTTPS,
+	        "predicate-proof.invalid",
+	        443,
+	        false,
+	        false,
+	        false,
+	        duckdb_api::MAX_EXECUTION_MILLISECONDS,
+	        duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE};
+}
+
+void TestNamesClassificationAndValidRequestFactsAreNotAuthority() {
+	using namespace duckdb_api_test;
+	const OperationPlanCounterexample operations[] = {
+	    OperationPlanCounterexample::OTHER_CONNECTOR_IDENTITY, OperationPlanCounterexample::OTHER_CONNECTOR_VERSION,
+	    OperationPlanCounterexample::OTHER_RELATION_IDENTITY,  OperationPlanCounterexample::EMPTY_IDENTITY,
+	    OperationPlanCounterexample::OTHER_OPERATION_IDENTITY, OperationPlanCounterexample::OTHER_PATH,
+	    OperationPlanCounterexample::EMPTY_FIXED_HEADER_VALUE};
+	for (const auto variation : operations) {
+		auto profile = duckdb_api::internal::TryAdmitSingleResponseHttpPlan(
+		    BuildOperationPlanCounterexample("fixture_secret", variation), RepositoryExecutionProfile());
+		Require(static_cast<bool>(profile), "REST admission interpreted provenance or valid request data as identity");
+	}
+
+	auto nullable = duckdb_api::internal::TryAdmitSingleResponseHttpPlan(
+	    BuildResponsePlanCounterexample("fixture_secret", ResponsePlanCounterexample::FLIPPED_SCHEMA_NULLABILITY),
+	    RepositoryExecutionProfile());
+	Require(nullable && nullable->Columns()[0].nullable,
+	        "REST admission rejected a structurally valid nullable output column");
+
+	const RepositoryPlanCounterexample independent_facts[] = {
+	    RepositoryPlanCounterexample::MISSING_VISIBILITY_COLUMN,
+	    RepositoryPlanCounterexample::VISIBILITY_NOT_TRAILING,
+	    RepositoryPlanCounterexample::VISIBILITY_NULLABLE,
+	    RepositoryPlanCounterexample::VISIBILITY_WRONG_TYPE,
+	    RepositoryPlanCounterexample::VISIBILITY_WRONG_EXTRACTOR,
+	    RepositoryPlanCounterexample::UNKNOWN_PREDICATE_CATEGORY,
+	    RepositoryPlanCounterexample::UNKNOWN_PREDICATE_REASON,
+	    RepositoryPlanCounterexample::EXACT_CATEGORY_SUPERSET_ACCURACY,
+	    RepositoryPlanCounterexample::SUPERSET_CATEGORY_EXACT_ACCURACY,
+	    RepositoryPlanCounterexample::AMBIGUOUS_RESIDUAL_TRUE,
+	    RepositoryPlanCounterexample::MAPPING_UNAVAILABLE_RESIDUAL_TRUE};
+	for (std::size_t index = 0; index < sizeof(independent_facts) / sizeof(independent_facts[0]); index++) {
+		Require(static_cast<bool>(duckdb_api::internal::TryAdmitPaginatedRestPlan(
+		            BuildRepositoryPlanCounterexample("fixture_secret", independent_facts[index]),
+		            RepositoryExecutionProfile())),
+		        "REST admission interpreted independent schema/classification variation " + std::to_string(index) +
+		            " as native identity");
+	}
+}
+
+void TestPermanentConditionalBindingUsesTypedAuthority() {
+	const auto plan = duckdb_api_test::BuildDistinctRestQueryPathScanPlanFixture("permanent_rest_secret");
+	const auto &operation = plan.Operation().Rest();
+	bool has_conditional = false;
+	for (const auto &binding : operation.query_bindings) {
+		has_conditional =
+		    has_conditional || binding.Source() == duckdb_api::PlannedRestQueryValueSource::CONDITIONAL_INPUT;
+	}
+	Require(!operation.result_columns.empty() && !operation.records_path.segments.empty() && has_conditional &&
+	            plan.ConditionalInput() == duckdb_api::PlannedConditionalInput::REST_QUERY_BINDING &&
+	            plan.TypedEquality() != nullptr,
+	        "permanent REST fixture lost its typed conditional binding");
+	auto admitted = duckdb_api::internal::TryAdmitPaginatedRestPlan(plan, RepositoryExecutionProfile());
+	Require(static_cast<bool>(admitted), "matching permanent REST conditional authority was not admitted");
+	std::size_t access_count = 0;
+	for (const auto &parameter : admitted->QueryParameters()) {
+		if (parameter.name == "access") {
+			access_count++;
+			Require(parameter.encoded_value == "private", "typed conditional value changed during materialization");
+		}
+	}
+	Require(access_count == 1 &&
+	            admitted->ConditionalInput() == duckdb_api::internal::AdmittedPaginatedRestConditionalInput::NONE,
+	        "generic conditional binding borrowed the native visibility compatibility discriminant");
+}
+
+void TestPlannerProducedExactAndResidualOnlyPlansRemainDistinct() {
+	const auto exact_plan = duckdb_api_test::BuildRuntimeExactRestPredicatePlanFixture();
+	Require(exact_plan.RemoteAccuracy() == duckdb_api::RemotePredicateAccuracy::EXACT &&
+	            exact_plan.TypedEquality() != nullptr &&
+	            exact_plan.TypedEquality()->OccurrencePreservation() ==
+	                duckdb_api::PlannedOccurrencePreservation::PRESERVES_EXACT_MATCHING_BASE_OCCURRENCES,
+	        "planner-produced exact fixture lost its exact occurrence authority");
+	auto exact = duckdb_api::internal::TryAdmitSingleResponseHttpPlan(exact_plan, PredicateProofExecutionProfile());
+	Require(static_cast<bool>(exact), "planner-produced exact REST predicate plan was not admitted");
+	std::size_t rank_filter_count = 0;
+	for (const auto &parameter : exact->QueryParameters()) {
+		if (parameter.name == "rank_filter") {
+			rank_filter_count++;
+			Require(parameter.encoded_value == "42", "exact BIGINT predicate changed during materialization");
+		}
+	}
+	Require(rank_filter_count == 1, "exact conditional authority did not emit exactly one request binding");
+
+	const auto residual_plan = duckdb_api_test::BuildRuntimeResidualOnlyRestPredicatePlanFixture();
+	Require(residual_plan.RemotePredicate() == duckdb_api::PlannedPredicate::TRUE_FOR_BASE_DOMAIN &&
+	            residual_plan.RemoteAccuracy() == duckdb_api::RemotePredicateAccuracy::UNSUPPORTED &&
+	            residual_plan.ResidualPredicate() == duckdb_api::PlannedPredicate::TYPED_EQUALITY &&
+	            residual_plan.ConditionalInput() == duckdb_api::PlannedConditionalInput::NONE,
+	        "planner-produced residual fixture lost its DuckDB-only predicate ownership");
+	auto residual =
+	    duckdb_api::internal::TryAdmitSingleResponseHttpPlan(residual_plan, PredicateProofExecutionProfile());
+	Require(static_cast<bool>(residual), "planner-produced residual-only REST predicate plan was not admitted");
+	for (const auto &parameter : residual->QueryParameters()) {
+		Require(parameter.name != "rank_filter", "residual-only predicate leaked into the remote request");
+	}
+}
+
+void TestConditionalBindingCounterexamplesFailBeforeTransport() {
+	using duckdb_api_test::RuntimeRestPredicatePlanCounterexample;
+	const RuntimeRestPredicatePlanCounterexample counterexamples[] = {
+	    RuntimeRestPredicatePlanCounterexample::CONDITIONAL_SOURCE_ID,
+	    RuntimeRestPredicatePlanCounterexample::CONDITIONAL_SCALAR_KIND,
+	    RuntimeRestPredicatePlanCounterexample::CONDITIONAL_TYPED_VALUE,
+	    RuntimeRestPredicatePlanCounterexample::NONCANONICAL_ENCODED_VALUE,
+	    RuntimeRestPredicatePlanCounterexample::DUPLICATE_CONDITIONAL_BINDING};
+	for (std::size_t index = 0; index < sizeof(counterexamples) / sizeof(counterexamples[0]); index++) {
+		const auto plan = duckdb_api_test::BuildRuntimeRestPredicatePlanCounterexample(counterexamples[index]);
+		const auto runtime = duckdb_api_test::BuildControlledHttpRuntimeForHost("predicate-proof.invalid");
+		NeverCancelledControl control;
+		bool rejected = false;
+		try {
+			(void)runtime->Executor()->Open(plan, control);
+		} catch (const duckdb_api::ExecutionError &error) {
+			rejected = true;
+			Require(error.Stage() == duckdb_api::ErrorStage::POLICY,
+			        "conditional binding mismatch used the wrong error stage");
+		}
+		const auto observation = runtime->Observation();
+		Require(rejected && observation.request_count == 0 && observation.target.empty() && observation.headers.empty(),
+		        "conditional binding mismatch reached request construction or transport at index " +
+		            std::to_string(index));
+	}
+}
+
+void TestNativeConditionalCompatibilityRemainsIsolated() {
+	auto selected = duckdb_api::internal::TryAdmitPaginatedRestPlan(
+	    duckdb_api_test::BuildRuntimeNativePredicateIsolationPlanFixture(), RepositoryExecutionProfile());
+	auto fallback = duckdb_api::internal::TryAdmitPaginatedRestPlan(
+	    duckdb_api_test::BuildCompleteResidualFallbackPlanFixture("native_fallback_secret"),
+	    RepositoryExecutionProfile());
+	Require(selected && fallback &&
+	            selected->ConditionalInput() ==
+	                duckdb_api::internal::AdmittedPaginatedRestConditionalInput::LEGACY_VISIBILITY_PRIVATE &&
+	            fallback->ConditionalInput() == duckdb_api::internal::AdmittedPaginatedRestConditionalInput::NONE,
+	        "native selected and fallback profiles lost their distinct compatibility authority");
+	const auto selected_request =
+	    duckdb_api::internal::BuildAdmittedPaginatedRestPageRequest(*selected, selected->FirstPage());
+	const auto fallback_request =
+	    duckdb_api::internal::BuildAdmittedPaginatedRestPageRequest(*fallback, fallback->FirstPage());
+	Require(selected_request.target.find("visibility=private") != std::string::npos &&
+	            selected_request.target.find("rank_filter=") == std::string::npos &&
+	            fallback_request.target.find("visibility=") == std::string::npos,
+	        "generic admission widened or erased the native visibility compatibility bridge");
+}
+
+} // namespace
+
+int main() {
+	try {
+		TestNamesClassificationAndValidRequestFactsAreNotAuthority();
+		TestPermanentConditionalBindingUsesTypedAuthority();
+		TestPlannerProducedExactAndResidualOnlyPlansRemainDistinct();
+		TestConditionalBindingCounterexamplesFailBeforeTransport();
+		TestNativeConditionalCompatibilityRemainsIsolated();
+		std::cout << "REST plan admission tests passed" << std::endl;
+		return EXIT_SUCCESS;
+	} catch (const std::exception &error) {
+		std::cerr << "REST plan admission tests failed: " << error.what() << std::endl;
+		return EXIT_FAILURE;
+	}
+}

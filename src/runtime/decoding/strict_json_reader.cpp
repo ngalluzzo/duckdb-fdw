@@ -70,6 +70,17 @@ void StrictJsonReader::Reset() noexcept {
 	position = 0;
 }
 
+std::size_t StrictJsonReader::Position() const noexcept {
+	return position;
+}
+
+void StrictJsonReader::SetPosition(std::size_t position_p) {
+	if (position_p > input.size()) {
+		Malformed();
+	}
+	position = position_p;
+}
+
 void StrictJsonReader::Check() const {
 	if (control.IsCancellationRequested()) {
 		throw ExecutionCancelled();

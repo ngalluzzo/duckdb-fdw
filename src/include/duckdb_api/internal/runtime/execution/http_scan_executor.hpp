@@ -27,8 +27,8 @@ struct HttpExecutionProfile {
 	bool link_local_addresses_enabled;
 	bool loopback_addresses_enabled;
 	uint64_t max_wall_milliseconds;
-	// Per-response record authority. The installed 0.6 profile admits up to
-	// 100 repository records; private fixtures may narrow this value.
+	// Per-response record authority. The installed compatibility profile admits
+	// up to the v1 per-page ceiling; private fixtures may narrow this value.
 	uint64_t max_decoded_records;
 };
 

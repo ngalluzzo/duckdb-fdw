@@ -12,7 +12,7 @@
 
 namespace {
 
-using duckdb_api::internal::AdmittedRepositoryRequestProfile;
+using duckdb_api::internal::AdmittedPaginatedRestRequestProfile;
 using duckdb_api::internal::LinkPaginationError;
 using duckdb_api::internal::LinkPaginationErrorKind;
 using duckdb_api::internal::LinkPaginationState;
@@ -20,7 +20,7 @@ using duckdb_api_test::Require;
 
 const std::string CANARY = "private-repository-canary";
 
-AdmittedRepositoryRequestProfile AdmitRepositoryProfile(bool selective) {
+AdmittedPaginatedRestRequestProfile AdmitPaginatedRestProfile(bool selective) {
 	const duckdb_api::internal::HttpExecutionProfile execution_profile {duckdb_api::PlannedUrlScheme::HTTPS,
 	                                                                    "api.github.com",
 	                                                                    443,
@@ -29,7 +29,7 @@ AdmittedRepositoryRequestProfile AdmitRepositoryProfile(bool selective) {
 	                                                                    false,
 	                                                                    duckdb_api::MAX_EXECUTION_MILLISECONDS,
 	                                                                    100};
-	auto admitted = duckdb_api::internal::TryAdmitRepositoryHttpPlan(
+	auto admitted = duckdb_api::internal::TryAdmitPaginatedRestPlan(
 	    selective ? duckdb_api_test::BuildVisibilityPrivatePlanFixture("fixture_secret")
 	              : duckdb_api_test::BuildValidAuthenticatedRepositoriesPlanFixture("fixture_secret"),
 	    execution_profile);
@@ -37,13 +37,13 @@ AdmittedRepositoryRequestProfile AdmitRepositoryProfile(bool selective) {
 	return *admitted;
 }
 
-const AdmittedRepositoryRequestProfile &BaseProfile() {
-	static const auto profile = AdmitRepositoryProfile(false);
+const AdmittedPaginatedRestRequestProfile &BaseProfile() {
+	static const auto profile = AdmitPaginatedRestProfile(false);
 	return profile;
 }
 
-const AdmittedRepositoryRequestProfile &SelectiveProfile() {
-	static const auto profile = AdmitRepositoryProfile(true);
+const AdmittedPaginatedRestRequestProfile &SelectiveProfile() {
+	static const auto profile = AdmitPaginatedRestProfile(true);
 	return profile;
 }
 

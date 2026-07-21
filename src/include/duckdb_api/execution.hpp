@@ -156,10 +156,13 @@ protected:
 	// Concrete Runtime executors may distinguish only the two closed
 	// alternatives. This inspection exposes no credential bytes and grants no
 	// host, placement, or operation authority.
-	enum class AuthorizationAlternative : uint8_t { ANONYMOUS, GITHUB_USER_BEARER };
+	// GITHUB_USER_BEARER is the bounded 0.7 source-compatibility spelling for
+	// existing Query consumers. It aliases BEARER and cannot select a distinct
+	// Runtime state or execution path.
+	enum class AuthorizationAlternative : uint8_t { ANONYMOUS, BEARER, GITHUB_USER_BEARER = BEARER };
 	static AuthorizationAlternative AlternativeOf(const ScanAuthorization &authorization) noexcept {
 		return authorization.kind == ScanAuthorization::Kind::ANONYMOUS ? AuthorizationAlternative::ANONYMOUS
-		                                                                : AuthorizationAlternative::GITHUB_USER_BEARER;
+		                                                                : AuthorizationAlternative::BEARER;
 	}
 
 	// The public entry validates cancellation and moved-from state before this

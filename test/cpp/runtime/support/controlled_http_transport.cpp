@@ -352,4 +352,19 @@ std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntime(uint64_t max_w
 	return std::shared_ptr<ControlledHttpRuntime>(new ControlledHttpRuntime(std::move(state), std::move(executor)));
 }
 
+std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntimeForHost(std::string host) {
+	auto state = std::make_shared<ControlledHttpRuntime::State>();
+	std::unique_ptr<duckdb_api::internal::HttpTransport> transport(new ControlledTransport(state));
+	const duckdb_api::internal::HttpExecutionProfile profile {duckdb_api::PlannedUrlScheme::HTTPS,
+	                                                          std::move(host),
+	                                                          443,
+	                                                          false,
+	                                                          false,
+	                                                          false,
+	                                                          duckdb_api::MAX_EXECUTION_MILLISECONDS,
+	                                                          duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE};
+	auto executor = duckdb_api::internal::BuildHttpScanExecutorForProfile(std::move(transport), profile);
+	return std::shared_ptr<ControlledHttpRuntime>(new ControlledHttpRuntime(std::move(state), std::move(executor)));
+}
+
 } // namespace duckdb_api_test

@@ -56,6 +56,8 @@ public:
 	std::string ParseNumberToken(uint64_t max_token_bytes, const std::string &budget_field, const char *safe_message);
 	void Literal(const char *value);
 	void SkipValue(uint64_t depth = 0);
+	std::size_t Position() const noexcept;
+	void SetPosition(std::size_t position);
 
 private:
 	uint32_t ParseHexCodeUnit();

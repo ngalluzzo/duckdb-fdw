@@ -49,6 +49,15 @@ configure_duckdb_api_cpp_target(duckdb_api_scan_resource_accounting_tests)
 target_include_directories(duckdb_api_scan_resource_accounting_tests PRIVATE test/cpp)
 
 add_executable(
+  duckdb_api_request_validation_tests
+  test/cpp/runtime/policy/request_validation_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_request_validation_tests)
+target_include_directories(duckdb_api_request_validation_tests PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_request_validation_tests
+  PRIVATE duckdb_api_runtime_executor_service)
+
+add_executable(
   duckdb_api_http_transport_contract_tests
   test/cpp/runtime/transport/http_transport_contract_tests.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_http_transport_contract_tests)
@@ -88,7 +97,8 @@ add_executable(
   test/cpp/runtime/decoding/graphql_response_decoder_tests.cpp
   src/runtime/decoding/graphql_response_decoder.cpp
   src/runtime/decoding/strict_json_reader.cpp
-  src/runtime/execution/graphql_plan_admission.cpp)
+  src/runtime/execution/graphql_plan_admission.cpp
+  src/runtime/policy/request_validation.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_graphql_response_decoder_tests)
 target_include_directories(duckdb_api_graphql_response_decoder_tests PRIVATE test/cpp)
 target_link_libraries(
@@ -168,9 +178,23 @@ add_duckdb_api_runtime_executor_test(
 add_duckdb_api_runtime_executor_test(
   duckdb_api_http_scan_pagination_tests
   test/cpp/runtime/execution/http_scan_pagination_tests.cpp)
+target_link_libraries(
+  duckdb_api_http_scan_pagination_tests
+  PRIVATE duckdb_api_semantics_materialized_fixture_service)
 add_duckdb_api_runtime_executor_test(
   duckdb_api_http_scan_executor_policy_tests
   test/cpp/runtime/execution/http_scan_executor_policy_tests.cpp)
+add_executable(
+  duckdb_api_rest_plan_admission_tests
+  test/cpp/runtime/execution/rest_plan_admission_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_rest_plan_admission_tests)
+target_include_directories(duckdb_api_rest_plan_admission_tests PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_rest_plan_admission_tests
+  PRIVATE duckdb_api_runtime_executor_service
+          duckdb_api_runtime_programmable_test_service
+          duckdb_api_semantics_fixture_service
+          duckdb_api_semantics_materialized_fixture_service)
 add_duckdb_api_runtime_executor_test(
   duckdb_api_graphql_paginated_scan_tests
   test/cpp/runtime/execution/graphql_paginated_scan_tests.cpp)

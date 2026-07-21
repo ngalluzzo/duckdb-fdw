@@ -1,11 +1,12 @@
 #include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 
-#include "duckdb_api/internal/runtime/authentication/fixed_github_user_bearer_authenticator.hpp"
+#include "duckdb_api/internal/runtime/authentication/bearer_authenticator.hpp"
 #include "duckdb_api/internal/runtime/execution/graphql_paginated_scan.hpp"
 #include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
 #include "duckdb_api/internal/runtime/execution/http_paginated_scan.hpp"
 #include "duckdb_api/internal/runtime/execution/http_plan_admission.hpp"
 #include "duckdb_api/internal/runtime/decoding/json_decoder.hpp"
+#include "duckdb_api/internal/runtime/policy/request_validation.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -27,36 +28,20 @@ namespace {
 static_assert(std::is_nothrow_move_assignable<TypedBatch>::value,
               "batch ownership transfer must not fail after rows are committed");
 
-static const uint64_t NATIVE_PRODUCT_MAX_DECODED_RECORDS_PER_PAGE = 100;
+static const uint64_t V1_MAX_DECODED_RECORDS_PER_PAGE = 100;
 
-HttpRequest BuildRequest(const PlannedRestOperation &operation) {
-	HttpRequest request;
-	request.method = "GET";
-	request.scheme = operation.origin.scheme == PlannedUrlScheme::HTTPS ? "https" : "http";
-	request.host = operation.origin.host;
-	request.port = operation.origin.port;
-	request.target = operation.path;
-	for (std::size_t index = 0; index < operation.query_parameters.size(); index++) {
-		request.target += index == 0 ? "?" : "&";
-		request.target +=
-		    operation.query_parameters[index].name + "=" + operation.query_parameters[index].encoded_value;
-	}
-	for (const auto &header : operation.headers) {
-		request.headers.push_back({header.name, header.value});
-	}
-	return request;
-}
-
-JsonDecodePlan BuildDecodePlan(const ScanPlan &plan, std::chrono::steady_clock::time_point deadline) {
-	const auto &budgets = plan.Budgets();
+JsonDecodePlan BuildDecodePlan(const AdmittedRestRequestProfile &profile,
+                               std::chrono::steady_clock::time_point deadline) {
+	const auto &budgets = profile.Budgets();
 	JsonDecodePlan result;
-	result.response_source = plan.Operation().Rest().response_source == PlannedResponseSource::ROOT_OBJECT
-	                             ? JsonResponseSource::ROOT_OBJECT
-	                             : JsonResponseSource::JSON_PATH_MANY;
-	result.records_field = result.response_source == JsonResponseSource::JSON_PATH_MANY ? "items" : "";
-	result.columns = {{"id", "id", ValueKind::BIGINT},
-	                  {"login", "login", ValueKind::VARCHAR},
-	                  {"site_admin", "site_admin", ValueKind::BOOLEAN}};
+	result.response_source =
+	    profile.ResponseSource() == PlannedResponseSource::ROOT_OBJECT  ? JsonResponseSource::ROOT_OBJECT
+	    : profile.ResponseSource() == PlannedResponseSource::ROOT_ARRAY ? JsonResponseSource::ROOT_ARRAY
+	                                                                    : JsonResponseSource::JSON_PATH_MANY;
+	result.records_path = profile.RecordsPath();
+	for (const auto &column : profile.Columns()) {
+		result.columns.push_back(JsonColumnPlan(column.name, column.source_path, column.kind, column.nullable));
+	}
 	result.max_records = budgets.decoded_records;
 	result.max_string_bytes = budgets.extracted_string_bytes;
 	result.max_json_nesting = budgets.json_nesting;
@@ -93,17 +78,21 @@ private:
 	const std::atomic<bool> &cancelled;
 };
 
-// Single-response compatibility stream for the two 0.4 profiles. Pagination
-// lives in the separate Remote Runtime service and is selected only by exact
-// plan validation at executor dispatch.
+// Single-response REST stream. Pagination lives in the separate Remote Runtime
+// service and is selected only by complete plan validation at executor
+// dispatch.
 class HttpBatchStream final : public BatchStream {
 public:
-	HttpBatchStream(const ScanPlan &plan_p, ScanAuthorization authorization_p,
-	                AdmittedHttpOperation installed_operation_p, std::shared_ptr<const HttpTransport> transport_p,
+	HttpBatchStream(std::unique_ptr<const AdmittedRestRequestProfile> admitted_profile_p,
+	                ScanAuthorization authorization_p, std::shared_ptr<const HttpTransport> transport_p,
 	                uint64_t max_wall_milliseconds_p)
-	    : plan(plan_p), transport(std::move(transport_p)), max_wall_milliseconds(max_wall_milliseconds_p),
-	      authorization(new ScanAuthorization(std::move(authorization_p))), installed_operation(installed_operation_p),
-	      cancelled(false), closed(false), attempted(false), exhausted(false), deadline_initialized(false), offset(0) {
+	    : admitted_profile(std::move(admitted_profile_p)), transport(std::move(transport_p)),
+	      max_wall_milliseconds(max_wall_milliseconds_p),
+	      authorization(new ScanAuthorization(std::move(authorization_p))), cancelled(false), closed(false),
+	      attempted(false), exhausted(false), deadline_initialized(false), offset(0) {
+		for (const auto &column : admitted_profile->Columns()) {
+			column_kinds.push_back(column.kind);
+		}
 	}
 
 	~HttpBatchStream() noexcept override {
@@ -133,7 +122,8 @@ public:
 		CombinedExecutionControl combined(control, cancelled);
 		if (!deadline_initialized) {
 			deadline = std::chrono::steady_clock::now() +
-			           std::chrono::milliseconds(std::min(plan.Budgets().wall_milliseconds, max_wall_milliseconds));
+			           std::chrono::milliseconds(
+			               std::min(admitted_profile->Budgets().wall_milliseconds, max_wall_milliseconds));
 			deadline_initialized = true;
 		}
 		try {
@@ -141,14 +131,14 @@ public:
 			if (!attempted) {
 				attempted = true;
 				const HttpLimits limits {0,
-				                         plan.Budgets().header_bytes,
-				                         plan.Budgets().response_bytes,
-				                         plan.Budgets().decompressed_bytes,
+				                         admitted_profile->Budgets().header_bytes,
+				                         admitted_profile->Budgets().response_bytes,
+				                         admitted_profile->Budgets().decompressed_bytes,
 				                         0,
 				                         deadline};
-				auto request = BuildRequest(plan.Operation().Rest());
-				if (installed_operation == AdmittedHttpOperation::AUTHENTICATED_USER) {
-					request = FixedGithubUserBearerAuthenticator::Authorize(plan, std::move(request), *authorization);
+				auto request = BuildAdmittedRestRequest(*admitted_profile);
+				if (admitted_profile->RequiresBearer()) {
+					request = BearerAuthenticator::AuthorizeRest(*admitted_profile, std::move(request), *authorization);
 				}
 				auto response = transport->Execute(request, limits, combined);
 				authorization.reset();
@@ -159,18 +149,18 @@ public:
 				    response.metadata.retained_bytes > limits.max_metadata_bytes) {
 					throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP response exceeded an execution budget");
 				}
-				if (installed_operation == AdmittedHttpOperation::AUTHENTICATED_USER && response.status == 401) {
+				if (admitted_profile->RequiresBearer() && response.status == 401) {
 					throw ExecutionError(ErrorStage::AUTHENTICATION, "http_status",
 					                     "HTTP endpoint rejected bearer authentication");
 				}
-				if (installed_operation == AdmittedHttpOperation::AUTHENTICATED_USER && response.status == 403) {
+				if (admitted_profile->RequiresBearer() && response.status == 403) {
 					throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status",
 					                     "HTTP endpoint denied bearer authorization");
 				}
 				if (response.status < 200 || response.status >= 300) {
 					throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status");
 				}
-				decoded = DecodeJsonRows(response.body, BuildDecodePlan(plan, deadline), combined);
+				decoded = DecodeJsonRows(response.body, BuildDecodePlan(*admitted_profile, deadline), combined);
 				CheckExecutionState(combined, deadline);
 			}
 
@@ -180,9 +170,9 @@ public:
 				return false;
 			}
 			const auto remaining = decoded.size() - offset;
-			const auto count = std::min(remaining, static_cast<std::size_t>(plan.Budgets().batch_rows));
+			const auto count = std::min(remaining, static_cast<std::size_t>(admitted_profile->Budgets().batch_rows));
 			TypedBatch produced;
-			produced.column_kinds = {ValueKind::BIGINT, ValueKind::VARCHAR, ValueKind::BOOLEAN};
+			produced.column_kinds = column_kinds;
 			produced.rows.reserve(count);
 			for (std::size_t index = 0; index < count; index++) {
 				CheckExecutionState(combined, deadline);
@@ -259,11 +249,11 @@ private:
 		}
 	}
 
-	const ScanPlan plan;
+	const std::unique_ptr<const AdmittedRestRequestProfile> admitted_profile;
 	const std::shared_ptr<const HttpTransport> transport;
 	const uint64_t max_wall_milliseconds;
 	std::unique_ptr<ScanAuthorization> authorization;
-	const AdmittedHttpOperation installed_operation;
+	std::vector<ValueKind> column_kinds;
 	mutable std::mutex state_mutex;
 	std::atomic<bool> cancelled;
 	bool closed;
@@ -286,31 +276,41 @@ public:
 		CheckCancellation(control);
 		try {
 			if (plan.Operation().Protocol() == PlannedProtocol::GRAPHQL) {
-				if (!TryAdmitGraphqlPlan(plan, profile)) {
+				auto graphql_profile = TryAdmitGraphqlPlan(plan, profile);
+				if (!graphql_profile) {
 					throw ExecutionError(ErrorStage::POLICY, "",
 					                     "scan plan is outside the installed execution profile");
 				}
-				throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
-				                     "authenticated execution requires a bearer authorization capability");
+				if (graphql_profile->RequiresBearer()) {
+					throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
+					                     "authenticated execution requires a bearer authorization capability");
+				}
+				return OpenGraphqlPaginatedScan(std::move(graphql_profile), ScanAuthorization::Anonymous(), transport,
+				                                profile.max_wall_milliseconds, control);
 			}
 		} catch (const ExecutionError &) {
 			throw;
 		} catch (...) {
 			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
 		}
-		if (TryAdmitRepositoryHttpPlan(plan, profile)) {
-			throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
-			                     "authenticated execution requires a bearer authorization capability");
+		auto paginated = TryAdmitPaginatedRestPlan(plan, profile);
+		if (paginated) {
+			if (paginated->RequiresBearer()) {
+				throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
+				                     "authenticated execution requires a bearer authorization capability");
+			}
+			return OpenPaginatedRestScan(std::move(paginated), ScanAuthorization::Anonymous(), transport,
+			                             profile.max_wall_milliseconds, control);
 		}
-		AdmittedHttpOperation installed = AdmittedHttpOperation::ANONYMOUS_SEARCH;
-		if (!TryAdmitSingleResponseHttpPlan(plan, profile, installed)) {
+		auto admitted = TryAdmitSingleResponseHttpPlan(plan, profile);
+		if (!admitted) {
 			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
 		}
-		if (installed != AdmittedHttpOperation::ANONYMOUS_SEARCH) {
+		if (admitted->RequiresBearer()) {
 			throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
 			                     "authenticated execution requires a bearer authorization capability");
 		}
-		return OpenSingle(plan, ScanAuthorization::Anonymous(), installed, control);
+		return OpenSingle(std::move(admitted), ScanAuthorization::Anonymous(), control);
 	}
 
 protected:
@@ -323,11 +323,13 @@ protected:
 					throw ExecutionError(ErrorStage::POLICY, "",
 					                     "scan plan is outside the installed execution profile");
 				}
-				if (AlternativeOf(authorization) != AuthorizationAlternative::GITHUB_USER_BEARER) {
+				const auto expected = graphql_profile->RequiresBearer() ? AuthorizationAlternative::BEARER
+				                                                        : AuthorizationAlternative::ANONYMOUS;
+				if (AlternativeOf(authorization) != expected) {
 					throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
 					                     "authorization capability does not match the scan plan");
 				}
-				return OpenGraphqlPaginatedScan(plan, std::move(graphql_profile), std::move(authorization), transport,
+				return OpenGraphqlPaginatedScan(std::move(graphql_profile), std::move(authorization), transport,
 				                                profile.max_wall_milliseconds, control);
 			}
 		} catch (const ExecutionError &) {
@@ -335,37 +337,37 @@ protected:
 		} catch (...) {
 			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
 		}
-		auto repository_profile = TryAdmitRepositoryHttpPlan(plan, profile);
-		if (repository_profile) {
-			if (AlternativeOf(authorization) != AuthorizationAlternative::GITHUB_USER_BEARER) {
+		auto paginated_profile = TryAdmitPaginatedRestPlan(plan, profile);
+		if (paginated_profile) {
+			const auto expected = paginated_profile->RequiresBearer() ? AuthorizationAlternative::BEARER
+			                                                          : AuthorizationAlternative::ANONYMOUS;
+			if (AlternativeOf(authorization) != expected) {
 				throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
 				                     "authorization capability does not match the scan plan");
 			}
-			return OpenAuthenticatedRepositoriesScan(plan, std::move(repository_profile), std::move(authorization),
-			                                         transport, profile.max_wall_milliseconds, control);
+			return OpenPaginatedRestScan(std::move(paginated_profile), std::move(authorization), transport,
+			                             profile.max_wall_milliseconds, control);
 		}
-		AdmittedHttpOperation installed = AdmittedHttpOperation::ANONYMOUS_SEARCH;
-		if (!TryAdmitSingleResponseHttpPlan(plan, profile, installed)) {
+		auto admitted = TryAdmitSingleResponseHttpPlan(plan, profile);
+		if (!admitted) {
 			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
 		}
 		const auto alternative = AlternativeOf(authorization);
-		const bool matches = (installed == AdmittedHttpOperation::ANONYMOUS_SEARCH &&
-		                      alternative == AuthorizationAlternative::ANONYMOUS) ||
-		                     (installed == AdmittedHttpOperation::AUTHENTICATED_USER &&
-		                      alternative == AuthorizationAlternative::GITHUB_USER_BEARER);
+		const bool matches = (!admitted->RequiresBearer() && alternative == AuthorizationAlternative::ANONYMOUS) ||
+		                     (admitted->RequiresBearer() && alternative == AuthorizationAlternative::BEARER);
 		if (!matches) {
 			throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
 			                     "authorization capability does not match the scan plan");
 		}
-		return OpenSingle(plan, std::move(authorization), installed, control);
+		return OpenSingle(std::move(admitted), std::move(authorization), control);
 	}
 
 private:
-	std::unique_ptr<BatchStream> OpenSingle(const ScanPlan &plan, ScanAuthorization authorization,
-	                                        AdmittedHttpOperation installed, ExecutionControl &control) const {
+	std::unique_ptr<BatchStream> OpenSingle(std::unique_ptr<const AdmittedRestRequestProfile> admitted,
+	                                        ScanAuthorization authorization, ExecutionControl &control) const {
 		CheckCancellation(control);
 		try {
-			return std::unique_ptr<BatchStream>(new HttpBatchStream(plan, std::move(authorization), installed,
+			return std::unique_ptr<BatchStream>(new HttpBatchStream(std::move(admitted), std::move(authorization),
 			                                                        transport, profile.max_wall_milliseconds));
 		} catch (const ExecutionError &) {
 			throw;
@@ -391,7 +393,7 @@ std::shared_ptr<const ScanExecutor> BuildHttpScanExecutor(std::unique_ptr<HttpTr
 	                                           false,
 	                                           false,
 	                                           PAGINATION_MAX_EXECUTION_MILLISECONDS,
-	                                           NATIVE_PRODUCT_MAX_DECODED_RECORDS_PER_PAGE};
+	                                           V1_MAX_DECODED_RECORDS_PER_PAGE};
 	return BuildHttpScanExecutorForProfile(std::move(transport), public_profile);
 }
 
@@ -400,11 +402,13 @@ std::shared_ptr<const ScanExecutor> BuildHttpScanExecutorForProfile(std::unique_
 	if (!transport) {
 		throw ExecutionError(ErrorStage::INTERNAL, "", "HTTP executor requires a transport");
 	}
-	if (profile.host.empty() || profile.host.find_first_of("/:@?#\r\n") != std::string::npos || profile.port == 0) {
+	if (profile.scheme != PlannedUrlScheme::HTTPS || !IsSafeDnsHost(profile.host) || profile.port == 0 ||
+	    profile.private_addresses_enabled || profile.link_local_addresses_enabled ||
+	    profile.loopback_addresses_enabled) {
 		throw ExecutionError(ErrorStage::POLICY, "", "HTTP executor profile is invalid");
 	}
 	if (profile.max_wall_milliseconds == 0 || profile.max_wall_milliseconds > PAGINATION_MAX_EXECUTION_MILLISECONDS ||
-	    profile.max_decoded_records == 0 || profile.max_decoded_records > NATIVE_PRODUCT_MAX_DECODED_RECORDS_PER_PAGE) {
+	    profile.max_decoded_records == 0 || profile.max_decoded_records > V1_MAX_DECODED_RECORDS_PER_PAGE) {
 		throw ExecutionError(ErrorStage::INTERNAL, "", "HTTP executor profile is invalid");
 	}
 	try {

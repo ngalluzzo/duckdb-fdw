@@ -1,5 +1,5 @@
 #include "duckdb_api/authorization.hpp"
-#include "duckdb_api/internal/runtime/authentication/fixed_github_user_bearer_authenticator.hpp"
+#include "duckdb_api/internal/runtime/authentication/bearer_authenticator.hpp"
 #include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
 #include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 #include "duckdb_api/internal/runtime/policy/scan_resource_accounting.hpp"
@@ -30,7 +30,7 @@ void TestValidPlanProducesClosedProfileAndCanonicalBodies() {
 	Require(static_cast<bool>(admitted), "valid GraphQL fixture must be admitted");
 	Require(admitted->Method() == "POST" && admitted->Scheme() == "https" && admitted->Host() == "api.github.com" &&
 	            admitted->Port() == 443 && admitted->Path() == "/graphql" && admitted->Columns().size() == 8 &&
-	            admitted->PageSize() == 100 && admitted->MaxPages() == 32,
+	            admitted->PageSize() == 100 && admitted->MaxPages() == 32 && admitted->RequiresBearer(),
 	        "admitted GraphQL profile must own exact execution facts");
 
 	const auto first = duckdb_api::internal::BuildAdmittedGraphqlRequest(*admitted, nullptr);
@@ -86,6 +86,48 @@ void TestValidPlanProducesClosedProfileAndCanonicalBodies() {
 	Require(first.body == exact_first, "first GraphQL request bytes drifted from the external compact oracle");
 }
 
+void TestPackageGeneratedDocumentFailsClosedWithoutRendererMembership() {
+	const std::string secret_name = "distinct_provenance_secret";
+	const auto canonical = duckdb_api_test::BuildValidGraphqlScanPlanFixture(secret_name);
+	const auto distinct = duckdb_api_test::BuildDistinctGraphqlProvenanceScanPlanFixture(secret_name);
+	Require(distinct.ConnectorName() != canonical.ConnectorName() &&
+	            distinct.ConnectorVersion() != canonical.ConnectorVersion() &&
+	            distinct.RelationName() != canonical.RelationName() &&
+	            distinct.Operation().Graphql().operation_name != canonical.Operation().Graphql().operation_name &&
+	            canonical.Operation().Graphql().document_identity ==
+	                duckdb_api::PlannedGraphqlDocumentIdentity::GITHUB_VIEWER_REPOSITORY_METRICS_V1 &&
+	            canonical.Domain() == duckdb_api::BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES &&
+	            distinct.Operation().Graphql().document_identity ==
+	                duckdb_api::PlannedGraphqlDocumentIdentity::PACKAGE_GENERATED_V1 &&
+	            distinct.Domain() == duckdb_api::BaseDomain::GRAPHQL_RELAY_CONNECTION_NODE_OCCURRENCES &&
+	            distinct.SourceSnapshot() != canonical.SourceSnapshot() && distinct.SecretReference().IsPresent() &&
+	            distinct.SecretReference().Name() == secret_name &&
+	            distinct.SourceSnapshot().find(secret_name) == std::string::npos,
+	        "provider fixture did not isolate coherent package identity from the logical secret handle");
+
+	Require(!duckdb_api::internal::TryAdmitGraphqlPlan(distinct, PublicProfile()),
+	        "package document identity executed without a validated source-neutral renderer recipe");
+}
+
+void TestAnonymousGraphqlAlternativeAdmits() {
+	const auto plan = duckdb_api_test::BuildValidAnonymousGraphqlScanPlanFixture();
+	auto admitted = duckdb_api::internal::TryAdmitGraphqlPlan(plan, PublicProfile());
+	Require(admitted && !admitted->RequiresBearer() && !plan.SecretReference().IsPresent() &&
+	            plan.AuthenticationObligation().Requirement() == duckdb_api::PlannedCredentialRequirement::NONE &&
+	            plan.AuthenticationObligation().Destination() == nullptr,
+	        "closed anonymous GraphQL plan did not produce an anonymous admitted profile");
+	const auto request = duckdb_api::internal::BuildAdmittedGraphqlRequest(*admitted, nullptr);
+	const auto authorization = duckdb_api::ScanAuthorization::Bearer("anonymous_graphql_bearer_canary");
+	bool rejected = false;
+	try {
+		(void)duckdb_api::internal::BearerAuthenticator::AuthorizeGraphql(*admitted, request, authorization);
+	} catch (const duckdb_api::ExecutionError &error) {
+		rejected = error.Stage() == duckdb_api::ErrorStage::POLICY && error.Field() == "authorization";
+	}
+	Require(rejected && request.headers.size() == admitted->Headers().size(),
+	        "anonymous GraphQL profile acquired bearer decoration authority");
+}
+
 void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 	const auto plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("body_accounting_secret");
 	auto admitted = duckdb_api::internal::TryAdmitGraphqlPlan(plan, PublicProfile());
@@ -129,29 +171,28 @@ void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 	for (const auto &header : request.headers) {
 		Require(header.name != "Authorization", "body debit failure occurred after bearer placement");
 	}
-	const auto authorization = duckdb_api::ScanAuthorization::GithubUserBearer("synthetic_body_order_token");
+	const auto authorization = duckdb_api::ScanAuthorization::Bearer("synthetic_body_order_token");
 	auto arbitrary = request;
 	const auto arbitrary_cursor = arbitrary.body.rfind("null}}");
 	Require(arbitrary_cursor != std::string::npos, "arbitrary cursor fixture drifted");
 	arbitrary.body.replace(arbitrary_cursor, 4, "\"\"");
 	try {
-		(void)duckdb_api::internal::FixedGithubUserBearerAuthenticator::AuthorizeGraphql(*admitted, 16384, arbitrary,
-		                                                                                 authorization);
+		(void)duckdb_api::internal::BearerAuthenticator::AuthorizeGraphql(*admitted, arbitrary, authorization);
 		throw std::runtime_error("arbitrary nonempty GraphQL body acquired bearer authority");
 	} catch (const duckdb_api::ExecutionError &error) {
 		Require(error.Stage() == duckdb_api::ErrorStage::POLICY && error.Field() == "authorization" &&
 		            arbitrary.headers.size() == admitted->Headers().size(),
 		        "arbitrary body was not rejected before bearer placement");
 	}
-	auto authorized = duckdb_api::internal::FixedGithubUserBearerAuthenticator::AuthorizeGraphql(
-	    *admitted, 16384, std::move(request), authorization);
+	auto authorized =
+	    duckdb_api::internal::BearerAuthenticator::AuthorizeGraphql(*admitted, std::move(request), authorization);
 	Require(authorized.headers.size() == admitted->Headers().size() + 1 &&
 	            authorized.headers.back().name == "Authorization",
 	        "valid exact body did not remain authorizable after the failed side-effect-free debit probe");
 	const std::string cursor = "exact-later-cursor";
 	auto later = duckdb_api::internal::BuildAdmittedGraphqlRequest(*admitted, &cursor);
-	auto authorized_later = duckdb_api::internal::FixedGithubUserBearerAuthenticator::AuthorizeGraphql(
-	    *admitted, 16384, std::move(later), authorization);
+	auto authorized_later =
+	    duckdb_api::internal::BearerAuthenticator::AuthorizeGraphql(*admitted, std::move(later), authorization);
 	Require(authorized_later.headers.size() == admitted->Headers().size() + 1 &&
 	            authorized_later.body.find("\"cursor\":\"exact-later-cursor\"") != std::string::npos,
 	        "valid exact later-page body lost bearer authority");
@@ -160,8 +201,8 @@ void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 	auto exact_cursor_request = duckdb_api::internal::BuildAdmittedGraphqlRequest(*admitted, &exact_cursor);
 	Require(duckdb_api::internal::IsCanonicalAdmittedGraphqlBody(exact_cursor_request.body),
 	        "exact 512-byte decoded cursor must remain canonical");
-	auto exact_cursor_authorized = duckdb_api::internal::FixedGithubUserBearerAuthenticator::AuthorizeGraphql(
-	    *admitted, 16384, std::move(exact_cursor_request), authorization);
+	auto exact_cursor_authorized = duckdb_api::internal::BearerAuthenticator::AuthorizeGraphql(
+	    *admitted, std::move(exact_cursor_request), authorization);
 	Require(exact_cursor_authorized.headers.back().name == "Authorization",
 	        "exact 512-byte decoded cursor lost bearer authority");
 
@@ -181,8 +222,7 @@ void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 	Require(!duckdb_api::internal::IsCanonicalAdmittedGraphqlBody(oversized_body.body),
 	        "513-byte decoded cursor passed canonical body classification");
 	try {
-		(void)duckdb_api::internal::FixedGithubUserBearerAuthenticator::AuthorizeGraphql(*admitted, 16384,
-		                                                                                 oversized_body, authorization);
+		(void)duckdb_api::internal::BearerAuthenticator::AuthorizeGraphql(*admitted, oversized_body, authorization);
 		throw std::runtime_error("513-byte decoded cursor acquired bearer authority");
 	} catch (const duckdb_api::ExecutionError &error) {
 		Require(error.Stage() == duckdb_api::ErrorStage::POLICY && oversized_body.headers.size() == 3,
@@ -208,8 +248,7 @@ void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 	Require(!duckdb_api::internal::IsCanonicalAdmittedGraphqlBody(invalid_utf8_body.body),
 	        "invalid UTF-8 cursor passed canonical body classification");
 	try {
-		(void)duckdb_api::internal::FixedGithubUserBearerAuthenticator::AuthorizeGraphql(
-		    *admitted, 16384, invalid_utf8_body, authorization);
+		(void)duckdb_api::internal::BearerAuthenticator::AuthorizeGraphql(*admitted, invalid_utf8_body, authorization);
 		throw std::runtime_error("invalid UTF-8 cursor acquired bearer authority");
 	} catch (const duckdb_api::ExecutionError &error) {
 		Require(error.Stage() == duckdb_api::ErrorStage::POLICY && invalid_utf8_body.headers.size() == 3,
@@ -217,17 +256,46 @@ void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 	}
 }
 
-void TestEveryProviderCounterexampleFailsClosed() {
+bool IsIndependentProfileVariation(duckdb_api_test::GraphqlRuntimeAdmissionCounterexample variation) {
+	using Variation = duckdb_api_test::GraphqlRuntimeAdmissionCounterexample;
+	switch (variation) {
+	case Variation::OTHER_OPERATION_NAME:
+	case Variation::OTHER_OPERATION_PATH:
+	case Variation::OTHER_HEADER_NAME:
+	case Variation::OTHER_HEADER_VALUE:
+	case Variation::MISSING_OPERATION_HEADER:
+	case Variation::REORDERED_OPERATION_HEADERS:
+	case Variation::EXTRA_OPERATION_HEADER:
+	case Variation::OTHER_MAX_DOCUMENT_BYTES:
+		return true;
+	default:
+		return false;
+	}
+}
+
+void TestProviderCorpusSeparatesExecutableFactsFromIdentity() {
 	const auto count = static_cast<std::size_t>(duckdb_api_test::GraphqlRuntimeAdmissionCounterexample::COUNT);
-	Require(count == 141, "Runtime must exercise the complete Semantics counterexample corpus, including unknown domains");
+	Require(count == 141,
+	        "Runtime must exercise the complete Semantics counterexample corpus, including unknown domains");
 	for (std::size_t value = 0; value < count; value++) {
 		const auto counterexample = static_cast<duckdb_api_test::GraphqlRuntimeAdmissionCounterexample>(value);
 		const auto plan =
 		    duckdb_api_test::BuildGraphqlRuntimeAdmissionCounterexample("counterexample_secret", counterexample);
 		auto admitted = duckdb_api::internal::TryAdmitGraphqlPlan(plan, PublicProfile());
-		if (admitted) {
-			throw std::runtime_error("GraphQL admission accepted Semantics counterexample " + std::to_string(value));
+		if (static_cast<bool>(admitted) != IsIndependentProfileVariation(counterexample)) {
+			throw std::runtime_error("GraphQL admission misclassified Semantics variation " + std::to_string(value));
 		}
+	}
+}
+
+void TestUnknownProfileDiscriminatorsFailClosed() {
+	using Counterexample = duckdb_api_test::GraphqlRuntimeAdmissionCounterexample;
+	const Counterexample unknowns[] = {Counterexample::OTHER_DOCUMENT_IDENTITY, Counterexample::UNKNOWN_DOMAIN};
+	for (const auto counterexample : unknowns) {
+		const auto plan =
+		    duckdb_api_test::BuildGraphqlRuntimeAdmissionCounterexample("unknown_profile_secret", counterexample);
+		Require(!duckdb_api::internal::TryAdmitGraphqlPlan(plan, PublicProfile()),
+		        "GraphQL admission accepted an unknown execution-profile discriminator");
 	}
 }
 
@@ -282,7 +350,7 @@ void TestDocumentAdmissionRequiresIntegrityAndCanonicalMembership() {
 	const auto coherent_drift = duckdb_api_test::BuildGraphqlRuntimeAdmissionCounterexample(
 	    "digest_secret", Counterexample::CHANGED_DOCUMENT_WITH_RECOMPUTED_DIGEST);
 	Require(!duckdb_api::internal::TryAdmitGraphqlPlan(coherent_drift, PublicProfile()),
-	        "a self-consistent document and digest must not replace canonical-profile membership");
+	        "a self-consistent digest replaced reviewed canonical renderer membership");
 }
 
 } // namespace
@@ -290,12 +358,15 @@ void TestDocumentAdmissionRequiresIntegrityAndCanonicalMembership() {
 int main() {
 	try {
 		TestValidPlanProducesClosedProfileAndCanonicalBodies();
+		TestPackageGeneratedDocumentFailsClosedWithoutRendererMembership();
+		TestAnonymousGraphqlAlternativeAdmits();
 		TestRequestBodyExactOneOverAggregateAndPreBearerOrdering();
 		TestDocumentAdmissionRequiresIntegrityAndCanonicalMembership();
+		TestUnknownProfileDiscriminatorsFailClosed();
 		TestEveryValidLocalResidualProfileAdmits();
 		TestEveryNonAuthorityVariationAdmits();
 		TestRelationalAuthorityMutationsStillFailClosed();
-		TestEveryProviderCounterexampleFailsClosed();
+		TestProviderCorpusSeparatesExecutableFactsFromIdentity();
 		std::cout << "GraphQL plan admission tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

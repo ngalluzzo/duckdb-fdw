@@ -76,6 +76,7 @@ public:
 private:
 	friend std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntime(uint64_t max_wall_milliseconds,
 	                                                                         uint64_t max_decoded_records);
+	friend std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntimeForHost(std::string host);
 	ControlledHttpRuntime(std::shared_ptr<State> state, std::shared_ptr<const duckdb_api::ScanExecutor> executor);
 
 	std::shared_ptr<State> state;
@@ -85,5 +86,9 @@ private:
 std::shared_ptr<ControlledHttpRuntime>
 BuildControlledHttpRuntime(uint64_t max_wall_milliseconds = duckdb_api::MAX_EXECUTION_MILLISECONDS,
                            uint64_t max_decoded_records = duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE);
+// Binds the private controlled executor to one exact DNS host. This proves the
+// per-generation construction boundary without granting a caller-selected
+// host through the installed product composition.
+std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntimeForHost(std::string host);
 
 } // namespace duckdb_api_test

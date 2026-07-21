@@ -60,6 +60,12 @@ OpenWithToken(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &run
 	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
 }
 
+std::unique_ptr<duckdb_api::BatchStream>
+OpenAnonymous(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
+              ManualHttpExecutionControl &control) {
+	return runtime->Executor()->Open(duckdb_api_test::BuildValidAnonymousGraphqlScanPlanFixture(), control);
+}
+
 void RequireTerminalFailure(duckdb_api::BatchStream &stream, ManualHttpExecutionControl &control,
                             duckdb_api::ErrorStage stage, const std::string &field = "") {
 	duckdb_api::TypedBatch batch;
@@ -109,6 +115,44 @@ void TestSequentialBodiesBackpressureAndNullableRows() {
 		        "GraphQL request authority, redaction, or body allowance drifted");
 	}
 	Require(runtime->ConsumeBearerExpectation(2), "GraphQL pages did not retain one isolated authorization capability");
+}
+
+void TestAnonymousExecutionAndAuthorizationAlternatives() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->Respond(200, Page(1, 1, false, ""));
+	ManualHttpExecutionControl control;
+	auto stream = OpenAnonymous(runtime, control);
+	Require(runtime->Observations().empty(), "anonymous GraphQL Open performed transport I/O");
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 1 && batch.rows[0].values[0].varchar_value == "R1" &&
+	            !stream->Next(control, batch),
+	        "anonymous GraphQL traversal did not preserve the admitted result contract");
+	const auto observations = runtime->Observations();
+	Require(observations.size() == 1 && observations[0].headers.size() == 3,
+	        "anonymous GraphQL request acquired an authorization header");
+	for (const auto &header : observations[0].headers) {
+		Require(header.first != "Authorization", "anonymous GraphQL request emitted bearer authority");
+	}
+
+	const auto mismatch = duckdb_api_test::BuildControlledHttpRuntime();
+	bool anonymous_for_bearer_rejected = false;
+	try {
+		(void)mismatch->Executor()->OpenWithAuthorization(
+		    duckdb_api_test::BuildValidGraphqlScanPlanFixture("mismatch_secret"),
+		    duckdb_api::ScanAuthorization::Anonymous(), control);
+	} catch (const duckdb_api::ExecutionError &error) {
+		anonymous_for_bearer_rejected = error.Stage() == duckdb_api::ErrorStage::AUTHENTICATION;
+	}
+	bool bearer_for_anonymous_rejected = false;
+	try {
+		(void)mismatch->Executor()->OpenWithAuthorization(
+		    duckdb_api_test::BuildValidAnonymousGraphqlScanPlanFixture(),
+		    duckdb_api::ScanAuthorization::Bearer(std::string("surplus_graphql_token")), control);
+	} catch (const duckdb_api::ExecutionError &error) {
+		bearer_for_anonymous_rejected = error.Stage() == duckdb_api::ErrorStage::AUTHENTICATION;
+	}
+	Require(anonymous_for_bearer_rejected && bearer_for_anonymous_rejected && mismatch->Observations().empty(),
+	        "GraphQL authorization alternative mismatch reached transport or used the wrong stage");
 }
 
 void TestRemoteErrorIsRedactedAndTerminal() {
@@ -347,6 +391,7 @@ void TestIntegratedThirtyTwoPageBoundary() {
 int main() {
 	try {
 		TestSequentialBodiesBackpressureAndNullableRows();
+		TestAnonymousExecutionAndAuthorizationAlternatives();
 		TestRemoteErrorIsRedactedAndTerminal();
 		TestCloseBeforePullIsSideEffectFree();
 		TestEmptyPageAdvancesWithoutPublishingFalseExhaustion();

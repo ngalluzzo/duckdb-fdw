@@ -13,9 +13,12 @@ namespace internal {
 // credential and must be debited by scan accounting before authorization.
 HttpRequest BuildAdmittedGraphqlRequest(const AdmittedGraphqlRequestProfile &profile, const std::string *cursor);
 
-// Defense-in-depth validation for the fixed installed curl wrapper. Admission
-// and the serializer remain the primary authority; this rejects document or
-// fixed-variable drift before a concrete transport sees the request.
+// Revalidates exact serialized bytes against one immutable admitted profile.
+// This is used before bearer placement; callers cannot substitute a document,
+// variable name, page size, cursor grammar, or noncanonical JSON spelling.
+bool IsAdmittedGraphqlBody(const AdmittedGraphqlRequestProfile &profile, const std::string &body) noexcept;
+
+// Compatibility classifier for the fixed 0.7 production curl composition.
 bool IsCanonicalAdmittedGraphqlBody(const std::string &body) noexcept;
 
 } // namespace internal

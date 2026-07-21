@@ -1,6 +1,6 @@
 #include "duckdb_api/authorization.hpp"
 #include "duckdb_api/execution.hpp"
-#include "duckdb_api/internal/runtime/authentication/fixed_github_user_bearer_authenticator.hpp"
+#include "duckdb_api/internal/runtime/authentication/bearer_authenticator.hpp"
 
 #include <new>
 #include <utility>
@@ -35,7 +35,7 @@ public:
 private:
 	std::string token;
 
-	friend class internal::FixedGithubUserBearerAuthenticator;
+	friend class internal::BearerAuthenticator;
 };
 
 ScanAuthorization::ScanAuthorization(Kind kind_p, StateOwner state_p) noexcept
@@ -65,7 +65,7 @@ ScanAuthorization ScanAuthorization::Anonymous() {
 	return ScanAuthorization(Kind::ANONYMOUS, StateOwner(nullptr, &ScanAuthorization::DestroyState));
 }
 
-uint64_t ScanAuthorization::GithubUserBearerTokenByteLimit() noexcept {
+uint64_t ScanAuthorization::BearerTokenByteLimit() noexcept {
 	// Reserve half of the native header envelope for libcurl-generated Host,
 	// Accept-Encoding, connection fields, and framing. The focused real-curl
 	// boundary oracle verifies the complete emitted block remains within the
@@ -73,8 +73,8 @@ uint64_t ScanAuthorization::GithubUserBearerTokenByteLimit() noexcept {
 	return HOST_MAX_HEADER_BYTES / 2;
 }
 
-ScanAuthorization ScanAuthorization::GithubUserBearer(std::string &&token) {
-	if (token.size() > GithubUserBearerTokenByteLimit()) {
+ScanAuthorization ScanAuthorization::Bearer(std::string &&token) {
+	if (token.size() > BearerTokenByteLimit()) {
 		throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
 		                     "bearer token exceeds the 8192-byte request-header limit");
 	}
@@ -83,7 +83,7 @@ ScanAuthorization ScanAuthorization::GithubUserBearer(std::string &&token) {
 		                     "bearer authorization requires a non-empty visible-ASCII token");
 	}
 	try {
-		return ScanAuthorization(Kind::GITHUB_USER_BEARER,
+		return ScanAuthorization(Kind::BEARER,
 		                         StateOwner(new State(std::move(token)), &ScanAuthorization::DestroyState));
 	} catch (const std::bad_alloc &) {
 		throw ExecutionError(ErrorStage::RESOURCE, "authorization",
@@ -91,9 +91,16 @@ ScanAuthorization ScanAuthorization::GithubUserBearer(std::string &&token) {
 	}
 }
 
-std::string internal::FixedGithubUserBearerAuthenticator::CopyToken(const ScanAuthorization &authorization) {
-	if (!authorization.valid || authorization.kind != ScanAuthorization::Kind::GITHUB_USER_BEARER ||
-	    !authorization.state) {
+uint64_t ScanAuthorization::GithubUserBearerTokenByteLimit() noexcept {
+	return BearerTokenByteLimit();
+}
+
+ScanAuthorization ScanAuthorization::GithubUserBearer(std::string &&token) {
+	return Bearer(std::move(token));
+}
+
+std::string internal::BearerAuthenticator::CopyToken(const ScanAuthorization &authorization) {
+	if (!authorization.valid || authorization.kind != ScanAuthorization::Kind::BEARER || !authorization.state) {
 		throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization", "bearer authorization capability is invalid");
 	}
 	try {

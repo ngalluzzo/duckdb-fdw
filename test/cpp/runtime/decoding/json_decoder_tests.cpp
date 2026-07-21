@@ -34,7 +34,7 @@ private:
 duckdb_api::internal::JsonDecodePlan Plan() {
 	duckdb_api::internal::JsonDecodePlan plan;
 	plan.response_source = duckdb_api::internal::JsonResponseSource::JSON_PATH_MANY;
-	plan.records_field = "items";
+	plan.records_path = {"items"};
 	plan.columns = {{"id", "id", duckdb_api::ValueKind::BIGINT},
 	                {"login", "login", duckdb_api::ValueKind::VARCHAR},
 	                {"site_admin", "site_admin", duckdb_api::ValueKind::BOOLEAN}};
@@ -49,8 +49,17 @@ duckdb_api::internal::JsonDecodePlan Plan() {
 duckdb_api::internal::JsonDecodePlan RootPlan() {
 	auto plan = Plan();
 	plan.response_source = duckdb_api::internal::JsonResponseSource::ROOT_OBJECT;
-	plan.records_field.clear();
+	plan.records_path.clear();
 	plan.max_records = 1;
+	return plan;
+}
+
+duckdb_api::internal::JsonDecodePlan NestedPlan() {
+	auto plan = Plan();
+	plan.records_path = {"payload", "records"};
+	plan.columns = {{"id", std::vector<std::string>({"identity", "id"}), duckdb_api::ValueKind::BIGINT},
+	                {"label", std::vector<std::string>({"attributes", "label"}), duckdb_api::ValueKind::VARCHAR, true},
+	                {"active", std::vector<std::string>({"flags", "active"}), duckdb_api::ValueKind::BOOLEAN}};
 	return plan;
 }
 
@@ -145,6 +154,43 @@ void TestStrictSuccessfulRootObject() {
 	auto invalid = RootPlan();
 	invalid.max_records = 2;
 	RequireError([&]() { duckdb_api::internal::DecodeJsonRows("{}", invalid, control); },
+	             duckdb_api::ErrorStage::INTERNAL, "");
+}
+
+void TestNestedPermanentRestPaths() {
+	ManualControl control;
+	const auto rows = duckdb_api::internal::DecodeJsonRows(
+	    "{\"ignored\":0,\"payload\":{\"other\":true,\"records\":["
+	    "{\"identity\":{\"id\":42},\"attributes\":{\"label\":\"north\"},\"flags\":{\"active\":true}},"
+	    "{\"identity\":{\"id\":43},\"attributes\":{\"label\":null},\"flags\":{\"active\":false}}]}}",
+	    NestedPlan(), control);
+	Require(rows.size() == 2 && rows[0].values[0].bigint_value == 42 && rows[0].values[1].varchar_value == "north" &&
+	            rows[0].values[2].boolean_value && rows[1].values[0].bigint_value == 43 && !rows[1].values[1].valid &&
+	            !rows[1].values[2].boolean_value,
+	        "nested permanent REST paths did not produce schema-aligned typed rows");
+
+	RequireError(
+	    [&]() {
+		    (void)duckdb_api::internal::DecodeJsonRows(
+		        "{\"payload\":{\"records\":[{\"identity\":{\"id\":1},\"identity\":{\"id\":2},"
+		        "\"attributes\":{\"label\":\"x\"},\"flags\":{\"active\":true}}]}}",
+		        NestedPlan(), control);
+	    },
+	    duckdb_api::ErrorStage::SCHEMA, "id");
+	RequireError(
+	    [&]() {
+		    (void)duckdb_api::internal::DecodeJsonRows(
+		        "{\"payload\":{\"records\":[{\"identity\":null,\"attributes\":{\"label\":\"x\"},"
+		        "\"flags\":{\"active\":true}}]}}",
+		        NestedPlan(), control);
+	    },
+	    duckdb_api::ErrorStage::SCHEMA, "id");
+	RequireError([&]() { (void)duckdb_api::internal::DecodeJsonRows("{\"payload\":{}}", NestedPlan(), control); },
+	             duckdb_api::ErrorStage::SCHEMA, "records");
+
+	auto invalid = NestedPlan();
+	invalid.columns[1].json_path = {"identity"};
+	RequireError([&]() { (void)duckdb_api::internal::DecodeJsonRows("{}", invalid, control); },
 	             duckdb_api::ErrorStage::INTERNAL, "");
 }
 
@@ -244,6 +290,7 @@ int main() {
 	try {
 		TestTypedRowsAndCompleteValidation();
 		TestStrictSuccessfulRootObject();
+		TestNestedPermanentRestPaths();
 		TestMalformedAndInvalidUtf8();
 		TestRequiredShapeAndStrictTypes();
 		TestExactResourceBoundaries();

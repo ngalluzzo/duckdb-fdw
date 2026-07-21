@@ -222,13 +222,13 @@ void TestWrongNullDuplicateAndEnvelopeShapesFailClosed() {
 	auto duplicate = Node("R");
 	duplicate.insert(1, "\"id\":\"other\",");
 	RequireFailure(Envelope(duplicate), duckdb_api::ErrorStage::SCHEMA, "id");
-	RequireFailure("{}", duckdb_api::ErrorStage::SCHEMA, "data");
-	RequireFailure("{\"data\":null,\"errors\":[]}", duckdb_api::ErrorStage::SCHEMA, "data");
+	RequireFailure("{}", duckdb_api::ErrorStage::SCHEMA, "data.viewer.repositories.nodes");
+	RequireFailure("{\"data\":null,\"errors\":[]}", duckdb_api::ErrorStage::SCHEMA, "data.viewer.repositories.nodes");
 	auto duplicate_data = Envelope(Node("R"));
 	const auto errors = duplicate_data.find(",\"errors\"");
 	Require(errors != std::string::npos, "duplicate-data fixture drifted");
 	duplicate_data.insert(errors + 1, "\"data\":{},");
-	RequireFailure(duplicate_data, duckdb_api::ErrorStage::SCHEMA, "data");
+	RequireFailure(duplicate_data, duckdb_api::ErrorStage::SCHEMA, "data.viewer.repositories.nodes");
 	RequireFailure("{\"data\":{},\"errors\":null}", duckdb_api::ErrorStage::SCHEMA, "errors");
 }
 

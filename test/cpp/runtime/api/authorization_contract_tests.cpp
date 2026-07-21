@@ -122,7 +122,7 @@ void TestAuthorizedCapabilityFailsClosedUntilImplemented() {
 	const auto plan = AnonymousPlan();
 	const auto token = TokenCanary();
 	auto token_input = token;
-	auto authorized = duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token_input));
+	auto authorized = duckdb_api::ScanAuthorization::Bearer(std::move(token_input));
 
 	RequireRejected([&]() { (void)executor.OpenWithAuthorization(plan, std::move(authorized), control); },
 	                duckdb_api::ErrorStage::POLICY, token);
@@ -144,22 +144,36 @@ void TestUnsafeBearerTokensAreRejectedWithoutDisclosure() {
 	                                                 std::string(1, static_cast<char>(0x80))};
 	for (const auto &token : invalid_tokens) {
 		auto token_input = token;
-		RequireRejected([&]() { (void)duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token_input)); },
+		RequireRejected([&]() { (void)duckdb_api::ScanAuthorization::Bearer(std::move(token_input)); },
 		                duckdb_api::ErrorStage::AUTHENTICATION, token);
 	}
 }
 
 void TestBearerTokenByteBoundary() {
-	const auto limit = duckdb_api::ScanAuthorization::GithubUserBearerTokenByteLimit();
-	Require(limit == 8 * 1024, "fixed GitHub bearer-token byte limit drifted");
+	const auto limit = duckdb_api::ScanAuthorization::BearerTokenByteLimit();
+	Require(limit == 8 * 1024, "bearer-token byte limit drifted");
 	auto exact = std::string(static_cast<std::size_t>(limit), 'e');
-	auto authorization = duckdb_api::ScanAuthorization::GithubUserBearer(std::move(exact));
+	auto authorization = duckdb_api::ScanAuthorization::Bearer(std::move(exact));
 	(void)authorization;
 
 	auto over = std::string(static_cast<std::size_t>(limit + 1), 'o');
 	const auto canary = over;
-	RequireHeaderBudgetRejected([&]() { (void)duckdb_api::ScanAuthorization::GithubUserBearer(std::move(over)); },
-	                            canary);
+	RequireHeaderBudgetRejected([&]() { (void)duckdb_api::ScanAuthorization::Bearer(std::move(over)); }, canary);
+}
+
+void TestGithubBearerNamesRemainOnlyACompatibilityBridge() {
+	Require(duckdb_api::ScanAuthorization::GithubUserBearerTokenByteLimit() ==
+	            duckdb_api::ScanAuthorization::BearerTokenByteLimit(),
+	        "GitHub compatibility limit diverged from the generic bearer capability");
+	AnonymousExecutor executor;
+	ManualControl control;
+	const auto plan = AnonymousPlan();
+	const auto token = TokenCanary();
+	auto token_input = token;
+	auto compatibility = duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token_input));
+	RequireRejected([&]() { (void)executor.OpenWithAuthorization(plan, std::move(compatibility), control); },
+	                duckdb_api::ErrorStage::POLICY, token);
+	Require(executor.open_count == 0, "GitHub compatibility bridge bypassed the generic bearer envelope");
 }
 
 void TestCancellationPrecedesCapabilityUse() {
@@ -169,7 +183,7 @@ void TestCancellationPrecedesCapabilityUse() {
 	const auto plan = AnonymousPlan();
 	const auto token = TokenCanary();
 	auto token_input = token;
-	auto authorized = duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token_input));
+	auto authorized = duckdb_api::ScanAuthorization::Bearer(std::move(token_input));
 	bool cancelled = false;
 	try {
 		(void)executor.OpenWithAuthorization(plan, std::move(authorized), control);
@@ -193,6 +207,7 @@ int main() {
 		TestAuthorizedCapabilityFailsClosedUntilImplemented();
 		TestUnsafeBearerTokensAreRejectedWithoutDisclosure();
 		TestBearerTokenByteBoundary();
+		TestGithubBearerNamesRemainOnlyACompatibilityBridge();
 		TestCancellationPrecedesCapabilityUse();
 		std::cout << "authorization contract tests passed" << std::endl;
 		return EXIT_SUCCESS;

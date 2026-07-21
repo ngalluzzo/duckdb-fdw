@@ -14,7 +14,7 @@ namespace internal {
 // authorization-alternative matching occur before this boundary; body bytes,
 // bearer placement, transport, decoder, and mutable cursor state remain lazy.
 std::unique_ptr<BatchStream>
-OpenGraphqlPaginatedScan(const ScanPlan &plan, std::unique_ptr<const AdmittedGraphqlRequestProfile> admitted_profile,
+OpenGraphqlPaginatedScan(std::unique_ptr<const AdmittedGraphqlRequestProfile> admitted_profile,
                          ScanAuthorization authorization, std::shared_ptr<const HttpTransport> transport,
                          uint64_t max_wall_milliseconds, ExecutionControl &control);
 

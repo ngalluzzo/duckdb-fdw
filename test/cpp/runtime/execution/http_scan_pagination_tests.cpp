@@ -1,6 +1,7 @@
 #include "duckdb_api/authorization.hpp"
 #include "runtime/support/controlled_http_transport.hpp"
 #include "runtime/support/http_scan_executor_test_support.hpp"
+#include "semantics/support/permanent_rest_scan_plan_test_fixtures.hpp"
 #include "support/require.hpp"
 #include "semantics/support/scan_plan_test_fixtures.hpp"
 
@@ -16,6 +17,8 @@ namespace {
 
 using duckdb_api_test::BuildAmbiguousPredicateFallbackPlanFixture;
 using duckdb_api_test::BuildValidAuthenticatedRepositoriesPlanFixture;
+using duckdb_api_test::BuildValidPaginatedPlanFixture;
+using duckdb_api_test::BuildValidPermanentRestScanPlanFixture;
 using duckdb_api_test::BuildVisibilityPrivateCompleteResidualPlanFixture;
 using duckdb_api_test::BuildVisibilityPrivatePlanFixture;
 using duckdb_api_test::ControlledHttpResponse;
@@ -59,6 +62,25 @@ std::string SelectiveNextLink(uint64_t page, const std::string &visibility = "pr
 	       "&visibility=" + visibility + ">; rel=\"next\"";
 }
 
+std::string GenericPage(uint64_t id, const std::string &label) {
+	return std::string("{\"records\":[{\"record_id\":") + std::to_string(id) + ",\"record_label\":\"" + label + "\"}]}";
+}
+
+std::string GenericNextLink(uint64_t page) {
+	return std::string("<https://api.github.com/fixtures/linked-records?batch_size=3&cursor_page=") +
+	       std::to_string(page) + ">; rel=next";
+}
+
+std::string PermanentRestPage(uint64_t id, const std::string &label_json) {
+	return std::string("{\"payload\":{\"records\":[{\"identity\":{\"record_id\":") + std::to_string(id) +
+	       "},\"attributes\":{\"label\":" + label_json + "}}]}}";
+}
+
+std::string PermanentRestNextLink(uint64_t page) {
+	return std::string("<https://api.github.com/fixtures/materialized-records?view=summary&scope_name=") +
+	       "north+america%2F%CE%B2&per_page=25&page=" + std::to_string(page) + ">; rel=next";
+}
+
 std::unique_ptr<duckdb_api::BatchStream> Open(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
                                               ManualHttpExecutionControl &control, uint64_t token_suffix) {
 	const auto plan = BuildValidAuthenticatedRepositoriesPlanFixture("github_default");
@@ -96,6 +118,23 @@ OpenAmbiguous(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &run
 	runtime->ExpectBearer("Bearer " + token);
 	return runtime->Executor()->OpenWithAuthorization(
 	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+}
+
+std::unique_ptr<duckdb_api::BatchStream>
+OpenGeneric(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime, ManualHttpExecutionControl &control,
+            uint64_t token_suffix) {
+	const auto plan = BuildValidPaginatedPlanFixture("fixture_secret");
+	auto token = GeneratedHttpBearerToken(token_suffix);
+	runtime->ExpectBearer("Bearer " + token);
+	return runtime->Executor()->OpenWithAuthorization(
+	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+}
+
+std::unique_ptr<duckdb_api::BatchStream>
+OpenPermanentRest(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
+                  ManualHttpExecutionControl &control) {
+	const auto plan = BuildValidPermanentRestScanPlanFixture();
+	return runtime->Executor()->Open(plan, control);
 }
 
 void RequireFailure(const std::function<void()> &action, duckdb_api::ErrorStage stage, const std::string &field,
@@ -146,6 +185,62 @@ void TestSequentialBackpressureAndEmptyMiddlePage() {
 		        "transport did not receive the page-scoped normalized-metadata allowance");
 	}
 	Require(runtime->ConsumeBearerExpectation(3), "one scan did not use the same opaque capability on every page");
+}
+
+void TestGenericPaginatedRestUsesCopiedExecutableFacts() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({ControlledResponse(200, GenericPage(1, "first"), {GenericNextLink(2)}),
+	                          ControlledResponse(200, GenericPage(2, "second"))});
+	ManualHttpExecutionControl control;
+	auto stream = OpenGeneric(runtime, control, 730);
+	Require(runtime->Observations().empty(), "generic paginated REST Open performed transport I/O");
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 1 && batch.rows[0].values.size() == 2 &&
+	            batch.rows[0].values[0].bigint_value == 1 && batch.rows[0].values[1].varchar_value == "first",
+	        "generic paginated REST profile did not decode its copied JSON-path schema");
+	Require(stream->Next(control, batch) && batch.rows[0].values[0].bigint_value == 2 &&
+	            batch.rows[0].values[1].varchar_value == "second" && !stream->Next(control, batch),
+	        "generic paginated REST profile did not traverse its exact copied Link contract");
+	const auto observations = runtime->Observations();
+	Require(observations.size() == 2 &&
+	            observations[0].target == "/fixtures/linked-records?batch_size=3&cursor_page=1" &&
+	            observations[1].target == "/fixtures/linked-records?batch_size=3&cursor_page=2" &&
+	            observations[0].headers.size() == 2 && observations[0].headers[0].first == "X-Connector-Fixture" &&
+	            observations[0].headers[1].first == "Authorization" && runtime->ConsumeBearerExpectation(2),
+	        "generic paginated REST execution drifted to the native repository identity");
+}
+
+void TestPermanentRestPlanExecutesCopiedRelationalFacts() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({ControlledResponse(200, PermanentRestPage(7, "\"first\""), {PermanentRestNextLink(3)}),
+	                          ControlledResponse(200, PermanentRestPage(9, "null"))});
+	ManualHttpExecutionControl control;
+	auto stream = OpenPermanentRest(runtime, control);
+	Require(runtime->Observations().empty(), "permanent REST Open performed transport I/O");
+
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.IsSchemaAligned() && batch.rows.size() == 1 &&
+	            batch.rows[0].values.size() == 2 && batch.rows[0].values[0].bigint_value == 7 &&
+	            batch.rows[0].values[1].valid && batch.rows[0].values[1].varchar_value == "first",
+	        "permanent REST plan did not decode its nested first page");
+	Require(stream->Next(control, batch) && batch.rows.size() == 1 && batch.rows[0].values[0].bigint_value == 9 &&
+	            !batch.rows[0].values[1].valid,
+	        "permanent REST plan did not preserve its nullable nested column");
+	Require(!stream->Next(control, batch), "permanent REST plan did not exhaust after its terminal page");
+
+	const auto observations = runtime->Observations();
+	Require(
+	    observations.size() == 2 &&
+	        observations[0].target ==
+	            "/fixtures/materialized-records?view=summary&scope_name=north+america%2F%CE%B2&per_page=25&page=1" &&
+	        observations[1].target ==
+	            "/fixtures/materialized-records?view=summary&scope_name=north+america%2F%CE%B2&per_page=25&page=3",
+	    "permanent REST plan lost binding order, relation encoding, or page increment");
+	for (const auto &observation : observations) {
+		Require(observation.headers.size() == 1 && observation.headers[0].first == "X-Connector-Fixture" &&
+		            observation.headers[0].second == "rest-materialization",
+		        "permanent REST plan changed its anonymous fixed-header authority");
+	}
 }
 
 void TestFullPageDrainsBeforeNextRequest() {
@@ -398,6 +493,8 @@ void TestCancellationCloseAndAggregatePageCeiling() {
 int main() {
 	try {
 		TestSequentialBackpressureAndEmptyMiddlePage();
+		TestGenericPaginatedRestUsesCopiedExecutableFacts();
+		TestPermanentRestPlanExecutesCopiedRelationalFacts();
 		TestFullPageDrainsBeforeNextRequest();
 		TestTerminalEmptyPageAndAuthorityDenial();
 		TestSelectiveInputPersistsAcrossRequestsAndLinks();

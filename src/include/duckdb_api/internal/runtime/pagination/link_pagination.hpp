@@ -11,7 +11,7 @@
 namespace duckdb_api {
 namespace internal {
 
-// Private, DuckDB-free failure returned by the fixed Link pagination service.
+// Private, DuckDB-free failure returned by the Link pagination service.
 // Field and SafeMessage are bounded diagnostics chosen by Runtime; received
 // Link values and target strings are never retained by or exposed through it.
 enum class LinkPaginationErrorKind : uint8_t { MALFORMED, POLICY, STATE };
@@ -40,18 +40,18 @@ struct LinkPageTransition {
 	uint64_t next_page;
 };
 
-// Sequential state for an admitted repository request profile. Resume and
+// Sequential state for an admitted paginated REST request profile. Resume and
 // caller-selected starting state are unsupported. Advance parses physical Link
 // field-values in receipt order, accepts zero or one rel=next target, and
-// requires the profile's exact origin, path, page progression, field set, and
-// conditional visibility input. Omission, change, duplication, or extra query
+// requires the profile's exact origin, path, page progression, and copied
+// encoded query multiset. Omission, change, duplication, or extra query
 // fields fail closed. Any error makes the state terminal so a caller cannot
 // continue after rejected remote metadata. This object owns a copy of the
 // immutable admitted profile, is scan-owned, and is not thread-safe; the owning
 // stream supplies synchronization and resource/cancellation authority.
 class LinkPaginationState {
 public:
-	explicit LinkPaginationState(const AdmittedRepositoryRequestProfile &profile);
+	explicit LinkPaginationState(const AdmittedPaginatedRestRequestProfile &profile);
 
 	LinkPageTransition Advance(const std::vector<std::string> &link_field_values);
 
@@ -61,7 +61,7 @@ public:
 	std::size_t SeenPageCount() const noexcept;
 
 private:
-	const AdmittedRepositoryRequestProfile profile;
+	const AdmittedPaginatedRestRequestProfile profile;
 	uint64_t current_page;
 	std::vector<uint64_t> seen_pages;
 	bool exhausted;

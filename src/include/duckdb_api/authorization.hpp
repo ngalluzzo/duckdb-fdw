@@ -7,20 +7,19 @@
 namespace duckdb_api {
 
 namespace internal {
-class FixedGithubUserBearerAuthenticator;
+class BearerAuthenticator;
 } // namespace internal
 
 // Runtime-owned authority for opening one scan. Callers must choose either the
-// anonymous alternative or the fixed GitHub authenticated-relations bearer
-// alternative, then move the value into ScanExecutor::OpenWithAuthorization.
+// anonymous alternative or the bearer alternative, then move the value into
+// ScanExecutor::OpenWithAuthorization.
 //
-// GithubUserBearer takes ownership of one token snapshot. That alternative is
-// scoped inside Runtime to bearer authentication for the installed GitHub
-// user and repository profiles; callers cannot select a destination,
-// operation, authenticator, or header placement. Only Runtime's fixed
-// authenticator may inspect the opaque state. Moving invalidates the source,
-// and a moved-from
-// value fails closed if submitted again.
+// Bearer takes ownership of one token snapshot. That alternative is scoped
+// inside Runtime to bearer authentication for the exact admitted destination;
+// callers cannot select a destination, operation, authenticator, or header
+// placement. Only Runtime's bearer authenticator may inspect the opaque state.
+// Moving invalidates the source, and a moved-from value fails closed if
+// submitted again.
 //
 // Destruction is non-throwing and releases the owned token state. The token is
 // never copyable, serializable, comparable, or available through a plaintext
@@ -30,11 +29,17 @@ class FixedGithubUserBearerAuthenticator;
 class ScanAuthorization {
 public:
 	static ScanAuthorization Anonymous();
-	// The fixed GitHub bearer profile accepts at most 8 KiB of token bytes.
-	// This is half the native 16 KiB header envelope, reserving the remainder
-	// for fixed project fields and dependency-generated HTTP framing. Query
-	// uses this Runtime-owned limit to reject oversized DuckDB secrets before
-	// creating or resolving a capability.
+	// The bearer capability accepts at most 8 KiB of token bytes. This is half
+	// the native 16 KiB header envelope, reserving the remainder for fixed
+	// project fields and dependency-generated HTTP framing. Query uses this
+	// Runtime-owned limit to reject oversized DuckDB secrets before creating or
+	// resolving a capability.
+	static uint64_t BearerTokenByteLimit() noexcept;
+	static ScanAuthorization Bearer(std::string &&token);
+
+	// Bounded 0.7 source-compatibility bridge. New package and Runtime consumers
+	// use the protocol-neutral bearer names above; these wrappers grant exactly
+	// the same opaque capability and no GitHub-specific authority.
 	static uint64_t GithubUserBearerTokenByteLimit() noexcept;
 	static ScanAuthorization GithubUserBearer(std::string &&token);
 
@@ -46,7 +51,7 @@ public:
 	ScanAuthorization &operator=(const ScanAuthorization &) = delete;
 
 private:
-	enum class Kind : uint8_t { ANONYMOUS, GITHUB_USER_BEARER };
+	enum class Kind : uint8_t { ANONYMOUS, BEARER };
 	class State;
 	using StateOwner = std::unique_ptr<State, void (*)(State *)>;
 
@@ -58,7 +63,7 @@ private:
 	bool valid;
 
 	friend class ScanExecutor;
-	friend class internal::FixedGithubUserBearerAuthenticator;
+	friend class internal::BearerAuthenticator;
 };
 
 } // namespace duckdb_api

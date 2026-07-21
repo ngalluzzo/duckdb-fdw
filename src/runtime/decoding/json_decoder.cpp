@@ -1,9 +1,11 @@
 #include "duckdb_api/internal/runtime/decoding/json_decoder.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 #include <limits>
 #include <new>
+#include <set>
 #include <utility>
 
 namespace duckdb_api {
@@ -51,24 +53,40 @@ void RequireMemory(uint64_t current, uint64_t addition, uint64_t limit, uint64_t
 	}
 }
 
+bool IsPathPrefix(const std::vector<std::string> &prefix, const std::vector<std::string> &path) {
+	return prefix.size() <= path.size() && std::equal(prefix.begin(), prefix.end(), path.begin());
+}
+
 void ValidatePlan(const JsonDecodePlan &plan) {
+	const bool has_records_path = !plan.records_path.empty();
 	const bool source_valid =
-	    (plan.response_source == JsonResponseSource::JSON_PATH_MANY && !plan.records_field.empty()) ||
-	    (plan.response_source == JsonResponseSource::ROOT_ARRAY && plan.records_field.empty()) ||
-	    (plan.response_source == JsonResponseSource::ROOT_OBJECT && plan.records_field.empty() &&
-	     plan.max_records == 1);
+	    (plan.response_source == JsonResponseSource::JSON_PATH_MANY && has_records_path) ||
+	    (plan.response_source == JsonResponseSource::ROOT_ARRAY && plan.records_path.empty()) ||
+	    (plan.response_source == JsonResponseSource::ROOT_OBJECT && plan.records_path.empty() && plan.max_records == 1);
 	if (!source_valid || plan.columns.empty() || plan.max_records == 0 || plan.max_string_bytes == 0 ||
 	    plan.max_json_nesting == 0 || plan.max_decoded_memory_bytes == 0 ||
 	    plan.max_records > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max())) {
 		throw ExecutionError(ErrorStage::INTERNAL, "", "JSON decoder received an invalid schema or budget");
 	}
-	for (std::size_t index = 0; index < plan.columns.size(); index++) {
-		if (plan.columns[index].output_name.empty() || plan.columns[index].json_field.empty()) {
+	for (const auto &segment : plan.records_path) {
+		if (segment.empty()) {
 			throw ExecutionError(ErrorStage::INTERNAL, "", "JSON decoder received an invalid schema or budget");
+		}
+	}
+	for (std::size_t index = 0; index < plan.columns.size(); index++) {
+		if (plan.columns[index].output_name.empty() || plan.columns[index].json_path.empty()) {
+			throw ExecutionError(ErrorStage::INTERNAL, "", "JSON decoder received an invalid schema or budget");
+		}
+		for (const auto &segment : plan.columns[index].json_path) {
+			if (segment.empty()) {
+				throw ExecutionError(ErrorStage::INTERNAL, "", "JSON decoder received an invalid schema or budget");
+			}
 		}
 		for (std::size_t other = 0; other < index; other++) {
 			if (plan.columns[index].output_name == plan.columns[other].output_name ||
-			    plan.columns[index].json_field == plan.columns[other].json_field) {
+			    plan.columns[index].json_path == plan.columns[other].json_path ||
+			    IsPathPrefix(plan.columns[index].json_path, plan.columns[other].json_path) ||
+			    IsPathPrefix(plan.columns[other].json_path, plan.columns[index].json_path)) {
 				throw ExecutionError(ErrorStage::INTERNAL, "", "JSON decoder received an invalid schema or budget");
 			}
 		}
@@ -91,8 +109,9 @@ public:
 		const bool root_matches =
 		    plan.response_source == JsonResponseSource::ROOT_ARRAY ? Peek() == '[' : Peek() == '{';
 		if (!root_matches) {
+			const auto field = !plan.records_path.empty() ? plan.records_path.back() : std::string();
 			throw ExecutionError(ErrorStage::SCHEMA,
-			                     plan.response_source == JsonResponseSource::JSON_PATH_MANY ? plan.records_field : "",
+			                     plan.response_source == JsonResponseSource::JSON_PATH_MANY ? field : "",
 			                     "response root does not match the declared schema");
 		}
 		if (plan.response_source == JsonResponseSource::ROOT_OBJECT) {
@@ -110,13 +129,14 @@ public:
 
 private:
 	struct ParsedSlot {
-		ParsedSlot() : bigint_value(0), boolean_value(false), seen(false) {
+		ParsedSlot() : bigint_value(0), boolean_value(false), seen(false), valid(true) {
 		}
 
 		int64_t bigint_value;
 		std::string varchar_value;
 		bool boolean_value;
 		bool seen;
+		bool valid;
 	};
 
 	std::vector<TypedRow> AllocateResult() {
@@ -159,44 +179,65 @@ private:
 	}
 
 	std::vector<TypedRow> ParseRecordArrayResponse() {
+		auto result = AllocateResult();
+		const auto path = EffectiveRecordsPath();
+		ParseRecordArrayObject(path, 0, result);
+		SkipWhitespace();
+		if (position != input.size()) {
+			MalformedJson();
+		}
+		return result;
+	}
 
+	const std::vector<std::string> &EffectiveRecordsPath() const {
+		return plan.records_path;
+	}
+
+	const std::string &RecordsDiagnosticField(const std::vector<std::string> &path) const {
+		return path.back();
+	}
+
+	void ParseRecordArrayObject(const std::vector<std::string> &path, std::size_t depth,
+	                            std::vector<TypedRow> &result) {
 		Expect('{');
 		SkipWhitespace();
 		bool found_records = false;
-		auto result = AllocateResult();
-
 		while (Peek() != '}') {
 			RequireObjectKey();
 			const auto key = ParseString();
 			SkipWhitespace();
 			Expect(':');
 			SkipWhitespace();
-			if (key == plan.records_field) {
+			if (key == path[depth]) {
 				if (found_records) {
-					throw ExecutionError(ErrorStage::SCHEMA, plan.records_field,
+					throw ExecutionError(ErrorStage::SCHEMA, RecordsDiagnosticField(path),
 					                     "required response field is duplicated");
 				}
 				found_records = true;
-				if (Peek() != '[') {
+				if (depth + 1 == path.size()) {
+					if (Peek() != '[') {
+						SkipValue();
+						throw ExecutionError(ErrorStage::SCHEMA, RecordsDiagnosticField(path),
+						                     "required response field has an incompatible type");
+					}
+					ParseRecords(result);
+				} else if (Peek() != '{') {
 					SkipValue();
-					throw ExecutionError(ErrorStage::SCHEMA, plan.records_field,
+					throw ExecutionError(ErrorStage::SCHEMA, RecordsDiagnosticField(path),
 					                     "required response field has an incompatible type");
+				} else {
+					ParseRecordArrayObject(path, depth + 1, result);
 				}
-				ParseRecords(result);
 			} else {
 				SkipValue();
 			}
 			ConsumeObjectSeparator();
 		}
 		Expect('}');
-		SkipWhitespace();
-		if (position != input.size()) {
-			MalformedJson();
-		}
 		if (!found_records) {
-			throw ExecutionError(ErrorStage::SCHEMA, plan.records_field, "required response field is missing");
+			throw ExecutionError(ErrorStage::SCHEMA, RecordsDiagnosticField(path),
+			                     "required response field is missing");
 		}
-		return result;
 	}
 
 	void ValidateDocument() {
@@ -529,15 +570,6 @@ private:
 		MalformedJson();
 	}
 
-	std::size_t FindColumn(const std::string &json_field) const noexcept {
-		for (std::size_t index = 0; index < plan.columns.size(); index++) {
-			if (plan.columns[index].json_field == json_field) {
-				return index;
-			}
-		}
-		return plan.columns.size();
-	}
-
 	int64_t ParseBigInt(const JsonColumnPlan &column) {
 		SkipWhitespace();
 		if (Peek() != '-' && (Peek() < '0' || Peek() > '9')) {
@@ -590,45 +622,95 @@ private:
 		                     "required response field has an incompatible type");
 	}
 
+	void ParseColumnValue(std::size_t column_index, std::vector<ParsedSlot> &slots) {
+		auto &slot = slots[column_index];
+		const auto &column = plan.columns[column_index];
+		if (slot.seen) {
+			throw ExecutionError(ErrorStage::SCHEMA, column.output_name, "required response field is duplicated");
+		}
+		SkipWhitespace();
+		if (Peek() == 'n') {
+			ParseLiteral("null");
+			slot.valid = false;
+			slot.seen = true;
+			if (!column.nullable) {
+				throw ExecutionError(ErrorStage::SCHEMA, column.output_name,
+				                     "required response field has an incompatible type");
+			}
+			return;
+		}
+		switch (column.kind) {
+		case ValueKind::BIGINT:
+			slot.bigint_value = ParseBigInt(column);
+			break;
+		case ValueKind::VARCHAR:
+			slot.varchar_value = ParseVarchar(column);
+			break;
+		case ValueKind::BOOLEAN:
+			slot.boolean_value = ParseBoolean(column);
+			break;
+		}
+		slot.seen = true;
+	}
+
+	void ParseSelectedObject(std::vector<ParsedSlot> &slots, const std::vector<std::string> &prefix) {
+		Expect('{');
+		SkipWhitespace();
+		std::set<std::string> selected_keys;
+		while (Peek() != '}') {
+			RequireObjectKey();
+			const auto key = ParseString();
+			SkipWhitespace();
+			Expect(':');
+
+			auto path = prefix;
+			path.push_back(key);
+			std::size_t exact = plan.columns.size();
+			std::size_t descendant = plan.columns.size();
+			for (std::size_t index = 0; index < plan.columns.size(); index++) {
+				const auto &candidate = plan.columns[index].json_path;
+				if (!IsPathPrefix(path, candidate)) {
+					continue;
+				}
+				if (candidate.size() == path.size()) {
+					exact = index;
+				} else if (descendant == plan.columns.size()) {
+					descendant = index;
+				}
+			}
+
+			if (exact == plan.columns.size() && descendant == plan.columns.size()) {
+				SkipValue();
+			} else {
+				const auto column_index = exact != plan.columns.size() ? exact : descendant;
+				if (!selected_keys.insert(key).second) {
+					throw ExecutionError(ErrorStage::SCHEMA, plan.columns[column_index].output_name,
+					                     "required response field is duplicated");
+				}
+				if (exact != plan.columns.size()) {
+					ParseColumnValue(exact, slots);
+				} else {
+					SkipWhitespace();
+					if (Peek() != '{') {
+						SkipValue();
+						throw ExecutionError(ErrorStage::SCHEMA, plan.columns[descendant].output_name,
+						                     "required response field has an incompatible type");
+					}
+					ParseSelectedObject(slots, path);
+				}
+			}
+			ConsumeObjectSeparator();
+		}
+		Expect('}');
+	}
+
 	TypedRow ParseRecord() {
 		if (Peek() != '{') {
 			SkipValue();
 			throw ExecutionError(ErrorStage::SCHEMA, "", "response record does not match the declared schema");
 		}
 		std::vector<ParsedSlot> slots(plan.columns.size());
-		Expect('{');
-		SkipWhitespace();
-		while (Peek() != '}') {
-			RequireObjectKey();
-			const auto key = ParseString();
-			SkipWhitespace();
-			Expect(':');
-			const auto column_index = FindColumn(key);
-			if (column_index == plan.columns.size()) {
-				SkipValue();
-			} else {
-				auto &slot = slots[column_index];
-				const auto &column = plan.columns[column_index];
-				if (slot.seen) {
-					throw ExecutionError(ErrorStage::SCHEMA, column.output_name,
-					                     "required response field is duplicated");
-				}
-				switch (column.kind) {
-				case ValueKind::BIGINT:
-					slot.bigint_value = ParseBigInt(column);
-					break;
-				case ValueKind::VARCHAR:
-					slot.varchar_value = ParseVarchar(column);
-					break;
-				case ValueKind::BOOLEAN:
-					slot.boolean_value = ParseBoolean(column);
-					break;
-				}
-				slot.seen = true;
-			}
-			ConsumeObjectSeparator();
-		}
-		Expect('}');
+		ParseSelectedObject(slots, {});
 
 		TypedRow row;
 		try {
@@ -648,6 +730,10 @@ private:
 			if (!slots[index].seen) {
 				throw ExecutionError(ErrorStage::SCHEMA, plan.columns[index].output_name,
 				                     "required response field is missing");
+			}
+			if (!slots[index].valid) {
+				row.values.push_back(TypedValue::Null(plan.columns[index].kind));
+				continue;
 			}
 			switch (plan.columns[index].kind) {
 			case ValueKind::BIGINT:
@@ -679,8 +765,11 @@ private:
 		while (Peek() != ']') {
 			Check();
 			if (static_cast<uint64_t>(result.size()) >= plan.max_records) {
-				throw ExecutionError(ErrorStage::RESOURCE, plan.records_field,
-				                     "HTTP response exceeded its record budget");
+				const auto path = EffectiveRecordsPath();
+				throw ExecutionError(
+				    ErrorStage::RESOURCE,
+				    plan.response_source == JsonResponseSource::JSON_PATH_MANY ? RecordsDiagnosticField(path) : "",
+				    "HTTP response exceeded its record budget");
 			}
 			result.push_back(ParseRecord());
 			ConsumeArraySeparator();

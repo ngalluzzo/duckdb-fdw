@@ -1,6 +1,6 @@
 #include "duckdb_api/internal/runtime/execution/graphql_paginated_scan.hpp"
 
-#include "duckdb_api/internal/runtime/authentication/fixed_github_user_bearer_authenticator.hpp"
+#include "duckdb_api/internal/runtime/authentication/bearer_authenticator.hpp"
 #include "duckdb_api/internal/runtime/decoding/decoded_page_buffer.hpp"
 #include "duckdb_api/internal/runtime/decoding/graphql_response_decoder.hpp"
 #include "duckdb_api/internal/runtime/pagination/graphql_cursor_pagination.hpp"
@@ -31,9 +31,9 @@ std::vector<ValueKind> ColumnKinds(const AdmittedGraphqlRequestProfile &profile)
 	return result;
 }
 
-ScanResourceProfile ResourceProfile(const ScanPlan &plan, uint64_t max_wall_milliseconds) {
-	const auto &page = plan.Pagination().PageBudgets();
-	const auto &scan = plan.Pagination().ScanBudgets();
+ScanResourceProfile ResourceProfile(const AdmittedGraphqlRequestProfile &profile, uint64_t max_wall_milliseconds) {
+	const auto &page = profile.PageBudgets();
+	const auto &scan = profile.ScanBudgets();
 	return {{page.request_attempts, page.header_bytes, page.response_bytes, page.decompressed_bytes,
 	         page.decoded_records, page.decoded_memory_bytes, page.concurrency, page.serialized_request_body_bytes},
 	        {scan.request_attempts, scan.pages, scan.header_bytes, scan.response_bytes, scan.decompressed_bytes,
@@ -52,10 +52,10 @@ void CheckState(ExecutionControl &control, std::chrono::steady_clock::time_point
 
 void CheckStatus(uint32_t status) {
 	if (status == 401) {
-		throw ExecutionError(ErrorStage::AUTHENTICATION, "http_status", "HTTP endpoint rejected bearer authentication");
+		throw ExecutionError(ErrorStage::AUTHENTICATION, "http_status", "HTTP endpoint rejected authentication");
 	}
 	if (status == 403) {
-		throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status", "HTTP endpoint denied bearer authorization");
+		throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status", "HTTP endpoint denied authorization");
 	}
 	if (status != 200) {
 		throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status");
@@ -78,12 +78,13 @@ private:
 
 class GraphqlBatchStream final : public BatchStream {
 public:
-	GraphqlBatchStream(const ScanPlan &plan_p, std::unique_ptr<const AdmittedGraphqlRequestProfile> admitted_profile_p,
+	GraphqlBatchStream(std::unique_ptr<const AdmittedGraphqlRequestProfile> admitted_profile_p,
 	                   ScanAuthorization authorization_p, std::shared_ptr<const HttpTransport> transport_p,
 	                   uint64_t max_wall_milliseconds_p)
-	    : plan(plan_p), admitted_profile(std::move(admitted_profile_p)), transport(std::move(transport_p)),
+	    : admitted_profile(std::move(admitted_profile_p)), transport(std::move(transport_p)),
 	      authorization(new ScanAuthorization(std::move(authorization_p))),
-	      column_kinds(ColumnKinds(*admitted_profile)), accounting(ResourceProfile(plan, max_wall_milliseconds_p)),
+	      column_kinds(ColumnKinds(*admitted_profile)),
+	      accounting(ResourceProfile(*admitted_profile, max_wall_milliseconds_p)),
 	      cursor(admitted_profile->MaxPages(), 512), cancelled(false), closed(false), exhausted(false),
 	      page_loaded(false), page_has_next(false), offset(0) {
 	}
@@ -183,7 +184,7 @@ private:
 	bool ProduceBatch(ExecutionControl &control, TypedBatch &batch) {
 		CheckState(control, accounting.Deadline());
 		const auto remaining = decoded.Rows().size() - offset;
-		const auto count = std::min(remaining, static_cast<std::size_t>(plan.Budgets().batch_rows));
+		const auto count = std::min(remaining, static_cast<std::size_t>(admitted_profile->PageBudgets().batch_rows));
 		if (count == 0) {
 			throw ExecutionError(ErrorStage::INTERNAL, "", "runtime attempted to produce an empty successful batch");
 		}
@@ -213,8 +214,9 @@ private:
 		auto request = BuildAdmittedGraphqlRequest(*admitted_profile, request_cursor);
 		accounting.CommitRequestBody(static_cast<uint64_t>(request.body.size()));
 		CheckState(control, allowance.deadline);
-		request = FixedGithubUserBearerAuthenticator::AuthorizeGraphql(
-		    *admitted_profile, plan.Pagination().PageBudgets().header_bytes, std::move(request), *authorization);
+		if (admitted_profile->RequiresBearer()) {
+			request = BearerAuthenticator::AuthorizeGraphql(*admitted_profile, std::move(request), *authorization);
+		}
 		const HttpLimits limits {allowance.serialized_request_body_bytes,
 		                         allowance.header_bytes,
 		                         allowance.wire_response_bytes,
@@ -237,8 +239,8 @@ private:
 			                     "GraphQL cursor state exhausted the decoded-memory budget");
 		}
 		const GraphqlDecodeLimits decode_limits {
-		    allowance.decoded_records, plan.Pagination().PageBudgets().extracted_string_bytes,
-		    plan.Pagination().PageBudgets().json_nesting, allowance.decoded_memory_bytes - cursor_memory_before,
+		    allowance.decoded_records, admitted_profile->PageBudgets().extracted_string_bytes,
+		    admitted_profile->PageBudgets().json_nesting, allowance.decoded_memory_bytes - cursor_memory_before,
 		    allowance.deadline};
 		auto page = DecodeGraphqlResponse(response.body, *admitted_profile, decode_limits, control);
 		CheckState(control, allowance.deadline);
@@ -283,7 +285,6 @@ private:
 		}
 	}
 
-	const ScanPlan plan;
 	const std::unique_ptr<const AdmittedGraphqlRequestProfile> admitted_profile;
 	const std::shared_ptr<const HttpTransport> transport;
 	std::unique_ptr<ScanAuthorization> authorization;
@@ -304,7 +305,7 @@ private:
 } // namespace
 
 std::unique_ptr<BatchStream>
-OpenGraphqlPaginatedScan(const ScanPlan &plan, std::unique_ptr<const AdmittedGraphqlRequestProfile> admitted_profile,
+OpenGraphqlPaginatedScan(std::unique_ptr<const AdmittedGraphqlRequestProfile> admitted_profile,
                          ScanAuthorization authorization, std::shared_ptr<const HttpTransport> transport,
                          uint64_t max_wall_milliseconds, ExecutionControl &control) {
 	if (control.IsCancellationRequested()) {
@@ -315,7 +316,7 @@ OpenGraphqlPaginatedScan(const ScanPlan &plan, std::unique_ptr<const AdmittedGra
 	}
 	try {
 		return std::unique_ptr<BatchStream>(new GraphqlBatchStream(
-		    plan, std::move(admitted_profile), std::move(authorization), std::move(transport), max_wall_milliseconds));
+		    std::move(admitted_profile), std::move(authorization), std::move(transport), max_wall_milliseconds));
 	} catch (const ExecutionError &) {
 		throw;
 	} catch (const ScanResourceError &error) {

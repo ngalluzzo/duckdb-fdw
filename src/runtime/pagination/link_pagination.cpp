@@ -45,7 +45,7 @@ uint64_t ParsePositiveDecimal(const std::string &value) {
 }
 
 uint64_t ValidateNextTarget(const std::string &target, uint64_t current_page, const std::vector<uint64_t> &seen_pages,
-                            const AdmittedRepositoryRequestProfile &profile) {
+                            const AdmittedPaginatedRestRequestProfile &profile) {
 	const std::string authority = profile.Scheme() + "://" + profile.Host();
 	if (target.compare(0, authority.size(), authority) != 0) {
 		ThrowPolicy();
@@ -60,16 +60,12 @@ uint64_t ValidateNextTarget(const std::string &target, uint64_t current_page, co
 		ThrowPolicy();
 	}
 	offset += path_and_query.size();
-	if (offset >= target.size() || target.find('#', offset) != std::string::npos ||
-	    target.find('%', offset) != std::string::npos) {
+	if (offset >= target.size() || target.find('#', offset) != std::string::npos) {
 		ThrowPolicy();
 	}
 
-	bool saw_per_page = false;
-	bool saw_page = false;
-	bool saw_visibility = false;
+	std::vector<std::pair<std::string, std::string>> received;
 	uint64_t parsed_page = 0;
-	std::size_t field_count = 0;
 	while (offset < target.size()) {
 		const auto separator = target.find('&', offset);
 		const auto field_end = separator == std::string::npos ? target.size() : separator;
@@ -83,27 +79,15 @@ uint64_t ValidateNextTarget(const std::string &target, uint64_t current_page, co
 		}
 		const auto name = target.substr(offset, equals - offset);
 		const auto value = target.substr(equals + 1, field_end - equals - 1);
-		if (name == profile.PageSizeParameter()) {
-			if (saw_per_page || value != std::to_string(profile.PageSize())) {
+		for (const auto &field : received) {
+			if (field.first == name) {
 				ThrowPolicy();
 			}
-			saw_per_page = true;
-		} else if (name == profile.PageNumberParameter()) {
-			if (saw_page) {
-				ThrowPolicy();
-			}
-			saw_page = true;
-			parsed_page = ParsePositiveDecimal(value);
-		} else if (name == "visibility") {
-			if (profile.ConditionalInput() != AdmittedRepositoryConditionalInput::VISIBILITY_PRIVATE ||
-			    saw_visibility || value != "private") {
-				ThrowPolicy();
-			}
-			saw_visibility = true;
-		} else {
-			ThrowPolicy();
 		}
-		field_count++;
+		if (name == profile.PageNumberParameter()) {
+			parsed_page = ParsePositiveDecimal(value);
+		}
+		received.push_back({name, value});
 		if (separator == std::string::npos) {
 			break;
 		}
@@ -112,13 +96,32 @@ uint64_t ValidateNextTarget(const std::string &target, uint64_t current_page, co
 		}
 		offset = separator + 1;
 	}
-	const auto expected_fields =
-	    profile.ConditionalInput() == AdmittedRepositoryConditionalInput::VISIBILITY_PRIVATE ? 3U : 2U;
-	if (field_count != expected_fields || !saw_per_page || !saw_page ||
-	    saw_visibility != (profile.ConditionalInput() == AdmittedRepositoryConditionalInput::VISIBILITY_PRIVATE) ||
-	    current_page > std::numeric_limits<uint64_t>::max() - profile.PageIncrement() ||
-	    parsed_page != current_page + profile.PageIncrement()) {
+	if (current_page > std::numeric_limits<uint64_t>::max() - profile.PageIncrement()) {
 		ThrowPolicy();
+	}
+	const auto next_page = current_page + profile.PageIncrement();
+	std::vector<std::pair<std::string, std::string>> expected;
+	for (const auto &field : profile.QueryParameters()) {
+		expected.push_back({field.name, field.name == profile.PageNumberParameter() ? std::to_string(next_page)
+		                                                                            : field.encoded_value});
+	}
+	if (profile.ConditionalInput() == AdmittedPaginatedRestConditionalInput::LEGACY_VISIBILITY_PRIVATE) {
+		expected.push_back({"visibility", "private"});
+	}
+	if (received.size() != expected.size() || parsed_page != next_page) {
+		ThrowPolicy();
+	}
+	for (const auto &field : expected) {
+		bool found = false;
+		for (const auto &candidate : received) {
+			if (candidate == field) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			ThrowPolicy();
+		}
 	}
 	for (const auto seen_page : seen_pages) {
 		if (seen_page == parsed_page) {
@@ -159,7 +162,7 @@ private:
 
 LinkPageTransition ParseTransition(const std::vector<std::string> &fields, uint64_t current_page,
                                    const std::vector<uint64_t> &seen_pages,
-                                   const AdmittedRepositoryRequestProfile &profile) {
+                                   const AdmittedPaginatedRestRequestProfile &profile) {
 	NextTargetSelector selector;
 	try {
 		ParseLinkHeaderFields(fields, selector);
@@ -195,7 +198,7 @@ const std::string &LinkPaginationError::SafeMessage() const noexcept {
 	return safe_message;
 }
 
-LinkPaginationState::LinkPaginationState(const AdmittedRepositoryRequestProfile &profile_p)
+LinkPaginationState::LinkPaginationState(const AdmittedPaginatedRestRequestProfile &profile_p)
     : profile(profile_p), current_page(profile.FirstPage()), seen_pages(1, profile.FirstPage()), exhausted(false),
       failed(false) {
 }
