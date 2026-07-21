@@ -191,6 +191,13 @@ Relational Semantics then:
 
 Planning is deterministic and side-effect free.
 
+Lead composition may bind that planner to one immutable package generation.
+Every bound call presents the opaque generation handle retained by its catalog
+owner. The handle must share the exact generation state owned by the service;
+equal spec, connector, version, and digest fields from another generation are
+not planning authority. This prevents a catalog entry from pairing its request
+with semantically equal-looking but separately owned compiled state.
+
 ## Relational correctness
 
 Remote work is an optimization. DuckDB owns correctness.

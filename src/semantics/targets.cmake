@@ -24,3 +24,14 @@ target_link_libraries(
          duckdb_api_relational_predicate_service
          duckdb_api_connector_metadata_service
          duckdb_api_query_request_service)
+
+# Lead composition consumes this generation-bound Semantics provider and
+# adapts it to its Query-facing interface. The service owns no catalog,
+# publication, Connector-construction, or Query-adapter responsibility.
+add_library(
+  duckdb_api_package_bound_planning_service STATIC
+  ${RELATIONAL_PACKAGE_BOUND_PLANNER_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_package_bound_planning_service)
+target_link_libraries(
+  duckdb_api_package_bound_planning_service
+  PUBLIC duckdb_api_relational_planning_service)

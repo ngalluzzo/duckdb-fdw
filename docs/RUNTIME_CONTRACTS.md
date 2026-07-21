@@ -317,6 +317,23 @@ Planning validation is exhaustive and fail-closed. A `PlanningError` contains a
 closed code and safe structural field; no partial plan or Runtime authority is
 returned.
 
+Lead composition uses the package-bound form when planning a generated catalog
+entry:
+
+```text
+PackageBoundScanPlanningService(compiled_generation)
+    .Plan(exact_generation_handle, scan_request)
+    -> ScanPlan | PlanningError
+```
+
+The service owns its immutable generation and accepts copied handles only when
+they share that exact generation state. Repeating every package identity field
+in a separately constructed generation does not match. A mismatch returns
+`INVALID_CONTRACT` before relation lookup or planning and produces no partial
+plan. The service has no catalog, publication, source, credential, clock,
+network, or execution authority; lead composition adapts it to the
+Query-facing planning interface without transferring those responsibilities.
+
 ## Active generation registry
 
 Remote Runtime owns immutable registry snapshots and generation retention:

@@ -12,6 +12,7 @@
 void RunPredicateCompositionLawTests();
 void RunInputResolutionLawTests();
 void RunOperationSelectionLawTests();
+void RunPackageBoundScanPlannerTests();
 void RunPermanentRestScanPlanFixtureTests();
 void RunRuntimeRestPredicatePlanFixtureTests();
 
@@ -400,6 +401,7 @@ int main() {
 		RunPredicateCompositionLawTests();
 		RunInputResolutionLawTests();
 		RunOperationSelectionLawTests();
+		RunPackageBoundScanPlannerTests();
 		RunPermanentRestScanPlanFixtureTests();
 		RunRuntimeRestPredicatePlanFixtureTests();
 		TestExactSelectionHasNoFallback();

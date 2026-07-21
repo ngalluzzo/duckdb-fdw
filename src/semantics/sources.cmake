@@ -14,7 +14,10 @@ set(RELATIONAL_PLANNER_SOURCES
     src/semantics/rest_operation_planner.cpp
     src/semantics/scan_planner.cpp
     src/semantics/scan_planner_validation.cpp)
+set(RELATIONAL_PACKAGE_BOUND_PLANNER_SOURCES
+    src/semantics/package_bound_scan_planner.cpp)
 set(RELATIONAL_PLANNING_SOURCES
     ${RELATIONAL_PREDICATE_SOURCES}
     ${RELATIONAL_PLAN_VALUE_SOURCES}
-    ${RELATIONAL_PLANNER_SOURCES})
+    ${RELATIONAL_PLANNER_SOURCES}
+    ${RELATIONAL_PACKAGE_BOUND_PLANNER_SOURCES})

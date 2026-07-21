@@ -29,6 +29,7 @@ set(RELATIONAL_PREDICATE_PLANNER_TEST_SOURCES
     test/cpp/semantics/predicate_planner_tests.cpp
     test/cpp/semantics/predicate_composition_law_tests.cpp
     test/cpp/semantics/permanent_rest_scan_plan_fixture_tests.cpp
+    test/cpp/semantics/package_bound_scan_planner_tests.cpp
     test/cpp/semantics/runtime_rest_predicate_plan_fixture_tests.cpp)
 set(RELATIONAL_PLAN_TEST_CONTRACT_SOURCES
     test/cpp/semantics/support/scan_plan_test_fixture_test_support.cpp
