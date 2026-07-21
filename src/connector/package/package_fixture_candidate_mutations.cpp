@@ -280,6 +280,12 @@ std::vector<SemanticSourceFile> BuildFixtureCandidateSources(const CompiledLocal
 		}
 	} else if (coverage_entry.scope == PackageFixtureCoverageScope::RELATION_SELECTION) {
 		MutateSelectionNoCandidate(files, active.Generation(), coverage_entry, cancellation);
+	} else if (coverage_entry.scope == PackageFixtureCoverageScope::COMPILER_CANCELLATION) {
+		if (coverage_entry.variant != "source_enumeration" && coverage_entry.variant != "source_read" &&
+		    coverage_entry.variant != "yaml_parse" && coverage_entry.variant != "reference_validation" &&
+		    coverage_entry.variant != "generation_validation") {
+			throw std::invalid_argument("coverage entry is not a Connector-owned compiler-cancellation variant");
+		}
 	} else {
 		throw std::invalid_argument("coverage entry has no Connector-owned source candidate");
 	}

@@ -274,7 +274,7 @@ void AdmitDirectoryEntryName(const std::string &name, const std::string &prefix,
 
 DirectoryCapture CaptureDirectory(int fd, const std::string &prefix, std::uint64_t entry_limit,
                                   std::uint64_t &aggregate_entries, const PackageSourceLimits &limits,
-                                  PackageCancellation &cancellation) {
+                                  PackageCancellation &cancellation, PackageCompilationPhaseHook *phase_hook) {
 	DirectoryCapture capture;
 	capture.directory = FstatIdentity(fd, prefix);
 	// dup(2) shares a directory stream offset. Opening "." creates an
@@ -291,6 +291,9 @@ DirectoryCapture CaptureDirectory(int fd, const std::string &prefix, std::uint64
 	}
 	(void)enumeration.Release();
 	DirectoryStream directory(opened_directory);
+	if (phase_hook != nullptr) {
+		phase_hook->BeforeCancellationCheck(PackageCompilationCheckpoint::SOURCE_ENUMERATION);
+	}
 	CheckCancellation(cancellation, prefix);
 	std::set<std::string> folded_names;
 	std::uint64_t since_checkpoint = 0;
@@ -507,14 +510,15 @@ void ValidatePackageDirectoryEntryNameCapture(const std::vector<std::string> &na
 
 class PackageDirectoryCustody::Impl {
 public:
-	Impl(FileDescriptor root_p, PackageSourceLimits limits_p, PackageCancellation &cancellation)
+	Impl(FileDescriptor root_p, PackageSourceLimits limits_p, PackageCancellation &cancellation,
+	     PackageCompilationPhaseHook *phase_hook)
 	    : limits(limits_p), root(std::move(root_p)), relations(OpenRelations(root.Get())), aggregate_bytes(0),
 	      verified(false) {
 		std::uint64_t aggregate_entries = 0;
-		root_before =
-		    CaptureDirectory(root.Get(), "", limits.max_root_entries, aggregate_entries, limits, cancellation);
+		root_before = CaptureDirectory(root.Get(), "", limits.max_root_entries, aggregate_entries, limits, cancellation,
+		                               phase_hook);
 		relations_before = CaptureDirectory(relations.Get(), "relations", limits.max_relation_entries,
-		                                    aggregate_entries, limits, cancellation);
+		                                    aggregate_entries, limits, cancellation, phase_hook);
 		const auto *manifest = FindEntry(root_before, "connector.yaml");
 		const auto *relation_directory = FindEntry(root_before, "relations");
 		if (!manifest || !S_ISREG(static_cast<mode_t>(manifest->identity.mode)) || !relation_directory ||
@@ -539,10 +543,11 @@ PackageDirectoryCustody::PackageDirectoryCustody(std::unique_ptr<Impl> impl_p) :
 
 PackageDirectoryCustody PackageDirectoryCustody::OpenAbsolute(const std::string &absolute_root,
                                                               const PackageSourceLimits &host_limits,
-                                                              PackageCancellation &cancellation) {
+                                                              PackageCancellation &cancellation,
+                                                              PackageCompilationPhaseHook *phase_hook) {
 	const auto limits = EffectiveLimits(host_limits);
-	return PackageDirectoryCustody(
-	    std::unique_ptr<Impl>(new Impl(OpenAbsoluteRoot(absolute_root, cancellation), limits, cancellation)));
+	return PackageDirectoryCustody(std::unique_ptr<Impl>(
+	    new Impl(OpenAbsoluteRoot(absolute_root, cancellation), limits, cancellation, phase_hook)));
 }
 
 PackageDirectoryCustody PackageDirectoryCustody::OpenRetained(int retained_root_fd,
@@ -550,7 +555,7 @@ PackageDirectoryCustody PackageDirectoryCustody::OpenRetained(int retained_root_
                                                               PackageCancellation &cancellation) {
 	const auto limits = EffectiveLimits(host_limits);
 	return PackageDirectoryCustody(
-	    std::unique_ptr<Impl>(new Impl(DuplicateRoot(retained_root_fd), limits, cancellation)));
+	    std::unique_ptr<Impl>(new Impl(DuplicateRoot(retained_root_fd), limits, cancellation, nullptr)));
 }
 
 PackageDirectoryCustody::PackageDirectoryCustody(PackageDirectoryCustody &&other) noexcept
@@ -612,9 +617,9 @@ void PackageDirectoryCustody::VerifyUnchanged(PackageCancellation &cancellation)
 	}
 	std::uint64_t aggregate_entries = 0;
 	const auto root_after = CaptureDirectory(impl->root.Get(), "", impl->limits.max_root_entries, aggregate_entries,
-	                                         impl->limits, cancellation);
+	                                         impl->limits, cancellation, nullptr);
 	const auto relations_after = CaptureDirectory(impl->relations.Get(), "relations", impl->limits.max_relation_entries,
-	                                              aggregate_entries, impl->limits, cancellation);
+	                                              aggregate_entries, impl->limits, cancellation, nullptr);
 	if (!SameCapture(impl->root_before, root_after) || !SameCapture(impl->relations_before, relations_after)) {
 		throw PackageSourceError(PackageSourceErrorCode::IDENTITY_CHANGED, "",
 		                         "package source entry set or identity changed during acquisition");

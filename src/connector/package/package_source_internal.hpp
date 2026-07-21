@@ -1,5 +1,7 @@
 #pragma once
 
+#include "package_compilation_control_internal.hpp"
+
 #include "duckdb_api/internal/connector/package/package_source.hpp"
 
 #include <memory>
@@ -30,7 +32,8 @@ class PackageDirectoryCustody {
 public:
 	static PackageDirectoryCustody OpenAbsolute(const std::string &absolute_root,
 	                                            const PackageSourceLimits &host_limits,
-	                                            PackageCancellation &cancellation);
+	                                            PackageCancellation &cancellation,
+	                                            PackageCompilationPhaseHook *phase_hook);
 	static PackageDirectoryCustody OpenRetained(int retained_root_fd, const PackageSourceLimits &host_limits,
 	                                            PackageCancellation &cancellation);
 
@@ -54,10 +57,11 @@ private:
 	std::unique_ptr<Impl> impl;
 };
 
-PackageSourceSnapshot AcquirePackageSourceWithVerificationHook(const std::string &absolute_root,
-                                                               const PackageSourceLimits &host_limits,
-                                                               PackageCancellation &cancellation,
-                                                               PackageSourceVerificationHook &hook);
+PackageSourceSnapshot AcquirePackageSourceControlled(const std::string &absolute_root,
+                                                     const PackageSourceLimits &host_limits,
+                                                     PackageCancellation &cancellation,
+                                                     PackageCompilationPhaseHook *phase_hook,
+                                                     PackageSourceVerificationHook *verification_hook);
 
 // Applies the exact bounded entry-name admission used by ordinary directory
 // enumeration to one caller-provided closed capture. It grants no descriptor,

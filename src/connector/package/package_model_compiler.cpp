@@ -66,7 +66,12 @@ CompiledNetworkPolicy CompileNetworkPolicy(const NetworkPolicyDeclaration &sourc
 std::shared_ptr<const CompiledPackageGeneration> CompilePackageDeclaration(const PackageDeclaration &package,
                                                                            const PackageSourceSnapshot &snapshot,
                                                                            PackageDiagnosticSink &diagnostics,
-                                                                           PackageCancellation &cancellation) {
+                                                                           PackageCancellation &cancellation,
+                                                                           PackageCompilationPhaseHook *phase_hook) {
+	if (phase_hook != nullptr) {
+		phase_hook->BeforeCancellationCheck(PackageCompilationCheckpoint::REFERENCE_VALIDATION);
+	}
+	CheckCancellation(cancellation, package.manifest.mark);
 	ValidateManifestPolicy(package, diagnostics, cancellation);
 	std::vector<CompiledRelation> relations;
 	relations.reserve(package.relations.size());
@@ -79,6 +84,9 @@ std::shared_ptr<const CompiledPackageGeneration> CompilePackageDeclaration(const
 	}
 	if (!diagnostics.Empty()) {
 		return nullptr;
+	}
+	if (phase_hook != nullptr) {
+		phase_hook->BeforeCancellationCheck(PackageCompilationCheckpoint::GENERATION_VALIDATION);
 	}
 	if (cancellation.IsCancellationRequested()) {
 		throw FailsafeYamlError(FailsafeYamlErrorCode::CANCELLED, "connector.yaml", package.manifest.mark.span,

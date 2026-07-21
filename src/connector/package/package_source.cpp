@@ -110,8 +110,12 @@ struct AcquiredPackageSource {
 };
 
 AcquiredPackageSource AcquireFromCustody(internal::PackageDirectoryCustody custody, PackageCancellation &cancellation,
-                                         internal::PackageSourceVerificationHook *hook) {
+                                         internal::PackageCompilationPhaseHook *phase_hook,
+                                         internal::PackageSourceVerificationHook *verification_hook) {
 	std::vector<SemanticSourceFile> files;
+	if (phase_hook != nullptr) {
+		phase_hook->BeforeCancellationCheck(internal::PackageCompilationCheckpoint::SOURCE_READ);
+	}
 	files.push_back({"connector.yaml", custody.ReadManifest(cancellation)});
 	auto relation_ids = ManifestRelationIds(files.front().bytes, custody.Limits().max_semantic_files - 1, cancellation);
 	custody.ValidateListedRelations(relation_ids);
@@ -119,8 +123,8 @@ AcquiredPackageSource AcquireFromCustody(internal::PackageDirectoryCustody custo
 	for (const auto &id : relation_ids) {
 		files.push_back({"relations/" + id + ".yaml", custody.ReadRelation(id, cancellation)});
 	}
-	if (hook != nullptr) {
-		hook->BeforeFinalIdentityVerification();
+	if (verification_hook != nullptr) {
+		verification_hook->BeforeFinalIdentityVerification();
 	}
 	custody.VerifyUnchanged(cancellation);
 	std::string digest;
@@ -136,9 +140,9 @@ AcquiredPackageSource AcquireFromCustody(internal::PackageDirectoryCustody custo
 
 PackageSourceSnapshot AcquirePackageSource(const std::string &absolute_root, const PackageSourceLimits &host_limits,
                                            PackageCancellation &cancellation) {
-	auto acquired =
-	    AcquireFromCustody(internal::PackageDirectoryCustody::OpenAbsolute(absolute_root, host_limits, cancellation),
-	                       cancellation, nullptr);
+	auto acquired = AcquireFromCustody(
+	    internal::PackageDirectoryCustody::OpenAbsolute(absolute_root, host_limits, cancellation, nullptr),
+	    cancellation, nullptr, nullptr);
 	const int root_fd = acquired.ReleaseRoot();
 	return PackageSourceSnapshot::Create(root_fd, std::move(acquired.files), std::move(acquired.relation_ids),
 	                                     std::move(acquired.digest));
@@ -151,7 +155,7 @@ PackageSourceSnapshot ReacquirePackageSource(const PackageSourceSnapshot &prior,
 	}
 	auto acquired = AcquireFromCustody(
 	    internal::PackageDirectoryCustody::OpenRetained(prior.RetainedRootFd(), host_limits, cancellation),
-	    cancellation, nullptr);
+	    cancellation, nullptr, nullptr);
 	const int root_fd = acquired.ReleaseRoot();
 	return PackageSourceSnapshot::Create(root_fd, std::move(acquired.files), std::move(acquired.relation_ids),
 	                                     std::move(acquired.digest));
@@ -159,12 +163,14 @@ PackageSourceSnapshot ReacquirePackageSource(const PackageSourceSnapshot &prior,
 
 namespace internal {
 
-PackageSourceSnapshot AcquirePackageSourceWithVerificationHook(const std::string &absolute_root,
-                                                               const PackageSourceLimits &host_limits,
-                                                               PackageCancellation &cancellation,
-                                                               PackageSourceVerificationHook &hook) {
-	auto acquired = AcquireFromCustody(PackageDirectoryCustody::OpenAbsolute(absolute_root, host_limits, cancellation),
-	                                   cancellation, &hook);
+PackageSourceSnapshot AcquirePackageSourceControlled(const std::string &absolute_root,
+                                                     const PackageSourceLimits &host_limits,
+                                                     PackageCancellation &cancellation,
+                                                     PackageCompilationPhaseHook *phase_hook,
+                                                     PackageSourceVerificationHook *verification_hook) {
+	auto acquired =
+	    AcquireFromCustody(PackageDirectoryCustody::OpenAbsolute(absolute_root, host_limits, cancellation, phase_hook),
+	                       cancellation, phase_hook, verification_hook);
 	const int root_fd = acquired.ReleaseRoot();
 	return PackageSourceSnapshot::Create(root_fd, std::move(acquired.files), std::move(acquired.relation_ids),
 	                                     std::move(acquired.digest));

@@ -24,6 +24,14 @@ enum class PackageFixtureSourceIdentityOutcome {
 	SOURCE_IDENTITY_REJECTED
 };
 
+enum class PackageFixtureCompilerCancellationOutcome {
+	SOURCE_ENUMERATION,
+	SOURCE_READ,
+	YAML_PARSE,
+	REFERENCE_VALIDATION,
+	GENERATION_VALIDATION
+};
+
 // One closed source-backed fixture variant compiled through the production
 // package boundary. A successful value owns opaque candidate custody; a failed
 // value owns the compiler's bounded stable diagnostics. Reload variants also
@@ -67,6 +75,16 @@ private:
 PackageFixtureSourceCandidate BuildPackageFixtureSourceCandidate(const CompiledLocalPackage &active,
                                                                  const PackageFixtureCoverageEntry &coverage_entry,
                                                                  PackageCancellation &cancellation);
+
+// Executes one Connector-owned compiler-cancellation coverage entry against a
+// private semantic-source copy. An internal phase hook only arms caller-owned
+// cancellation immediately before the ordinary production check; it cannot
+// replace that check. The returned enum proves the exact reached boundary.
+// publication_wait belongs to Query publication and is rejected here.
+PackageFixtureCompilerCancellationOutcome
+RunPackageFixtureCompilerCancellation(const CompiledLocalPackage &active,
+                                      const PackageFixtureCoverageEntry &coverage_entry,
+                                      PackageCancellation &cancellation);
 
 } // namespace connector
 } // namespace duckdb_api

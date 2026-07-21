@@ -25,12 +25,75 @@ private:
 	internal::PrivatePackageSourceCopy &source_copy;
 };
 
+class PhaseCancellation final : public PackageCancellation, public internal::PackageCompilationPhaseHook {
+public:
+	PhaseCancellation(internal::PackageCompilationCheckpoint target_p, PackageCancellation &caller_p)
+	    : target(target_p), caller(caller_p), armed(false), observed(false) {
+	}
+
+	bool IsCancellationRequested() const noexcept override {
+		return armed || caller.IsCancellationRequested();
+	}
+
+	void BeforeCancellationCheck(internal::PackageCompilationCheckpoint checkpoint) override {
+		if (checkpoint == target) {
+			observed = true;
+			armed = true;
+		}
+	}
+
+	bool ReachedTarget() const noexcept {
+		return observed && armed;
+	}
+
+private:
+	internal::PackageCompilationCheckpoint target;
+	PackageCancellation &caller;
+	bool armed;
+	bool observed;
+};
+
+internal::PackageCompilationCheckpoint CancellationCheckpoint(const std::string &variant) {
+	if (variant == "source_enumeration") {
+		return internal::PackageCompilationCheckpoint::SOURCE_ENUMERATION;
+	}
+	if (variant == "source_read") {
+		return internal::PackageCompilationCheckpoint::SOURCE_READ;
+	}
+	if (variant == "yaml_parse") {
+		return internal::PackageCompilationCheckpoint::YAML_PARSE;
+	}
+	if (variant == "reference_validation") {
+		return internal::PackageCompilationCheckpoint::REFERENCE_VALIDATION;
+	}
+	if (variant == "generation_validation") {
+		return internal::PackageCompilationCheckpoint::GENERATION_VALIDATION;
+	}
+	throw std::invalid_argument("coverage entry is not a Connector-owned compiler-cancellation variant");
+}
+
+PackageFixtureCompilerCancellationOutcome CancellationOutcome(internal::PackageCompilationCheckpoint checkpoint) {
+	switch (checkpoint) {
+	case internal::PackageCompilationCheckpoint::SOURCE_ENUMERATION:
+		return PackageFixtureCompilerCancellationOutcome::SOURCE_ENUMERATION;
+	case internal::PackageCompilationCheckpoint::SOURCE_READ:
+		return PackageFixtureCompilerCancellationOutcome::SOURCE_READ;
+	case internal::PackageCompilationCheckpoint::YAML_PARSE:
+		return PackageFixtureCompilerCancellationOutcome::YAML_PARSE;
+	case internal::PackageCompilationCheckpoint::REFERENCE_VALIDATION:
+		return PackageFixtureCompilerCancellationOutcome::REFERENCE_VALIDATION;
+	case internal::PackageCompilationCheckpoint::GENERATION_VALIDATION:
+		return PackageFixtureCompilerCancellationOutcome::GENERATION_VALIDATION;
+	}
+	throw std::logic_error("compiler-cancellation checkpoint is outside the closed vocabulary");
+}
+
 PackageCompileResult CompileWithVerificationHook(const std::string &absolute_root, PackageCancellation &cancellation,
                                                  internal::PackageSourceVerificationHook &hook) {
 	const auto compiler_limits = PackageCompilerLimits::V1();
 	try {
-		return CompilePackage(internal::AcquirePackageSourceWithVerificationHook(
-		                          absolute_root, PackageSourceLimits::V1(), cancellation, hook),
+		return CompilePackage(internal::AcquirePackageSourceControlled(absolute_root, PackageSourceLimits::V1(),
+		                                                               cancellation, nullptr, &hook),
 		                      compiler_limits, cancellation);
 	} catch (const PackageSourceError &error) {
 		if (error.Code() == PackageSourceErrorCode::CANCELLED) {
@@ -231,6 +294,44 @@ PackageFixtureSourceCandidate BuildPackageFixtureSourceCandidate(const CompiledL
 	}
 	return internal::PackageFixtureSourceCandidateBuilder::Build(
 	    coverage_entry, std::move(source_copy), std::move(candidate), {}, std::move(decision), source_identity_outcome);
+}
+
+PackageFixtureCompilerCancellationOutcome
+RunPackageFixtureCompilerCancellation(const CompiledLocalPackage &active,
+                                      const PackageFixtureCoverageEntry &coverage_entry,
+                                      PackageCancellation &cancellation) {
+	if (cancellation.IsCancellationRequested()) {
+		throw PackageCompilationCancelled();
+	}
+	if (coverage_entry.scope != PackageFixtureCoverageScope::COMPILER_CANCELLATION) {
+		throw std::invalid_argument("coverage entry is not compiler cancellation");
+	}
+	const auto checkpoint = CancellationCheckpoint(coverage_entry.variant);
+	auto sources = internal::BuildFixtureCandidateSources(active, coverage_entry, cancellation);
+	auto source_copy = internal::PrivatePackageSourceCopy::Create(sources, cancellation);
+	PhaseCancellation controlled(checkpoint, cancellation);
+	try {
+		auto snapshot = internal::AcquirePackageSourceControlled(source_copy->Root(), PackageSourceLimits::V1(),
+		                                                         controlled, &controlled, nullptr);
+		(void)internal::CompilePackageWithPhaseHook(snapshot, PackageCompilerLimits::V1(), controlled, controlled);
+	} catch (const PackageSourceError &error) {
+		if (error.Code() != PackageSourceErrorCode::CANCELLED) {
+			throw;
+		}
+		if (!controlled.ReachedTarget()) {
+			throw PackageCompilationCancelled();
+		}
+		return CancellationOutcome(checkpoint);
+	} catch (const FailsafeYamlError &error) {
+		if (error.Code() != FailsafeYamlErrorCode::CANCELLED) {
+			throw;
+		}
+		if (!controlled.ReachedTarget()) {
+			throw PackageCompilationCancelled();
+		}
+		return CancellationOutcome(checkpoint);
+	}
+	throw std::logic_error("compiler-cancellation fixture completed without cancellation");
 }
 
 } // namespace connector

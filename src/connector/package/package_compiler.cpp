@@ -66,8 +66,11 @@ PackageCompileResult PackageSyntaxFailureResult(const FailsafeYamlError &error, 
 
 } // namespace internal
 
-PackageCompileResult CompilePackage(const PackageSourceSnapshot &snapshot, const PackageCompilerLimits &host_limits,
-                                    PackageCancellation &cancellation) {
+namespace {
+
+PackageCompileResult CompilePackageImpl(const PackageSourceSnapshot &snapshot, const PackageCompilerLimits &host_limits,
+                                        PackageCancellation &cancellation,
+                                        internal::PackageCompilationPhaseHook *phase_hook) {
 	internal::PackageDiagnosticSink diagnostics(host_limits.max_diagnostics);
 	if (!snapshot.IsValid() || !VerifyConnectorPackageV1SchemaAsset()) {
 		diagnostics.Add(PackageDiagnosticCode::PACKAGE_IDENTITY, PackageDiagnosticPhase::SOURCE, RootMark());
@@ -77,6 +80,10 @@ PackageCompileResult CompilePackage(const PackageSourceSnapshot &snapshot, const
 		throw FailsafeYamlError(FailsafeYamlErrorCode::CANCELLED, "connector.yaml", {{0, 1, 1}, {0, 1, 1}},
 		                        "package compilation was cancelled");
 	}
+	if (phase_hook != nullptr) {
+		phase_hook->BeforeCancellationCheck(internal::PackageCompilationCheckpoint::YAML_PARSE);
+	}
+	CheckCompilationCancellation(cancellation, "connector.yaml", {{0, 1, 1}, {0, 1, 1}});
 
 	FailsafeYamlBudget yaml_budget(host_limits.yaml);
 	std::vector<std::pair<std::string, FailsafeYamlNode>> documents;
@@ -110,7 +117,7 @@ PackageCompileResult CompilePackage(const PackageSourceSnapshot &snapshot, const
 		return PackageCompileResult(nullptr, diagnostics.Finish());
 	}
 
-	auto generation = internal::CompilePackageDeclaration(package, snapshot, diagnostics, cancellation);
+	auto generation = internal::CompilePackageDeclaration(package, snapshot, diagnostics, cancellation, phase_hook);
 	if (!diagnostics.Empty() || !generation) {
 		return PackageCompileResult(nullptr, diagnostics.Finish());
 	}
@@ -118,6 +125,24 @@ PackageCompileResult CompilePackage(const PackageSourceSnapshot &snapshot, const
 	return PackageCompileResult(
 	    std::shared_ptr<const CompiledLocalPackage>(new CompiledLocalPackage(std::move(compiled_local))), {});
 }
+
+} // namespace
+
+PackageCompileResult CompilePackage(const PackageSourceSnapshot &snapshot, const PackageCompilerLimits &host_limits,
+                                    PackageCancellation &cancellation) {
+	return CompilePackageImpl(snapshot, host_limits, cancellation, nullptr);
+}
+
+namespace internal {
+
+PackageCompileResult CompilePackageWithPhaseHook(const PackageSourceSnapshot &snapshot,
+                                                 const PackageCompilerLimits &host_limits,
+                                                 PackageCancellation &cancellation,
+                                                 PackageCompilationPhaseHook &phase_hook) {
+	return CompilePackageImpl(snapshot, host_limits, cancellation, &phase_hook);
+}
+
+} // namespace internal
 
 PackageCompileResult CompileLocalPackageRoot(const std::string &absolute_root, const PackageSourceLimits &source_limits,
                                              const PackageCompilerLimits &compiler_limits,

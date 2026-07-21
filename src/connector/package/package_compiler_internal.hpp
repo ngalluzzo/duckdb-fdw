@@ -1,6 +1,7 @@
 #pragma once
 
 #include "package_declarations.hpp"
+#include "package_compilation_control_internal.hpp"
 
 #include "duckdb_api/compiled_package_generation.hpp"
 
@@ -15,6 +16,10 @@ namespace internal {
 
 PackageCompileResult PackageSourceFailureResult(const PackageSourceError &error, std::uint64_t maximum_diagnostics);
 PackageCompileResult PackageSyntaxFailureResult(const FailsafeYamlError &error, std::uint64_t maximum_diagnostics);
+PackageCompileResult CompilePackageWithPhaseHook(const PackageSourceSnapshot &snapshot,
+                                                 const PackageCompilerLimits &host_limits,
+                                                 PackageCancellation &cancellation,
+                                                 PackageCompilationPhaseHook &phase_hook);
 
 bool DecodePackageSchema(const std::vector<std::pair<std::string, FailsafeYamlNode>> &documents,
                          const PackageSourceSnapshot &snapshot, PackageDiagnosticSink &diagnostics,
@@ -27,7 +32,8 @@ bool DecodeRelationSchema(const std::string &file, const FailsafeYamlNode &root,
 std::shared_ptr<const CompiledPackageGeneration> CompilePackageDeclaration(const PackageDeclaration &package,
                                                                            const PackageSourceSnapshot &snapshot,
                                                                            PackageDiagnosticSink &diagnostics,
-                                                                           PackageCancellation &cancellation);
+                                                                           PackageCancellation &cancellation,
+                                                                           PackageCompilationPhaseHook *phase_hook);
 
 struct RenderedGraphqlOperation {
 	std::shared_ptr<const CompiledGraphqlQueryRecipe> query_recipe;

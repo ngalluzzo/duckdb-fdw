@@ -149,6 +149,45 @@ void TestNoCandidateSource(const std::string &repository_root) {
 	}
 }
 
+void TestCompilerCancellation(const duckdb_api::CompiledLocalPackage &active,
+                              const duckdb_api::connector::PackageFixtureCoverage &coverage) {
+	struct Expected {
+		const char *variant;
+		duckdb_api::connector::PackageFixtureCompilerCancellationOutcome outcome;
+	};
+	const Expected expected[] = {
+	    {"source_enumeration", duckdb_api::connector::PackageFixtureCompilerCancellationOutcome::SOURCE_ENUMERATION},
+	    {"source_read", duckdb_api::connector::PackageFixtureCompilerCancellationOutcome::SOURCE_READ},
+	    {"yaml_parse", duckdb_api::connector::PackageFixtureCompilerCancellationOutcome::YAML_PARSE},
+	    {"reference_validation",
+	     duckdb_api::connector::PackageFixtureCompilerCancellationOutcome::REFERENCE_VALIDATION},
+	    {"generation_validation",
+	     duckdb_api::connector::PackageFixtureCompilerCancellationOutcome::GENERATION_VALIDATION},
+	};
+	NeverCancel cancellation;
+	for (const auto &item : expected) {
+		const auto &entry = FindEntry(coverage, "compiler_cancellation_" + std::string(item.variant));
+		Require(duckdb_api::connector::RunPackageFixtureCompilerCancellation(active, entry, cancellation) ==
+		            item.outcome,
+		        std::string("compiler cancellation did not stop at its exact phase: ") + item.variant);
+	}
+
+	try {
+		(void)duckdb_api::connector::RunPackageFixtureCompilerCancellation(
+		    active, FindEntry(coverage, "compiler_cancellation_publication_wait"), cancellation);
+	} catch (const std::invalid_argument &) {
+		AlwaysCancel cancelled;
+		try {
+			(void)duckdb_api::connector::RunPackageFixtureCompilerCancellation(
+			    active, FindEntry(coverage, "compiler_cancellation_yaml_parse"), cancelled);
+		} catch (const duckdb_api::connector::PackageCompilationCancelled &) {
+			return;
+		}
+		throw std::runtime_error("compiler-cancellation fixture ignored caller cancellation");
+	}
+	throw std::runtime_error("Connector accepted Query-owned publication-wait cancellation");
+}
+
 void TestCandidateDispatchAndCancellation(const duckdb_api::CompiledLocalPackage &active,
                                           const duckdb_api::connector::PackageFixtureCoverage &coverage) {
 	NeverCancel cancellation;
@@ -179,6 +218,7 @@ int main(int argc, char **argv) {
 		TestGraphqlDocumentCandidates(active, coverage);
 		TestSourceIdentityCandidates(active, coverage);
 		TestNoCandidateSource(argv[1]);
+		TestCompilerCancellation(active, coverage);
 		TestCandidateDispatchAndCancellation(active, coverage);
 		std::cout << "package fixture candidate tests passed" << std::endl;
 		return 0;

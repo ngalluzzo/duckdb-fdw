@@ -22,9 +22,11 @@ class PackageSourceSnapshot;
 struct PackageSourceLimits;
 
 namespace internal {
+class PackageCompilationPhaseHook;
 class PackageSourceVerificationHook;
-PackageSourceSnapshot AcquirePackageSourceWithVerificationHook(const std::string &, const PackageSourceLimits &,
-                                                               PackageCancellation &, PackageSourceVerificationHook &);
+PackageSourceSnapshot AcquirePackageSourceControlled(const std::string &, const PackageSourceLimits &,
+                                                     PackageCancellation &, PackageCompilationPhaseHook *,
+                                                     PackageSourceVerificationHook *);
 } // namespace internal
 
 enum class PackageSourceErrorCode : std::uint8_t {
@@ -94,10 +96,11 @@ private:
 	                                                  PackageCancellation &);
 	friend PackageSourceSnapshot ReacquirePackageSource(const PackageSourceSnapshot &, const PackageSourceLimits &,
 	                                                    PackageCancellation &);
-	friend PackageSourceSnapshot
-	internal::AcquirePackageSourceWithVerificationHook(const std::string &, const PackageSourceLimits &,
-	                                                   PackageCancellation &,
-	                                                   internal::PackageSourceVerificationHook &);
+	friend PackageSourceSnapshot internal::AcquirePackageSourceControlled(const std::string &,
+	                                                                      const PackageSourceLimits &,
+	                                                                      PackageCancellation &,
+	                                                                      internal::PackageCompilationPhaseHook *,
+	                                                                      internal::PackageSourceVerificationHook *);
 	friend class duckdb_api::internal::CompiledLocalPackageAccess;
 };
 
