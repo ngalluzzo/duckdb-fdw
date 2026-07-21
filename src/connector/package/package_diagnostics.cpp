@@ -25,14 +25,26 @@ bool SafeField(const std::string &value) {
 }
 
 bool SafeRelativeFile(const std::string &value) {
-	return value.empty() ||
-	       (value.front() != '/' && value.find("..") == std::string::npos && value.find('\\') == std::string::npos);
+	if (value.empty()) {
+		return true;
+	}
+	if (value.front() == '/' || value.find("..") != std::string::npos || value.find('\\') != std::string::npos) {
+		return false;
+	}
+	for (const auto character : value) {
+		const auto byte = static_cast<unsigned char>(character);
+		if (byte < 0x20U || byte == 0x7fU) {
+			return false;
+		}
+	}
+	return true;
 }
 
 bool SafeCoordinate(const PackageSourceCoordinate &coordinate) {
 	return SafeRelativeFile(coordinate.file) &&
 	       ((coordinate.file.empty() && coordinate.line == 0 && coordinate.column == 0) ||
-	        (!coordinate.file.empty() && coordinate.line != 0 && coordinate.column != 0)) &&
+	        (!coordinate.file.empty() &&
+	         ((coordinate.line == 0 && coordinate.column == 0) || (coordinate.line != 0 && coordinate.column != 0)))) &&
 	       (coordinate.yaml_path.empty() || coordinate.yaml_path.front() == '$');
 }
 

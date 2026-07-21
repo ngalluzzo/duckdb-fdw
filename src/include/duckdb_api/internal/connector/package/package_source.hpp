@@ -10,6 +10,11 @@
 #include <vector>
 
 namespace duckdb_api {
+
+namespace internal {
+class CompiledLocalPackageAccess;
+}
+
 namespace connector {
 
 enum class PackageSourceErrorCode : std::uint8_t {
@@ -79,6 +84,7 @@ private:
 	                                                  PackageCancellation &);
 	friend PackageSourceSnapshot ReacquirePackageSource(const PackageSourceSnapshot &, const PackageSourceLimits &,
 	                                                    PackageCancellation &);
+	friend class duckdb_api::internal::CompiledLocalPackageAccess;
 };
 
 // Opens an explicit absolute POSIX root component-by-component with no-follow

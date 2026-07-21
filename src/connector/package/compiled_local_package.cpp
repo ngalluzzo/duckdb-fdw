@@ -1,6 +1,8 @@
 #include "compiled_local_package_internal.hpp"
 
+#include <fcntl.h>
 #include <stdexcept>
+#include <unistd.h>
 #include <utility>
 
 namespace duckdb_api {
@@ -56,6 +58,22 @@ const connector::PackageSourceSnapshot &CompiledLocalPackageAccess::Source(const
 		throw std::logic_error("compiled local package is empty");
 	}
 	return package.state->source;
+}
+
+int CompiledLocalPackageAccess::DuplicateRootForFixtures(const CompiledLocalPackage &package) {
+	const auto &source = Source(package);
+#if defined(F_DUPFD_CLOEXEC)
+	const int duplicated = ::fcntl(source.RetainedRootFd(), F_DUPFD_CLOEXEC, 0);
+#else
+	const int duplicated = ::dup(source.RetainedRootFd());
+	if (duplicated >= 0) {
+		::fcntl(duplicated, F_SETFD, FD_CLOEXEC);
+	}
+#endif
+	if (duplicated < 0) {
+		throw std::runtime_error("retained package root is unavailable for fixture custody");
+	}
+	return duplicated;
 }
 
 } // namespace internal

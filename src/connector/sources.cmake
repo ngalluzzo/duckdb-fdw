@@ -47,7 +47,16 @@ set(CONNECTOR_PACKAGE_COMPILER_SOURCES
     src/connector/package/package_schema_helpers.cpp
     src/connector/package/package_schema_reader.cpp)
 set(CONNECTOR_PACKAGE_FIXTURE_SOURCES
-    src/connector/package/package_fixture_coverage.cpp)
+    src/connector/package/package_fixture_assets.cpp
+    src/connector/package/package_fixture_comparison.cpp
+    src/connector/package/package_fixture_coverage.cpp
+    src/connector/package/package_fixture_index.cpp
+    src/connector/package/package_fixture_index_expected.cpp
+    src/connector/package/package_fixture_index_transcript.cpp
+    src/connector/package/package_fixture_index_validation.cpp
+    src/connector/package/package_fixture_limits.cpp
+    src/connector/package/package_fixture_runner.cpp
+    src/connector/package/package_fixture_source.cpp)
 set(CONNECTOR_NATIVE_PROFILE_SOURCES
     src/connector/native_github_composition.cpp)
 set(CONNECTOR_METADATA_IMPLEMENTATION_SOURCES

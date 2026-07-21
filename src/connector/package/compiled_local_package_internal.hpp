@@ -16,6 +16,10 @@ public:
 	static CompiledLocalPackage Create(std::shared_ptr<const CompiledPackageGeneration> generation,
 	                                   connector::PackageSourceSnapshot source);
 	static const connector::PackageSourceSnapshot &Source(const CompiledLocalPackage &package);
+	// Returns a close-on-exec duplicate owned by the caller. Fixture custody uses
+	// this descriptor to open only `fixtures` without exposing the canonical
+	// absolute root or weakening the semantic snapshot lifetime.
+	static int DuplicateRootForFixtures(const CompiledLocalPackage &package);
 };
 
 } // namespace internal

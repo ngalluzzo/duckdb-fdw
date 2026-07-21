@@ -1,0 +1,231 @@
+R"DAPI_COVER({
+  "contract": "duckdb_api/fixture_coverage_v1",
+  "key_grammar": "[a-z][a-z0-9_]{0,254}",
+  "key_construction": {
+    "separator": "_",
+    "tokens": "fixed lower-case tokens and already validated connector-package IDs",
+    "overflow": "a derived key longer than 255 bytes rejects the semantic package",
+    "uniqueness": "each derived key occurs once in the required set and exactly once in an accepted fixture index"
+  },
+  "derivation_language": {
+    "input": "the schema-validated normalized compatibility descriptor before fixture I/O",
+    "iteration": "Each selector is an ordered array of steps. A step with iterate resolves its sequence from aliases already bound by earlier steps, visits it in source order, and binds each element to as. A step with fields visits, in listed order, the named fields present in the object resolved by from and binds an object with name and value to as; the normalized semantic schema requires every field for nodes that satisfy that scope's conditions. Bindings and conditions may reference only an alias introduced by the selector or the fixed synthetic aliases package and generation.",
+    "condition": "equals compares an exact normalized enum/string; present tests field presence; count_gt compares sequence length; all conditions must hold. One semantic package and one active connector generation each select exactly one synthetic node.",
+    "resource_fields": {
+      "relation": ["max_response_bytes_per_page", "max_response_bytes_per_scan", "max_records_per_page", "max_records_per_scan", "max_extracted_string_bytes"],
+      "graphql_request": ["max_document_bytes", "max_serialized_body_bytes_per_request", "max_serialized_body_bytes_per_scan"]
+    },
+    "scope_vocabulary": {
+      "each relation operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
+      "each anonymous relation operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"equals": ["relation.auth.mode", "anonymous"]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
+      "each credential relation operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"equals": ["relation.auth.mode", "credential"]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
+      "each declared relation input": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.inputs", "as": "input"}], "bindings": {"relation": "relation.id", "input": "input.id"}},
+      "each declared relation input with a default": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.inputs", "as": "input"}], "where": [{"present": "input.default"}], "bindings": {"relation": "relation.id", "input": "input.id"}},
+      "each nullable declared relation input": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.inputs", "as": "input"}], "where": [{"equals": ["input.nullable", "true"]}], "bindings": {"relation": "relation.id", "input": "input.id"}},
+      "each non-nullable declared relation input": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.inputs", "as": "input"}], "where": [{"equals": ["input.nullable", "false"]}], "bindings": {"relation": "relation.id", "input": "input.id"}},
+      "each output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.columns", "as": "column"}], "bindings": {"relation": "relation.id", "column": "column.id"}},
+      "each nullable output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.nullable", "true"]}], "bindings": {"relation": "relation.id", "column": "column.id"}},
+      "each non-nullable output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.nullable", "false"]}], "bindings": {"relation": "relation.id", "column": "column.id"}},
+      "each BIGINT output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.type", "BIGINT"]}], "bindings": {"relation": "relation.id", "column": "column.id"}},
+      "each VARCHAR output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.type", "VARCHAR"]}], "bindings": {"relation": "relation.id", "column": "column.id"}},
+      "each operation in a relation containing more than one operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"count_gt": ["relation.operations", 1]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
+      "each relation containing more than one operation": {"selector": [{"iterate": "package.relations", "as": "relation"}], "where": [{"count_gt": ["relation.operations", 1]}], "bindings": {"relation": "relation.id"}},
+      "each predicate mapping": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.predicates", "as": "predicate"}], "bindings": {"relation": "relation.id", "predicate": "predicate.id"}},
+      "each disabled-pagination operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"equals": ["operation.request.protocol", "rest"]}, {"equals": ["operation.pagination.strategy", "disabled"]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
+      "each Link-pagination operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"equals": ["operation.request.protocol", "rest"]}, {"equals": ["operation.pagination.strategy", "link_next"]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
+      "each Relay-pagination operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"equals": ["operation.request.protocol", "graphql"]}, {"equals": ["operation.request.pagination.strategy", "relay_forward"]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
+      "each GraphQL operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"equals": ["operation.request.protocol", "graphql"]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
+      "each declared relation resource field": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"fields": "derivation_language.resource_fields.relation", "from": "relation.resources", "as": "resource"}], "bindings": {"relation": "relation.id", "resource": "resource.name"}},
+      "each GraphQL request resource field": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}, {"fields": "derivation_language.resource_fields.graphql_request", "from": "operation.request", "as": "resource"}], "where": [{"equals": ["operation.request.protocol", "graphql"]}], "bindings": {"relation": "relation.id", "operation": "operation.id", "resource": "resource.name"}},
+      "one semantic package": {"selector": [{"synthetic": "package"}], "bindings": {}},
+      "one active connector generation": {"selector": [{"synthetic": "generation"}], "bindings": {}}
+    }
+  },
+  "rules": [
+    {
+      "scope": "each relation operation",
+      "template": "operation_{relation}_{operation}_{variant}",
+      "variants": ["success"]
+    },
+    {
+      "scope": "each anonymous relation operation",
+      "template": "auth_{relation}_{operation}_{variant}",
+      "variants": ["anonymous"]
+    },
+    {
+      "scope": "each credential relation operation",
+      "template": "auth_{relation}_{operation}_{variant}",
+      "variants": ["bearer_present", "bearer_missing"]
+    },
+    {
+      "scope": "each declared relation input",
+      "template": "input_{relation}_{input}_{variant}",
+      "variants": ["bound_value", "unbound"]
+    },
+    {
+      "scope": "each declared relation input with a default",
+      "template": "input_{relation}_{input}_{variant}",
+      "variants": ["default_applied"]
+    },
+    {
+      "scope": "each nullable declared relation input",
+      "template": "input_{relation}_{input}_{variant}",
+      "variants": ["bound_null_omitted"]
+    },
+    {
+      "scope": "each non-nullable declared relation input",
+      "template": "input_{relation}_{input}_{variant}",
+      "variants": ["bound_null_rejected"]
+    },
+    {
+      "scope": "each output column",
+      "template": "column_{relation}_{column}_{variant}",
+      "variants": ["success", "type_mismatch_rejected"]
+    },
+    {
+      "scope": "each nullable output column",
+      "template": "column_{relation}_{column}_{variant}",
+      "variants": ["null"]
+    },
+    {
+      "scope": "each non-nullable output column",
+      "template": "column_{relation}_{column}_{variant}",
+      "variants": ["missing_rejected", "null_rejected"]
+    },
+    {
+      "scope": "each BIGINT output column",
+      "template": "column_{relation}_{column}_{variant}",
+      "variants": ["minimum", "maximum", "underflow_rejected", "overflow_rejected", "fraction_rejected"]
+    },
+    {
+      "scope": "each VARCHAR output column",
+      "template": "column_{relation}_{column}_{variant}",
+      "variants": ["string_budget_boundary", "string_budget_one_over_rejected"]
+    },
+    {
+      "scope": "each operation in a relation containing more than one operation",
+      "template": "selection_{relation}_{operation}_{variant}",
+      "variants": ["selected"]
+    },
+    {
+      "scope": "each relation containing more than one operation",
+      "template": "selection_{relation}_{variant}",
+      "variants": ["highest_rank_tie_rejected", "no_candidate_rejected", "fallback_selected"]
+    },
+    {
+      "scope": "each predicate mapping",
+      "template": "predicate_{relation}_{predicate}_{variant}",
+      "variants": ["positive", "non_true", "duplicates", "unavailable_structure_local"]
+    },
+    {
+      "scope": "each disabled-pagination operation",
+      "template": "pagination_{relation}_{operation}_{variant}",
+      "variants": ["single_page_termination"]
+    },
+    {
+      "scope": "each Link-pagination operation",
+      "template": "pagination_{relation}_{operation}_{variant}",
+      "variants": ["first_page", "multi_page", "termination", "encoded_target", "malformed_target_rejected", "replayed_target_rejected", "max_pages_exhausted"]
+    },
+    {
+      "scope": "each Relay-pagination operation",
+      "template": "pagination_{relation}_{operation}_{variant}",
+      "variants": ["first_page", "multi_page", "termination", "cursor_transition", "missing_cursor_rejected", "repeated_cursor_rejected", "max_pages_exhausted"]
+    },
+    {
+      "scope": "each GraphQL operation",
+      "template": "graphql_{relation}_{operation}_{variant}",
+      "variants": ["document_identity", "serialized_body_identity", "errors_rejected", "response_role_rejected"]
+    },
+    {
+      "scope": "each declared relation resource field",
+      "template": "resource_{relation}_{resource}_{variant}",
+      "variants": ["boundary", "one_over_rejected"]
+    },
+    {
+      "scope": "each GraphQL request resource field",
+      "template": "resource_{relation}_{operation}_{resource}_{variant}",
+      "variants": ["boundary", "one_over_rejected"]
+    },
+    {
+      "scope": "one semantic package",
+      "template": "compiler_cancellation_{variant}",
+      "variants": ["source_enumeration", "source_read", "yaml_parse", "reference_validation", "generation_validation", "publication_wait"]
+    },
+    {
+      "scope": "each relation operation",
+      "template": "runtime_cancellation_{relation}_{operation}_{variant}",
+      "variants": ["before_request", "transport", "decode", "page_boundary", "stream_close"]
+    },
+    {
+      "scope": "one semantic package",
+      "template": "source_identity_{variant}",
+      "variants": ["copied_root", "byte_change", "symlink_rejected", "hardlink_rejected", "entry_change_rejected", "unlisted_relation_rejected", "case_collision_rejected"]
+    },
+    {
+      "scope": "one active connector generation",
+      "template": "reload_{variant}",
+      "variants": ["exact_no_op", "compatible_patch", "compatible_minor", "version_reuse_rejected", "downgrade_rejected", "incompatible_rejected"]
+    }
+  ],
+  "diagnostic_rule": {
+    "scope": "one semantic package",
+    "template": "diagnostic_{lowercase_code}",
+    "lowercase_code": "ASCII lower-case conversion of the complete stable diagnostic code",
+    "codes": [
+      "DUCKDB_API_UNSUPPORTED_SPEC",
+      "DUCKDB_API_UNSUPPORTED_DIALECT",
+      "DUCKDB_API_MALFORMED_YAML",
+      "DUCKDB_API_UNKNOWN_FIELD",
+      "DUCKDB_API_MISSING_FIELD",
+      "DUCKDB_API_DUPLICATE_ID",
+      "DUCKDB_API_INVALID_REFERENCE",
+      "DUCKDB_API_INVALID_IDENTIFIER",
+      "DUCKDB_API_INVALID_TYPE",
+      "DUCKDB_API_INVALID_EXTRACTOR",
+      "DUCKDB_API_RESERVED_INPUT",
+      "DUCKDB_API_UNSUPPORTED_DECLARATION",
+      "DUCKDB_API_INVALID_SELECTOR",
+      "DUCKDB_API_INVALID_PREDICATE",
+      "DUCKDB_API_INVALID_GRAPHQL_PROFILE",
+      "DUCKDB_API_POLICY_WIDENING",
+      "DUCKDB_API_RESOURCE_EXHAUSTED",
+      "DUCKDB_API_PACKAGE_IDENTITY",
+      "DUCKDB_API_FIXTURE_MISMATCH",
+      "DUCKDB_API_INCOMPATIBLE_RELOAD",
+      "DUCKDB_API_PUBLICATION_CONFLICT"
+    ]
+  },
+  "github_golden": {
+    "semantic_package_digest": "sha256.b286e6f7481b437b243dfe2ce017a59d601d909272b9d2b35788fb78753ff23b",
+    "required_key_count": 258,
+    "ordered_keys_digest": "sha256.a4e2cafbe8acea3e02b5739e4751a9b05a7c927164d5ec23ec9e5bd03a734aa8",
+    "selected_keys": [
+      "resource_viewer_repository_metrics_max_response_bytes_per_page_boundary",
+      "resource_viewer_repository_metrics_max_response_bytes_per_page_one_over_rejected",
+      "resource_viewer_repository_metrics_max_response_bytes_per_scan_boundary",
+      "resource_viewer_repository_metrics_max_response_bytes_per_scan_one_over_rejected",
+      "resource_viewer_repository_metrics_max_records_per_page_boundary",
+      "resource_viewer_repository_metrics_max_records_per_page_one_over_rejected",
+      "resource_viewer_repository_metrics_max_records_per_scan_boundary",
+      "resource_viewer_repository_metrics_max_records_per_scan_one_over_rejected",
+      "resource_viewer_repository_metrics_max_extracted_string_bytes_boundary",
+      "resource_viewer_repository_metrics_max_extracted_string_bytes_one_over_rejected",
+      "resource_viewer_repository_metrics_github_viewer_repository_metrics_max_document_bytes_boundary",
+      "resource_viewer_repository_metrics_github_viewer_repository_metrics_max_document_bytes_one_over_rejected",
+      "resource_viewer_repository_metrics_github_viewer_repository_metrics_max_serialized_body_bytes_per_request_boundary",
+      "resource_viewer_repository_metrics_github_viewer_repository_metrics_max_serialized_body_bytes_per_request_one_over_rejected",
+      "resource_viewer_repository_metrics_github_viewer_repository_metrics_max_serialized_body_bytes_per_scan_boundary",
+      "resource_viewer_repository_metrics_github_viewer_repository_metrics_max_serialized_body_bytes_per_scan_one_over_rejected"
+    ]
+  },
+  "evaluation_order": [
+    "rules in document order",
+    "relations in compiled source order",
+    "operations, inputs, columns, predicates, and resources in compiled source order",
+    "variants in their listed order",
+    "diagnostic codes in their listed order"
+  ],
+  "acceptance": "The required set is generated from the independently validated normalized descriptor before reading fixtures. The fixture index must cover the set exactly; order does not affect equality. A case claiming a key must execute the named scope and variant through the production path."
+}
+)DAPI_COVER"
