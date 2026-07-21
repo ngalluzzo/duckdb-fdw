@@ -191,8 +191,7 @@ configure_duckdb_api_cpp_target(duckdb_api_rest_plan_admission_tests)
 target_include_directories(duckdb_api_rest_plan_admission_tests PRIVATE test/cpp)
 target_link_libraries(
   duckdb_api_rest_plan_admission_tests
-  PRIVATE duckdb_api_runtime_executor_service
-          duckdb_api_runtime_programmable_test_service
+  PRIVATE duckdb_api_runtime_programmable_test_service
           duckdb_api_semantics_fixture_service
           duckdb_api_semantics_materialized_fixture_service)
 add_duckdb_api_runtime_executor_test(
