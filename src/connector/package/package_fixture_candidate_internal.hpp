@@ -37,6 +37,9 @@ private:
 std::vector<SemanticSourceFile> BuildFixtureCandidateSources(const CompiledLocalPackage &active,
                                                              const PackageFixtureCoverageEntry &coverage_entry,
                                                              PackageCancellation &cancellation);
+std::vector<SemanticSourceFile> BuildFixtureDiagnosticSources(const CompiledLocalPackage &active,
+                                                              const PackageFixtureCoverageEntry &coverage_entry,
+                                                              PackageCancellation &cancellation);
 
 } // namespace internal
 } // namespace connector

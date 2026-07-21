@@ -188,6 +188,37 @@ void TestCompilerCancellation(const duckdb_api::CompiledLocalPackage &active,
 	throw std::runtime_error("Connector accepted Query-owned publication-wait cancellation");
 }
 
+void TestStableDiagnostics(const duckdb_api::CompiledLocalPackage &active,
+                           const duckdb_api::connector::PackageFixtureCoverage &coverage) {
+	NeverCancel cancellation;
+	std::size_t executed = 0;
+	for (const auto &entry : coverage.Entries()) {
+		if (entry.scope != duckdb_api::connector::PackageFixtureCoverageScope::DIAGNOSTIC ||
+		    entry.diagnostic == "DUCKDB_API_PUBLICATION_CONFLICT") {
+			continue;
+		}
+		const auto outcome = duckdb_api::connector::RunPackageFixtureDiagnostic(active, entry, cancellation);
+		Require(outcome.Code() == entry.diagnostic && !outcome.Phase().empty(),
+		        "stable diagnostic did not traverse its production owner: " + entry.diagnostic);
+		executed++;
+	}
+	Require(executed > 0, "compiled package coverage omitted Connector-owned stable diagnostics");
+	try {
+		(void)duckdb_api::connector::RunPackageFixtureDiagnostic(
+		    active, FindEntry(coverage, "diagnostic_duckdb_api_publication_conflict"), cancellation);
+	} catch (const std::invalid_argument &) {
+		AlwaysCancel cancelled;
+		try {
+			(void)duckdb_api::connector::RunPackageFixtureDiagnostic(
+			    active, FindEntry(coverage, "diagnostic_duckdb_api_invalid_type"), cancelled);
+		} catch (const duckdb_api::connector::PackageCompilationCancelled &) {
+			return;
+		}
+		throw std::runtime_error("stable-diagnostic fixture ignored caller cancellation");
+	}
+	throw std::runtime_error("Connector accepted Query-owned publication-conflict diagnostic");
+}
+
 void TestCandidateDispatchAndCancellation(const duckdb_api::CompiledLocalPackage &active,
                                           const duckdb_api::connector::PackageFixtureCoverage &coverage) {
 	NeverCancel cancellation;
@@ -219,6 +250,14 @@ int main(int argc, char **argv) {
 		TestSourceIdentityCandidates(active, coverage);
 		TestNoCandidateSource(argv[1]);
 		TestCompilerCancellation(active, coverage);
+		TestStableDiagnostics(active, coverage);
+		NeverCancel cancellation;
+		const auto controlled_result = duckdb_api::connector::CompileLocalPackageRoot(
+		    std::string(argv[1]) + "/test/fixtures/package_graphql_non_github", cancellation);
+		Require(controlled_result.Succeeded() && controlled_result.Package() != nullptr,
+		        "controlled diagnostic package did not compile");
+		const duckdb_api::CompiledLocalPackage controlled(*controlled_result.Package());
+		TestStableDiagnostics(controlled, duckdb_api::connector::DerivePackageFixtureCoverage(controlled.Generation()));
 		TestCandidateDispatchAndCancellation(active, coverage);
 		std::cout << "package fixture candidate tests passed" << std::endl;
 		return 0;

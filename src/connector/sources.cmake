@@ -49,8 +49,10 @@ set(CONNECTOR_PACKAGE_COMPILER_SOURCES
 set(CONNECTOR_PACKAGE_FIXTURE_SOURCES
     src/connector/package/package_fixture_assets.cpp
     src/connector/package/package_fixture_candidate_mutations.cpp
+    src/connector/package/package_fixture_candidate_diagnostics.cpp
     src/connector/package/package_fixture_candidate_source.cpp
     src/connector/package/package_fixture_candidates.cpp
+    src/connector/package/package_fixture_diagnostics.cpp
     src/connector/package/package_fixture_comparison.cpp
     src/connector/package/package_fixture_coverage.cpp
     src/connector/package/package_fixture_index.cpp

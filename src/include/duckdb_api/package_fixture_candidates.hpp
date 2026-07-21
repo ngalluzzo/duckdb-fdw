@@ -61,6 +61,29 @@ private:
 	friend class internal::PackageFixtureSourceCandidateBuilder;
 };
 
+// Stable, secret-safe outcome of one Connector-owned diagnostic subscenario.
+// Code and phase come from the production compiler, fixture comparator, or
+// reload classifier; callers never infer them from the coverage-key spelling.
+class PackageFixtureDiagnosticOutcome {
+public:
+	PackageFixtureDiagnosticOutcome(const PackageFixtureDiagnosticOutcome &) = default;
+	PackageFixtureDiagnosticOutcome(PackageFixtureDiagnosticOutcome &&) = default;
+	PackageFixtureDiagnosticOutcome &operator=(const PackageFixtureDiagnosticOutcome &) = delete;
+	PackageFixtureDiagnosticOutcome &operator=(PackageFixtureDiagnosticOutcome &&) = delete;
+
+	const std::string &Code() const noexcept;
+	const std::string &Phase() const noexcept;
+
+private:
+	PackageFixtureDiagnosticOutcome(std::string code, std::string phase);
+	std::string code;
+	std::string phase;
+
+	friend PackageFixtureDiagnosticOutcome RunPackageFixtureDiagnostic(const CompiledLocalPackage &,
+	                                                                   const PackageFixtureCoverageEntry &,
+	                                                                   PackageCancellation &);
+};
+
 // Builds only Connector-owned variants that require a distinct semantic-source
 // candidate: all reload variants; copied-root, byte-change, symbolic-link,
 // hard-link, entry-change, unlisted-relation, and portable case-collision
@@ -85,6 +108,14 @@ PackageFixtureCompilerCancellationOutcome
 RunPackageFixtureCompilerCancellation(const CompiledLocalPackage &active,
                                       const PackageFixtureCoverageEntry &coverage_entry,
                                       PackageCancellation &cancellation);
+
+// Executes a Connector-owned stable-diagnostic entry through the owning
+// compiler, fixture comparison, or reload classifier. The entry's typed
+// diagnostic must agree exactly with the observed production code. Query-owned
+// publication conflict is rejected.
+PackageFixtureDiagnosticOutcome RunPackageFixtureDiagnostic(const CompiledLocalPackage &active,
+                                                            const PackageFixtureCoverageEntry &coverage_entry,
+                                                            PackageCancellation &cancellation);
 
 } // namespace connector
 } // namespace duckdb_api
