@@ -3,6 +3,7 @@
 #include "support/require.hpp"
 
 #include <cstddef>
+#include <cstdlib>
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
@@ -12,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -27,9 +29,9 @@ struct ExpectedColumn {
 	bool nullable;
 };
 
-using MachineFiles = std::map<std::string, std::string>;
+using PackageFiles = std::map<std::string, std::string>;
 
-const std::vector<std::string> EXPECTED_GITHUB_MACHINE_FILES = {"connector.yaml",
+const std::vector<std::string> EXPECTED_GITHUB_PACKAGE_FILES = {"connector.yaml",
                                                                 "fixtures/index.yaml",
                                                                 "fixtures/private_visibility_duplicates.json",
                                                                 "fixtures/private_visibility_duplicates_base.json",
@@ -44,11 +46,10 @@ const std::vector<std::string> EXPECTED_GITHUB_MACHINE_FILES = {"connector.yaml"
                                                                 "relations/duckdb_login_search_page.yaml",
                                                                 "relations/viewer_repository_metrics.yaml"};
 
-bool IsMachineFile(const std::string &name) {
-	const auto yaml = std::string(".yaml");
-	const auto json = std::string(".json");
-	return (name.size() >= yaml.size() && name.compare(name.size() - yaml.size(), yaml.size(), yaml) == 0) ||
-	       (name.size() >= json.size() && name.compare(name.size() - json.size(), json.size(), json) == 0);
+bool IsExcludedHumanAsset(const std::string &relative) {
+	// The two root READMEs intentionally address different audiences. Every
+	// other regular file is package or fixture custody regardless of extension.
+	return relative == "README.md";
 }
 
 std::string ReadBytes(const std::string &path) {
@@ -61,7 +62,51 @@ std::string ReadBytes(const std::string &path) {
 	return output.str();
 }
 
-void CollectMachineFiles(const std::string &root, const std::string &relative, MachineFiles &files) {
+class TemporaryInventoryTree {
+public:
+	TemporaryInventoryTree() {
+		char pattern[] = "/private/tmp/duckdb-api-package-inventory-XXXXXX";
+		const auto *created = ::mkdtemp(pattern);
+		if (created == nullptr) {
+			throw std::runtime_error("could not create package inventory test root");
+		}
+		root = created;
+		if (::mkdir((root + "/relations").c_str(), 0700) != 0) {
+			throw std::runtime_error("could not create package inventory test directory");
+		}
+	}
+
+	~TemporaryInventoryTree() noexcept {
+		for (auto iterator = files.rbegin(); iterator != files.rend(); ++iterator) {
+			::unlink((root + "/" + *iterator).c_str());
+		}
+		::rmdir((root + "/relations").c_str());
+		::rmdir(root.c_str());
+	}
+
+	TemporaryInventoryTree(const TemporaryInventoryTree &) = delete;
+	TemporaryInventoryTree &operator=(const TemporaryInventoryTree &) = delete;
+
+	void Write(const std::string &relative, const std::string &bytes) {
+		std::ofstream output((root + "/" + relative).c_str(), std::ios::binary | std::ios::trunc);
+		if (!output) {
+			throw std::runtime_error("could not write package inventory test file");
+		}
+		output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+		output.close();
+		files.push_back(relative);
+	}
+
+	const std::string &Root() const {
+		return root;
+	}
+
+private:
+	std::string root;
+	std::vector<std::string> files;
+};
+
+void CollectPackageFiles(const std::string &root, const std::string &relative, PackageFiles &files) {
 	const auto directory_path = relative.empty() ? root : root + "/" + relative;
 	std::unique_ptr<DIR, int (*)(DIR *)> directory(::opendir(directory_path.c_str()), ::closedir);
 	if (!directory) {
@@ -82,22 +127,24 @@ void CollectMachineFiles(const std::string &root, const std::string &relative, M
 			throw std::runtime_error("GitHub package drift input contains a symbolic link: " + child_relative);
 		}
 		if (S_ISDIR(status.st_mode)) {
-			CollectMachineFiles(root, child_relative, files);
-		} else if (S_ISREG(status.st_mode) && IsMachineFile(name)) {
-			files.emplace(child_relative, ReadBytes(child_path));
+			CollectPackageFiles(root, child_relative, files);
+		} else if (S_ISREG(status.st_mode)) {
+			if (!IsExcludedHumanAsset(child_relative)) {
+				files.emplace(child_relative, ReadBytes(child_path));
+			}
 		} else if (!S_ISREG(status.st_mode)) {
 			throw std::runtime_error("GitHub package drift input contains a special file: " + child_relative);
 		}
 	}
 }
 
-MachineFiles InventoryMachineFiles(const std::string &root) {
-	MachineFiles files;
-	CollectMachineFiles(root, "", files);
+PackageFiles InventoryPackageFiles(const std::string &root) {
+	PackageFiles files;
+	CollectPackageFiles(root, "", files);
 	return files;
 }
 
-std::vector<std::string> MachineFileNames(const MachineFiles &files) {
+std::vector<std::string> PackageFileNames(const PackageFiles &files) {
 	std::vector<std::string> names;
 	for (const auto &entry : files) {
 		names.push_back(entry.first);
@@ -105,35 +152,70 @@ std::vector<std::string> MachineFileNames(const MachineFiles &files) {
 	return names;
 }
 
-void RequireExactGithubMachineMirror(const MachineFiles &product, const MachineFiles &evidence) {
-	Require(MachineFileNames(product) == EXPECTED_GITHUB_MACHINE_FILES,
-	        "permanent GitHub package machine-file inventory drifted");
-	Require(MachineFileNames(evidence) == EXPECTED_GITHUB_MACHINE_FILES,
-	        "RFC 0013 GitHub evidence machine-file inventory drifted");
-	Require(product == evidence,
-	        "permanent GitHub package machine-readable bytes differ from accepted RFC 0013 evidence");
+void RequireMatchingPackageBytes(const PackageFiles &product, const PackageFiles &evidence) {
+	Require(product == evidence, "permanent GitHub package bytes differ from accepted RFC 0013 evidence");
 }
 
-void RequireMirrorFailure(const MachineFiles &product, const MachineFiles &evidence, const std::string &message) {
+void RequireExactGithubPackageMirror(const PackageFiles &product, const PackageFiles &evidence) {
+	Require(PackageFileNames(product) == EXPECTED_GITHUB_PACKAGE_FILES,
+	        "permanent GitHub package file inventory drifted");
+	Require(PackageFileNames(evidence) == EXPECTED_GITHUB_PACKAGE_FILES,
+	        "RFC 0013 GitHub evidence file inventory drifted");
+	RequireMatchingPackageBytes(product, evidence);
+}
+
+void RequireMirrorFailure(const PackageFiles &product, const PackageFiles &evidence, const std::string &message) {
 	try {
-		RequireExactGithubMachineMirror(product, evidence);
+		RequireExactGithubPackageMirror(product, evidence);
 	} catch (const std::runtime_error &) {
 		return;
 	}
 	throw std::runtime_error(message);
 }
 
+void RequireByteMismatchFailure(const PackageFiles &product, const PackageFiles &evidence, const std::string &message) {
+	try {
+		RequireMatchingPackageBytes(product, evidence);
+	} catch (const std::runtime_error &) {
+		return;
+	}
+	throw std::runtime_error(message);
+}
+
+void TestPackageInventoryIncludesAllNestedRegularFiles() {
+	TemporaryInventoryTree package;
+	package.Write("README.md", "root human asset\n");
+	package.Write("relations/unexpected.body", "fixture body\n");
+	package.Write("relations/README.md", "nested package file\n");
+	const auto files = InventoryPackageFiles(package.Root());
+	Require(files.size() == 2 && files.at("relations/unexpected.body") == "fixture body\n" &&
+	            files.at("relations/README.md") == "nested package file\n",
+	        "drift inventory did not include every nested regular file or excluded more than the root README");
+}
+
 void TestPermanentGithubPackageTracksAcceptedEvidence(const std::string &repository_root) {
-	const auto product = InventoryMachineFiles(repository_root + "/connectors/github");
-	const auto evidence = InventoryMachineFiles(repository_root + "/docs/rfcs/evidence/0013/github");
-	RequireExactGithubMachineMirror(product, evidence);
+	TestPackageInventoryIncludesAllNestedRegularFiles();
+	Require(IsExcludedHumanAsset("README.md") && !IsExcludedHumanAsset("fixtures/README.md") &&
+	            !IsExcludedHumanAsset("fixtures/unexpected.body"),
+	        "drift inventory excluded a nested or non-README package file");
+	const auto product = InventoryPackageFiles(repository_root + "/connectors/github");
+	const auto evidence = InventoryPackageFiles(repository_root + "/docs/rfcs/evidence/0013/github");
+	RequireExactGithubPackageMirror(product, evidence);
 
 	auto extra_product = product;
-	extra_product["fixtures/unexpected.json"] = "{}\n";
+	extra_product["fixtures/nested/unexpected.body"] = "product body\n";
 	RequireMirrorFailure(extra_product, evidence, "drift gate accepted an extra permanent-package file");
 	auto extra_evidence = evidence;
-	extra_evidence["relations/unexpected.yaml"] = "kind: relation\n";
+	extra_evidence["fixtures/nested/unexpected.body"] = "evidence body\n";
 	RequireMirrorFailure(product, extra_evidence, "drift gate accepted an extra RFC-evidence file");
+	auto nested_readme = product;
+	nested_readme["fixtures/README.md"] = "nested package file\n";
+	RequireMirrorFailure(nested_readme, evidence, "drift gate excluded a nested README from package custody");
+	auto body_product = product;
+	auto body_evidence = evidence;
+	body_product["fixtures/referenced.body"] = "product body\n";
+	body_evidence["fixtures/referenced.body"] = "evidence body\n";
+	RequireByteMismatchFailure(body_product, body_evidence, "drift gate accepted mismatched non-JSON fixture bytes");
 	auto changed_product = product;
 	changed_product["connector.yaml"] += "\n";
 	RequireMirrorFailure(changed_product, evidence, "drift gate accepted changed semantic package bytes");
