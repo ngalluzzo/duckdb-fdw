@@ -145,4 +145,61 @@ final review, and goal closure.
 
 ## Completion record
 
-Pending delivery evidence.
+In progress as of 2026-07-21. `make build`, `make test`, and `make demo` pass
+against a fresh developer cell after closing two gaps that had accumulated
+across this goal's cumulative diff without being re-verified:
+
+- `release/0.8.0/pins.json`'s source-identity pins (`native_product_sources`,
+  `repository_connector_package`, `controlled_product_sources` digest, and the
+  `build_graph` translation-unit lists) were stale against the new
+  `src/connector/package/package_fixture_*.cpp` files and
+  `connectors/github/fixtures/*.json` files; regenerated from the live tree.
+- The new package-fixture sources were compiled only into a test-linked
+  static library and never reached the shipped public/controlled extension
+  targets, violating `verify-source-identities.py`'s invariant that every
+  native `.cpp` under `src/` ships in both build graphs. An adversarial review
+  then found that 6 of those files are pure candidate/mutation-generation test
+  tooling (creating temp directories, symlinks, and hardlinks to synthesize
+  malformed packages) with no reason to ship inside the public extension
+  binary; they were relocated to `test/cpp/connector/support/` behind a new
+  `duckdb_api_package_fixture_candidate_test_service` target, leaving only the
+  genuine `RunPackageFixtures` production call graph (10 files) in
+  `src/connector/package/`. 13 focused test targets covering this behavior
+  (fixture cancellation/execution/failure/variant cases, REST plan admission,
+  Semantics input-resolution) compiled but were never invoked by `make test`
+  or the release gate; both are now wired to run all 72 focused targets.
+- The RFC 0013 evidence mirror (`docs/rfcs/evidence/0013/github/`) was stale
+  against the delivered package content; resynced (excluding the
+  intentionally distinct `README.md`).
+
+An interaction-exit audit against the responsibility map below (independent
+Explore-agent reads of real source and test dependencies, not the plan docs'
+prose) found most exits genuinely met, with three specific gaps remaining
+before this goal can be marked Complete:
+
+1. **Connector Experience ↔ Relational Semantics** (shared gap). Native/package
+   plan differentials exist only for the GraphQL relation
+   (`test/cpp/semantics/package_graphql_planning_tests.cpp`); the three REST
+   GitHub relations (`authenticated_user`, `authenticated_repositories`,
+   `duckdb_login_search_page`) have no equivalent differential proving
+   package-compiled REST plans match the native ones. The goal's own
+   acceptance evidence requires this parity for all four relations.
+2. **Query Experience ↔ Connector Experience.**
+   `src/query/duckdb/typed_value_adapter.cpp`'s `ValueKindForLogicalType`
+   re-derives a `ValueKind` enum from Connector's `logical_type` string
+   instead of consuming a closed enum Connector already computes
+   (`ScalarTypeFromName` in `src/connector/catalog_model.cpp`), duplicating
+   the same string-to-enum mapping across Connector, Semantics, and Query.
+   This is a `$contract-change`-scoped decision, not a mechanical fix.
+3. **Remote Runtime ↔ Connector Experience.** Runtime's generation owner is
+   opaque throughout the real `Open()`/execution path, but
+   `src/query/package_generation_composition.cpp` downcasts it back to a
+   concrete `CompiledLocalPackage`/`CompiledPackageGeneration` for reload.
+   This is confined to the lead-owned composition root, which may be an
+   accepted exception rather than a defect — not yet confirmed against
+   `docs/ARCHITECTURE.md`.
+
+Engineering Enablement's facilitation exit is reached: all four team's
+focused CMake test suites are independently runnable, no Enablement-owned
+allow-list gates a domain team's additions, source/dependency-drift gates
+fail closed, and `make test`/`make verify` now invoke all 72 focused targets.

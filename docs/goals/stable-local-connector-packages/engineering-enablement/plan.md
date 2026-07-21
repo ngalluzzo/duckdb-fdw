@@ -2,7 +2,14 @@
 
 ## Outcome and authority
 
-Status: **Planned; Facilitation**.
+Status: **Facilitation exit reached as of 2026-07-21.** All four domain
+teams' focused CMake test suites are independently runnable with no
+Enablement-owned allow-list gating a team's additions, and source/dependency
+drift gates fail closed. 13 focused targets (fixture cancellation/execution/
+failure/variant cases, REST plan admission, Semantics input-resolution) had
+compiled but were never invoked by `make test` or the release gate; both now
+run all 72 focused targets (see
+[the goal's Completion record](../stable-local-connector-packages.md)).
 
 Engineering Enablement will make the accepted package, generated SQL, fixture,
 and migration evidence reproducible in the supported build cell, then transfer

@@ -2,8 +2,12 @@
 
 ## Outcome and authority
 
-Status: **Planned; supporting subsystem, provider interaction in
-Collaboration**.
+Status: **In progress as of 2026-07-21; supporting subsystem.** The Connector
+and Remote Runtime interactions are confirmed exited to X-as-a-Service by
+source/test-dependency audit. The Query interaction remains Collaboration:
+the goal's acceptance evidence requires native/package plan differentials for
+all four GitHub relations, but only the GraphQL relation has one (see
+[the goal's Completion record](../stable-local-connector-packages.md)).
 
 Relational Semantics will turn generalized compiled package facts and a typed
 `ScanRequest` into a conservative immutable `ScanPlan` without deriving

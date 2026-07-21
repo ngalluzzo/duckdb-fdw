@@ -2,8 +2,15 @@
 
 ## Outcome and authority
 
-Status: **Planned; supporting platform, provider interaction in
-Collaboration**.
+Status: **In progress as of 2026-07-21; supporting platform.** The Relational
+Semantics and Query interactions are confirmed exited to X-as-a-Service by
+source/test-dependency audit. The Connector interaction is open pending
+confirmation: the generation owner is opaque throughout the real
+`Open()`/execution path, but `src/query/package_generation_composition.cpp`
+downcasts it back to a concrete Connector type for reload. This is confined
+to the lead-owned composition root and may be an accepted exception rather
+than a defect — not yet confirmed against `docs/ARCHITECTURE.md` (see
+[the goal's Completion record](../stable-local-connector-packages.md)).
 
 Remote Runtime will execute package-derived plans through the existing bounded
 stream without admitting by connector ID, relation name, package version, or

@@ -2,8 +2,12 @@
 
 ## Outcome and authority
 
-Status: **Planned; accountable stream, provider interactions in
-Collaboration**.
+Status: **In progress as of 2026-07-21; accountable stream.** Query, Remote
+Runtime, and Engineering Enablement interactions are confirmed exited to
+X-as-a-Service by source/test-dependency audit. The Relational Semantics
+interaction remains Collaboration: native/package plan differentials are
+proven only for the GraphQL relation, not the three REST GitHub relations
+(see [the goal's Completion record](../stable-local-connector-packages.md)).
 
 Connector Experience will turn the complete accepted `duckdb_api/v1` source
 contract into one immutable package generation. An author can load the

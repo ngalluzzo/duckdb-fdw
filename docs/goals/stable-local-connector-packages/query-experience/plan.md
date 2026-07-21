@@ -2,8 +2,15 @@
 
 ## Outcome and authority
 
-Status: **Planned; supporting stream, provider interactions in
-Collaboration**.
+Status: **In progress as of 2026-07-21; supporting stream.** The Relational
+Semantics, Remote Runtime, and Engineering Enablement interactions are
+confirmed exited to X-as-a-Service by source/test-dependency audit. The
+Connector interaction is open:
+`src/query/duckdb/typed_value_adapter.cpp`'s `ValueKindForLogicalType`
+re-derives a type enum from Connector's `logical_type` string instead of
+consuming a closed enum Connector already computes, duplicating the same
+string-to-enum mapping across three layers — a `$contract-change`-scoped
+decision (see [the goal's Completion record](../stable-local-connector-packages.md)).
 
 Query Experience will project an accepted immutable package generation into
 DuckDB exactly as approved by
