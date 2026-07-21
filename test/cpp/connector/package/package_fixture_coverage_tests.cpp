@@ -145,10 +145,30 @@ void TestCoverageIsCompiledFactDriven(const std::string &repository_root) {
 	const auto &graph = operation("regional_event_graph");
 	const auto &rest = operation("regional_event_rest");
 	const auto &fallback = operation("fallback_events");
+	const auto requires_relation_input = [](const duckdb_api::CompiledOperation &candidate, const std::string &id) {
+		return std::find_if(candidate.selector.RequiredInputReferences().begin(),
+		                    candidate.selector.RequiredInputReferences().end(),
+		                    [&](const duckdb_api::CompiledRequiredInputReference &reference) {
+			                    return reference.Kind() == duckdb_api::CompiledRequiredInputKind::RELATION_INPUT &&
+			                           reference.Id() == id;
+		                    }) != candidate.selector.RequiredInputReferences().end();
+	};
 	Require(!graph.fallback && graph.selector.RequiredInputReferences().size() == 2 && !rest.fallback &&
-	            rest.selector.RequiredInputReferences().size() == 2 && fallback.fallback &&
+	            requires_relation_input(graph, "region") && requires_relation_input(graph, "graph_view") &&
+	            rest.selector.RequiredInputReferences().size() == 2 && requires_relation_input(rest, "rest_view") &&
+	            requires_relation_input(rest, "include_cancelled") && fallback.fallback &&
 	            fallback.selector.RequiredInputReferences().empty(),
 	        "controlled package lost its equal-rank unique/tie candidates or unconditional fallback");
+	const auto nullable_rest_binding = [&](const std::string &name) {
+		const auto &query = rest.Rest().request.query_parameters;
+		const auto found =
+		    std::find_if(query.begin(), query.end(),
+		                 [&](const duckdb_api::CompiledQueryParameter &field) { return field.name == name; });
+		return found != query.end() && found->source == duckdb_api::CompiledQueryValueSource::RELATION_INPUT &&
+		       found->source_id == name && found->omit_when_null;
+	};
+	Require(nullable_rest_binding("region") && nullable_rest_binding("audience") && nullable_rest_binding("note"),
+	        "controlled REST operation no longer proves nullable inputs are omitted at the request boundary");
 	Require(relation->PredicateMappings()[0].Accuracy() == duckdb_api::CompiledPredicateAccuracy::EXACT &&
 	            relation->PredicateMappings()[1].Accuracy() == duckdb_api::CompiledPredicateAccuracy::SUPERSET &&
 	            graph.Graphql().document_digest == "ca2060e0db0b535bbf4a2b96050127159fb3e953cd52bd17dd8b2ae955464d28",

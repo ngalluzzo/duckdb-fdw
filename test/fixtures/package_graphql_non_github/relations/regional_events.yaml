@@ -118,7 +118,7 @@ operations:
 
   - id: regional_event_rest
     when:
-      required_inputs: [input.region, input.rest_view]
+      required_inputs: [input.rest_view, input.include_cancelled]
     cardinality: many
     replay_safety: safe
     request:
@@ -153,6 +153,11 @@ operations:
           omit_when_null: true
         - name: audience
           input: audience
+          encoding: form_urlencoded
+          omit_when_unbound: true
+          omit_when_null: true
+        - name: note
+          input: note
           encoding: form_urlencoded
           omit_when_unbound: true
           omit_when_null: true

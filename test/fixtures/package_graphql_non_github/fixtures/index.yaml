@@ -1,6 +1,6 @@
 api_version: duckdb_api/v1
 kind: fixture_index
-package_digest: sha256.54a81efa7af5bf4a47578e95baf9cd7407b9d50e4d24e99059debefaff32fe7c
+package_digest: sha256.3b2b08cd27897e73a22a48733f35a2f7bf69ea833c066943a7960511f09eed13
 
 cases:
   - id: announcements_base
@@ -403,14 +403,15 @@ cases:
     expected:
       runtime_error: {stage: authentication, field: authorization}
 
-  - id: regional_fallback_explicit_null
+  - id: regional_rest_explicit_null
     relation: regional_events
-    operation: fallback_events
+    operation: regional_event_rest
     covers:
       - input_regional_events_region_bound_null_omitted
       - input_regional_events_audience_bound_null_omitted
       - input_regional_events_note_bound_null_omitted
     inputs:
+      - {id: rest_view, value: {kind: value, value: true}}
       - {id: region, value: {kind: null}}
       - {id: audience, value: {kind: null}}
       - {id: note, value: {kind: null}}
@@ -421,10 +422,12 @@ cases:
             protocol: rest
             method: GET
             origin: {scheme: https, host: api.example.com, port: 8443}
-            path: /v1/events
+            path: /v1/regional-events
             query:
               - {name: per_page, encoded_value: "50"}
               - {name: page, encoded_value: "1"}
+              - {name: include_cancelled, encoded_value: "false"}
+              - {name: minimum_attendance, encoded_value: "25"}
             authorization: bearer_capability
           response:
             status: 200
@@ -436,7 +439,7 @@ cases:
       remote_accuracy: unsupported
       rows:
         - {event_id: event-null, active: true, attendance: 30, category: {kind: null}}
-      explain: {protocol: rest, pagination: link_next, operation: fallback_events, auth: bearer_capability}
+      explain: {protocol: rest, pagination: link_next, operation: regional_event_rest, auth: bearer_capability}
 
   - id: active_events_matching
     relation: regional_events
