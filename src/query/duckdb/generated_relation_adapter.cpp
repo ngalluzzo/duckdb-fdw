@@ -181,7 +181,6 @@ void ScanGeneratedRelation(ClientContext &context, TableFunctionInput &input, Da
 
 TableFunction
 BuildGeneratedRelationFunction(const std::shared_ptr<CatalogGenerationCoordinator> &coordinator,
-                               const std::shared_ptr<const PackageCatalogSnapshot> &snapshot,
                                const std::shared_ptr<const duckdb_api::QueryPublishedGeneration> &generation,
                                const duckdb_api::CompiledRegistrationRelation &relation) {
 	const auto &registration = generation->Registration();
@@ -201,7 +200,7 @@ BuildGeneratedRelationFunction(const std::shared_ptr<CatalogGenerationCoordinato
 	function.pushdown_complex_filter = GeneratedRelationPushdown;
 	function.to_string = GeneratedRelationToString;
 	function.function_info = make_shared_ptr<PackageCatalogFunctionInfo>(
-	    coordinator, snapshot, PackageCatalogFunctionKind::GENERATED_RELATION, generation, &relation);
+	    coordinator, nullptr, PackageCatalogFunctionKind::GENERATED_RELATION, generation, &relation);
 	return function;
 }
 

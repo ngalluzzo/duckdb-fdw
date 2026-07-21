@@ -29,6 +29,20 @@ namespace {
 
 const char *const PUBLICATION_STATE_KEY = "duckdb_api_package_publication_state";
 
+class PublicationWaiterCount final {
+public:
+	explicit PublicationWaiterCount(std::atomic<std::uint64_t> &waiting_p) : waiting(waiting_p) {
+		waiting.fetch_add(1, std::memory_order_acq_rel);
+	}
+
+	~PublicationWaiterCount() {
+		waiting.fetch_sub(1, std::memory_order_acq_rel);
+	}
+
+private:
+	std::atomic<std::uint64_t> &waiting;
+};
+
 struct OwnedFunctionExpectation final {
 	std::string name;
 	PackageCatalogFunctionKind kind;
@@ -129,7 +143,8 @@ CatalogEntry *RequireOwned(CatalogSet &set, CatalogTransaction transaction, cons
 	}
 	auto info = dynamic_cast<PackageCatalogFunctionInfo *>(functions[0].function_info.get());
 	const auto snapshot_matches =
-	    info && (expected.kind == PackageCatalogFunctionKind::GENERATED_RELATION || info->snapshot == snapshot);
+	    info && (expected.kind == PackageCatalogFunctionKind::GENERATED_RELATION ? !info->snapshot
+	                                                                             : info->snapshot == snapshot);
 	if (!info || info->coordinator.get() != coordinator || !snapshot_matches || info->kind != expected.kind ||
 	    info->generation != expected.generation || info->relation != expected.relation) {
 		throw CatalogException("[duckdb_api][publication] function %s has an unrelated catalog owner", expected.name);
@@ -182,19 +197,34 @@ void Create(Catalog &catalog, CatalogTransaction transaction, TableFunction func
 }
 
 std::unique_ptr<std::unique_lock<std::timed_mutex>> AcquirePublication(ClientContext &context, std::timed_mutex &mutex,
-                                                                       const std::atomic<bool> &closing) {
+                                                                       const std::atomic<bool> &closing,
+                                                                       std::atomic<std::uint64_t> &waiting) {
+	if (context.IsInterrupted()) {
+		throw InterruptException();
+	}
 	if (closing.load(std::memory_order_acquire)) {
 		throw InvalidInputException("[duckdb_api][publication] package coordinator is closing");
 	}
 	auto guard = std::unique_ptr<std::unique_lock<std::timed_mutex>>(
 	    new std::unique_lock<std::timed_mutex>(mutex, std::defer_lock));
-	while (!guard->try_lock_for(std::chrono::milliseconds(10))) {
+	while (true) {
+		bool acquired;
+		{
+			PublicationWaiterCount waiter_count(waiting);
+			acquired = guard->try_lock_for(std::chrono::milliseconds(10));
+		}
+		if (acquired) {
+			break;
+		}
 		if (context.IsInterrupted()) {
 			throw InterruptException();
 		}
 		if (closing.load(std::memory_order_acquire)) {
 			throw InvalidInputException("[duckdb_api][publication] package coordinator is closing");
 		}
+	}
+	if (context.IsInterrupted()) {
+		throw InterruptException();
 	}
 	if (closing.load(std::memory_order_acquire)) {
 		throw InvalidInputException("[duckdb_api][publication] package coordinator is closing");
@@ -223,7 +253,7 @@ void CatalogGenerationCoordinator::Publish(ClientContext &context,
 	if (!base) {
 		throw InternalException("duckdb_api publication is missing its base catalog snapshot");
 	}
-	auto guard = AcquirePublication(context, publication_mutex, closing);
+	auto guard = AcquirePublication(context, publication_mutex, closing, waiting_publications);
 
 	const auto &candidate = staged.Generation();
 	std::shared_ptr<const PackageCatalogSnapshot> target;
@@ -286,7 +316,7 @@ void CatalogGenerationCoordinator::Publish(ClientContext &context,
 		}
 	}
 	for (const auto &relation : candidate->Registration().Relations()) {
-		Create(catalog, transaction, BuildGeneratedRelationFunction(shared_from_this(), target, candidate, relation));
+		Create(catalog, transaction, BuildGeneratedRelationFunction(shared_from_this(), candidate, relation));
 	}
 
 	for (const auto &expected : old_functions) {
@@ -317,6 +347,10 @@ void CatalogGenerationCoordinator::BeginClose() noexcept {
 
 bool CatalogGenerationCoordinator::IsClosing() const noexcept {
 	return closing.load(std::memory_order_acquire);
+}
+
+std::uint64_t CatalogGenerationCoordinator::WaitingPublications() const noexcept {
+	return waiting_publications.load(std::memory_order_acquire);
 }
 
 } // namespace duckdb_api_query_internal

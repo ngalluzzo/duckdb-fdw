@@ -33,10 +33,10 @@ struct PackageQueryProbe final {
 	std::atomic<std::uint64_t> publication_discards;
 };
 
-// Honest Query consumer double: callers supply complete immutable Connector
-// generations. The service assembles the Query port but never constructs or
-// mutates Connector descriptors, interprets Runtime registry state, or grants
-// publication authority outside the Query coordinator.
+// Honest Query consumer double: executable cases supply complete immutable
+// Connector generations. Registration-only cases deliberately install a
+// planning trap, proving catalog publication and introspection do not cross the
+// planning port. Neither mode constructs or mutates provider descriptors.
 class PackageQueryStagingService final : public duckdb_api::QueryPackageStagingService {
 public:
 	PackageQueryStagingService(duckdb_api::CompiledQueryRegistrationView initial_registration,
@@ -44,6 +44,9 @@ public:
 	                           duckdb_api::CompiledQueryRegistrationView replacement_registration,
 	                           duckdb_api::CompiledConnector replacement_connector, std::string accepted_root,
 	                           std::shared_ptr<PackageQueryProbe> probe);
+	PackageQueryStagingService(duckdb_api::CompiledQueryRegistrationView initial_registration,
+	                           duckdb_api::CompiledQueryRegistrationView replacement_registration,
+	                           std::string accepted_root, std::shared_ptr<PackageQueryProbe> probe);
 
 	duckdb_api::QueryStagedGeneration StageLoad(const std::string &absolute_root,
 	                                            duckdb_api::ExecutionControl &control) const override;
@@ -79,7 +82,8 @@ BuildGithubPackageQueryStaging(const std::string &absolute_repository_root,
                                const std::shared_ptr<PackageQueryProbe> &probe);
 
 std::shared_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator>
-RegisterPackageQuerySurface(duckdb::DuckDB &database, const std::shared_ptr<const PackageQueryStagingService> &staging);
+RegisterPackageQuerySurface(duckdb::DuckDB &database,
+                            const std::shared_ptr<const duckdb_api::QueryPackageStagingService> &staging);
 
 std::string PackageQueryError(duckdb::Connection &connection, const std::string &sql);
 void RequirePackageQuerySuccess(duckdb::Connection &connection, const std::string &sql);

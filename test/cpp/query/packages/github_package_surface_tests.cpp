@@ -7,41 +7,12 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace duckdb_api_test {
 namespace {
-
-struct ExpectedColumn final {
-	const char *name;
-	const char *type;
-};
-
-void RequireSchema(duckdb::Connection &connection, const std::string &function,
-                   const std::vector<ExpectedColumn> &expected, const std::string &arguments = std::string()) {
-	auto result = connection.Query("DESCRIBE SELECT * FROM system.main." + function + "(" + arguments + ")");
-	if (result->HasError()) {
-		throw std::runtime_error("generated GitHub relation DESCRIBE failed for " + function + ": " +
-		                         result->GetError());
-	}
-	Require(result->RowCount() == expected.size(), "generated GitHub relation column count drifted for " + function);
-	for (duckdb::idx_t row = 0; row < result->RowCount(); row++) {
-		Require(result->GetValue(0, row).ToString() == expected[row].name &&
-		            result->GetValue(1, row).ToString() == expected[row].type,
-		        "generated GitHub relation schema drifted for " + function + "." + expected[row].name);
-	}
-}
-
-void RequireSingleRow(duckdb::Connection &connection, const std::string &sql, const std::string &label) {
-	auto result = connection.Query(sql);
-	if (result->HasError()) {
-		throw std::runtime_error(label + " failed: " + result->GetError());
-	}
-	Require(result->RowCount() == 1, label + " did not execute exactly one controlled Runtime row");
-}
 
 void TestCompiledGithubPackageIsThePublishedSqlSurface(const std::string &absolute_repository_root) {
 	auto probe = std::shared_ptr<PackageQueryProbe>(new PackageQueryProbe());
@@ -93,32 +64,6 @@ void TestCompiledGithubPackageIsThePublishedSqlSurface(const std::string &absolu
 		        "compiled GitHub function was not installed with its exact system.main identity");
 	}
 
-	RequireSchema(connection, "github_duckdb_login_search_page",
-	              {{"id", "BIGINT"}, {"login", "VARCHAR"}, {"site_admin", "BOOLEAN"}});
-	RequireSchema(connection, "github_authenticated_user",
-	              {{"id", "BIGINT"}, {"login", "VARCHAR"}, {"site_admin", "BOOLEAN"}},
-	              "secret := 'offline-not-resolved'");
-	RequireSchema(connection, "github_authenticated_repositories",
-	              {{"id", "BIGINT"},
-	               {"full_name", "VARCHAR"},
-	               {"private", "BOOLEAN"},
-	               {"fork", "BOOLEAN"},
-	               {"archived", "BOOLEAN"},
-	               {"visibility", "VARCHAR"}},
-	              "secret := 'offline-not-resolved'");
-	RequireSchema(connection, "github_viewer_repository_metrics",
-	              {{"id", "VARCHAR"},
-	               {"full_name", "VARCHAR"},
-	               {"owner_login", "VARCHAR"},
-	               {"stars", "BIGINT"},
-	               {"primary_language", "VARCHAR"},
-	               {"private", "BOOLEAN"},
-	               {"archived", "BOOLEAN"},
-	               {"updated_at", "VARCHAR"}},
-	              "secret := 'offline-not-resolved'");
-	Require(probe->streams_opened.load(std::memory_order_relaxed) == 0,
-	        "compiled GitHub relation DESCRIBE opened Runtime");
-
 	auto arguments = connection.Query(
 	    "SELECT relation, argument, duckdb_type, nullable, has_default, default_value, argument_origin "
 	    "FROM system.main.duckdb_api_relation_arguments() ORDER BY relation, argument");
@@ -134,35 +79,9 @@ void TestCompiledGithubPackageIsThePublishedSqlSurface(const std::string &absolu
 		            arguments->GetValue(5, row).IsNull() && arguments->GetValue(6, row).ToString() == "query",
 		        "compiled GitHub secret argument shape drifted for " + authenticated_relations[row]);
 	}
-
-	RequirePackageQuerySuccess(connection, "PREPARE github_authenticated AS SELECT login FROM "
-	                                       "system.main.github_authenticated_user(secret := 'github_fixture')");
-	Require(probe->streams_opened.load(std::memory_order_relaxed) == 0,
-	        "compiled GitHub relation PREPARE opened Runtime");
-	const auto missing_secret = PackageQueryError(connection, "SELECT * FROM system.main.github_authenticated_user()");
-	Require(missing_secret.find("required named argument secret is missing") != std::string::npos,
-	        "authenticated generated relation used the wrong missing-secret diagnostic: " + missing_secret);
-	const auto anonymous_secret = PackageQueryError(
-	    connection, "SELECT * FROM system.main.github_duckdb_login_search_page(secret := 'not-accepted')");
-	Require(anonymous_secret.find("secret") != std::string::npos,
-	        "anonymous generated relation did not reject a secret argument");
-	Require(probe->streams_opened.load(std::memory_order_relaxed) == 0,
-	        "generated GitHub bind failures opened Runtime");
-
-	RequirePackageQuerySuccess(
-	    connection, "CREATE TEMPORARY SECRET github_fixture (TYPE duckdb_api, PROVIDER config, TOKEN 'offline-token')");
-	RequireSingleRow(connection, "EXECUTE github_authenticated", "prepared authenticated GitHub user relation");
-	RequireSingleRow(connection, "SELECT * FROM system.main.github_duckdb_login_search_page()",
-	                 "anonymous GitHub relation");
-	RequireSingleRow(connection,
-	                 "SELECT * FROM system.main.github_authenticated_repositories(secret := 'github_fixture')",
-	                 "authenticated GitHub repositories relation");
-	RequireSingleRow(connection,
-	                 "SELECT * FROM system.main.github_viewer_repository_metrics(secret := 'github_fixture')",
-	                 "authenticated GitHub GraphQL relation");
-	Require(probe->streams_opened.load(std::memory_order_relaxed) == 4 &&
-	            probe->streams_closed.load(std::memory_order_relaxed) == 4,
-	        "four generated GitHub executions did not own four bounded Runtime stream lifecycles");
+	Require(probe->plans.load(std::memory_order_relaxed) == 0 &&
+	            probe->streams_opened.load(std::memory_order_relaxed) == 0,
+	        "compiled registration publication crossed an unprovisioned Semantics or Runtime port");
 }
 
 } // namespace

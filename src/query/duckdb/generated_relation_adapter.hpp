@@ -13,7 +13,6 @@ namespace duckdb {
 namespace duckdb_api_query_internal {
 
 class CatalogGenerationCoordinator;
-class PackageCatalogSnapshot;
 
 // Builds one generated relation function from structural registration facts.
 // The function captures the relation descriptor and immutable generation
@@ -21,7 +20,6 @@ class PackageCatalogSnapshot;
 // protocol meaning.
 TableFunction
 BuildGeneratedRelationFunction(const std::shared_ptr<CatalogGenerationCoordinator> &coordinator,
-                               const std::shared_ptr<const PackageCatalogSnapshot> &snapshot,
                                const std::shared_ptr<const duckdb_api::QueryPublishedGeneration> &generation,
                                const duckdb_api::CompiledRegistrationRelation &relation);
 

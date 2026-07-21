@@ -3,6 +3,7 @@
 #include "duckdb_api/query_generation.hpp"
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 
@@ -30,10 +31,14 @@ public:
 	const std::shared_ptr<const duckdb_api::QueryPackageStagingService> &Staging() const noexcept;
 	void BeginClose() noexcept;
 	bool IsClosing() const noexcept;
+	// Internal lifecycle observability used to prove that cancellation and
+	// close wake a genuinely contended publication without timing guesses.
+	std::uint64_t WaitingPublications() const noexcept;
 
 private:
 	std::shared_ptr<const duckdb_api::QueryPackageStagingService> staging;
 	std::timed_mutex publication_mutex;
+	std::atomic<std::uint64_t> waiting_publications {0};
 	std::atomic<bool> closing {false};
 };
 

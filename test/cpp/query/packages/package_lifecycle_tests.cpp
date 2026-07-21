@@ -1,18 +1,72 @@
 #include "query/packages/support/package_query_test_support.hpp"
 
 #include "catalog_generation_coordinator.hpp"
+#include "connector/support/package_generation_test_fixtures.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
 #include "support/require.hpp"
 
 #include <atomic>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace duckdb_api_test {
 namespace {
 
 const char *const FIXTURE_ROOT = "/fixture/package";
+
+class TwoConnectorStagingService final : public duckdb_api::QueryPackageStagingService {
+public:
+	TwoConnectorStagingService(std::string first_root_p, std::shared_ptr<PackageQueryStagingService> first_p,
+	                           std::string second_root_p, std::shared_ptr<PackageQueryStagingService> second_p,
+	                           std::string first_connector_p, std::string second_connector_p)
+	    : first_root(std::move(first_root_p)), first(std::move(first_p)), second_root(std::move(second_root_p)),
+	      second(std::move(second_p)), first_connector(std::move(first_connector_p)),
+	      second_connector(std::move(second_connector_p)) {
+	}
+
+	duckdb_api::QueryStagedGeneration StageLoad(const std::string &absolute_root,
+	                                            duckdb_api::ExecutionControl &control) const override {
+		if (absolute_root == first_root) {
+			return first->StageLoad(absolute_root, control);
+		}
+		if (absolute_root == second_root) {
+			return second->StageLoad(absolute_root, control);
+		}
+		throw std::logic_error("two-connector Query fixture received an unknown package root");
+	}
+
+	duckdb_api::QueryStagedGeneration
+	StageReload(const std::string &connector, const std::shared_ptr<const duckdb_api::QueryPublishedGeneration> &active,
+	            duckdb_api::ExecutionControl &control) const override {
+		if (connector == first_connector) {
+			return first->StageReload(connector, active, control);
+		}
+		if (connector == second_connector) {
+			return second->StageReload(connector, active, control);
+		}
+		throw std::logic_error("two-connector Query fixture received an unknown connector");
+	}
+
+private:
+	const std::string first_root;
+	const std::shared_ptr<PackageQueryStagingService> first;
+	const std::string second_root;
+	const std::shared_ptr<PackageQueryStagingService> second;
+	const std::string first_connector;
+	const std::string second_connector;
+};
+
+std::shared_ptr<PackageQueryStagingService> BuildPackageStaging(duckdb_api::CompiledPackageGeneration initial,
+                                                                duckdb_api::CompiledPackageGeneration replacement,
+                                                                const std::string &root,
+                                                                const std::shared_ptr<PackageQueryProbe> &probe) {
+	return std::shared_ptr<PackageQueryStagingService>(
+	    new PackageQueryStagingService(initial.QueryRegistration(), initial.Connector(),
+	                                   replacement.QueryRegistration(), replacement.Connector(), root, probe));
+}
 
 void TestCloseRejectsPublicationButAllowsPublishedScans() {
 	auto probe = std::shared_ptr<PackageQueryProbe>(new PackageQueryProbe());
@@ -84,12 +138,56 @@ void TestDatabaseLifetimeSentryReleasesCoordinatorAndGeneration() {
 	        "database destruction did not release the opaque Runtime owner exactly once");
 }
 
+void TestGeneratedRelationDoesNotRetainUnrelatedRetiredGeneration() {
+	const std::string first_root = "/fixture/package/first";
+	const std::string second_root = "/fixture/package/second";
+	auto probe = std::shared_ptr<PackageQueryProbe>(new PackageQueryProbe());
+	auto first = BuildPackageStaging(
+	    BuildPackageCompatibilityFixture(PackageCompatibilityFixture::BASELINE, "1.2.3", 'a'),
+	    BuildPackageCompatibilityFixture(PackageCompatibilityFixture::APPEND_RELATION, "1.3.0", 'b'), first_root,
+	    probe);
+	auto second = BuildPackageStaging(
+	    BuildPackageCompatibilityFixture(PackageCompatibilityFixture::CONNECTOR_ID_CHANGED, "2.0.0", 'c'),
+	    BuildPackageCompatibilityFixture(PackageCompatibilityFixture::CONNECTOR_ID_CHANGED, "2.1.0", 'd'), second_root,
+	    probe);
+	auto staging = std::shared_ptr<TwoConnectorStagingService>(new TwoConnectorStagingService(
+	    first_root, first, second_root, second, "fixture_package", "fixture_package_other"));
+	duckdb::DuckDB database(nullptr);
+	(void)RegisterPackageQuerySurface(database, staging);
+	duckdb::Connection connection(database);
+	RequirePackageQuerySuccess(connection,
+	                           "CALL system.main.duckdb_api_load_connector(package_root := '" + first_root + "')");
+	RequirePackageQuerySuccess(connection,
+	                           "CALL system.main.duckdb_api_load_connector(package_root := '" + second_root + "')");
+	auto retired_second = second->LastCandidate();
+	Require(!retired_second.expired(), "second connector generation was not published");
+	RequirePackageQuerySuccess(
+	    connection,
+	    "PREPARE retained_second AS SELECT status FROM system.main.fixture_package_other_distinct_status()");
+
+	first->SetReloadChanged(true);
+	RequirePackageQuerySuccess(connection,
+	                           "CALL system.main.duckdb_api_reload_connector(connector := 'fixture_package')");
+	second->SetReloadChanged(true);
+	RequirePackageQuerySuccess(connection,
+	                           "CALL system.main.duckdb_api_reload_connector(connector := 'fixture_package_other')");
+	Require(!retired_second.expired(), "reload released a generation genuinely owned by a prepared plan");
+	auto retained = connection.Query("EXECUTE retained_second");
+	Require(!retained->HasError() && retained->GetValue(0, 0).ToString() == "old:status",
+	        "prepared plan did not retain the unrelated connector's retired generation");
+	retained.reset();
+	RequirePackageQuerySuccess(connection, "DEALLOCATE retained_second");
+	Require(retired_second.expired(),
+	        "current generated relation retained an unrelated connector generation after genuine owners ended");
+}
+
 } // namespace
 
 void RunPackageLifecycleTests() {
 	TestCloseRejectsPublicationButAllowsPublishedScans();
 	TestFailedPublicationReleasesCandidateOwner();
 	TestDatabaseLifetimeSentryReleasesCoordinatorAndGeneration();
+	TestGeneratedRelationDoesNotRetainUnrelatedRetiredGeneration();
 }
 
 } // namespace duckdb_api_test

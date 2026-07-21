@@ -9,6 +9,7 @@ void RunGithubPackageSurfaceTests(const std::string &absolute_repository_root);
 void RunPackageIntrospectionTests();
 void RunPackageLifecycleTests();
 void RunPackageManagementTests();
+void RunPackagePublicationCancellationTests();
 } // namespace duckdb_api_test
 
 int main(int argc, char **argv) {
@@ -20,6 +21,7 @@ int main(int argc, char **argv) {
 		duckdb_api_test::RunPackageIntrospectionTests();
 		duckdb_api_test::RunGeneratedRelationTests();
 		duckdb_api_test::RunPackageLifecycleTests();
+		duckdb_api_test::RunPackagePublicationCancellationTests();
 		duckdb_api_test::RunGithubPackageSurfaceTests(argv[1]);
 		std::cout << "duckdb api package Query surface tests passed" << std::endl;
 		return 0;

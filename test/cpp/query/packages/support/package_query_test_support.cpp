@@ -45,6 +45,9 @@ public:
 			throw std::logic_error("Query package test planner received the wrong immutable generation");
 		}
 		probe->plans.fetch_add(1, std::memory_order_relaxed);
+		if (!connector) {
+			throw std::logic_error("Query registration-only fixture has no Semantics planning provider");
+		}
 		return duckdb_api::BuildConservativeScanPlan(*connector, request);
 	}
 
@@ -214,6 +217,20 @@ PackageQueryStagingService::PackageQueryStagingService(
 	}
 }
 
+PackageQueryStagingService::PackageQueryStagingService(
+    duckdb_api::CompiledQueryRegistrationView initial_registration_p,
+    duckdb_api::CompiledQueryRegistrationView replacement_registration_p, std::string accepted_root_p,
+    std::shared_ptr<PackageQueryProbe> probe_p)
+    : initial_registration(new duckdb_api::CompiledQueryRegistrationView(std::move(initial_registration_p))),
+      initial_connector(),
+      replacement_registration(new duckdb_api::CompiledQueryRegistrationView(std::move(replacement_registration_p))),
+      replacement_connector(), accepted_root(std::move(accepted_root_p)), probe(std::move(probe_p)),
+      reload_changed(false) {
+	if (accepted_root.empty() || accepted_root[0] != '/' || !probe) {
+		throw std::invalid_argument("Query package test staging requires an absolute root and probe");
+	}
+}
+
 std::shared_ptr<const duckdb_api::QueryPublishedGeneration> PackageQueryStagingService::BuildPublished(
     const std::shared_ptr<const duckdb_api::CompiledQueryRegistrationView> &registration,
     const std::shared_ptr<const duckdb_api::CompiledConnector> &connector, const std::string &marker) const {
@@ -291,18 +308,17 @@ BuildGithubPackageQueryStaging(const std::string &absolute_repository_root,
                                const std::shared_ptr<PackageQueryProbe> &probe) {
 	auto initial = CompileRepositoryGithubRegistrationFixture(absolute_repository_root);
 	auto replacement = CompileRepositoryGithubRegistrationFixture(absolute_repository_root);
-	// The Connector-owned fixture deliberately exposes only registration and
-	// opaque lifetime facts. Query's controlled planning double therefore uses
-	// the matching public native GitHub connector; it does not import compiler
-	// implementation data or construct registration descriptors.
-	return std::shared_ptr<PackageQueryStagingService>(new PackageQueryStagingService(
-	    std::move(initial), duckdb_api::BuildNativeGithubConnector(), std::move(replacement),
-	    duckdb_api::BuildNativeGithubConnector(), absolute_repository_root + "/docs/rfcs/evidence/0013/github", probe));
+	// This Query-owned catalog oracle intentionally has no Semantics provider.
+	// The lead-owned whole-graph target supplies same-generation planning; this
+	// fixture fails if catalog-only assertions cross that unprovisioned port.
+	return std::shared_ptr<PackageQueryStagingService>(
+	    new PackageQueryStagingService(std::move(initial), std::move(replacement),
+	                                   absolute_repository_root + "/docs/rfcs/evidence/0013/github", probe));
 }
 
 std::shared_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator>
 RegisterPackageQuerySurface(duckdb::DuckDB &database,
-                            const std::shared_ptr<const PackageQueryStagingService> &staging) {
+                            const std::shared_ptr<const duckdb_api::QueryPackageStagingService> &staging) {
 	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_package_query_tests");
 	duckdb::RegisterDuckdbApiSecrets(loader);
 	return duckdb::duckdb_api_query_internal::RegisterPackageSurfaceInternal(loader, staging);

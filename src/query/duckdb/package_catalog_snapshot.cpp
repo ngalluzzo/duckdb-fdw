@@ -142,15 +142,15 @@ PackageCatalogFunctionInfo::PackageCatalogFunctionInfo(
     const duckdb_api::CompiledRegistrationRelation *relation_p)
     : coordinator(std::move(coordinator_p)), snapshot(std::move(snapshot_p)), kind(kind_p),
       generation(std::move(generation_p)), relation(relation_p) {
-	if (!coordinator || !snapshot) {
-		throw std::invalid_argument("Query catalog function requires coordinator and snapshot ownership");
+	if (!coordinator) {
+		throw std::invalid_argument("Query catalog function requires coordinator ownership");
 	}
 	if (kind == PackageCatalogFunctionKind::GENERATED_RELATION) {
-		if (!generation || !relation) {
-			throw std::invalid_argument("generated Query relation requires immutable generation metadata");
+		if (snapshot || !generation || !relation) {
+			throw std::invalid_argument("generated Query relation requires only its immutable generation metadata");
 		}
-	} else if (generation || relation) {
-		throw std::invalid_argument("non-relation Query catalog function cannot carry relation metadata");
+	} else if (!snapshot || generation || relation) {
+		throw std::invalid_argument("non-relation Query catalog function requires only snapshot metadata");
 	}
 }
 

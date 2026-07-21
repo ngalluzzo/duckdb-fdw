@@ -47,10 +47,10 @@ enum class PackageCatalogFunctionKind {
 	GENERATED_RELATION,
 };
 
-// Common catalog ownership marker. Publication accepts replacement only when
-// the existing entry has one overload and this exact coordinator/snapshot
-// owner. Per-callback behavior is resolved from the closed kind and structural
-// relation descriptor, never from the SQL name.
+// Common catalog ownership marker. Management and introspection functions own
+// their complete MVCC snapshot. A generated function owns only its own
+// generation and structural relation descriptor, so one connector cannot pin
+// an unrelated connector generation after reload.
 struct PackageCatalogFunctionInfo final : public TableFunctionInfo {
 	PackageCatalogFunctionInfo(std::shared_ptr<CatalogGenerationCoordinator> coordinator,
 	                           std::shared_ptr<const PackageCatalogSnapshot> snapshot, PackageCatalogFunctionKind kind,
