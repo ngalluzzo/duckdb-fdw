@@ -6,11 +6,13 @@ Status: **Planned; supporting subsystem, provider interaction in
 Collaboration**.
 
 Relational Semantics will turn generalized compiled package facts and a typed
-`ScanRequest` into the same conservative immutable `ScanPlan` regardless of
-whether metadata came from the native catalog or `duckdb_api/v1`. The team
-alone owns input resolution, default application, operation eligibility and
-selection, predicate proof use, projection closure, budget intersection, and
-residual ownership.
+`ScanRequest` into a conservative immutable `ScanPlan` without deriving
+package behavior from provenance or product names. During the accepted `0.8.0`
+migration release, the native catalog retains its bounded compatibility
+profiles and their distinct plan identities; package plans receive authority
+only from the generalized v1 facts. The team alone owns input resolution,
+default application, operation eligibility and selection, predicate proof use,
+projection closure, budget intersection, and residual ownership.
 
 It does not parse package source, derive meaning from generated SQL names,
 bind DuckDB arguments, construct requests, resolve credentials, or execute a
@@ -31,8 +33,10 @@ sources do not enter the v1 API.
 
 The closed plan copies every Runtime-authoritative fact into immutable typed
 values. Connector identity, relation name, package version, source location,
-and explanation text are never execution-profile shortcuts. Native metadata
-and package generations travel through one semantic model and one law suite.
+and explanation text are never package execution-profile shortcuts. Native
+metadata and package generations travel through one semantic model and one law
+suite, while the native REST and GraphQL compatibility discriminators remain
+closed migration profiles rather than authorities available to package code.
 
 Responsibilities remain separated between typed input resolution, operation
 selection, predicate implication/classification, conservative projection and
@@ -56,9 +60,11 @@ The deterministic law matrix proves:
 - projection closure, full local ownership of unproved filtering, ordering,
   limit and offset, cardinality preservation, checked resource intersections,
   and conservative behavior for missing DuckDB structure; and
-- structural equality of native and package plans for all four GitHub
-  relations plus a controlled package that exercises every input and selector
-  state.
+- executable-request, relational-decision, result, and failure parity between
+  the four native and package GitHub relations, with only the documented
+  source explanation, base-domain/document identity, and package-owned
+  generator-recipe differences; plus a controlled package that exercises
+  every input and selector state.
 
 Focused Semantics fixtures expose only immutable valid plans and explicit
 invalid executable-boundary cases. Consumers link the fixture service; they do
@@ -67,9 +73,12 @@ not import private plan builders or compile Semantics sources directly.
 ## Dependencies and interaction exits
 
 - **Connector Experience — Collaboration to X-as-a-Service.** Exit when
-  Semantics consumes generalized compiled facts through one public service and
-  no longer branches on native origin, connector ID, package version, raw type
-  or extractor spelling, or a fixed GraphQL identity.
+  Semantics consumes generalized compiled package facts through one public
+  service and package planning does not branch on connector ID, package
+  version, source provenance, raw type or extractor spelling, or a fixed
+  provider identity. The finite native `0.8.0` REST and GraphQL compatibility
+  profiles authorized by RFC 0012 and the architecture remain explicit and
+  cannot be selected or widened by package metadata.
 - **Query Experience — X-as-a-Service.** Query supplies only the complete
   typed request and consumes only the final plan or structured planning error.
   Exit when generated and dispatcher plans are equivalent without SQL-name

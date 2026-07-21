@@ -110,6 +110,29 @@ enum class RepositoryGithubGraphqlBoundary {
 	COUNT
 };
 
+// Closed Connector-owned counterexamples for Semantics' independent recipe
+// copier. The provider performs all friend-only construction; consumers see
+// only immutable compiled values and cannot mutate Connector internals.
+enum class RepositoryGithubGraphqlRecipeFixture {
+	EXACT_LITERAL_DEPTH,
+	EXCESSIVE_LITERAL_DEPTH,
+	EXACT_LIST_ITEMS,
+	EXCESSIVE_LIST_ITEMS,
+	MINIMUM_SIGNED_INTEGER,
+	MAXIMUM_SIGNED_INTEGER,
+	BELOW_MINIMUM_SIGNED_INTEGER,
+	ABOVE_MAXIMUM_SIGNED_INTEGER,
+	COUNT
+};
+
+enum class GraphqlLiteralNodeBudgetFixture { EXACT, EXCESSIVE, COUNT };
+
+duckdb_api::CompiledGraphqlQueryRecipe
+CompileRepositoryGithubGraphqlRecipeFixture(const std::string &absolute_repository_root,
+                                            RepositoryGithubGraphqlRecipeFixture fixture);
+
+duckdb_api::CompiledGraphqlLiteral BuildGraphqlLiteralNodeBudgetFixture(GraphqlLiteralNodeBudgetFixture fixture);
+
 // Starts from a real compiler-produced repository generation, then confines
 // one named post-validation mutation to Connector's non-installable fixture
 // boundary. Semantics receives only the public immutable catalog facade and

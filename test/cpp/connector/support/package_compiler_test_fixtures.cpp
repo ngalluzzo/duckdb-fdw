@@ -325,4 +325,56 @@ duckdb_api::CompiledConnector CompileRepositoryGithubGraphqlBoundary(const std::
 	    std::move(connector), "viewer_repository_metrics", "github_viewer_repository_metrics", std::move(graphql));
 }
 
+duckdb_api::CompiledGraphqlQueryRecipe
+CompileRepositoryGithubGraphqlRecipeFixture(const std::string &absolute_repository_root,
+                                            RepositoryGithubGraphqlRecipeFixture fixture) {
+	const auto generation = CompileRepositoryGithubGenerationFixture(absolute_repository_root);
+	const auto *relation = generation.Connector().FindRelation("viewer_repository_metrics");
+	if (relation == nullptr || relation->Operations().size() != 1) {
+		throw std::runtime_error("repository GitHub GraphQL recipe fixture lost its exact relation");
+	}
+	const auto &recipe = relation->Operations()[0].Graphql().QueryRecipe();
+	switch (fixture) {
+	case RepositoryGithubGraphqlRecipeFixture::EXACT_LITERAL_DEPTH:
+		return ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
+		    recipe, ConnectorCatalogTestAccess::NestedGraphqlList(31));
+	case RepositoryGithubGraphqlRecipeFixture::EXCESSIVE_LITERAL_DEPTH:
+		return ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
+		    recipe, ConnectorCatalogTestAccess::NestedGraphqlList(32));
+	case RepositoryGithubGraphqlRecipeFixture::EXACT_LIST_ITEMS:
+		return ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
+		    recipe, ConnectorCatalogTestAccess::FlatGraphqlNullList(4096));
+	case RepositoryGithubGraphqlRecipeFixture::EXCESSIVE_LIST_ITEMS:
+		return ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
+		    recipe, ConnectorCatalogTestAccess::FlatGraphqlNullList(4097));
+	case RepositoryGithubGraphqlRecipeFixture::MINIMUM_SIGNED_INTEGER:
+		return ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
+		    recipe, ConnectorCatalogTestAccess::RawGraphqlInteger("-9223372036854775808"));
+	case RepositoryGithubGraphqlRecipeFixture::MAXIMUM_SIGNED_INTEGER:
+		return ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
+		    recipe, ConnectorCatalogTestAccess::RawGraphqlInteger("9223372036854775807"));
+	case RepositoryGithubGraphqlRecipeFixture::BELOW_MINIMUM_SIGNED_INTEGER:
+		return ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
+		    recipe, ConnectorCatalogTestAccess::RawGraphqlInteger("-9223372036854775809"));
+	case RepositoryGithubGraphqlRecipeFixture::ABOVE_MAXIMUM_SIGNED_INTEGER:
+		return ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
+		    recipe, ConnectorCatalogTestAccess::RawGraphqlInteger("9223372036854775808"));
+	case RepositoryGithubGraphqlRecipeFixture::COUNT:
+		break;
+	}
+	throw std::invalid_argument("unknown repository GitHub GraphQL recipe fixture");
+}
+
+duckdb_api::CompiledGraphqlLiteral BuildGraphqlLiteralNodeBudgetFixture(GraphqlLiteralNodeBudgetFixture fixture) {
+	switch (fixture) {
+	case GraphqlLiteralNodeBudgetFixture::EXACT:
+		return ConnectorCatalogTestAccess::GraphqlLiteralNodeTree(100000);
+	case GraphqlLiteralNodeBudgetFixture::EXCESSIVE:
+		return ConnectorCatalogTestAccess::GraphqlLiteralNodeTree(100001);
+	case GraphqlLiteralNodeBudgetFixture::COUNT:
+		break;
+	}
+	throw std::invalid_argument("unknown GraphQL literal node budget fixture");
+}
+
 } // namespace duckdb_api_test

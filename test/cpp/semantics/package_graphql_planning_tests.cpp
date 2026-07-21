@@ -1,6 +1,5 @@
 #include "semantics/support/graphql_semantics_test_cases.hpp"
 
-#include "connector/support/catalog_test_access.hpp"
 #include "connector/support/package_compiler_test_fixtures.hpp"
 #include "duckdb_api/package_bound_scan_planner.hpp"
 #include "duckdb_api/scan_planner.hpp"
@@ -78,43 +77,45 @@ void TestRecipeCopyAndRenderBudgets(const std::string &absolute_repository_root)
 	        "recipe renderer rejected its exact byte budget");
 	RequireRecipeRejected(recipe, baseline.rendered_document.size() - 1, "a one-byte-short rendered budget");
 
-	const auto exact_depth = ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
-	    recipe, ConnectorCatalogTestAccess::NestedGraphqlList(31));
+	const auto exact_depth = CompileRepositoryGithubGraphqlRecipeFixture(
+	    absolute_repository_root, RepositoryGithubGraphqlRecipeFixture::EXACT_LITERAL_DEPTH);
 	(void)duckdb_api::scan_planner_internal::GraphqlGeneratorRecipePlanner::Plan(exact_depth, 65536);
-	const auto excessive_depth = ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
-	    recipe, ConnectorCatalogTestAccess::NestedGraphqlList(32));
+	const auto excessive_depth = CompileRepositoryGithubGraphqlRecipeFixture(
+	    absolute_repository_root, RepositoryGithubGraphqlRecipeFixture::EXCESSIVE_LITERAL_DEPTH);
 	RequireRecipeRejected(excessive_depth, 65536, "a literal one level beyond the depth budget");
 
-	const auto exact_list = ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
-	    recipe, ConnectorCatalogTestAccess::FlatGraphqlNullList(4096));
+	const auto exact_list = CompileRepositoryGithubGraphqlRecipeFixture(
+	    absolute_repository_root, RepositoryGithubGraphqlRecipeFixture::EXACT_LIST_ITEMS);
 	(void)duckdb_api::scan_planner_internal::GraphqlGeneratorRecipePlanner::Plan(exact_list, 65536);
-	const auto excessive_list = ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
-	    recipe, ConnectorCatalogTestAccess::FlatGraphqlNullList(4097));
+	const auto excessive_list = CompileRepositoryGithubGraphqlRecipeFixture(
+	    absolute_repository_root, RepositoryGithubGraphqlRecipeFixture::EXCESSIVE_LIST_ITEMS);
 	RequireRecipeRejected(excessive_list, 65536, "a literal one node beyond the list allocation budget");
 
-	const auto exact_nodes = ConnectorCatalogTestAccess::GraphqlLiteralNodeTree(100000);
+	const auto exact_nodes = BuildGraphqlLiteralNodeBudgetFixture(GraphqlLiteralNodeBudgetFixture::EXACT);
 	Require(GraphqlGeneratorRecipePlannerTestAccess::CopyLiteralNodeCount(exact_nodes) == 100000,
 	        "recipe literal copier rejected its exact node budget");
 	bool excessive_nodes_rejected = false;
 	try {
-		const auto excessive_nodes = ConnectorCatalogTestAccess::GraphqlLiteralNodeTree(100001);
+		const auto excessive_nodes = BuildGraphqlLiteralNodeBudgetFixture(GraphqlLiteralNodeBudgetFixture::EXCESSIVE);
 		(void)GraphqlGeneratorRecipePlannerTestAccess::CopyLiteralNodeCount(excessive_nodes);
 	} catch (const std::logic_error &) {
 		excessive_nodes_rejected = true;
 	}
 	Require(excessive_nodes_rejected, "recipe literal copier accepted one node beyond its budget");
 
-	const char *accepted_integers[] = {"9223372036854775807", "-9223372036854775808"};
-	for (const auto *integer : accepted_integers) {
-		const auto accepted = ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
-		    recipe, ConnectorCatalogTestAccess::RawGraphqlInteger(integer));
+	const RepositoryGithubGraphqlRecipeFixture accepted_integers[] = {
+	    RepositoryGithubGraphqlRecipeFixture::MINIMUM_SIGNED_INTEGER,
+	    RepositoryGithubGraphqlRecipeFixture::MAXIMUM_SIGNED_INTEGER};
+	for (const auto fixture : accepted_integers) {
+		const auto accepted = CompileRepositoryGithubGraphqlRecipeFixture(absolute_repository_root, fixture);
 		(void)duckdb_api::scan_planner_internal::GraphqlGeneratorRecipePlanner::Plan(accepted, 65536);
 	}
-	const char *rejected_integers[] = {"9223372036854775808", "-9223372036854775809"};
-	for (const auto *integer : rejected_integers) {
-		const auto rejected = ConnectorCatalogTestAccess::WithFirstGraphqlFixedArgument(
-		    recipe, ConnectorCatalogTestAccess::RawGraphqlInteger(integer));
-		RequireRecipeRejected(rejected, 65536, std::string("signed 64-bit overflow ") + integer);
+	const RepositoryGithubGraphqlRecipeFixture rejected_integers[] = {
+	    RepositoryGithubGraphqlRecipeFixture::BELOW_MINIMUM_SIGNED_INTEGER,
+	    RepositoryGithubGraphqlRecipeFixture::ABOVE_MAXIMUM_SIGNED_INTEGER};
+	for (const auto fixture : rejected_integers) {
+		const auto rejected = CompileRepositoryGithubGraphqlRecipeFixture(absolute_repository_root, fixture);
+		RequireRecipeRejected(rejected, 65536, "signed 64-bit overflow");
 	}
 }
 
