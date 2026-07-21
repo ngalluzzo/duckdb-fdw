@@ -17,6 +17,8 @@ set(RELATIONAL_PLAN_TEST_SERVICE_SOURCES
     test/cpp/semantics/support/scan_plan_resource_test_fixtures.cpp
     test/cpp/semantics/support/scan_plan_repository_test_fixtures.cpp
     test/cpp/semantics/support/scan_plan_fixture_consumer_probe.cpp)
+set(RELATIONAL_PROTOCOL_REPLACEMENT_TEST_SERVICE_SOURCES
+    test/cpp/semantics/support/protocol_operation_replacement_test_access.cpp)
 set(RELATIONAL_PLAN_PAGINATION_TEST_SERVICE_SOURCES
     test/cpp/semantics/support/scan_plan_pagination_test_fixtures.cpp)
 set(RELATIONAL_MATERIALIZED_PLAN_TEST_SERVICE_SOURCES

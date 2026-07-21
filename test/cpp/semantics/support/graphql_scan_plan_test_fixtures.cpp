@@ -10,11 +10,6 @@ duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixtureImpl(const std::string &exa
                                                           GraphqlLocalResidualProfile profile);
 duckdb_api::ScanPlan BuildValidAnonymousGraphqlScanPlanFixtureImpl();
 
-void ScanPlanTestAccess::ReplaceGraphql(duckdb_api::ScanPlan &plan, duckdb_api::PlannedGraphqlOperation operation) {
-	plan.operation = std::make_shared<const duckdb_api::PlannedProtocolOperation>(
-	    duckdb_api::PlannedProtocolOperation::FromGraphql(std::move(operation)));
-}
-
 duckdb_api::ScanPlan ScanPlanTestAccess::DistinctGraphqlProvenance(duckdb_api::ScanPlan plan) {
 	plan.connector_name = "package_graphql_fixture";
 	plan.connector_version = "1.2.3";

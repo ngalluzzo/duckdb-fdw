@@ -5,11 +5,6 @@
 
 namespace duckdb_api_test {
 
-void ScanPlanTestAccess::ReplaceRest(duckdb_api::ScanPlan &plan, duckdb_api::PlannedRestOperation operation) {
-	plan.operation = std::make_shared<const duckdb_api::PlannedProtocolOperation>(
-	    duckdb_api::PlannedProtocolOperation::FromRest(std::move(operation)));
-}
-
 duckdb_api::ScanPlan ScanPlanTestAccess::Operation(duckdb_api::ScanPlan plan,
                                                    OperationPlanCounterexample counterexample) {
 	switch (counterexample) {

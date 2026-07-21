@@ -1,3 +1,18 @@
+# Closed fixture mutation shared by the broad and package-specific providers.
+# Consumers cannot call this friend-only service; they receive only the safe
+# factories exposed by those providers.
+add_library(
+  duckdb_api_semantics_protocol_replacement_fixture_service STATIC
+  ${RELATIONAL_PROTOCOL_REPLACEMENT_TEST_SERVICE_SOURCES})
+configure_duckdb_api_cpp_target(
+  duckdb_api_semantics_protocol_replacement_fixture_service)
+target_include_directories(
+  duckdb_api_semantics_protocol_replacement_fixture_service
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_semantics_protocol_replacement_fixture_service
+  PRIVATE duckdb_api_scan_plan_service)
+
 # Real planner-produced positive plans live in a separate provider so the
 # value-only Runtime fixture service below retains no Connector or Query
 # dependency. Runtime consumers link this bounded Semantics API, never
@@ -28,7 +43,8 @@ target_link_libraries(
   duckdb_api_semantics_package_graphql_fixture_service
   PRIVATE duckdb_api_package_compiler_fixture_service
           duckdb_api_package_bound_planning_service
-          duckdb_api_content_digest_service)
+          duckdb_api_content_digest_service
+          duckdb_api_semantics_protocol_replacement_fixture_service)
 
 # Link-only Runtime-facing topology oracle. Its source includes only the
 # bounded Semantics fixture header and the immutable plan contract.
@@ -70,7 +86,8 @@ target_include_directories(
   PUBLIC test/cpp)
 target_link_libraries(
   duckdb_api_semantics_fixture_service
-  PUBLIC duckdb_api_scan_plan_service)
+  PUBLIC duckdb_api_scan_plan_service
+  PRIVATE duckdb_api_semantics_protocol_replacement_fixture_service)
 
 add_executable(
   duckdb_api_scan_planner_tests
