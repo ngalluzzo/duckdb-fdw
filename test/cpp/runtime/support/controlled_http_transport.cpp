@@ -1,5 +1,7 @@
 #include "runtime/support/controlled_http_transport.hpp"
 
+#include "runtime/support/package_fixture_checkpoint.hpp"
+
 #include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 #include "duckdb_api/internal/runtime/transport/http_transport.hpp"
 
@@ -198,6 +200,7 @@ private:
 			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                                 "HTTP response metadata exceeded its memory budget");
 		}
+		NotifyRuntimeFixtureResponseReady(control);
 		return {status,
 		        header_bytes,
 		        static_cast<uint64_t>(body.size()),

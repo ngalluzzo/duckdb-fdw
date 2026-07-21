@@ -15,6 +15,41 @@ namespace duckdb_api_test {
 // credential bytes, an authenticator, a placement, or destination authority.
 enum class RuntimeFixtureAuthorizationState { ANONYMOUS, BEARER_PRESENT, BEARER_MISSING };
 
+// Closed Runtime-owned checkpoints used by the project fixture provider. The
+// caller selects lifecycle evidence, never a poll count, callback, thread, or
+// transport behavior. NONE preserves ordinary transcript execution.
+enum class RuntimeFixtureCancellationPoint { NONE, BEFORE_REQUEST, TRANSPORT, DECODE, PAGE_BOUNDARY, STREAM_CLOSE };
+
+// Closed Runtime failure families. The service validates that the production
+// executor reached the selected boundary while preserving the executor's exact
+// stable stage and field in RuntimeFixtureExecutionObservation. Runtime never
+// receives an expected diagnostic string or a connector coverage key.
+enum class RuntimeFixtureFailureExpectation {
+	NONE,
+	TRANSPORT,
+	DECODE,
+	GRAPHQL_APPLICATION_ERRORS,
+	GRAPHQL_RESPONSE_ROLE,
+	PAGINATION,
+	RESOURCE
+};
+
+class RuntimeFixtureScenario {
+public:
+	static RuntimeFixtureScenario Standard();
+	static RuntimeFixtureScenario CancelAt(RuntimeFixtureCancellationPoint point);
+	static RuntimeFixtureScenario Expect(RuntimeFixtureFailureExpectation failure);
+
+	RuntimeFixtureCancellationPoint Cancellation() const noexcept;
+	RuntimeFixtureFailureExpectation Failure() const noexcept;
+
+private:
+	RuntimeFixtureScenario(RuntimeFixtureCancellationPoint cancellation, RuntimeFixtureFailureExpectation failure);
+
+	RuntimeFixtureCancellationPoint cancellation;
+	RuntimeFixtureFailureExpectation failure;
+};
+
 struct RuntimeFixtureResponseHeader {
 	std::string name;
 	std::string value;
@@ -65,6 +100,14 @@ struct RuntimeFixtureExecutionObservation {
 	std::vector<RuntimeFixtureRequestObservation> requests;
 	bool transport_observed;
 	uint64_t request_count;
+	// Lifecycle evidence is populated by ExecuteScenario. Cancellation is a
+	// terminal outcome rather than a partial success; rows are always empty.
+	bool cancellation_observed;
+	RuntimeFixtureCancellationPoint cancellation_point;
+	bool checkpoint_reached;
+	bool stream_cancel_invoked;
+	bool stream_close_invoked;
+	bool post_close_exhaustion_observed;
 };
 
 // Runtime-owned, test-only adapter for Connector's offline fixture
@@ -82,6 +125,15 @@ public:
 	RuntimeFixtureExecutionObservation Execute(const duckdb_api::ScanPlan &plan,
 	                                           const RuntimeFixtureTranscript &transcript,
 	                                           duckdb_api::ExecutionControl &control) const;
+
+	// Runs one closed Runtime-owned variant and captures cancellation as
+	// structured evidence. The scenario may select exactly one cancellation
+	// checkpoint or one failure family. It cannot program arbitrary hooks, and
+	// every call owns a fresh executor, transport, control, and stream.
+	RuntimeFixtureExecutionObservation ExecuteScenario(const duckdb_api::ScanPlan &plan,
+	                                                   const RuntimeFixtureTranscript &transcript,
+	                                                   RuntimeFixtureScenario scenario,
+	                                                   duckdb_api::ExecutionControl &control) const;
 };
 
 } // namespace duckdb_api_test

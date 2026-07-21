@@ -138,7 +138,8 @@ target_include_directories(duckdb_api_graphql_cursor_pagination_tests PRIVATE te
 # this target or receives its include surface.
 add_library(
   duckdb_api_runtime_programmable_test_service STATIC
-  test/cpp/runtime/support/controlled_http_transport.cpp)
+  test/cpp/runtime/support/controlled_http_transport.cpp
+  test/cpp/runtime/support/package_fixture_checkpoint.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_runtime_programmable_test_service)
 target_include_directories(
   duckdb_api_runtime_programmable_test_service
@@ -177,6 +178,34 @@ target_include_directories(
   PRIVATE test/cpp)
 target_link_libraries(
   duckdb_api_package_fixture_execution_tests
+  PRIVATE duckdb_api_runtime_package_fixture_service
+          duckdb_api_semantics_fixture_service
+          Threads::Threads)
+
+add_executable(
+  duckdb_api_package_fixture_cancellation_tests
+  test/cpp/runtime/execution/package_fixture_cancellation_tests.cpp)
+configure_duckdb_api_cpp_target(
+  duckdb_api_package_fixture_cancellation_tests)
+target_include_directories(
+  duckdb_api_package_fixture_cancellation_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_package_fixture_cancellation_tests
+  PRIVATE duckdb_api_runtime_package_fixture_service
+          duckdb_api_semantics_fixture_service
+          Threads::Threads)
+
+add_executable(
+  duckdb_api_package_fixture_failure_tests
+  test/cpp/runtime/execution/package_fixture_failure_tests.cpp)
+configure_duckdb_api_cpp_target(
+  duckdb_api_package_fixture_failure_tests)
+target_include_directories(
+  duckdb_api_package_fixture_failure_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_package_fixture_failure_tests
   PRIVATE duckdb_api_runtime_package_fixture_service
           duckdb_api_semantics_fixture_service
           Threads::Threads)
