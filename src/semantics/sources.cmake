@@ -3,10 +3,13 @@
 set(RELATIONAL_PREDICATE_SOURCES
     src/semantics/relational_predicate.cpp)
 set(RELATIONAL_PLAN_VALUE_SOURCES
+    src/semantics/planned_graphql_generator_recipe.cpp
     src/semantics/planned_protocol_operation.cpp
     src/semantics/scan_plan.cpp
     src/semantics/scan_plan_explain.cpp)
 set(RELATIONAL_PLANNER_SOURCES
+    src/semantics/graphql_generator_recipe_planner.cpp
+    src/semantics/package_operation_contract.cpp
     src/semantics/graphql_operation_planner.cpp
     src/semantics/input_resolution.cpp
     src/semantics/operation_selection.cpp

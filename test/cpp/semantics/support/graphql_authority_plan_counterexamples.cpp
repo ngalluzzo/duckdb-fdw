@@ -101,6 +101,9 @@ bool ScanPlanTestAccess::MutateGraphqlRelationalOrAuthority(duckdb_api::ScanPlan
 	case GraphqlRuntimeAdmissionCounterexample::OTHER_NETWORK_HOST:
 		plan.network.allowed_hosts.at(0) = "other.example";
 		return true;
+	case GraphqlRuntimeAdmissionCounterexample::OTHER_NETWORK_PORT:
+		plan.network.port++;
+		return true;
 	case GraphqlRuntimeAdmissionCounterexample::EXTRA_NETWORK_SCHEME:
 		plan.network.allowed_schemes.push_back("http");
 		return true;

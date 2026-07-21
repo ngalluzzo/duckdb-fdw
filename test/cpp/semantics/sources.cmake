@@ -22,6 +22,8 @@ set(RELATIONAL_PLAN_PAGINATION_TEST_SERVICE_SOURCES
 set(RELATIONAL_MATERIALIZED_PLAN_TEST_SERVICE_SOURCES
     test/cpp/semantics/support/permanent_rest_scan_plan_test_fixtures.cpp
     test/cpp/semantics/support/runtime_rest_predicate_plan_test_fixtures.cpp)
+set(RELATIONAL_PACKAGE_GRAPHQL_PLAN_TEST_SERVICE_SOURCES
+    test/cpp/semantics/support/repository_graphql_scan_plan_test_fixtures.cpp)
 set(RELATIONAL_PREDICATE_PLANNER_TEST_SOURCES
     test/cpp/semantics/input_resolution_law_tests.cpp
     test/cpp/semantics/operation_selection_law_tests.cpp
@@ -49,4 +51,5 @@ set(GRAPHQL_SEMANTICS_TEST_SOURCES
     test/cpp/semantics/graphql_base_domain_tests.cpp
     test/cpp/semantics/graphql_cursor_resource_plan_tests.cpp
     test/cpp/semantics/graphql_nullability_plan_tests.cpp
-    test/cpp/semantics/graphql_plan_fixture_tests.cpp)
+    test/cpp/semantics/graphql_plan_fixture_tests.cpp
+    test/cpp/semantics/package_graphql_planning_tests.cpp)

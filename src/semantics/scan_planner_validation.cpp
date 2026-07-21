@@ -3,6 +3,7 @@
 #include "graphql_operation_planner.hpp"
 #include "input_resolution.hpp"
 #include "operation_selection.hpp"
+#include "package_operation_contract.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -31,8 +32,13 @@ bool Contains(const std::vector<std::string> &values, const std::string &expecte
 	return std::find(values.begin(), values.end(), expected) != values.end();
 }
 
-bool OriginsEqual(const CompiledRestOrigin &left, const CompiledRestOrigin &right) {
+bool OriginsEqual(const CompiledHttpOrigin &left, const CompiledHttpOrigin &right) {
 	return left.scheme == right.scheme && left.host.Value() == right.host.Value() && left.port == right.port;
+}
+
+bool FitsPageSequence(std::uint64_t page, std::uint64_t scan, std::uint64_t max_pages) {
+	return page > 0 && scan >= page && max_pages > 0 && page <= std::numeric_limits<std::uint64_t>::max() / max_pages &&
+	       scan <= page * max_pages;
 }
 
 bool FitsBigintPageSequence(std::uint64_t first_page, std::uint64_t page_increment, std::uint64_t max_pages_per_scan) {
@@ -160,24 +166,14 @@ void ValidatePagination(const CompiledOperation &operation, const CompiledResour
 	}
 	if (!ceilings.HasResponseByteNarrowing() || ceilings.MaxResponseBytesPerPage() == 0 ||
 	    ceilings.MaxResponseBytesPerScan() < ceilings.MaxResponseBytesPerPage() ||
-	    ceilings.MaxResponseBytesPerPage() > network_policy.max_response_bytes ||
-	    ceilings.MaxResponseBytesPerPage() > PAGINATION_MAX_RESPONSE_BYTES_PER_PAGE ||
-	    ceilings.MaxResponseBytesPerScan() > PAGINATION_MAX_RESPONSE_BYTES_PER_SCAN ||
-	    ceilings.MaxRecordsPerPage() == 0 || ceilings.MaxRecordsPerScan() < ceilings.MaxRecordsPerPage() ||
-	    pagination.PageSize() > ceilings.MaxRecordsPerPage() ||
-	    ceilings.MaxRecordsPerPage() > PAGINATION_MAX_DECODED_RECORDS_PER_PAGE ||
-	    ceilings.MaxRecordsPerScan() > PAGINATION_MAX_DECODED_RECORDS_PER_SCAN ||
-	    ceilings.MaxExtractedStringBytes() == 0 ||
-	    ceilings.MaxExtractedStringBytes() > PAGINATION_MAX_EXTRACTED_STRING_BYTES) {
+	    ceilings.MaxResponseBytesPerPage() > network_policy.max_response_bytes || ceilings.MaxRecordsPerPage() == 0 ||
+	    ceilings.MaxRecordsPerScan() < ceilings.MaxRecordsPerPage() ||
+	    pagination.PageSize() > ceilings.MaxRecordsPerPage() || ceilings.MaxExtractedStringBytes() == 0) {
 		throw std::logic_error("selected pagination contains an invalid page or scan resource envelope");
 	}
 	const auto max_pages = pagination.MaxPagesPerScan();
-	if (ceilings.MaxResponseBytesPerScan() > BoundedProduct(ceilings.MaxResponseBytesPerPage(), max_pages,
-	                                                        PAGINATION_MAX_RESPONSE_BYTES_PER_SCAN,
-	                                                        "response-byte scope") ||
-	    ceilings.MaxRecordsPerScan() > BoundedProduct(ceilings.MaxRecordsPerPage(), max_pages,
-	                                                  PAGINATION_MAX_DECODED_RECORDS_PER_SCAN,
-	                                                  "decoded-record scope")) {
+	if (!FitsPageSequence(ceilings.MaxResponseBytesPerPage(), ceilings.MaxResponseBytesPerScan(), max_pages) ||
+	    !FitsPageSequence(ceilings.MaxRecordsPerPage(), ceilings.MaxRecordsPerScan(), max_pages)) {
 		throw std::logic_error("selected pagination scan resource scope exceeds its bounded page sequence");
 	}
 }
@@ -191,6 +187,13 @@ void ValidateExecutableOrigin(const CompiledRestOrigin &origin, const CompiledNe
 	if (policy.redirects_enabled || policy.private_addresses_enabled || policy.link_local_addresses_enabled) {
 		throw std::logic_error("connector network policy exceeds the supported planner authority");
 	}
+	if (!policy.allowed_origins.empty()) {
+		if (origin.scheme != CompiledUrlScheme::HTTPS || policy.loopback_addresses_enabled ||
+		    !IsExactPackageOriginAllowed(policy, origin)) {
+			throw std::logic_error("package operation is outside its exact HTTPS origin authority");
+		}
+		return;
+	}
 	if (origin.scheme == CompiledUrlScheme::HTTPS) {
 		if (origin.port != 443 || policy.loopback_addresses_enabled) {
 			throw std::logic_error("HTTPS operation does not use the supported exact public authority profile");
@@ -203,7 +206,7 @@ void ValidateExecutableOrigin(const CompiledRestOrigin &origin, const CompiledNe
 	throw std::logic_error("cleartext operation lacks private controlled loopback authority");
 }
 
-bool IsControlledCompleteRootArray(const CompiledRelation &relation, const CompiledOperation &operation) {
+bool IsControlledLegacyNativeRootArray(const CompiledRelation &relation, const CompiledOperation &operation) {
 	bool found_selected_mapping = false;
 	for (const auto &mapping : relation.PredicateMappings()) {
 		if (mapping.OperationName() != operation.name) {
@@ -222,8 +225,8 @@ bool IsControlledCompleteRootArray(const CompiledRelation &relation, const Compi
 	return found_selected_mapping;
 }
 
-void ValidateOperation(const CompiledRelation &relation, const CompiledOperation &operation,
-                       const CompiledNetworkPolicy &network_policy) {
+void ValidateOperation(CompiledConnectorOrigin connector_origin, const CompiledRelation &relation,
+                       const CompiledOperation &operation, const CompiledNetworkPolicy &network_policy) {
 	const auto &ceilings = relation.ResourceCeilings();
 	if (operation.name.empty() || ceilings.MaxRecordsPerPage() == 0 || ceilings.MaxRecordsPerScan() == 0 ||
 	    ceilings.MaxExtractedStringBytes() == 0) {
@@ -237,14 +240,9 @@ void ValidateOperation(const CompiledRelation &relation, const CompiledOperation
 		throw std::logic_error("selected relation contains an unknown protocol alternative");
 	}
 	const auto &rest = operation.Rest();
-	if (rest.retry_enabled || rest.request.path.empty() || rest.request.path.front() != '/') {
+	if (rest.retry_enabled || rest.request.path.empty() || rest.request.path.front() != '/' ||
+	    (!network_policy.allowed_origins.empty() && !IsFixedPackagePath(rest.request.path))) {
 		throw std::logic_error("selected REST operation contains an unsupported request or retry declaration");
-	}
-	if (rest.response_source == CompiledResponseSource::ROOT_ARRAY &&
-	    rest.pagination.Strategy() == CompiledPaginationStrategy::DISABLED) {
-		if (!IsControlledCompleteRootArray(relation, operation)) {
-			throw std::logic_error("root-array response requires an explicit supported pagination declaration");
-		}
 	}
 	(void)PlanProtocol(operation.Protocol());
 	(void)PlanMethod(rest.method);
@@ -254,6 +252,16 @@ void ValidateOperation(const CompiledRelation &relation, const CompiledOperation
 	ValidateSourceShape(operation, ceilings);
 	ValidateExecutableOrigin(rest.request.origin, network_policy);
 	ValidatePagination(operation, ceilings, network_policy);
+	// The native 0.7 bridge accepted GitHub's repository root array only with
+	// its closed duplicate-preserving proof. A package operation is governed by
+	// its compiled cardinality, response source, exact origin, and resource
+	// contract instead; package authors never name this native proof identity.
+	if (connector_origin == CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA &&
+	    rest.response_source == CompiledResponseSource::ROOT_ARRAY &&
+	    rest.pagination.Strategy() == CompiledPaginationStrategy::DISABLED &&
+	    !IsControlledLegacyNativeRootArray(relation, operation)) {
+		throw std::logic_error("legacy native root-array response requires its controlled completeness proof");
+	}
 }
 
 bool ContainsOpaqueUnsupportedPosition(const RequestedPredicate &candidate) {
@@ -384,7 +392,7 @@ SelectedRelationOperation ValidateAndSelectOperation(const CompiledConnector &co
 	ValidateSchema(*relation);
 	ValidateRequest(connector, *relation, request);
 	for (const auto &operation : relation->Operations()) {
-		ValidateOperation(*relation, operation, connector.NetworkPolicy());
+		ValidateOperation(connector.Origin(), *relation, operation, connector.NetworkPolicy());
 	}
 
 	auto resolved_inputs = input_resolution::ResolveRelationInputs(*relation, request.explicit_inputs);

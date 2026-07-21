@@ -504,7 +504,7 @@ std::string ScanPlan::Snapshot() const {
 	AppendStrings(result, network.allowed_schemes);
 	result << "],hosts:[";
 	AppendStrings(result, network.allowed_hosts);
-	result << "],redirects:" << PermissionName(network.redirects_enabled)
+	result << "],port:" << network.port << ",redirects:" << PermissionName(network.redirects_enabled)
 	       << ",private:" << PermissionName(network.private_addresses_enabled)
 	       << ",link_local:" << PermissionName(network.link_local_addresses_enabled)
 	       << ",loopback:" << PermissionName(network.loopback_addresses_enabled);

@@ -16,6 +16,7 @@ void TestNetworkCounterexamples(const std::string &canary) {
 	                                                         NetworkPlanCounterexample::WIDENED_SCHEMES,
 	                                                         NetworkPlanCounterexample::EMPTY_HOSTS,
 	                                                         NetworkPlanCounterexample::WIDENED_HOSTS,
+	                                                         NetworkPlanCounterexample::OTHER_PORT,
 	                                                         NetworkPlanCounterexample::REDIRECTS_ENABLED,
 	                                                         NetworkPlanCounterexample::PRIVATE_ADDRESSES_ENABLED,
 	                                                         NetworkPlanCounterexample::LINK_LOCAL_ADDRESSES_ENABLED,
@@ -36,6 +37,10 @@ void TestNetworkCounterexamples(const std::string &canary) {
 		case NetworkPlanCounterexample::WIDENED_HOSTS:
 			Require(plan.Network().allowed_hosts.size() == baseline.Network().allowed_hosts.size() + 1,
 			        "widened-hosts counterexample did not add authority");
+			break;
+		case NetworkPlanCounterexample::OTHER_PORT:
+			Require(plan.Network().port != baseline.Network().port,
+			        "other-port counterexample retained the selected origin port");
 			break;
 		case NetworkPlanCounterexample::REDIRECTS_ENABLED:
 			Require(plan.Network().redirects_enabled, "redirect counterexample remained denied");

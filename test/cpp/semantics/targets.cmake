@@ -14,6 +14,35 @@ target_link_libraries(
   PUBLIC duckdb_api_relational_planning_service
          duckdb_api_package_generation_fixture_service)
 
+# Real package GraphQL plans cross a narrower provider because their exact
+# generation is compiled from repository evidence. Runtime consumers receive
+# only ScanPlan and do not link Connector-private renderer or test access.
+add_library(
+  duckdb_api_semantics_package_graphql_fixture_service STATIC
+  ${RELATIONAL_PACKAGE_GRAPHQL_PLAN_TEST_SERVICE_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_semantics_package_graphql_fixture_service)
+target_include_directories(
+  duckdb_api_semantics_package_graphql_fixture_service
+  PUBLIC test/cpp)
+target_link_libraries(
+  duckdb_api_semantics_package_graphql_fixture_service
+  PRIVATE duckdb_api_package_compiler_fixture_service
+          duckdb_api_package_bound_planning_service
+          duckdb_api_content_digest_service)
+
+# Link-only Runtime-facing topology oracle. Its source includes only the
+# bounded Semantics fixture header and the immutable plan contract.
+add_executable(
+  duckdb_api_repository_graphql_fixture_consumer_tests
+  test/cpp/semantics/repository_graphql_scan_plan_fixture_consumer_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_repository_graphql_fixture_consumer_tests)
+target_include_directories(
+  duckdb_api_repository_graphql_fixture_consumer_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_repository_graphql_fixture_consumer_tests
+  PRIVATE duckdb_api_semantics_package_graphql_fixture_service)
+
 # Link-only topology oracle for Runtime's bounded materialized-plan provider.
 # It intentionally omits the broad friend-built fixture service so unresolved
 # construction dependencies cannot hide behind aggregate Semantics targets.
@@ -51,11 +80,15 @@ configure_duckdb_api_cpp_target(duckdb_api_scan_planner_tests)
 target_include_directories(
   duckdb_api_scan_planner_tests
   PRIVATE test/cpp src/semantics)
+target_compile_definitions(
+  duckdb_api_scan_planner_tests
+  PRIVATE DUCKDB_API_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(
   duckdb_api_scan_planner_tests
   PRIVATE duckdb_api_semantics_fixture_service
           duckdb_api_semantics_materialized_fixture_service
           duckdb_api_connector_fixture_service
+          duckdb_api_package_compiler_fixture_service
           duckdb_api_package_generation_fixture_service
           duckdb_api_package_bound_planning_service
           duckdb_api_relational_planning_service
@@ -107,10 +140,13 @@ add_executable(
   duckdb_api_graphql_semantics_tests
   ${GRAPHQL_SEMANTICS_TEST_SOURCES})
 configure_duckdb_api_cpp_target(duckdb_api_graphql_semantics_tests)
-target_include_directories(duckdb_api_graphql_semantics_tests PRIVATE test/cpp)
+target_include_directories(duckdb_api_graphql_semantics_tests PRIVATE test/cpp src/semantics)
 target_link_libraries(
   duckdb_api_graphql_semantics_tests
   PRIVATE duckdb_api_semantics_fixture_service
           duckdb_api_connector_fixture_service
+          duckdb_api_package_compiler_fixture_service
+          duckdb_api_package_bound_planning_service
+          duckdb_api_semantics_package_graphql_fixture_service
           duckdb_api_content_digest_service
           duckdb_api_relational_planning_service)

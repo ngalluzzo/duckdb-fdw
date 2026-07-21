@@ -52,8 +52,9 @@ static const uint64_t PAGINATION_MAX_CONCURRENCY = 1;
 static const uint64_t PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN = 256 * 1024;
 
 // The base domain names the complete row-producing source before DuckDB-owned
-// relational operators. ROOT_ARRAY_RECORDS is admitted only for the controlled
-// complete-array proof profile. Each PAGINATED_* domain is the
+// relational operators. ROOT_ARRAY_RECORDS is one complete unpaginated
+// response; the legacy native bridge separately retains its controlled
+// completeness proof. Each PAGINATED_* domain is the
 // duplicate-preserving bag from every accepted page, not an ordered or
 // snapshot-isolated relation. A successful root object is one base row;
 // failures and zero/multiple-object violations are errors rather than empty
@@ -190,6 +191,9 @@ struct RelationalOwnership {
 struct NetworkCapability {
 	std::vector<std::string> allowed_schemes;
 	std::vector<std::string> allowed_hosts;
+	// Exact selected-operation destination port. Together with the singleton
+	// scheme and host sets, this is the complete origin Runtime may contact.
+	uint16_t port;
 	bool redirects_enabled;
 	bool private_addresses_enabled;
 	bool link_local_addresses_enabled;

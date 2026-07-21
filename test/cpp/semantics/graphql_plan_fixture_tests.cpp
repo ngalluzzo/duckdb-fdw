@@ -94,7 +94,7 @@ void TestFixtureBoundary() {
 	        "package/native GraphQL fixture differential changed beyond closed identity, domain, names, and secret");
 
 	const auto admission_count = static_cast<std::size_t>(GraphqlRuntimeAdmissionCounterexample::COUNT);
-	Require(admission_count == 141, "closed Runtime-facing GraphQL admission catalog changed without self-test review");
+	Require(admission_count == 142, "closed Runtime-facing GraphQL admission catalog changed without self-test review");
 	std::vector<duckdb_api::ScanPlan> admission_candidates;
 	admission_candidates.reserve(admission_count);
 	for (std::size_t value = 0; value < admission_count; value++) {

@@ -172,7 +172,9 @@ and disabled or exact-target Link pagination.
 GraphQL plans contain exact endpoint, ordered headers, generated document and
 digest identity, structured variables, row/error/page-info response paths,
 column path/type/nullability mapping, forward cursor contract, partial-data
-policy, and document/body/resource ceilings.
+policy, and document/body/resource ceilings. A package-generated plan also
+owns a distinct immutable `PlannedGraphqlGeneratorRecipe`; the native
+compatibility profile carries no such recipe.
 
 ### Query registration view
 
@@ -312,6 +314,23 @@ ScanPlan
 
 The plan contains everything Runtime needs for validation and execution. Runtime
 does not look up Connector metadata or ask Semantics to complete a decision.
+
+`NetworkCapability` is the selected operation's exact origin authority: one
+scheme, one host, and the explicit selected port, plus the denied-or-narrowed
+address and redirect policy. Runtime admission correlates all three origin
+components with the executable operation and, when present, the authentication
+destination. It does not infer a default port or admit any other port on an
+allowed host.
+
+For `PACKAGE_GENERATED_V1`, Semantics copies Connector's closed recipe
+field-by-field into its own planned literal, argument, variable, selection, and
+recipe values. It validates and renders only those planned values, recomputes
+SHA-256, and correlates the resulting document with every compiled variable,
+response path, result column, cursor, and resource fact before returning the
+plan. Copying is bounded before allocation by recipe-field, literal-depth,
+literal-node, collection-width, scalar-byte, signed-integer, and rendered-byte
+limits. Connector's compiled recipe type and canonical renderer are not
+Runtime authority and are absent from the Runtime-facing value service.
 
 Plans are copyable immutable values and are safe to retain in bound or prepared
 state. Construction is restricted to Semantics. Unknown enum values, incomplete
@@ -464,6 +483,13 @@ An admitted GraphQL profile contains the compiler-generated query document and
 its digest, endpoint, fixed variables, runtime cursor slot, response paths,
 column mapping, and body limits. Runtime serializes a canonical request body
 from those facts; callers cannot supply a raw document or arbitrary variable.
+
+The package planning profile is not admitted merely because a document and
+digest are present. Runtime admission must additionally validate the complete
+Semantics-owned generator recipe and its correlation with the planned
+operation. Until that separate Runtime checkpoint is accepted, the existing
+native `GITHUB_VIEWER_REPOSITORY_METRICS_V1` admission remains unchanged and a
+package-generated GraphQL plan fails closed before authorization or I/O.
 
 Any GraphQL `errors` member fails the page according to
 `fail_on_any_error`, including a response that also contains data. Error

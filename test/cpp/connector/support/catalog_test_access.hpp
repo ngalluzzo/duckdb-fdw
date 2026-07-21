@@ -3,6 +3,7 @@
 #include "duckdb_api/connector_catalog.hpp"
 #include "duckdb_api/internal/connector/compiled_model_builder.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -187,6 +188,103 @@ public:
 		return connector;
 	}
 
+	static duckdb_api::CompiledConnector WithInvalidGraphqlOperation(duckdb_api::CompiledConnector connector,
+	                                                                 const std::string &relation_name,
+	                                                                 const std::string &operation_name,
+	                                                                 duckdb_api::CompiledGraphqlOperation operation) {
+		for (auto &relation : connector.relations) {
+			if (relation.name != relation_name) {
+				continue;
+			}
+			for (auto &candidate : relation.operations) {
+				if (candidate.name == operation_name) {
+					candidate.protocol_operation.graphql =
+					    std::make_shared<const duckdb_api::CompiledGraphqlOperation>(std::move(operation));
+					return connector;
+				}
+			}
+		}
+		throw std::invalid_argument("GraphQL test mutation names an unknown relation or operation");
+	}
+
+	static duckdb_api::CompiledGraphqlOperation
+	WithUnknownGraphqlRecipeIdentity(duckdb_api::CompiledGraphqlOperation operation) {
+		auto recipe = operation.QueryRecipe();
+		recipe.identity = static_cast<duckdb_api::CompiledGraphqlDocumentIdentity>(255);
+		operation.query_recipe = std::make_shared<const duckdb_api::CompiledGraphqlQueryRecipe>(std::move(recipe));
+		return operation;
+	}
+
+	static duckdb_api::CompiledGraphqlLiteral RawGraphqlInteger(std::string scalar) {
+		return duckdb_api::CompiledGraphqlLiteral(duckdb_api::CompiledGraphqlLiteralKind::INTEGER, std::move(scalar),
+		                                          {}, {});
+	}
+
+	static duckdb_api::CompiledGraphqlLiteral NestedGraphqlList(std::size_t wrappers) {
+		std::shared_ptr<const duckdb_api::CompiledGraphqlLiteral> value =
+		    std::make_shared<const duckdb_api::CompiledGraphqlLiteral>(
+		        duckdb_api::internal::CompiledModelBuilder::GraphqlNullLiteral());
+		for (std::size_t index = 0; index < wrappers; index++) {
+			std::vector<std::shared_ptr<const duckdb_api::CompiledGraphqlLiteral>> items {value};
+			value = std::make_shared<const duckdb_api::CompiledGraphqlLiteral>(
+			    duckdb_api::CompiledGraphqlLiteral(duckdb_api::CompiledGraphqlLiteralKind::LIST, "", std::move(items),
+			                                       std::vector<duckdb_api::CompiledGraphqlObjectField>()));
+		}
+		return *value;
+	}
+
+	static duckdb_api::CompiledGraphqlLiteral FlatGraphqlNullList(std::size_t items_count) {
+		std::vector<std::shared_ptr<const duckdb_api::CompiledGraphqlLiteral>> items;
+		items.reserve(items_count);
+		for (std::size_t index = 0; index < items_count; index++) {
+			items.push_back(std::make_shared<const duckdb_api::CompiledGraphqlLiteral>(
+			    duckdb_api::internal::CompiledModelBuilder::GraphqlNullLiteral()));
+		}
+		return duckdb_api::CompiledGraphqlLiteral(duckdb_api::CompiledGraphqlLiteralKind::LIST, "", std::move(items),
+		                                          {});
+	}
+
+	static duckdb_api::CompiledGraphqlLiteral GraphqlLiteralNodeTree(std::size_t node_count) {
+		if (node_count == 0) {
+			throw std::invalid_argument("GraphQL literal node tree requires a root node");
+		}
+		if (node_count == 1) {
+			return duckdb_api::internal::CompiledModelBuilder::GraphqlNullLiteral();
+		}
+		const auto remaining = node_count - 1;
+		const auto child_count = (remaining + 4096) / 4097;
+		if (child_count > 4096) {
+			throw std::invalid_argument("GraphQL literal node tree exceeds its two-level fixture shape");
+		}
+		auto leaves_remaining = remaining - child_count;
+		const auto null_value = std::make_shared<const duckdb_api::CompiledGraphqlLiteral>(
+		    duckdb_api::internal::CompiledModelBuilder::GraphqlNullLiteral());
+		std::vector<std::shared_ptr<const duckdb_api::CompiledGraphqlLiteral>> children;
+		children.reserve(child_count);
+		for (std::size_t child = 0; child < child_count; child++) {
+			const auto leaves = std::min<std::size_t>(4096, leaves_remaining);
+			std::vector<std::shared_ptr<const duckdb_api::CompiledGraphqlLiteral>> items(leaves, null_value);
+			children.push_back(std::make_shared<const duckdb_api::CompiledGraphqlLiteral>(
+			    duckdb_api::CompiledGraphqlLiteral(duckdb_api::CompiledGraphqlLiteralKind::LIST, "", std::move(items),
+			                                       std::vector<duckdb_api::CompiledGraphqlObjectField>())));
+			leaves_remaining -= leaves;
+		}
+		if (leaves_remaining != 0) {
+			throw std::logic_error("GraphQL literal node tree fixture did not distribute all nodes");
+		}
+		return duckdb_api::CompiledGraphqlLiteral(duckdb_api::CompiledGraphqlLiteralKind::LIST, "", std::move(children),
+		                                          {});
+	}
+
+	static duckdb_api::CompiledGraphqlQueryRecipe
+	WithFirstGraphqlFixedArgument(const duckdb_api::CompiledGraphqlQueryRecipe &source,
+	                              duckdb_api::CompiledGraphqlLiteral literal) {
+		auto result = source;
+		result.fixed_arguments.at(0).value =
+		    std::make_shared<const duckdb_api::CompiledGraphqlLiteral>(std::move(literal));
+		return result;
+	}
+
 	// Changes one relation schema fact only after the canonical fixture passed
 	// production validation. The resulting value is confined to test targets.
 	static duckdb_api::CompiledConnector WithInvalidGraphqlColumnType(duckdb_api::CompiledConnector connector,
@@ -200,6 +298,27 @@ public:
 	                                                                         std::size_t column_index, bool nullable) {
 		connector.relations.at(0).columns.at(column_index).nullable = nullable;
 		return connector;
+	}
+
+	static duckdb_api::CompiledConnector
+	WithInvalidRelationResources(duckdb_api::CompiledConnector connector, const std::string &relation_name,
+	                             std::uint64_t response_bytes_per_page, std::uint64_t response_bytes_per_scan,
+	                             std::uint64_t records_per_page, std::uint64_t records_per_scan,
+	                             std::uint64_t extracted_string_bytes) {
+		for (auto &relation : connector.relations) {
+			if (relation.name != relation_name) {
+				continue;
+			}
+			auto &resources = relation.resource_ceilings;
+			resources.has_response_byte_narrowing = true;
+			resources.max_response_bytes_per_page = response_bytes_per_page;
+			resources.max_response_bytes_per_scan = response_bytes_per_scan;
+			resources.max_records_per_page = records_per_page;
+			resources.max_records_per_scan = records_per_scan;
+			resources.max_extracted_string_bytes = extracted_string_bytes;
+			return connector;
+		}
+		throw std::invalid_argument("resource test mutation names an unknown relation");
 	}
 };
 

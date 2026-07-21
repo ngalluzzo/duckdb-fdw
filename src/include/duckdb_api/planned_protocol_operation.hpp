@@ -1,5 +1,7 @@
 #pragma once
 
+#include "duckdb_api/planned_graphql_generator_recipe.hpp"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -145,10 +147,10 @@ struct PlannedRestOperation {
 };
 
 // Closed reviewed document families. The native bridge identity preserves the
-// 0.7 compatibility profile. PACKAGE_GENERATED_V1 identifies a document that
-// Semantics copied from Connector's validated package IR; Runtime still
-// validates the complete planned document envelope and never derives this
-// identity from connector, relation, operation, or source-provenance strings.
+// 0.7 compatibility profile. PACKAGE_GENERATED_V1 requires a separate
+// Semantics-owned generator_recipe whose independently rendered bytes agree
+// with the complete planned document envelope. Runtime never derives identity
+// from connector, relation, operation, or source-provenance strings.
 enum class PlannedGraphqlDocumentIdentity { GITHUB_VIEWER_REPOSITORY_METRICS_V1, PACKAGE_GENERATED_V1 };
 enum class PlannedGraphqlDigestAlgorithm { SHA256 };
 enum class PlannedGraphqlOperationKind { QUERY };
@@ -225,6 +227,10 @@ struct PlannedGraphqlOperation {
 	std::uint64_t max_document_bytes;
 	std::uint64_t max_serialized_request_body_bytes_per_request;
 	std::uint64_t max_serialized_request_body_bytes_per_scan;
+	// Null for the unchanged native compatibility profile. Package-generated
+	// operations always own this immutable Semantics value; Connector's recipe
+	// type and renderer do not cross into Runtime execution authority.
+	std::shared_ptr<const PlannedGraphqlGeneratorRecipe> generator_recipe;
 };
 
 // Exhaustive private pre-1.0 team API produced by Relational Semantics and

@@ -59,6 +59,7 @@ public:
 
 private:
 	friend class internal::CompiledModelBuilder;
+	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 	CompiledGraphqlObjectField(std::string name, std::shared_ptr<const CompiledGraphqlLiteral> value);
 
 	std::string name;
@@ -82,6 +83,7 @@ public:
 
 private:
 	friend class internal::CompiledModelBuilder;
+	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 	CompiledGraphqlLiteral(CompiledGraphqlLiteralKind kind, std::string scalar,
 	                       std::vector<std::shared_ptr<const CompiledGraphqlLiteral>> items,
 	                       std::vector<CompiledGraphqlObjectField> fields);
@@ -104,6 +106,7 @@ public:
 
 private:
 	friend class internal::CompiledModelBuilder;
+	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 	CompiledGraphqlFixedArgument(std::string name, std::shared_ptr<const CompiledGraphqlLiteral> value);
 
 	std::string name;
@@ -124,6 +127,7 @@ public:
 
 private:
 	friend class internal::CompiledModelBuilder;
+	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 	CompiledGraphqlRecipeVariable(std::string name, CompiledGraphqlVariableType type,
 	                              CompiledGraphqlRecipeVariableRole role, std::string argument_name);
 
@@ -145,6 +149,7 @@ public:
 
 private:
 	friend class internal::CompiledModelBuilder;
+	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 	CompiledGraphqlSelection(std::string column_name, std::vector<std::string> field_path);
 
 	std::string column_name;
@@ -174,6 +179,7 @@ public:
 
 private:
 	friend class internal::CompiledModelBuilder;
+	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 	CompiledGraphqlQueryRecipe(CompiledGraphqlDocumentIdentity identity, std::string operation_name,
 	                           std::vector<CompiledGraphqlRecipeVariable> variables, std::vector<std::string> root_path,
 	                           std::vector<CompiledGraphqlFixedArgument> fixed_arguments, std::string nodes_field,

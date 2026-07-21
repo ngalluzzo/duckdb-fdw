@@ -118,7 +118,7 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Common(std::string connector, std::
 	plan.retry = duckdb_api::FeatureState::DISABLED;
 	plan.cache = duckdb_api::FeatureState::DISABLED;
 	plan.authentication = duckdb_api::FeatureState::DISABLED;
-	plan.network = {{"https"}, {"api.github.com"}, false, false, false, false};
+	plan.network = {{"https"}, {"api.github.com"}, 443, false, false, false, false};
 	plan.classification_reason = "closed Semantics plan fixture";
 	return plan;
 }
@@ -591,7 +591,8 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string *secret_n
 	     32},
 	    4096,
 	    8 * 1024,
-	    256 * 1024};
+	    256 * 1024,
+	    nullptr};
 	plan.operation = std::make_shared<const duckdb_api::PlannedProtocolOperation>(
 	    duckdb_api::PlannedProtocolOperation::FromGraphql(std::move(operation)));
 	plan.output_columns = {{"id", "VARCHAR", false, "$.id"},

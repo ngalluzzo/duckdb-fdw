@@ -198,6 +198,23 @@ Relational Semantics then:
 
 Planning is deterministic and side-effect free.
 
+For a package GraphQL operation, Semantics does not accept Connector's
+rendered document or recipe type as execution authority. It deep-copies every
+closed recipe field into a distinct immutable planned recipe, independently
+validates and canonically renders that value, recomputes the document digest,
+and requires the resulting bytes, variables, response paths, columns, cursor
+facts, and resource envelope to agree with the compiled operation. A mismatch
+produces no plan. The native GitHub compatibility identity remains a separate
+closed profile and never acquires a package recipe.
+
+The package profile is source-neutral: operation selectors may choose a
+required-input, non-fallback GraphQL operation, predicate mappings for other
+operations do not constrain it, and endpoint paths, safe fixed headers, and
+ports come from the package contract rather than a GitHub-shaped allowlist.
+Semantics requires the selected HTTPS origin to match one package-declared
+scheme, host, and explicit port exactly. It intersects valid package resource
+declarations with Connector and host ceilings when constructing the plan.
+
 Lead composition may bind that planner to one immutable package generation.
 Every bound call presents the opaque generation handle retained by its catalog
 owner. The handle must share the exact generation state owned by the service;
@@ -260,6 +277,18 @@ loopback address, cookie, netrc, TLS, header, or response authority.
 REST and GraphQL have distinct compiled and planned operation values. They
 share authorization, policy, resource accounting, transport, cancellation,
 and stream machinery; they do not share an untyped request language.
+
+The planned network capability freezes the selected operation's singleton
+scheme and host together with its explicit port. Runtime must correlate that
+exact origin with the operation and authentication destination; a host match
+without a port match grants no authority.
+
+A package-generated GraphQL plan owns both the exact rendered document and a
+Semantics-owned immutable generator recipe. Runtime may consume only that
+planned representation; it does not import Connector's recipe class, renderer,
+or compiler internals. Planning support does not itself widen Runtime
+admission: each executable package profile still requires Runtime's complete
+closed-plan review and enforcement.
 
 Runtime constructs the initial request from the admitted plan. Received Link
 metadata and GraphQL cursors are untrusted continuation data. A continuation

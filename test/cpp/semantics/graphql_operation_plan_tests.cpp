@@ -131,13 +131,15 @@ void TestOperationPlan() {
 } // namespace graphql_semantics
 } // namespace duckdb_api_test
 
-int main() {
+int main(int argc, char **argv) {
 	try {
+		duckdb_api_test::Require(argc == 2, "usage: graphql_semantics_tests ABSOLUTE_REPOSITORY_ROOT");
 		duckdb_api_test::graphql_semantics::TestOperationPlan();
 		duckdb_api_test::graphql_semantics::TestBaseDomain();
 		duckdb_api_test::graphql_semantics::TestCursorResources();
 		duckdb_api_test::graphql_semantics::TestNullability();
 		duckdb_api_test::graphql_semantics::TestFixtureBoundary();
+		duckdb_api_test::graphql_semantics::TestPackageGraphqlPlanning(argv[1]);
 		std::cout << "GraphQL relational Semantics tests passed\n";
 		return 0;
 	} catch (const std::exception &error) {

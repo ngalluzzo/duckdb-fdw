@@ -64,6 +64,63 @@ bool ResultColumnsEqual(const std::vector<duckdb_api::PlannedGraphqlResultColumn
 	return true;
 }
 
+bool LiteralsEqual(const duckdb_api::PlannedGraphqlLiteral &left, const duckdb_api::PlannedGraphqlLiteral &right) {
+	if (left.Kind() != right.Kind() || left.Scalar() != right.Scalar() || left.Items().size() != right.Items().size() ||
+	    left.Fields().size() != right.Fields().size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.Items().size(); index++) {
+		if (!left.Items()[index] || !right.Items()[index] ||
+		    !LiteralsEqual(*left.Items()[index], *right.Items()[index])) {
+			return false;
+		}
+	}
+	for (std::size_t index = 0; index < left.Fields().size(); index++) {
+		if (left.Fields()[index].Name() != right.Fields()[index].Name() ||
+		    !LiteralsEqual(left.Fields()[index].Value(), right.Fields()[index].Value())) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool GeneratorRecipesEqual(const std::shared_ptr<const duckdb_api::PlannedGraphqlGeneratorRecipe> &left,
+                           const std::shared_ptr<const duckdb_api::PlannedGraphqlGeneratorRecipe> &right) {
+	if (!left || !right) {
+		return !left && !right;
+	}
+	if (left->Identity() != right->Identity() || left->OperationName() != right->OperationName() ||
+	    left->RootPath() != right->RootPath() || left->NodesField() != right->NodesField() ||
+	    left->PageInfoField() != right->PageInfoField() || left->HasNextPageField() != right->HasNextPageField() ||
+	    left->EndCursorField() != right->EndCursorField() || left->Variables().size() != right->Variables().size() ||
+	    left->FixedArguments().size() != right->FixedArguments().size() ||
+	    left->Selections().size() != right->Selections().size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left->Variables().size(); index++) {
+		const auto &left_variable = left->Variables()[index];
+		const auto &right_variable = right->Variables()[index];
+		if (left_variable.Name() != right_variable.Name() || left_variable.Type() != right_variable.Type() ||
+		    left_variable.Role() != right_variable.Role() ||
+		    left_variable.ArgumentName() != right_variable.ArgumentName()) {
+			return false;
+		}
+	}
+	for (std::size_t index = 0; index < left->FixedArguments().size(); index++) {
+		if (left->FixedArguments()[index].Name() != right->FixedArguments()[index].Name() ||
+		    !LiteralsEqual(left->FixedArguments()[index].Value(), right->FixedArguments()[index].Value())) {
+			return false;
+		}
+	}
+	for (std::size_t index = 0; index < left->Selections().size(); index++) {
+		if (left->Selections()[index].ColumnName() != right->Selections()[index].ColumnName() ||
+		    left->Selections()[index].FieldPath() != right->Selections()[index].FieldPath()) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool OutputColumnsEqual(const std::vector<duckdb_api::PlannedColumn> &left,
                         const std::vector<duckdb_api::PlannedColumn> &right) {
 	if (left.size() != right.size()) {
@@ -119,6 +176,7 @@ void CountOperation(std::size_t &count, const duckdb_api::PlannedGraphqlOperatio
 	           right.max_serialized_request_body_bytes_per_request);
 	CountValue(count, left.max_serialized_request_body_bytes_per_scan,
 	           right.max_serialized_request_body_bytes_per_scan);
+	CountValue(count, GeneratorRecipesEqual(left.generator_recipe, right.generator_recipe), true);
 }
 
 void CountPageBudgets(std::size_t &count, const duckdb_api::ResourceBudgets &left,
@@ -226,6 +284,7 @@ std::size_t CountGraphqlPlanDifferences(const duckdb_api::ScanPlan &left, const 
 	}
 	CountValue(count, left.Network().allowed_schemes, right.Network().allowed_schemes);
 	CountValue(count, left.Network().allowed_hosts, right.Network().allowed_hosts);
+	CountValue(count, left.Network().port, right.Network().port);
 	CountValue(count, left.Network().redirects_enabled, right.Network().redirects_enabled);
 	CountValue(count, left.Network().private_addresses_enabled, right.Network().private_addresses_enabled);
 	CountValue(count, left.Network().link_local_addresses_enabled, right.Network().link_local_addresses_enabled);

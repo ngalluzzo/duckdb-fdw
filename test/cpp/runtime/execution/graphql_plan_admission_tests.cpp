@@ -275,7 +275,7 @@ bool IsIndependentProfileVariation(duckdb_api_test::GraphqlRuntimeAdmissionCount
 
 void TestProviderCorpusSeparatesExecutableFactsFromIdentity() {
 	const auto count = static_cast<std::size_t>(duckdb_api_test::GraphqlRuntimeAdmissionCounterexample::COUNT);
-	Require(count == 141,
+	Require(count == 142,
 	        "Runtime must exercise the complete Semantics counterexample corpus, including unknown domains");
 	for (std::size_t value = 0; value < count; value++) {
 		const auto counterexample = static_cast<duckdb_api_test::GraphqlRuntimeAdmissionCounterexample>(value);

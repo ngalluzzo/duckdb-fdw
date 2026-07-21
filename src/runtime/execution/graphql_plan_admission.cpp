@@ -233,7 +233,8 @@ bool HasAuthority(const ScanPlan &plan, const HttpExecutionProfile &profile, boo
 	       operation.origin.host == profile.host && operation.origin.port == profile.port &&
 	       network.allowed_schemes.size() == 1 && network.allowed_schemes[0] == "https" &&
 	       network.allowed_hosts.size() == 1 && network.allowed_hosts[0] == profile.host &&
-	       !network.redirects_enabled && network.private_addresses_enabled == profile.private_addresses_enabled &&
+	       network.port == operation.origin.port && network.port == profile.port && !network.redirects_enabled &&
+	       network.private_addresses_enabled == profile.private_addresses_enabled &&
 	       network.link_local_addresses_enabled == profile.link_local_addresses_enabled &&
 	       network.loopback_addresses_enabled == profile.loopback_addresses_enabled;
 }

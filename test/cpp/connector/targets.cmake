@@ -25,10 +25,11 @@ target_link_libraries(
   duckdb_api_package_generation_fixture_service
   PUBLIC duckdb_api_connector_metadata_service)
 
-# Query and Runtime consumers use the real repository package compiler through
-# this Connector-owned bounded fixture API. It exposes structural registration
-# plus compiler-produced local-package/reload custody values, never YAML,
-# source paths, compiler construction access, or synthetic generations.
+# Query, Semantics, and Runtime consumers use the real repository package
+# compiler through this Connector-owned bounded fixture API. It exposes
+# registration/generation values, local-package/reload custody, and named
+# post-validation counterexamples; YAML, source paths, compiler construction,
+# and synthetic generations remain private to the provider.
 add_library(
   duckdb_api_package_compiler_fixture_service STATIC
   ${CONNECTOR_PACKAGE_COMPILER_TEST_SERVICE_SOURCES})

@@ -49,7 +49,10 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		result.operation =
 		    std::make_shared<const PlannedProtocolOperation>(PlannedProtocolOperation::FromRest(std::move(planned)));
 	} else {
-		result.domain = BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES;
+		result.domain = operation.Graphql().document_identity ==
+		                        CompiledGraphqlDocumentIdentity::GITHUB_VIEWER_REPOSITORY_METRICS_V1
+		                    ? BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES
+		                    : BaseDomain::GRAPHQL_RELAY_CONNECTION_NODE_OCCURRENCES;
 		result.operation = std::make_shared<const PlannedProtocolOperation>(
 		    PlannedProtocolOperation::FromGraphql(PlanGraphqlOperation(operation)));
 	}
@@ -104,6 +107,7 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	// origin. It never grants another relation's host or scheme to this scan.
 	result.network = {{UrlSchemeName(operation_origin.scheme)},
 	                  {operation_origin.host.Value()},
+	                  operation_origin.port,
 	                  false,
 	                  false,
 	                  false,
@@ -246,6 +250,12 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    "; canonical viewer.repositories traversal defines a duplicate-preserving mutable occurrence bag; fixed "
 		    "UPDATED_AT DESC enumerates cursors but grants no DuckDB ordering or snapshot; body and row ceilings grant "
 		    "no limit or truncation authority; DuckDB retains every relational operator";
+	} else if (result.domain == BaseDomain::GRAPHQL_RELAY_CONNECTION_NODE_OCCURRENCES) {
+		result.classification_reason =
+		    predicate_decision.reason +
+		    "; package-generated Relay connection nodes define a duplicate-preserving mutable occurrence bag; "
+		    "sequential cursor traversal grants no DuckDB ordering or snapshot; resource ceilings grant no limit or "
+		    "truncation authority; DuckDB retains every relational operator";
 	} else if (result.domain == BaseDomain::PAGINATED_JSON_PATH_RECORDS ||
 	           result.domain == BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS) {
 		result.classification_reason =

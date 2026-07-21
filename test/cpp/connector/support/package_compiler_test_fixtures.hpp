@@ -10,11 +10,12 @@
 namespace duckdb_api_test {
 
 // Compiles the repository's accepted GitHub package through Connector's real
-// local-root production entry point. Query tests receive only the bounded
-// structural registration view and its opaque generation owner; they cannot
-// construct descriptors or import compiler implementation details. The caller
-// supplies its explicit absolute repository root so the fixture remains valid
-// in archived cold-build projections as well as developer worktrees.
+// local-root production entry point. Query registration consumers receive the
+// bounded structural view and its opaque owner; Semantics integration tests
+// may receive the complete immutable generation. Neither can construct
+// descriptors or import compiler implementation details. The caller supplies
+// its explicit absolute repository root so the fixture remains valid in
+// archived cold-build projections as well as developer worktrees.
 duckdb_api::CompiledQueryRegistrationView
 CompileRepositoryGithubRegistrationFixture(const std::string &absolute_repository_root);
 
@@ -59,5 +60,67 @@ private:
 
 LocalPackageReloadFixture BuildRepositoryGithubLocalPackageReloadFixture(const std::string &absolute_repository_root,
                                                                          LocalPackageReloadFixtureVariant variant);
+
+// Compiles and returns the complete immutable generation for cross-team
+// Semantics tests that must prove exact generation-handle ownership. Consumers
+// receive no compiler internals and cannot construct or replace its catalog.
+duckdb_api::CompiledPackageGeneration
+CompileRepositoryGithubGenerationFixture(const std::string &absolute_repository_root);
+
+// Compiles a deliberately non-GitHub v1 package with an explicit 8443 origin,
+// a required-input GraphQL candidate, a REST fallback owning predicate
+// mappings, a separate unpaginated root-array relation with no mappings, and
+// resource declarations wider than the current host cell.
+duckdb_api::CompiledPackageGeneration
+CompileNonGithubGraphqlGenerationFixture(const std::string &absolute_repository_root);
+
+enum class RepositoryGithubGraphqlCounterexample {
+	DOCUMENT_MISMATCH,
+	DIGEST_MISMATCH,
+	VARIABLE_MISMATCH,
+	RESPONSE_PATH_MISMATCH,
+	COLUMN_MISMATCH,
+	CURSOR_MISMATCH,
+	UNKNOWN_RECIPE_IDENTITY,
+	MIXED_CASE_AUTHORIZATION_HEADER,
+	MIXED_CASE_HOST_HEADER,
+	MIXED_CASE_CONTENT_LENGTH_HEADER,
+	CASE_INSENSITIVE_DUPLICATE_HEADER,
+	MIXED_CASE_CONTENT_TYPE_MISMATCH,
+	INVALID_HEADER_NAME,
+	INVALID_HEADER_VALUE,
+	INVALID_ENDPOINT_PATH_GRAMMAR,
+	TRAILING_ENDPOINT_PATH_SEPARATOR,
+	ENDPOINT_PATH_TOO_LONG,
+	ENDPOINT_PORT_OUTSIDE_POLICY,
+	TOO_MANY_HEADERS,
+	HEADER_BYTES_EXCEEDED,
+	RESPONSE_SCAN_SCOPE_EXCEEDED,
+	RECORD_SCAN_SCOPE_EXCEEDED,
+	RESOURCE_PRODUCT_OVERFLOW,
+	COUNT
+};
+
+enum class RepositoryGithubGraphqlBoundary {
+	ENDPOINT_PATH_BYTES,
+	FIXED_HEADER_COUNT,
+	FIXED_HEADER_BYTES,
+	RESPONSE_SCAN_PRODUCT,
+	COUNT
+};
+
+// Starts from a real compiler-produced repository generation, then confines
+// one named post-validation mutation to Connector's non-installable fixture
+// boundary. Semantics receives only the public immutable catalog facade and
+// must fail before producing a partial ScanPlan.
+duckdb_api::CompiledConnector
+CompileRepositoryGithubGraphqlCounterexample(const std::string &absolute_repository_root,
+                                             RepositoryGithubGraphqlCounterexample counterexample);
+
+// Starts from the same compiler-produced operation and moves one fact to the
+// exact accepted RFC 0013 boundary. These values complement the one-over
+// counterexamples so Semantics does not accidentally narrow package syntax.
+duckdb_api::CompiledConnector CompileRepositoryGithubGraphqlBoundary(const std::string &absolute_repository_root,
+                                                                     RepositoryGithubGraphqlBoundary boundary);
 
 } // namespace duckdb_api_test

@@ -141,6 +141,7 @@ void RequireSelectedNetworkAndBudgets(const duckdb_api::ScanPlan &plan, const du
 	Require(plan.Network().allowed_schemes.size() == 1 && plan.Network().allowed_hosts.size() == 1 &&
 	            plan.Network().allowed_schemes[0] == expected_scheme &&
 	            plan.Network().allowed_hosts[0] == relation.Operation().Rest().request.origin.host.Value() &&
+	            plan.Network().port == relation.Operation().Rest().request.origin.port &&
 	            !plan.Network().redirects_enabled && !plan.Network().private_addresses_enabled &&
 	            !plan.Network().link_local_addresses_enabled,
 	        "plan network capability was not narrowed to the selected operation");
@@ -201,7 +202,7 @@ void RequireAuthenticatedPlan(const duckdb_api::ScanPlan &plan, const duckdb_api
 	            plan.Operation().Rest().origin.scheme == duckdb_api::PlannedUrlScheme::HTTPS &&
 	            plan.Network().allowed_schemes == std::vector<std::string>({"https"}) &&
 	            destination->host == plan.Operation().Rest().origin.host &&
-	            destination->port == plan.Operation().Rest().origin.port &&
+	            destination->port == plan.Operation().Rest().origin.port && plan.Network().port == destination->port &&
 	            destination->scheme == plan.Operation().Rest().origin.scheme,
 	        "authenticated plan did not normalize the exact bearer destination obligation");
 	Require(plan.Budgets().decoded_records == 1 && plan.RemoteLimit() == duckdb_api::RelationalDelegation::NONE &&

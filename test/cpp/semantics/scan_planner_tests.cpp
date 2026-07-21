@@ -1,5 +1,7 @@
 #include "duckdb_api/scan_planner.hpp"
 #include "connector/support/connector_catalog_test_fixtures.hpp"
+#include "connector/support/package_compiler_test_fixtures.hpp"
+#include "duckdb_api/package_bound_scan_planner.hpp"
 #include "query/support/live_scan_request.hpp"
 #include "support/require.hpp"
 #include "semantics/support/scan_plan_contract_test_support.hpp"
@@ -356,7 +358,7 @@ void TestPaginationRequiresExplicitSupportedProfile() {
 	RequireRequestRejected(
 	    disabled_root_array,
 	    BuildAuthenticatedScanRequest(disabled_root_array, disabled_root_array_relation.Name(), "pagination_secret"),
-	    "a repository-shaped root array with disabled pagination by falling back to page one");
+	    "a legacy native repository root array without its controlled completeness proof");
 
 	const auto too_many_pages = BuildPaginationPlannerCandidate(33, 1024, 33 * 1024, 3, 99, 96);
 	const auto &too_many_relation = FindRelation(too_many_pages, "planner_pagination_candidate");
@@ -366,27 +368,58 @@ void TestPaginationRequiresExplicitSupportedProfile() {
 
 	const auto too_many_records = BuildPaginationPlannerCandidate(4, 1024, 4096, 101, 404, 96);
 	const auto &too_many_records_relation = FindRelation(too_many_records, "planner_pagination_candidate");
-	RequireRequestRejected(
+	const auto too_many_records_plan = duckdb_api::BuildConservativeScanPlan(
 	    too_many_records,
-	    BuildAuthenticatedScanRequest(too_many_records, too_many_records_relation.Name(), "pagination_secret"),
-	    "a pagination profile wider than the per-page decoded-record envelope");
+	    BuildAuthenticatedScanRequest(too_many_records, too_many_records_relation.Name(), "pagination_secret"));
+	Require(too_many_records_plan.Pagination().PageBudgets().decoded_records ==
+	                duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE &&
+	            too_many_records_plan.Pagination().ScanBudgets().decoded_records == 404,
+	        "REST author record declarations were rejected or failed to intersect with host policy");
 
 	const auto too_many_response_bytes =
 	    BuildPaginationPlannerCandidate(9, duckdb_api::PAGINATION_MAX_RESPONSE_BYTES_PER_PAGE,
 	                                    9 * duckdb_api::PAGINATION_MAX_RESPONSE_BYTES_PER_PAGE, 3, 27, 96);
 	const auto &too_many_response_bytes_relation =
 	    FindRelation(too_many_response_bytes, "planner_pagination_candidate");
-	RequireRequestRejected(too_many_response_bytes,
-	                       BuildAuthenticatedScanRequest(too_many_response_bytes,
-	                                                     too_many_response_bytes_relation.Name(), "pagination_secret"),
-	                       "a pagination profile wider than the aggregate response-byte envelope");
+	const auto too_many_response_bytes_plan = duckdb_api::BuildConservativeScanPlan(
+	    too_many_response_bytes,
+	    BuildAuthenticatedScanRequest(too_many_response_bytes, too_many_response_bytes_relation.Name(),
+	                                  "pagination_secret"));
+	Require(too_many_response_bytes_plan.Pagination().PageBudgets().response_bytes ==
+	                duckdb_api::PAGINATION_MAX_RESPONSE_BYTES_PER_PAGE &&
+	            too_many_response_bytes_plan.Pagination().ScanBudgets().response_bytes ==
+	                duckdb_api::PAGINATION_MAX_RESPONSE_BYTES_PER_SCAN,
+	        "REST author response declarations were rejected or failed to intersect with host policy");
 
 	const auto too_wide_strings = BuildPaginationPlannerCandidate(4, 1024, 4096, 3, 12, 513);
 	const auto &too_wide_strings_relation = FindRelation(too_wide_strings, "planner_pagination_candidate");
-	RequireRequestRejected(
+	const auto too_wide_strings_plan = duckdb_api::BuildConservativeScanPlan(
 	    too_wide_strings,
-	    BuildAuthenticatedScanRequest(too_wide_strings, too_wide_strings_relation.Name(), "pagination_secret"),
-	    "a pagination profile wider than the extracted-string envelope");
+	    BuildAuthenticatedScanRequest(too_wide_strings, too_wide_strings_relation.Name(), "pagination_secret"));
+	Require(too_wide_strings_plan.Pagination().PageBudgets().extracted_string_bytes ==
+	                duckdb_api::PAGINATION_MAX_EXTRACTED_STRING_BYTES &&
+	            too_wide_strings_plan.Pagination().ScanBudgets().extracted_string_bytes ==
+	                duckdb_api::PAGINATION_MAX_EXTRACTED_STRING_BYTES,
+	        "REST author string declaration was rejected or failed to intersect with host policy");
+}
+
+void TestPackageAcceptsUnpaginatedRootArray() {
+	const auto generation = duckdb_api_test::CompileNonGithubGraphqlGenerationFixture(DUCKDB_API_SOURCE_ROOT);
+	const auto &relation = FindRelation(generation.Connector(), "public_announcements");
+	Require(relation.PredicateMappings().empty(),
+	        "compiler-produced root-array fixture unexpectedly gained a predicate proof mapping");
+	const duckdb_api::PackageBoundScanPlanningService planning(generation);
+	const auto plan = planning.Plan(generation.QueryRegistration().GenerationHandle(),
+	                                BuildAnonymousScanRequest(generation.Connector(), relation.Name()));
+	const auto &operation = plan.Operation().Rest();
+	Require(plan.ConnectorName() == "acme_events" && plan.RelationName() == "public_announcements" &&
+	            plan.Domain() == duckdb_api::BaseDomain::ROOT_ARRAY_RECORDS &&
+	            plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED &&
+	            operation.response_source == duckdb_api::PlannedResponseSource::ROOT_ARRAY &&
+	            operation.origin.scheme == duckdb_api::PlannedUrlScheme::HTTPS &&
+	            operation.origin.host == "api.example.com" && operation.origin.port == 8443 &&
+	            operation.path == "/v1/public-announcements",
+	        "valid non-GitHub package root array did not compile and plan from its declared authority");
 }
 
 } // namespace
@@ -414,6 +447,7 @@ int main() {
 		TestFixedSourceInputsRemainNonRelational();
 		TestResourceEnvelopeBounds();
 		TestPaginationRequiresExplicitSupportedProfile();
+		TestPackageAcceptsUnpaginatedRootArray();
 		std::cout << "scan planner tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

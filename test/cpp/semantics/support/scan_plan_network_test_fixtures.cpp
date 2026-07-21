@@ -18,6 +18,9 @@ duckdb_api::ScanPlan ScanPlanTestAccess::Network(duckdb_api::ScanPlan plan, Netw
 	case NetworkPlanCounterexample::WIDENED_HOSTS:
 		plan.network.allowed_hosts.push_back("other.example");
 		break;
+	case NetworkPlanCounterexample::OTHER_PORT:
+		plan.network.port++;
+		break;
 	case NetworkPlanCounterexample::REDIRECTS_ENABLED:
 		plan.network.redirects_enabled = true;
 		break;

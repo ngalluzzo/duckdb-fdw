@@ -42,15 +42,28 @@ operation reaches full predicate classification and plan construction. Unknown
 relation identity is instead an invalid request contract.
 
 The planned operation is an exhaustive REST-or-GraphQL value. REST preserves
-the existing typed request and Link-pagination facts. GraphQL planning admits
-only Connector's canonical `GITHUB_VIEWER_REPOSITORY_METRICS_V1` profile:
-exact bytes and SHA-256 digest, query-only kind, fixed variables and response
-paths, duplicate-preserving viewer-repository occurrence domain, sequential
-mutable cursor traversal, and page/scan resource ceilings must all agree.
-Semantics does not parse or generate GraphQL, serialize a request, track a
-cursor, or decode a response. Fixed `UPDATED_AT DESC` enumerates the cursor but
-does not grant SQL ordering or snapshot authority; body and row ceilings do not
-grant limit, truncation, or retry authority.
+the existing typed request and Link-pagination facts. Native GraphQL retains
+the closed `GITHUB_VIEWER_REPOSITORY_METRICS_V1` compatibility profile.
+Package GraphQL instead deep-copies Connector's `PACKAGE_QUERY_GENERATOR_V1`
+recipe into an immutable Semantics-owned value, independently validates and
+renders it, and requires its exact bytes, SHA-256 digest, variables, response
+paths, columns, cursor, and resource facts to agree before producing a plan.
+Copy and rendering enforce closed structural and byte budgets before growing
+planned containers. Connector's renderer and recipe type never become Runtime
+authority.
+
+Package planning follows the selected operation, not a GitHub-shaped endpoint
+profile: selector-required operations are valid, mappings owned by another
+operation are ignored, and safe endpoint paths, headers, and nonzero HTTPS
+ports are package-defined. The plan freezes the exact selected scheme, host,
+and port in its network capability and intersects valid author resource
+declarations with Connector and host ceilings.
+
+Semantics does not serialize a request, track a cursor, or decode a response.
+Fixed `UPDATED_AT DESC` enumerates the cursor but does not grant SQL ordering
+or snapshot authority; body and row ceilings do not grant limit, truncation,
+or retry authority. Package planning support remains distinct from Runtime
+admission, which fails closed until it reviews the complete planned recipe.
 
 ## Start here
 
@@ -62,12 +75,16 @@ grant limit, truncation, or retry authority.
 | Plan values, guarded payloads, or resource predicates | `scan_plan.cpp`, `duckdb_api/scan_plan.hpp` | `duckdb_api_scan_plan_contract_tests` |
 | Exhaustive REST/GraphQL planned operation value | `planned_protocol_operation.cpp`, `duckdb_api/planned_protocol_operation.hpp` | `duckdb_api_scan_plan_contract_tests`, `duckdb_api_graphql_semantics_tests` |
 | Canonical GraphQL admission and replay derivation | `graphql_operation_planner.cpp` | `duckdb_api_graphql_semantics_tests` |
+| Immutable planned GraphQL generator recipe | `planned_graphql_generator_recipe.cpp`, `duckdb_api/planned_graphql_generator_recipe.hpp` | `duckdb_api_graphql_semantics_tests`, `duckdb_api_repository_graphql_fixture_consumer_tests` |
+| Independent package recipe copy, validation, and rendering | `graphql_generator_recipe_planner.cpp` | `duckdb_api_graphql_semantics_tests` |
+| Shared RFC 0013 endpoint path and exact-origin validation | `package_operation_contract.cpp` | `duckdb_api_graphql_semantics_tests`, `duckdb_api_scan_planner_tests` |
 | Human-readable plan snapshots | `scan_plan_explain.cpp` | `duckdb_api_scan_plan_contract_tests`, `duckdb_api_scan_plan_fixture_tests` |
 | Capability narrowing or conservative classification | `scan_planner.cpp`, `duckdb_api/scan_planner.hpp` | `duckdb_api_scan_planner_tests` |
 | Connector, request, authorization, or pagination admission | `scan_planner_validation.cpp` | `duckdb_api_scan_planner_tests`, `duckdb_api_scan_plan_pagination_contract_tests` |
 | Private normalization shared by construction and validation | `scan_planner_internal.hpp` | `duckdb_api_scan_planner_tests` |
 | Reusable plan fixtures for Runtime consumers | `test/cpp/semantics/support/scan_plan_test_fixtures.*`, `graphql_scan_plan_test_fixtures.*` | `duckdb_api_scan_plan_fixture_tests`, `duckdb_api_graphql_semantics_tests` |
 | Real planner-produced permanent REST fixture | `test/cpp/semantics/support/permanent_rest_scan_plan_test_fixtures.*` | `duckdb_api_scan_planner_tests`; Runtime links `duckdb_api_semantics_materialized_fixture_service` |
+| Real planner-produced repository package GraphQL fixture | `test/cpp/semantics/support/repository_graphql_scan_plan_test_fixtures.*` | Runtime links `duckdb_api_semantics_package_graphql_fixture_service`; `duckdb_api_repository_graphql_fixture_consumer_tests` proves the boundary |
 
 `relational_predicate.hpp` is the smaller service below Query request
 construction and Semantics classification. `scan_plan.hpp` is the value-only
@@ -83,7 +100,9 @@ them came from a predicate mapping; the native encoded-only mirror,
 Connector provenance, and safe explanation do not duplicate or supersede that
 authority. For GraphQL, Runtime consumes the typed document, variable,
 response, and cursor plan without parsing relation names, source snapshots, or
-explanation to recover authority.
+explanation to recover authority. Package-generated operations additionally
+require the immutable planned generator recipe; the Connector recipe and
+renderer are not an alternative source.
 
 `PredicateCategory()` and `PredicateReason()` are the stable diagnostic
 contract. `ClassificationReason()` and `Snapshot()` are safe prose and must

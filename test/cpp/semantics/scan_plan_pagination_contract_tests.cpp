@@ -204,8 +204,9 @@ void TestAuthenticatedRepositoriesProfile() {
 	            plan.AuthenticationObligation().Authenticator() == duckdb_api::PlannedAuthenticator::BEARER &&
 	            plan.Network().allowed_schemes == std::vector<std::string>({"https"}) &&
 	            plan.Network().allowed_hosts == std::vector<std::string>({"api.github.com"}) &&
-	            !plan.Network().redirects_enabled && !plan.Network().private_addresses_enabled &&
-	            !plan.Network().link_local_addresses_enabled && !plan.Network().loopback_addresses_enabled,
+	            plan.Network().port == 443 && !plan.Network().redirects_enabled &&
+	            !plan.Network().private_addresses_enabled && !plan.Network().link_local_addresses_enabled &&
+	            !plan.Network().loopback_addresses_enabled,
 	        "repository fixture lost its authorization or exact network capability");
 	RequireDuckDbRelationalOwnership(plan);
 }
