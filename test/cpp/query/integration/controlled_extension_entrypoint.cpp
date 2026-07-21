@@ -81,6 +81,7 @@ void LoadControlledProduct(ExtensionLoader &loader) {
 	try {
 		auto product = duckdb_api_test::BuildControlledProductComposition(port, PredicateMappingAvailable());
 		RegisterDuckdbApi(loader, std::move(product.connector), std::move(product.executor));
+		RegisterDuckdbApiPackageSurface(loader, std::move(product.package_staging));
 	} catch (const duckdb_api::ExecutionError &error) {
 		if (error.Stage() == duckdb_api::ErrorStage::INTERNAL) {
 			throw InvalidInputException("[duckdb_api][internal] controlled extension initialization failed");
