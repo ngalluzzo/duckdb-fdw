@@ -91,7 +91,18 @@ void TestCancellationAtDecoderCheckpoint() {
 	Require(result.transport_observed, "decode cancellation occurred before the controlled response returned");
 }
 
-void TestCancellationAtPageBoundary() {
+void TestCancellationAtDisabledPageBoundary() {
+	ManualControl control;
+	const auto result = RuntimePackageFixtureExecutionService().ExecuteScenario(
+	    duckdb_api_test::BuildValidAnonymousPlanFixture(),
+	    {RuntimeFixtureAuthorizationState::ANONYMOUS, {Response(SearchPage())}},
+	    RuntimeFixtureScenario::CancelAt(RuntimeFixtureCancellationPoint::PAGE_BOUNDARY), control);
+	RequireCancelled(result, RuntimeFixtureCancellationPoint::PAGE_BOUNDARY, 1);
+	Require(result.transport_observed,
+	        "disabled page-boundary cancellation did not follow a successful production page decode");
+}
+
+void TestCancellationAtPaginatedPageBoundary() {
 	ManualControl control;
 	const RuntimeFixtureTranscript transcript {
 	    RuntimeFixtureAuthorizationState::BEARER_PRESENT,
@@ -122,7 +133,8 @@ int main() {
 		TestCancellationBeforeRequest();
 		TestCancellationWhileTransportBlocked();
 		TestCancellationAtDecoderCheckpoint();
-		TestCancellationAtPageBoundary();
+		TestCancellationAtDisabledPageBoundary();
+		TestCancellationAtPaginatedPageBoundary();
 		TestCancellationDuringStreamClose();
 		std::cout << "package fixture Runtime cancellation tests passed\n";
 		return EXIT_SUCCESS;

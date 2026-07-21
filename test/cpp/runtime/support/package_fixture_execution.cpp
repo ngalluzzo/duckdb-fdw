@@ -59,11 +59,11 @@ void Close(std::unique_ptr<duckdb_api::BatchStream> &stream, RuntimeFixtureExecu
 	result.stream_close_invoked = true;
 }
 
-RuntimeFixtureExecutionObservation RunFixtureScenario(const duckdb_api::ScanPlan &plan,
-                                                      const RuntimeFixtureTranscript &transcript,
-                                                      RuntimeFixtureScenario scenario,
-                                                      duckdb_api::ExecutionControl &outer_control,
-                                                      bool capture_cancellation) {
+RuntimeFixtureExecutionObservation
+RunFixtureScenarioImpl(const duckdb_api::ScanPlan &plan, const RuntimeFixtureTranscript &transcript,
+                       RuntimeFixtureScenario scenario, duckdb_api::ExecutionControl &outer_control,
+                       bool capture_cancellation,
+                       const internal::RuntimeFixtureResponseAccountingOverrides *overrides) {
 	internal::ValidateRuntimeFixtureScenario(scenario);
 	auto result = internal::NewRuntimeFixtureObservation(plan, scenario.Cancellation());
 	internal::RuntimeFixtureScenarioControl control(outer_control, scenario.Cancellation());
@@ -79,7 +79,8 @@ RuntimeFixtureExecutionObservation RunFixtureScenario(const duckdb_api::ScanPlan
 		internal::ValidateRuntimeFixtureTranscript(transcript);
 		if (transcript.authorization != RuntimeFixtureAuthorizationState::BEARER_MISSING) {
 			const bool transport_failure = scenario.Failure() == RuntimeFixtureFailureExpectation::TRANSPORT;
-			runtime->RespondSequence(internal::BuildRuntimeFixtureResponses(transcript, control, transport_failure));
+			runtime->RespondSequence(
+			    internal::BuildRuntimeFixtureResponses(transcript, control, transport_failure, overrides));
 		}
 		stream = OpenFixtureStream(plan, transcript, *runtime, control);
 
@@ -110,11 +111,10 @@ RuntimeFixtureExecutionObservation RunFixtureScenario(const duckdb_api::ScanPlan
 			}
 
 			if (scenario.Cancellation() == RuntimeFixtureCancellationPoint::PAGE_BOUNDARY) {
-				if (plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED ||
-				    batch.rows.empty() || batch.rows.size() >= plan.Pagination().PageBudgets().batch_rows) {
-					throw std::logic_error(
-					    "page-boundary cancellation requires a paginated first page smaller than one output batch");
-				}
+				// A successful Next means transport and the complete production page
+				// decode committed before any row became observable. That is the same
+				// decoded-page checkpoint for a disabled one-page operation and for a
+				// paginated first page; cancellation discards the moved rows below.
 				control.Reach(RuntimeFixtureCancellationPoint::PAGE_BOUNDARY);
 			}
 
@@ -170,17 +170,28 @@ RuntimeFixtureExecutionObservation RunFixtureScenario(const duckdb_api::ScanPlan
 
 } // namespace
 
+namespace internal {
+
+RuntimeFixtureExecutionObservation
+RunRuntimeFixtureScenario(const duckdb_api::ScanPlan &plan, const RuntimeFixtureTranscript &transcript,
+                          RuntimeFixtureScenario scenario, duckdb_api::ExecutionControl &outer_control,
+                          bool capture_cancellation, const RuntimeFixtureResponseAccountingOverrides *overrides) {
+	return RunFixtureScenarioImpl(plan, transcript, scenario, outer_control, capture_cancellation, overrides);
+}
+
+} // namespace internal
+
 RuntimeFixtureExecutionObservation
 RuntimePackageFixtureExecutionService::Execute(const duckdb_api::ScanPlan &plan,
                                                const RuntimeFixtureTranscript &transcript,
                                                duckdb_api::ExecutionControl &control) const {
-	return RunFixtureScenario(plan, transcript, RuntimeFixtureScenario::Standard(), control, false);
+	return internal::RunRuntimeFixtureScenario(plan, transcript, RuntimeFixtureScenario::Standard(), control, false);
 }
 
 RuntimeFixtureExecutionObservation RuntimePackageFixtureExecutionService::ExecuteScenario(
     const duckdb_api::ScanPlan &plan, const RuntimeFixtureTranscript &transcript, RuntimeFixtureScenario scenario,
     duckdb_api::ExecutionControl &control) const {
-	return RunFixtureScenario(plan, transcript, scenario, control, true);
+	return internal::RunRuntimeFixtureScenario(plan, transcript, scenario, control, true);
 }
 
 } // namespace duckdb_api_test

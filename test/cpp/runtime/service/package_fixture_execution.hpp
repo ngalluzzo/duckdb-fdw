@@ -3,6 +3,7 @@
 #include "duckdb_api/execution.hpp"
 #include "duckdb_api/scan_plan.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -33,6 +34,55 @@ enum class RuntimeFixtureFailureExpectation {
 	PAGINATION,
 	RESOURCE
 };
+
+// Closed decoder counterexamples selected by column ordinal. Applicability is
+// validated against the immutable planned column kind and nullability before a
+// derived response reaches the production decoder.
+enum class RuntimeFixtureColumnVariant {
+	TYPE_MISMATCH_REJECTED,
+	MISSING_REJECTED,
+	NULL_REJECTED,
+	BIGINT_MINIMUM,
+	BIGINT_MAXIMUM,
+	BIGINT_UNDERFLOW_REJECTED,
+	BIGINT_OVERFLOW_REJECTED,
+	BIGINT_FRACTION_REJECTED,
+	VARCHAR_STRING_BUDGET_BOUNDARY,
+	VARCHAR_STRING_BUDGET_ONE_OVER_REJECTED
+};
+
+struct RuntimeFixtureColumnScenario {
+	std::size_t column_ordinal;
+	RuntimeFixtureColumnVariant variant;
+};
+
+enum class RuntimeFixtureBoundaryVariant { BOUNDARY, ONE_OVER_REJECTED };
+
+enum class RuntimeFixtureRelationResourceField {
+	RESPONSE_BYTES_PER_PAGE,
+	RESPONSE_BYTES_PER_SCAN,
+	RECORDS_PER_PAGE,
+	RECORDS_PER_SCAN,
+	EXTRACTED_STRING_BYTES
+};
+
+enum class RuntimeFixtureGraphqlBodyResourceField { SERIALIZED_BODY_BYTES_PER_REQUEST, SERIALIZED_BODY_BYTES_PER_SCAN };
+
+// Protocol-specific pagination failures stay distinct so a consumer never
+// infers the selected mutation from a plan label or coverage-key spelling.
+enum class RuntimeFixturePaginationFailureVariant {
+	REST_MALFORMED_TARGET_REJECTED,
+	REST_REPLAYED_TARGET_REJECTED,
+	REST_MAX_PAGES_EXHAUSTED,
+	GRAPHQL_MISSING_CURSOR_REJECTED,
+	GRAPHQL_REPEATED_CURSOR_REJECTED,
+	GRAPHQL_MAX_PAGES_EXHAUSTED
+};
+
+// Successful return is evidence that Runtime observed and internally
+// validated the selected fixed production boundary. Boundary and one-over
+// results are different alternatives rather than caller-interpreted booleans.
+enum class RuntimeFixtureVariantOutcome { VALUE_SUCCEEDED, BOUNDARY_SUCCEEDED, EXPECTED_REJECTION, ONE_OVER_REJECTED };
 
 class RuntimeFixtureScenario {
 public:
@@ -110,6 +160,13 @@ struct RuntimeFixtureExecutionObservation {
 	bool post_close_exhaustion_observed;
 };
 
+struct RuntimeFixtureVariantObservation {
+	RuntimeFixtureExecutionObservation execution;
+	RuntimeFixtureVariantOutcome outcome;
+	uint64_t observed_units;
+	uint64_t admitted_limit;
+};
+
 // Runtime-owned, test-only adapter for Connector's offline fixture
 // orchestrator. Execute creates a fresh controlled transport and production
 // executor for every call, performs no live network access, and retains no
@@ -134,6 +191,25 @@ public:
 	                                                   const RuntimeFixtureTranscript &transcript,
 	                                                   RuntimeFixtureScenario scenario,
 	                                                   duckdb_api::ExecutionControl &control) const;
+
+	RuntimeFixtureVariantObservation ExecuteColumnVariant(const duckdb_api::ScanPlan &plan,
+	                                                      const RuntimeFixtureTranscript &transcript,
+	                                                      RuntimeFixtureColumnScenario scenario,
+	                                                      duckdb_api::ExecutionControl &control) const;
+	RuntimeFixtureVariantObservation ExecuteRelationResourceVariant(const duckdb_api::ScanPlan &plan,
+	                                                                const RuntimeFixtureTranscript &transcript,
+	                                                                RuntimeFixtureRelationResourceField field,
+	                                                                RuntimeFixtureBoundaryVariant boundary,
+	                                                                duckdb_api::ExecutionControl &control) const;
+	RuntimeFixtureVariantObservation ExecuteGraphqlBodyResourceVariant(const duckdb_api::ScanPlan &plan,
+	                                                                   const RuntimeFixtureTranscript &transcript,
+	                                                                   RuntimeFixtureGraphqlBodyResourceField field,
+	                                                                   RuntimeFixtureBoundaryVariant boundary,
+	                                                                   duckdb_api::ExecutionControl &control) const;
+	RuntimeFixtureVariantObservation ExecutePaginationFailureVariant(const duckdb_api::ScanPlan &plan,
+	                                                                 const RuntimeFixtureTranscript &transcript,
+	                                                                 RuntimeFixturePaginationFailureVariant variant,
+	                                                                 duckdb_api::ExecutionControl &control) const;
 };
 
 } // namespace duckdb_api_test

@@ -50,9 +50,12 @@ void ValidateRuntimeFixtureTranscript(const RuntimeFixtureTranscript &transcript
 	}
 }
 
-std::vector<ControlledHttpResponse> BuildRuntimeFixtureResponses(const RuntimeFixtureTranscript &transcript,
-                                                                 duckdb_api::ExecutionControl &control,
-                                                                 bool transport_failure) {
+std::vector<ControlledHttpResponse>
+BuildRuntimeFixtureResponses(const RuntimeFixtureTranscript &transcript, duckdb_api::ExecutionControl &control,
+                             bool transport_failure, const RuntimeFixtureResponseAccountingOverrides *overrides) {
+	if (overrides && overrides->wire_response_bytes.size() != transcript.pages.size()) {
+		throw std::invalid_argument("controlled fixture response-accounting override count differs from pages");
+	}
 	std::vector<ControlledHttpResponse> responses;
 	responses.reserve(transcript.pages.size());
 	for (const auto &page : transcript.pages) {
@@ -73,7 +76,9 @@ std::vector<ControlledHttpResponse> BuildRuntimeFixtureResponses(const RuntimeFi
 				link_field_values.push_back(header.value);
 			}
 		}
-		responses.push_back({page.status, page.body, std::move(link_field_values), header_bytes, false, ""});
+		const auto wire_response_bytes = overrides ? overrides->wire_response_bytes[responses.size()] : 0;
+		responses.push_back(
+		    {page.status, page.body, std::move(link_field_values), header_bytes, false, "", wire_response_bytes});
 		CheckCancellation(control);
 	}
 	return responses;

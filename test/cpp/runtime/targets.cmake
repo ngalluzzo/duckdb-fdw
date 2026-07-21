@@ -210,6 +210,33 @@ target_link_libraries(
           duckdb_api_semantics_fixture_service
           Threads::Threads)
 
+function(add_duckdb_api_package_fixture_variant_test target source)
+  add_executable(${target} ${source})
+  configure_duckdb_api_cpp_target(${target})
+  target_include_directories(${target} PRIVATE test/cpp)
+  target_link_libraries(
+    ${target}
+    PRIVATE duckdb_api_runtime_package_fixture_service
+            duckdb_api_semantics_fixture_service
+            Threads::Threads)
+endfunction()
+
+add_duckdb_api_package_fixture_variant_test(
+  duckdb_api_package_fixture_column_variant_tests
+  test/cpp/runtime/execution/package_fixture_column_variant_tests.cpp)
+add_duckdb_api_package_fixture_variant_test(
+  duckdb_api_package_fixture_pagination_variant_tests
+  test/cpp/runtime/execution/package_fixture_pagination_variant_tests.cpp)
+add_duckdb_api_package_fixture_variant_test(
+  duckdb_api_package_fixture_resource_variant_tests
+  test/cpp/runtime/execution/package_fixture_resource_variant_tests.cpp)
+add_duckdb_api_package_fixture_variant_test(
+  duckdb_api_package_fixture_graphql_body_variant_tests
+  test/cpp/runtime/execution/package_fixture_graphql_body_variant_tests.cpp)
+target_link_libraries(
+  duckdb_api_package_fixture_graphql_body_variant_tests
+  PRIVATE duckdb_api_semantics_package_graphql_fixture_service)
+
 # The sole Query-facing Runtime test service. Only this dedicated include
 # directory is public; its implementation selects Runtime-owned named scenarios
 # and returns a public ScanExecutor plus safe counters/stages.

@@ -21,6 +21,10 @@ struct ControlledHttpResponse {
 	uint64_t header_bytes;
 	bool transport_failure;
 	std::string dependency_diagnostic;
+	// Optional test-only wire accounting. Zero uses body.size(). This lets a
+	// closed Runtime fixture exercise admitted byte ceilings through production
+	// accounting without retaining multi-megabyte padding.
+	uint64_t wire_response_bytes;
 };
 
 ControlledHttpResponse ControlledResponse(uint32_t status, std::string body,

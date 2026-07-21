@@ -86,6 +86,7 @@ private:
 		std::string diagnostic;
 		std::vector<std::string> link_field_values;
 		uint64_t header_bytes = 64;
+		uint64_t wire_response_bytes = 0;
 		bool scripted_transport_failure = false;
 		bool wait_for_bearer_barrier = false;
 		{
@@ -143,6 +144,7 @@ private:
 					header_bytes = scripted.header_bytes;
 					scripted_transport_failure = scripted.transport_failure;
 					diagnostic = scripted.dependency_diagnostic;
+					wire_response_bytes = scripted.wire_response_bytes;
 				}
 			} else {
 				body = state->body;
@@ -184,7 +186,10 @@ private:
 			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "wall_milliseconds",
 			                                 "execution exceeded its wall-time budget");
 		}
-		if (static_cast<uint64_t>(body.size()) > limits.max_response_bytes) {
+		if (wire_response_bytes == 0) {
+			wire_response_bytes = static_cast<uint64_t>(body.size());
+		}
+		if (wire_response_bytes > limits.max_response_bytes) {
 			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "response_bytes",
 			                                 "HTTP response exceeded its byte budget");
 		}
@@ -201,11 +206,8 @@ private:
 			                                 "HTTP response metadata exceeded its memory budget");
 		}
 		NotifyRuntimeFixtureResponseReady(control);
-		return {status,
-		        header_bytes,
-		        static_cast<uint64_t>(body.size()),
-		        std::move(body),
-		        {std::move(link_field_values), metadata_bytes}};
+		return {
+		    status, header_bytes, wire_response_bytes, std::move(body), {std::move(link_field_values), metadata_bytes}};
 	}
 
 	const std::shared_ptr<ControlledHttpRuntime::State> state;
@@ -309,11 +311,11 @@ void ControlledHttpRuntime::BlockUntilCancelled() {
 
 ControlledHttpResponse ControlledResponse(uint32_t status, std::string body,
                                           std::vector<std::string> link_field_values) {
-	return {status, std::move(body), std::move(link_field_values), 64, false, ""};
+	return {status, std::move(body), std::move(link_field_values), 64, false, "", 0};
 }
 
 ControlledHttpResponse ControlledTransportFailure(std::string dependency_diagnostic) {
-	return {0, "", {}, 0, true, std::move(dependency_diagnostic)};
+	return {0, "", {}, 0, true, std::move(dependency_diagnostic), 0};
 }
 
 bool ControlledHttpRuntime::WaitForRequestCount(uint64_t count, std::chrono::milliseconds timeout) {

@@ -9,9 +9,14 @@ set(REMOTE_RUNTIME_EXECUTOR_TEST_SUPPORT_SOURCES
 # composition. Consumers provide immutable plans and verified response pages;
 # this source receives no Connector or fixture-index implementation.
 set(REMOTE_RUNTIME_PACKAGE_FIXTURE_SERVICE_SOURCES
-    test/cpp/runtime/support/package_fixture_execution.cpp
-    test/cpp/runtime/support/package_fixture_observation.cpp
-    test/cpp/runtime/support/package_fixture_scenario.cpp)
+	test/cpp/runtime/support/package_fixture_column_variants.cpp
+	test/cpp/runtime/support/package_fixture_execution.cpp
+	test/cpp/runtime/support/package_fixture_graphql_body_variants.cpp
+	test/cpp/runtime/support/package_fixture_json_variant.cpp
+	test/cpp/runtime/support/package_fixture_observation.cpp
+	test/cpp/runtime/support/package_fixture_pagination_variants.cpp
+	test/cpp/runtime/support/package_fixture_resource_variants.cpp
+	test/cpp/runtime/support/package_fixture_scenario.cpp)
 # Narrow Runtime-owned inventory for the private controlled product oracle.
 # Root composition consumes this variable instead of listing Runtime sources.
 set(REMOTE_RUNTIME_LOOPBACK_PRODUCT_SOURCES
