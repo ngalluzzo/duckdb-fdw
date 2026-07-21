@@ -12,6 +12,12 @@
 
 namespace duckdb_api_test {
 
+namespace {
+
+const char NON_GITHUB_LOGICAL_SECRET[] = "non_github_package_fixture_secret";
+
+} // namespace
+
 duckdb_api::ScanPlan BuildRepositoryGithubPackageGraphqlPlan(const std::string &absolute_repository_root,
                                                              const std::string &logical_secret_name) {
 	const auto generation = CompileRepositoryGithubGenerationFixture(absolute_repository_root);
@@ -26,17 +32,20 @@ duckdb_api::ScanPlan BuildRepositoryGithubPackageGraphqlPlan(const std::string &
 duckdb_api::ScanPlan BuildNonGithubPackageGraphqlPlan(const std::string &absolute_repository_root) {
 	const auto generation = CompileNonGithubGraphqlGenerationFixture(absolute_repository_root);
 	const duckdb_api::PackageBoundScanPlanningService planning(generation);
-	auto request = duckdb_api::BuildConservativeScanRequest(generation.Connector(), "regional_events",
-	                                                        duckdb_api::LogicalSecretReference());
-	request.explicit_inputs = duckdb_api::ExplicitInputs({duckdb_api::ExplicitInput::Varchar("region", "north")});
+	auto request =
+	    duckdb_api::BuildConservativeScanRequest(generation.Connector(), "regional_events",
+	                                             duckdb_api::LogicalSecretReference::Named(NON_GITHUB_LOGICAL_SECRET));
+	request.explicit_inputs = duckdb_api::ExplicitInputs({duckdb_api::ExplicitInput::Varchar("region", "north"),
+	                                                      duckdb_api::ExplicitInput::Boolean("graph_view", true)});
 	return planning.Plan(generation.QueryRegistration().GenerationHandle(), request);
 }
 
 duckdb_api::ScanPlan BuildNonGithubPackageRestPlan(const std::string &absolute_repository_root) {
 	const auto generation = CompileNonGithubGraphqlGenerationFixture(absolute_repository_root);
 	const duckdb_api::PackageBoundScanPlanningService planning(generation);
-	auto request = duckdb_api::BuildConservativeScanRequest(generation.Connector(), "regional_events",
-	                                                        duckdb_api::LogicalSecretReference());
+	auto request =
+	    duckdb_api::BuildConservativeScanRequest(generation.Connector(), "regional_events",
+	                                             duckdb_api::LogicalSecretReference::Named(NON_GITHUB_LOGICAL_SECRET));
 	return planning.Plan(generation.QueryRegistration().GenerationHandle(), request);
 }
 

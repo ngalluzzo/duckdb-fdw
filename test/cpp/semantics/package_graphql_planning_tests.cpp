@@ -127,9 +127,11 @@ void TestPackageGraphqlPlanning(const std::string &absolute_repository_root) {
 	const auto non_github_registration = non_github_generation.QueryRegistration();
 	const duckdb_api::PackageBoundScanPlanningService non_github_planning(non_github_generation);
 	auto non_github_request = duckdb_api::BuildConservativeScanRequest(
-	    non_github_generation.Connector(), "regional_events", duckdb_api::LogicalSecretReference());
+	    non_github_generation.Connector(), "regional_events",
+	    duckdb_api::LogicalSecretReference::Named("non_github_graphql_planning_secret"));
 	non_github_request.explicit_inputs =
-	    duckdb_api::ExplicitInputs({duckdb_api::ExplicitInput::Varchar("region", "north")});
+	    duckdb_api::ExplicitInputs({duckdb_api::ExplicitInput::Varchar("region", "north"),
+	                                duckdb_api::ExplicitInput::Boolean("graph_view", true)});
 	const auto non_github = non_github_planning.Plan(non_github_registration.GenerationHandle(), non_github_request);
 	const auto &non_github_operation = non_github.Operation().Graphql();
 	const auto &non_github_page = non_github.Pagination().PageBudgets();

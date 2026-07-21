@@ -75,10 +75,11 @@ enum class PackageHttpNumericOriginCounterexample {
 duckdb_api::ScanPlan BuildRepositoryGithubPackageGraphqlPlan(const std::string &absolute_repository_root,
                                                              const std::string &logical_secret_name);
 
-// Produces the real non-GitHub package's anonymous :8443 GraphQL candidate and
-// REST fallback through the same bounded Semantics planning service. Runtime
-// receives only immutable plans and never compiles package source or imports a
-// Connector/private construction surface.
+// Produces the real non-GitHub package's :8443 GraphQL candidate and REST
+// fallback through the same bounded Semantics planning service. Both carry a
+// fixed synthetic logical credential reference (capability only, never secret
+// bytes). Runtime receives only immutable plans and never compiles package
+// source or imports a Connector/private construction surface.
 duckdb_api::ScanPlan BuildNonGithubPackageGraphqlPlan(const std::string &absolute_repository_root);
 duckdb_api::ScanPlan BuildNonGithubPackageRestPlan(const std::string &absolute_repository_root);
 

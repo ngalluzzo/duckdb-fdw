@@ -26,18 +26,29 @@ public:
 };
 
 std::string GraphqlPage(const std::string &id, bool active, bool more, const std::string &cursor) {
-	return std::string("{\"data\":{\"account\":{\"events\":{\"nodes\":[{\"id\":\"") + id +
-	       "\",\"active\":" + (active ? "true" : "false") + "}],\"pagination\":{\"more\":" + (more ? "true" : "false") +
-	       ",\"next\":" + (cursor.empty() ? "null" : "\"" + cursor + "\"") + "}}}}}";
+	return std::string("{\"data\":{\"organization\":{\"eventFeed\":{\"nodes\":[{\"id\":\"") + id +
+	       "\",\"active\":" + (active ? "true" : "false") + ",\"stats\":{\"attendance\":" + (active ? "120" : "25") +
+	       "},\"classification\":" + (active ? "{\"label\":\"public\"}" : "null") +
+	       "}],\"pagination\":{\"more\":" + (more ? "true" : "false") +
+	       ",\"next\":" + (cursor.empty() ? "null" : "\"" + cursor + "\"") + "}}}},\"errors\":[]}";
+}
+
+std::string RestPage(const std::string &id, bool active) {
+	return std::string("[{\"id\":\"") + id + "\",\"active\":" + (active ? "true" : "false") +
+	       ",\"stats\":{\"attendance\":" + (active ? "120" : "25") +
+	       "},\"classification\":" + (active ? "{\"label\":\"public\"}" : "{\"label\":\"members\"}") + "}]";
 }
 
 void TestNonGithubPackageGraphqlExecutesTwoCursorPages(const std::string &repository_root) {
 	const auto runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
 	runtime->RespondSequence({ControlledResponse(200, GraphqlPage("event-1", true, true, "regional-cursor")),
 	                          ControlledResponse(200, GraphqlPage("event-2", false, false, ""))});
+	std::string token = "non_github_graphql_execution_token";
+	runtime->ExpectBearer("Bearer " + token);
 	NeverCancelled control;
 	auto stream =
-	    runtime->Executor()->Open(duckdb_api_test::BuildNonGithubPackageGraphqlPlan(repository_root), control);
+	    runtime->Executor()->OpenWithAuthorization(duckdb_api_test::BuildNonGithubPackageGraphqlPlan(repository_root),
+	                                               duckdb_api::ScanAuthorization::Bearer(std::move(token)), control);
 	Require(runtime->Observations().empty(), "package GraphQL Open performed request or body work");
 
 	duckdb_api::TypedBatch batch;
@@ -55,25 +66,30 @@ void TestNonGithubPackageGraphqlExecutesTwoCursorPages(const std::string &reposi
 		Require(observation.method == "POST" && observation.scheme == "https" &&
 		            observation.host == "api.example.com" && observation.port == 8443 &&
 		            observation.target == "/v1/graphql-events" && observation.content_type == "application/json" &&
-		            observation.headers.size() == 1 && observation.headers[0].first == "X-Client" &&
-		            observation.headers[0].second == "duckdb-api-test",
+		            observation.headers.size() == 2 && observation.headers[0].first == "X-Client" &&
+		            observation.headers[0].second == "duckdb-api-test" &&
+		            observation.headers[1].first == "Authorization" && observation.headers[1].second == "<redacted>",
 		        "package GraphQL request lost its typed non-GitHub authority");
 	}
 	Require(observations[0].body.find("{\"query\":\"query AcmeRegionalEvents") == 0 &&
 	            observations[0].body.find("\"variables\":{\"pageSize\":50,\"cursor\":null}") != std::string::npos &&
-	            observations[1].body.find("\"cursor\":\"regional-cursor\"") != std::string::npos,
+	            observations[1].body.find("\"cursor\":\"regional-cursor\"") != std::string::npos &&
+	            runtime->ConsumeBearerExpectation(2),
 	        "package GraphQL renderer or cursor body materialization drifted");
 }
 
 void TestNondefaultPortRestAndLinkContinuation(const std::string &repository_root) {
 	const auto explicit_port = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	std::string explicit_port_token = "non_github_rest_execution_token";
+	explicit_port->ExpectBearer("Bearer " + explicit_port_token);
 	explicit_port->RespondSequence(
-	    {ControlledResponse(200, "[{\"id\":\"event-1\",\"active\":true}]",
+	    {ControlledResponse(200, RestPage("event-1", true),
 	                        {"<https://api.example.com:8443/v1/events?per_page=50&page=2>; rel=next"}),
-	     ControlledResponse(200, "[{\"id\":\"event-2\",\"active\":false}]")});
+	     ControlledResponse(200, RestPage("event-2", false))});
 	NeverCancelled control;
-	auto stream =
-	    explicit_port->Executor()->Open(duckdb_api_test::BuildNonGithubPackageRestPlan(repository_root), control);
+	auto stream = explicit_port->Executor()->OpenWithAuthorization(
+	    duckdb_api_test::BuildNonGithubPackageRestPlan(repository_root),
+	    duckdb_api::ScanAuthorization::Bearer(std::move(explicit_port_token)), control);
 	duckdb_api::TypedBatch batch;
 	Require(stream->Next(control, batch) && batch.rows.size() == 1 &&
 	            batch.rows[0].values[0].varchar_value == "event-1" && stream->Next(control, batch) &&
@@ -82,24 +98,28 @@ void TestNondefaultPortRestAndLinkContinuation(const std::string &repository_roo
 	const auto observations = explicit_port->Observations();
 	Require(observations.size() == 2 && observations[0].host == "api.example.com" && observations[0].port == 8443 &&
 	            observations[0].target == "/v1/events?per_page=50&page=1" &&
-	            observations[1].target == "/v1/events?per_page=50&page=2" && observations[0].headers.size() == 1 &&
-	            observations[0].headers[0].first == "X-Client",
+	            observations[1].target == "/v1/events?per_page=50&page=2" && observations[0].headers.size() == 2 &&
+	            observations[0].headers[0].first == "X-Client" && observations[0].headers[1].first == "Authorization" &&
+	            observations[0].headers[1].second == "<redacted>" && explicit_port->ConsumeBearerExpectation(2),
 	        "package REST request reconstruction lost its path, query, header, or port");
 
 	const auto omitted_port = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	std::string omitted_port_token = "non_github_rest_denied_link_token";
+	omitted_port->ExpectBearer("Bearer " + omitted_port_token);
 	omitted_port->RespondSequence(
-	    {ControlledResponse(200, "[{\"id\":\"event-1\",\"active\":true}]",
+	    {ControlledResponse(200, RestPage("event-1", true),
 	                        {"<https://api.example.com/v1/events?per_page=50&page=2>; rel=next"}),
-	     ControlledResponse(200, "[{\"id\":\"event-2\",\"active\":false}]")});
-	auto denied =
-	    omitted_port->Executor()->Open(duckdb_api_test::BuildNonGithubPackageRestPlan(repository_root), control);
+	     ControlledResponse(200, RestPage("event-2", false))});
+	auto denied = omitted_port->Executor()->OpenWithAuthorization(
+	    duckdb_api_test::BuildNonGithubPackageRestPlan(repository_root),
+	    duckdb_api::ScanAuthorization::Bearer(std::move(omitted_port_token)), control);
 	bool rejected = false;
 	try {
 		(void)denied->Next(control, batch);
 	} catch (const duckdb_api::ExecutionError &error) {
 		rejected = error.Stage() == duckdb_api::ErrorStage::POLICY && error.Field() == "pagination.next";
 	}
-	Require(rejected && omitted_port->Observations().size() == 1,
+	Require(rejected && omitted_port->Observations().size() == 1 && omitted_port->ConsumeBearerExpectation(1),
 	        "omitted nondefault Link port reached another request or used the wrong failure");
 }
 
@@ -185,6 +205,9 @@ int main(int argc, char **argv) {
 		TestNumericOriginsFailBeforeCredentialOrTransport(repository_root);
 		std::cout << "package HTTP execution tests passed\n";
 		return EXIT_SUCCESS;
+	} catch (const duckdb_api::ExecutionError &error) {
+		std::cerr << "package HTTP execution tests failed at field " << error.Field() << ": " << error.what() << '\n';
+		return EXIT_FAILURE;
 	} catch (const std::exception &error) {
 		std::cerr << "package HTTP execution tests failed: " << error.what() << '\n';
 		return EXIT_FAILURE;

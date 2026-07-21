@@ -46,6 +46,43 @@ target_link_libraries(
           duckdb_api_content_digest_service
           duckdb_api_semantics_protocol_replacement_fixture_service)
 
+# Non-installable Semantics observation boundary for package-fixture consumers.
+# The provider accepts only immutable compiled facts and a typed ScanRequest,
+# then invokes the production generation-bound planner. Its dependency graph
+# intentionally contains no Runtime, transport, Connector source/compiler, or
+# fixture-coverage service.
+add_library(
+  duckdb_api_semantics_input_resolution_observation_service STATIC
+  ${RELATIONAL_INPUT_RESOLUTION_OBSERVATION_SERVICE_SOURCES})
+configure_duckdb_api_cpp_target(
+  duckdb_api_semantics_input_resolution_observation_service)
+target_include_directories(
+  duckdb_api_semantics_input_resolution_observation_service
+  PUBLIC test/cpp
+  PRIVATE src/semantics)
+target_link_libraries(
+  duckdb_api_semantics_input_resolution_observation_service
+  PRIVATE duckdb_api_package_bound_planning_service)
+
+# Focused provider oracle. Connector's typed generation fixture remains behind
+# its own bounded service and supplies no YAML, source, or coverage-key facts.
+add_executable(
+  duckdb_api_semantics_input_resolution_observation_service_tests
+  test/cpp/semantics/service/input_resolution_observation_service_tests.cpp)
+configure_duckdb_api_cpp_target(
+  duckdb_api_semantics_input_resolution_observation_service_tests)
+target_include_directories(
+  duckdb_api_semantics_input_resolution_observation_service_tests
+  PRIVATE test/cpp)
+target_compile_definitions(
+  duckdb_api_semantics_input_resolution_observation_service_tests
+  PRIVATE DUCKDB_API_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(
+  duckdb_api_semantics_input_resolution_observation_service_tests
+  PRIVATE duckdb_api_semantics_input_resolution_observation_service
+          duckdb_api_package_generation_fixture_service
+          duckdb_api_package_compiler_fixture_service)
+
 # Link-only Runtime-facing topology oracle. Its source includes only the
 # bounded Semantics fixture header and the immutable plan contract.
 add_executable(

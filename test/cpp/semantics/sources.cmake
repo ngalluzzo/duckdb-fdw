@@ -26,6 +26,10 @@ set(RELATIONAL_MATERIALIZED_PLAN_TEST_SERVICE_SOURCES
     test/cpp/semantics/support/runtime_rest_predicate_plan_test_fixtures.cpp)
 set(RELATIONAL_PACKAGE_GRAPHQL_PLAN_TEST_SERVICE_SOURCES
     test/cpp/semantics/support/repository_graphql_scan_plan_test_fixtures.cpp)
+set(RELATIONAL_INPUT_RESOLUTION_OBSERVATION_SERVICE_SOURCES
+    test/cpp/semantics/service/input_resolution_observation_values.cpp
+    test/cpp/semantics/service/input_resolution_observation_service.cpp
+    test/cpp/semantics/service/highest_rank_tie_observation_service.cpp)
 set(RELATIONAL_PREDICATE_PLANNER_TEST_SOURCES
     test/cpp/semantics/input_resolution_law_tests.cpp
     test/cpp/semantics/operation_selection_law_tests.cpp

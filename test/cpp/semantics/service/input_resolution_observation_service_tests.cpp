@@ -1,0 +1,286 @@
+#include "semantics/service/input_resolution_observation_service.hpp"
+
+#include "connector/support/package_compiler_test_fixtures.hpp"
+#include "connector/support/package_generation_test_fixtures.hpp"
+#include "support/require.hpp"
+
+#include <cstdlib>
+#include <exception>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+namespace {
+
+using duckdb_api_test::Require;
+using duckdb_api_test::semantics_service::ObservedCallerInputState;
+using duckdb_api_test::semantics_service::ObservedInputSource;
+using duckdb_api_test::semantics_service::ObservedInputState;
+using duckdb_api_test::semantics_service::ObservedRequestBindingDisposition;
+using duckdb_api_test::semantics_service::ObservedScalarKind;
+using duckdb_api_test::semantics_service::PackageInputPlanningObservation;
+
+const char RELATION[] = "bigint_predicates";
+
+const duckdb_api::CompiledRegistrationRelation &
+FindRegistrationRelation(const duckdb_api::CompiledQueryRegistrationView &registration,
+                         const std::string &relation_name = RELATION) {
+	for (const auto &relation : registration.Relations()) {
+		if (relation.Name() == relation_name) {
+			return relation;
+		}
+	}
+	throw std::runtime_error("typed package fixture lost its BIGINT predicate relation");
+}
+
+duckdb_api::ScanRequest BuildRequest(const duckdb_api::CompiledPackageGeneration &generation,
+                                     duckdb_api::ExplicitInputs inputs) {
+	const auto registration = generation.QueryRegistration();
+	auto request = duckdb_api::BuildPackageScanRequest(registration.Identity(), FindRegistrationRelation(registration),
+	                                                   std::move(inputs), duckdb_api::LogicalSecretReference());
+	request.requested_predicate = duckdb_api::RequestedPredicate::Comparison(
+	    1, duckdb_api::RequestedPredicateValueKind::BIGINT, duckdb_api::RequestedPredicateComparisonOperator::EQUALS,
+	    duckdb_api::RequestedPredicateValue::BigInt(42));
+	request.retained_predicate_scope = duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE;
+	request.capabilities.selective_predicate = true;
+	request.capabilities.retains_predicate = true;
+	return request;
+}
+
+void RequirePlanningOnly(const PackageInputPlanningObservation &observation) {
+	Require(observation.PlanningServiceInvocations() == 1 && observation.RuntimeInvocations() == 0 &&
+	            observation.TransportInvocations() == 0,
+	        "input observation crossed the planning-only service boundary");
+}
+
+void TestBoundValueIsMaterialized() {
+	const auto generation = duckdb_api_test::BuildTypedPredicatePackageGenerationFixture();
+	const auto request = BuildRequest(
+	    generation,
+	    duckdb_api::ExplicitInputs({duckdb_api::ExplicitInput::Varchar("scope", "north america/\xCE\xB2")}));
+	const auto observation = duckdb_api_test::semantics_service::ObservePackageInputPlanning(
+	    generation, generation.OpaqueHandle(), request, "scope");
+	Require(observation.PlanningSucceeded() && observation.SelectedOperation() == "bigint_predicates_selected" &&
+	            observation.Input().Completed() && observation.Input().Kind() == ObservedScalarKind::VARCHAR &&
+	            observation.Input().CallerState() == ObservedCallerInputState::BOUND_VALUE &&
+	            observation.Input().State() == ObservedInputState::BOUND_VALUE &&
+	            observation.Input().Source() == ObservedInputSource::EXPLICIT &&
+	            !observation.Input().DefaultWasApplied() &&
+	            observation.Input().VarcharValue() == "north america/\xCE\xB2" &&
+	            observation.BindingDisposition() == ObservedRequestBindingDisposition::MATERIALIZED &&
+	            observation.DeclaredBindingCount() == 1 && observation.MaterializedBindings().size() == 1 &&
+	            observation.MaterializedBindings()[0].Name() == "scope_name" &&
+	            observation.MaterializedBindings()[0].SourceId() == "scope" &&
+	            observation.MaterializedBindings()[0].Kind() == ObservedScalarKind::VARCHAR &&
+	            observation.MaterializedBindings()[0].VarcharValue() == "north america/\xCE\xB2" &&
+	            observation.MaterializedBindings()[0].EncodedValue() == "north+america%2F%CE%B2",
+	        "BOUND_VALUE observation lost explicit resolution or planned request materialization");
+	RequirePlanningOnly(observation);
+}
+
+void TestUnboundIsOmitted() {
+	const auto generation = duckdb_api_test::BuildTypedPredicatePackageGenerationFixture();
+	const auto observation = duckdb_api_test::semantics_service::ObservePackageInputPlanning(
+	    generation, generation.OpaqueHandle(), BuildRequest(generation, {}), "omitted");
+	Require(observation.PlanningSucceeded() && observation.SelectedOperation() == "bigint_predicates_selected" &&
+	            observation.Input().Completed() && observation.Input().Kind() == ObservedScalarKind::VARCHAR &&
+	            observation.Input().CallerState() == ObservedCallerInputState::UNBOUND &&
+	            observation.Input().State() == ObservedInputState::UNBOUND &&
+	            observation.Input().Source() == ObservedInputSource::NONE && !observation.Input().DefaultWasApplied() &&
+	            observation.BindingDisposition() == ObservedRequestBindingDisposition::OMITTED &&
+	            observation.DeclaredBindingCount() == 1 && observation.MaterializedBindings().empty(),
+	        "UNBOUND observation fabricated a value or request binding");
+	RequirePlanningOnly(observation);
+}
+
+void TestDefaultIsAppliedAndMaterialized() {
+	const auto generation = duckdb_api_test::BuildTypedPredicatePackageGenerationFixture();
+	const auto observation = duckdb_api_test::semantics_service::ObservePackageInputPlanning(
+	    generation, generation.OpaqueHandle(), BuildRequest(generation, {}), "scope");
+	Require(observation.PlanningSucceeded() && observation.SelectedOperation() == "bigint_predicates_selected" &&
+	            observation.Input().Completed() && observation.Input().Kind() == ObservedScalarKind::VARCHAR &&
+	            observation.Input().CallerState() == ObservedCallerInputState::UNBOUND &&
+	            observation.Input().State() == ObservedInputState::BOUND_VALUE &&
+	            observation.Input().Source() == ObservedInputSource::DEFAULT_VALUE &&
+	            observation.Input().DefaultWasApplied() && observation.Input().VarcharValue() == "all" &&
+	            observation.BindingDisposition() == ObservedRequestBindingDisposition::MATERIALIZED &&
+	            observation.DeclaredBindingCount() == 1 && observation.MaterializedBindings().size() == 1 &&
+	            observation.MaterializedBindings()[0].Name() == "scope_name" &&
+	            observation.MaterializedBindings()[0].VarcharValue() == "all" &&
+	            observation.MaterializedBindings()[0].EncodedValue() == "all",
+	        "DEFAULT_APPLIED observation lost its source or planned request value");
+	RequirePlanningOnly(observation);
+}
+
+void TestExplicitNullableNullIsOmitted() {
+	const auto generation = duckdb_api_test::BuildTypedPredicatePackageGenerationFixture();
+	const auto request = BuildRequest(generation, duckdb_api::ExplicitInputs({duckdb_api::ExplicitInput::Null(
+	                                                  "omitted", duckdb_api::ExplicitInputValueKind::VARCHAR)}));
+	const auto observation = duckdb_api_test::semantics_service::ObservePackageInputPlanning(
+	    generation, generation.OpaqueHandle(), request, "omitted");
+	Require(observation.PlanningSucceeded() && observation.SelectedOperation() == "bigint_predicates_selected" &&
+	            observation.Input().Completed() && observation.Input().Kind() == ObservedScalarKind::VARCHAR &&
+	            observation.Input().CallerState() == ObservedCallerInputState::BOUND_NULL &&
+	            observation.Input().State() == ObservedInputState::BOUND_NULL &&
+	            observation.Input().Source() == ObservedInputSource::EXPLICIT &&
+	            !observation.Input().DefaultWasApplied() &&
+	            observation.BindingDisposition() == ObservedRequestBindingDisposition::OMITTED &&
+	            observation.DeclaredBindingCount() == 1 && observation.MaterializedBindings().empty(),
+	        "BOUND_NULL_OMITTED observation materialized an explicit nullable NULL");
+	RequirePlanningOnly(observation);
+}
+
+void TestExplicitNonNullableNullIsRejected() {
+	const auto generation = duckdb_api_test::BuildTypedPredicatePackageGenerationFixture();
+	const auto request = BuildRequest(generation, duckdb_api::ExplicitInputs({duckdb_api::ExplicitInput::Null(
+	                                                  "scope", duckdb_api::ExplicitInputValueKind::VARCHAR)}));
+	const auto observation = duckdb_api_test::semantics_service::ObservePackageInputPlanning(
+	    generation, generation.OpaqueHandle(), request, "scope");
+	Require(!observation.PlanningSucceeded() &&
+	            observation.ErrorCode() == duckdb_api::PlanningErrorCode::INVALID_CONTRACT &&
+	            !observation.Input().Completed() && observation.Input().Kind() == ObservedScalarKind::VARCHAR &&
+	            observation.Input().CallerState() == ObservedCallerInputState::BOUND_NULL &&
+	            observation.Input().State() == ObservedInputState::BOUND_NULL &&
+	            observation.Input().Source() == ObservedInputSource::EXPLICIT &&
+	            !observation.Input().DefaultWasApplied() &&
+	            observation.BindingDisposition() == ObservedRequestBindingDisposition::NOT_AVAILABLE &&
+	            observation.DeclaredBindingCount() == 0 && observation.MaterializedBindings().empty(),
+	        "BOUND_NULL_REJECTED observation invented a completed resolution, operation, or request binding");
+	RequirePlanningOnly(observation);
+}
+
+void TestExactOperationSelectionFailureIsRetained() {
+	const auto generation = duckdb_api_test::BuildTypedTiePackageGenerationFixture();
+	const auto registration = generation.QueryRegistration();
+	const auto request = duckdb_api::BuildPackageScanRequest(
+	    registration.Identity(), FindRegistrationRelation(registration, duckdb_api_test::PACKAGE_TYPED_RELATION),
+	    duckdb_api::ExplicitInputs({duckdb_api::ExplicitInput::Varchar("query", "records")}),
+	    duckdb_api::LogicalSecretReference());
+	const auto observation = duckdb_api_test::semantics_service::ObservePackageInputPlanning(
+	    generation, generation.OpaqueHandle(), request, "query");
+	Require(!observation.PlanningSucceeded() &&
+	            observation.ErrorCode() == duckdb_api::PlanningErrorCode::OPERATION_SELECTION_FAILED &&
+	            observation.Input().Completed() &&
+	            observation.Input().CallerState() == ObservedCallerInputState::BOUND_VALUE &&
+	            observation.Input().State() == ObservedInputState::BOUND_VALUE &&
+	            observation.Input().Source() == ObservedInputSource::EXPLICIT &&
+	            observation.Input().VarcharValue() == "records" &&
+	            observation.BindingDisposition() == ObservedRequestBindingDisposition::NOT_AVAILABLE,
+	        "operation-selection failure was collapsed into an input or request-binding outcome");
+	RequirePlanningOnly(observation);
+}
+
+void TestControlledRegionalHighestRankTieIsDerived() {
+	const auto generation = duckdb_api_test::CompileNonGithubGraphqlGenerationFixture(DUCKDB_API_SOURCE_ROOT);
+	const auto registration = generation.QueryRegistration();
+	const auto request = duckdb_api::BuildPackageScanRequest(
+	    registration.Identity(), FindRegistrationRelation(registration, "regional_events"),
+	    duckdb_api::ExplicitInputs({duckdb_api::ExplicitInput::Varchar("region", "west"),
+	                                duckdb_api::ExplicitInput::Boolean("graph_view", true)}),
+	    duckdb_api::LogicalSecretReference::Named("input_resolution_tie_secret"));
+	const auto observation = duckdb_api_test::semantics_service::ObserveHighestRankRelationInputTie(
+	    generation, registration.GenerationHandle(), request);
+	Require(observation.EligibleCandidateCount() == 2 && observation.HighestSpecificity() == 2 &&
+	            observation.ErrorCode() == duckdb_api::PlanningErrorCode::OPERATION_SELECTION_FAILED &&
+	            !observation.PlanWasProduced() && observation.PlanningServiceInvocations() == 1 &&
+	            observation.RuntimeInvocations() == 0 && observation.TransportInvocations() == 0,
+	        "controlled regional tie did not reach the exact production operation-selection failure");
+}
+
+void TestControlledDefaultsPreserveEveryScalarKind() {
+	const auto generation = duckdb_api_test::CompileNonGithubGraphqlGenerationFixture(DUCKDB_API_SOURCE_ROOT);
+	const auto registration = generation.QueryRegistration();
+	const auto request = duckdb_api::BuildPackageScanRequest(
+	    registration.Identity(), FindRegistrationRelation(registration, "regional_events"),
+	    duckdb_api::ExplicitInputs({duckdb_api::ExplicitInput::Varchar("region", "west"),
+	                                duckdb_api::ExplicitInput::Boolean("rest_view", true)}),
+	    duckdb_api::LogicalSecretReference::Named("input_resolution_scalar_secret"));
+	const auto boolean_observation = duckdb_api_test::semantics_service::ObservePackageInputPlanning(
+	    generation, registration.GenerationHandle(), request, "include_cancelled");
+	const auto bigint_observation = duckdb_api_test::semantics_service::ObservePackageInputPlanning(
+	    generation, registration.GenerationHandle(), request, "minimum_attendance");
+	const auto varchar_observation = duckdb_api_test::semantics_service::ObservePackageInputPlanning(
+	    generation, registration.GenerationHandle(), request, "audience");
+	Require(boolean_observation.PlanningSucceeded() &&
+	            boolean_observation.SelectedOperation() == "regional_event_rest" &&
+	            boolean_observation.Input().Kind() == ObservedScalarKind::BOOLEAN &&
+	            boolean_observation.Input().CallerState() == ObservedCallerInputState::UNBOUND &&
+	            boolean_observation.Input().State() == ObservedInputState::BOUND_VALUE &&
+	            boolean_observation.Input().DefaultWasApplied() && !boolean_observation.Input().BooleanValue() &&
+	            boolean_observation.BindingDisposition() == ObservedRequestBindingDisposition::MATERIALIZED &&
+	            boolean_observation.MaterializedBindings().size() == 1 &&
+	            !boolean_observation.MaterializedBindings()[0].BooleanValue() &&
+	            boolean_observation.MaterializedBindings()[0].EncodedValue() == "false",
+	        "controlled BOOLEAN default lost typed resolution or materialization");
+	Require(bigint_observation.PlanningSucceeded() && bigint_observation.SelectedOperation() == "regional_event_rest" &&
+	            bigint_observation.Input().Kind() == ObservedScalarKind::BIGINT &&
+	            bigint_observation.Input().CallerState() == ObservedCallerInputState::UNBOUND &&
+	            bigint_observation.Input().State() == ObservedInputState::BOUND_VALUE &&
+	            bigint_observation.Input().DefaultWasApplied() && bigint_observation.Input().BigintValue() == 25 &&
+	            bigint_observation.BindingDisposition() == ObservedRequestBindingDisposition::MATERIALIZED &&
+	            bigint_observation.MaterializedBindings().size() == 1 &&
+	            bigint_observation.MaterializedBindings()[0].BigintValue() == 25 &&
+	            bigint_observation.MaterializedBindings()[0].EncodedValue() == "25",
+	        "controlled BIGINT default lost typed resolution or materialization");
+	Require(
+	    varchar_observation.PlanningSucceeded() && varchar_observation.SelectedOperation() == "regional_event_rest" &&
+	        varchar_observation.Input().Kind() == ObservedScalarKind::VARCHAR &&
+	        varchar_observation.Input().CallerState() == ObservedCallerInputState::UNBOUND &&
+	        varchar_observation.Input().State() == ObservedInputState::BOUND_VALUE &&
+	        varchar_observation.Input().DefaultWasApplied() && varchar_observation.Input().VarcharValue() == "public" &&
+	        varchar_observation.BindingDisposition() == ObservedRequestBindingDisposition::MATERIALIZED &&
+	        varchar_observation.MaterializedBindings().size() == 1 &&
+	        varchar_observation.MaterializedBindings()[0].VarcharValue() == "public" &&
+	        varchar_observation.MaterializedBindings()[0].EncodedValue() == "public",
+	    "controlled VARCHAR default lost typed resolution or materialization");
+	RequirePlanningOnly(boolean_observation);
+	RequirePlanningOnly(bigint_observation);
+	RequirePlanningOnly(varchar_observation);
+}
+
+void TestUnusedExplicitNullIsNotReportedAsProtocolOmission() {
+	const auto generation = duckdb_api_test::CompileNonGithubGraphqlGenerationFixture(DUCKDB_API_SOURCE_ROOT);
+	const auto registration = generation.QueryRegistration();
+	const auto request = duckdb_api::BuildPackageScanRequest(
+	    registration.Identity(), FindRegistrationRelation(registration, "regional_events"),
+	    duckdb_api::ExplicitInputs(
+	        {duckdb_api::ExplicitInput::Null("region", duckdb_api::ExplicitInputValueKind::VARCHAR),
+	         duckdb_api::ExplicitInput::Null("audience", duckdb_api::ExplicitInputValueKind::VARCHAR),
+	         duckdb_api::ExplicitInput::Null("note", duckdb_api::ExplicitInputValueKind::VARCHAR)}),
+	    duckdb_api::LogicalSecretReference::Named("input_resolution_unused_null_secret"));
+	const char *input_ids[] = {"region", "audience", "note"};
+	for (const auto *input_id : input_ids) {
+		const auto observation = duckdb_api_test::semantics_service::ObservePackageInputPlanning(
+		    generation, registration.GenerationHandle(), request, input_id);
+		Require(observation.PlanningSucceeded() && observation.SelectedOperation() == "fallback_events" &&
+		            observation.Input().Completed() &&
+		            observation.Input().CallerState() == ObservedCallerInputState::BOUND_NULL &&
+		            observation.Input().State() == ObservedInputState::BOUND_NULL &&
+		            observation.Input().Source() == ObservedInputSource::EXPLICIT &&
+		            observation.BindingDisposition() == ObservedRequestBindingDisposition::NOT_DECLARED &&
+		            observation.DeclaredBindingCount() == 0 && observation.MaterializedBindings().empty(),
+		        "unused explicit NULL was mislabeled as an omitted selected-operation request field");
+		RequirePlanningOnly(observation);
+	}
+}
+
+} // namespace
+
+int main() {
+	try {
+		TestBoundValueIsMaterialized();
+		TestUnboundIsOmitted();
+		TestDefaultIsAppliedAndMaterialized();
+		TestExplicitNullableNullIsOmitted();
+		TestExplicitNonNullableNullIsRejected();
+		TestExactOperationSelectionFailureIsRetained();
+		TestControlledRegionalHighestRankTieIsDerived();
+		TestControlledDefaultsPreserveEveryScalarKind();
+		TestUnusedExplicitNullIsNotReportedAsProtocolOmission();
+		std::cout << "Semantics input-resolution observation service tests passed" << std::endl;
+		return EXIT_SUCCESS;
+	} catch (const std::exception &error) {
+		std::cerr << "Semantics input-resolution observation service tests failed: " << error.what() << std::endl;
+		return EXIT_FAILURE;
+	}
+}
