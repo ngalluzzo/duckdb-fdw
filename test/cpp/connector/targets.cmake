@@ -104,6 +104,22 @@ target_link_libraries(
   PRIVATE duckdb_api_package_fixture_service
           duckdb_api_package_compiler_fixture_service)
 
+# 0.9.0 package-independence oracle: proves equivalent migration inputs across
+# the github and rickandmorty package profiles compile to equivalent output and
+# fail with equivalent diagnostics, including unsupported spec/dialect. The
+# target consumes only the Connector-owned fixture service; it never reaches
+# compiler internals, YAML, or source paths directly.
+add_executable(
+  duckdb_api_cross_package_migration_tests
+  test/cpp/connector/package/cross_package_migration_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_cross_package_migration_tests)
+target_include_directories(
+  duckdb_api_cross_package_migration_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_cross_package_migration_tests
+  PRIVATE duckdb_api_package_compiler_fixture_service)
+
 add_executable(
   duckdb_api_package_fixture_coverage_tests
   test/cpp/connector/package/package_fixture_coverage_tests.cpp)

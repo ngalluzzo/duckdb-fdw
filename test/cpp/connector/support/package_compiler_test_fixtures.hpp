@@ -44,6 +44,51 @@ CompileRepositoryRickAndMortyRegistrationFixture(const std::string &absolute_rep
 duckdb_api::CompiledLocalPackage
 CompileRepositoryRickAndMortyLocalPackageFixture(const std::string &absolute_repository_root);
 
+// Package-independence oracle for the 0.9.0 public-authoring candidate. Each
+// envelope is a freshly authored minimal package rooted in one real package's
+// policy profile: `github_profile` keeps GitHub's bearer credential and
+// api.github.com network policy; `rickandmorty_profile` is anonymous with
+// rickandmortyapi.com policy. Both carry one byte-identical canonical
+// `migration_probe` relation (anonymous, static schema, one BIGINT and one
+// VARCHAR column, one nullable VARCHAR relation input bound into a REST query
+// field, disabled pagination, identical resource ceilings) whose only
+// envelope-varying field is the operation origin host each policy admits. The
+// provider owns and retains both private roots for process lifetime; consumers
+// receive immutable compiled values and no YAML or path API. Equivalence of
+// the two compiled relations modulo identity proves the duckdb_api/v1 contract,
+// not either real package, is the product.
+struct CrossPackageMigrationFixture {
+	duckdb_api::CompiledLocalPackage github_profile;
+	duckdb_api::CompiledLocalPackage rickandmorty_profile;
+};
+
+CrossPackageMigrationFixture BuildRepositoryCrossPackageMigrationFixture(const std::string &absolute_repository_root);
+
+// Selects which real package profile a mutated migration envelope is derived
+// from. Each profile retains its real network policy (and credentials, for
+// GitHub) so diagnostic equivalence is proven across the actual package
+// envelopes, not a hand-authored approximation.
+enum class MigrationProfile { GITHUB, RICK_AND_MORTY };
+
+// One unique scalar anchor replaced in a derived migration manifest or the
+// canonical relation before compilation. The provider replaces the first
+// occurrence and rejects an absent anchor so a mutation cannot silently miss.
+struct MigrationReplacement {
+	std::string from;
+	std::string to;
+};
+
+// Compiles one migration envelope with optional scalar replacements applied to
+// the derived manifest and the canonical relation. Returns the production
+// compile result (success or failure) so callers can assert that equivalent
+// malformed inputs across both profiles produce equivalent diagnostics, and
+// that an unsupported spec or dialect fails identically regardless of profile.
+// The provider owns root lifetime exactly as for the unmutated fixture.
+duckdb_api::connector::PackageCompileResult
+CompileMigrationEnvelopeWithMutation(const std::string &absolute_repository_root, MigrationProfile profile,
+                                     const std::vector<MigrationReplacement> &manifest_replacements,
+                                     const std::vector<MigrationReplacement> &relation_replacements);
+
 enum class LocalPackageReloadFixtureVariant {
 	EXACT_NO_OP,
 	COMPATIBLE_PROVENANCE_PATCH,

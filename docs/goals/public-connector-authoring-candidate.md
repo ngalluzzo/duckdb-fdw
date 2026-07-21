@@ -229,3 +229,48 @@ accountable, Query Experience and Engineering Enablement as recorded above —
 routing unaffected by this trial's findings. No RFC was opened for the
 pagination gap; it is recorded here as a decision-critical input to the
 `1.0.0` contract-freeze delivery path (step 3), not decided.
+
+**Step 2 delivered: package-independence oracle (2026-07-21).** A new
+Connector-owned oracle at
+`test/cpp/connector/package/cross_package_migration_tests.cpp` (plus a
+`BuildRepositoryCrossPackageMigrationFixture` /
+`CompileMigrationEnvelopeWithMutation` provider in the existing compiler
+fixture service) proves the `duckdb_api/v1` contract, not either real package,
+is the product:
+
+- Equivalent valid inputs compile to equivalent output. A canonical
+  `migration_probe` relation (anonymous, static schema, one `BIGINT` and one
+  `VARCHAR` column, one nullable `VARCHAR` relation input bound into a REST
+  query field with omission semantics, `terminal_collection` response, disabled
+  pagination, full resource ceilings) is compiled under a github-profile
+  envelope (GitHub's real bearer credential + `api.github.com` policy) and a
+  rickandmorty-profile envelope (anonymous + `rickandmortyapi.com` policy). The
+  two compiled relations are byte-for-byte equivalent across the whole contract
+  surface — columns, inputs, operation identity/method/replay/response/pagination,
+  the input-bound query field, resource ceilings — modulo only the operation
+  origin host each policy admits and the package identity/digest.
+- Authentication independence is proven directly: the github envelope declares a
+  bearer credential for other relations while the rickandmorty envelope declares
+  none, yet both anonymous `migration_probe` relations compile to obligation
+  `NONE`. The v1 contract does not silently assume auth is always present.
+- Equivalent malformed inputs produce equivalent diagnostics. The same
+  one-over-the-connector-ceiling resource widening produces the same
+  `POLICY_WIDENING`/`COMPILE` diagnostic set (same count, codes, phases,
+  package-relative coordinates, and relation/operation identifiers) across both
+  envelopes. Diagnostics carry package-relative coordinates, so the comparison is
+  exact.
+- Unsupported spec and dialect fail identically regardless of profile.
+  `api_version: duckdb_api/v2` fails with `UNSUPPORTED_SPEC`/`SCHEMA` and
+  `extractor_dialect: duckdb_api/unsupported` fails with `UNSUPPORTED_DIALECT`/
+  `SCHEMA` in both envelopes, satisfying the explicit-failure acceptance signal.
+- The two envelopes' digests are well-formed, differ from each other, and differ
+  from both real repository packages, so the oracle cannot pass by accidentally
+  reproducing a real package.
+
+This step introduces no new public behavior (it is test and fixture service
+only), so it required no RFC and no architecture/specification/runtime contract
+edit. The pagination gap recorded above remains a step-3 input, not decided
+here. `make build`, `make test`, the source-identity, native-dependency,
+agent-asset, and public-inventory gates, and the fresh-root
+`scripts/run-native-product-tests.sh` gate all pass with this oracle wired into
+both the developer and release test lists.

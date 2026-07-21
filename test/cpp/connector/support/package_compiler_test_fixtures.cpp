@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
 #include <fstream>
@@ -150,6 +151,182 @@ CompileRepositoryRickAndMortyLocalPackageFixture(const std::string &absolute_rep
 		throw std::runtime_error("repository Rick and Morty connector package fixture did not compile");
 	}
 	return duckdb_api::CompiledLocalPackage(*result.Package());
+}
+
+// The canonical package-independence relation. Every field is identical across
+// both migration envelopes except the operation origin host, which must track
+// each envelope's network policy. It deliberately exercises the v1 mechanisms
+// both real packages share (static schema, typed columns with JSONPath
+// extractors, a nullable relation input bound into a REST query field with
+// omission semantics, anonymous auth, terminal-collection response, disabled
+// pagination, full resource ceilings) so equivalence is proven across the
+// contract surface, not one accidental field.
+const char *const kMigrationProbeRelationTemplate = "api_version: duckdb_api/v1\n"
+                                                    "kind: relation\n"
+                                                    "id: migration_probe\n"
+                                                    "schema: static\n"
+                                                    "\n"
+                                                    "columns:\n"
+                                                    "  - id: id\n"
+                                                    "    type: BIGINT\n"
+                                                    "    nullable: false\n"
+                                                    "    extract: $.id\n"
+                                                    "  - id: name\n"
+                                                    "    type: VARCHAR\n"
+                                                    "    nullable: false\n"
+                                                    "    extract: $.name\n"
+                                                    "\n"
+                                                    "inputs:\n"
+                                                    "  - id: status\n"
+                                                    "    type: VARCHAR\n"
+                                                    "    nullable: true\n"
+                                                    "\n"
+                                                    "auth:\n"
+                                                    "  mode: anonymous\n"
+                                                    "\n"
+                                                    "resources:\n"
+                                                    "  max_response_bytes_per_page: 65536\n"
+                                                    "  max_response_bytes_per_scan: 65536\n"
+                                                    "  max_records_per_page: 20\n"
+                                                    "  max_records_per_scan: 20\n"
+                                                    "  max_extracted_string_bytes: 256\n"
+                                                    "\n"
+                                                    "operations:\n"
+                                                    "  - id: fetch_probe\n"
+                                                    "    fallback: true\n"
+                                                    "    cardinality: many\n"
+                                                    "    replay_safety: safe\n"
+                                                    "    request:\n"
+                                                    "      protocol: rest\n"
+                                                    "      method: GET\n"
+                                                    "      origin:\n"
+                                                    "        scheme: https\n"
+                                                    "        host: %s\n"
+                                                    "        port: 443\n"
+                                                    "      path: /api/probe\n"
+                                                    "      query:\n"
+                                                    "        - name: status\n"
+                                                    "          input: status\n"
+                                                    "          encoding: form_urlencoded\n"
+                                                    "          omit_when_unbound: true\n"
+                                                    "          omit_when_null: true\n"
+                                                    "      headers: []\n"
+                                                    "    response:\n"
+                                                    "      source: terminal_collection\n"
+                                                    "      records: $.results[*]\n"
+                                                    "    pagination:\n"
+                                                    "      strategy: disabled\n";
+
+std::string RenderMigrationProbeRelation(const std::string &host) {
+	char buffer[4096];
+	const int written = ::snprintf(buffer, sizeof(buffer), kMigrationProbeRelationTemplate, host.c_str());
+	if (written < 0 || static_cast<std::size_t>(written) >= sizeof(buffer)) {
+		throw std::runtime_error("migration probe relation template did not render");
+	}
+	return std::string(buffer, static_cast<std::size_t>(written));
+}
+
+// Derives a migration envelope from one real package's connector.yaml by
+// re-identifying the connector and replacing its relation list with the single
+// canonical probe. Everything else (network policy, credentials, response
+// ceiling) is the real package's, so the oracle proves equivalence across the
+// actual package profiles rather than a hand-authored approximation.
+std::string DeriveMigrationManifest(const std::string &real_manifest, const std::string &real_id,
+                                    const std::string &migration_id) {
+	const std::string id_anchor = "\nid: " + real_id + "\n";
+	const auto id_offset = real_manifest.find(id_anchor);
+	if (id_offset == std::string::npos) {
+		throw std::runtime_error("migration envelope source connector id anchor is missing");
+	}
+	const std::string relations_anchor = "\nrelations:\n";
+	const auto relations_offset = real_manifest.find(relations_anchor);
+	if (relations_offset == std::string::npos) {
+		throw std::runtime_error("migration envelope source relations block is missing");
+	}
+	std::string result = real_manifest;
+	result.replace(id_offset, id_anchor.size(), "\nid: " + migration_id + "\n");
+	// Re-locate the relations block after the id replacement shifted the text.
+	const auto new_relations_offset = result.find(relations_anchor);
+	result.replace(new_relations_offset, result.size() - new_relations_offset, "\nrelations:\n  - migration_probe\n");
+	return result;
+}
+
+std::string ApplyReplacements(std::string text, const std::vector<MigrationReplacement> &replacements) {
+	for (const auto &replacement : replacements) {
+		const auto offset = text.find(replacement.from);
+		if (offset == std::string::npos) {
+			throw std::runtime_error("migration mutation anchor is absent: " + replacement.from);
+		}
+		text.replace(offset, replacement.from.size(), replacement.to);
+	}
+	return text;
+}
+
+struct MigrationProfileSource {
+	const char *package;
+	const char *real_id;
+	const char *migration_id;
+	const char *host;
+};
+
+MigrationProfileSource ResolveMigrationProfile(MigrationProfile profile) {
+	switch (profile) {
+	case MigrationProfile::GITHUB:
+		return {"github", "github", "github_migration", "api.github.com"};
+	case MigrationProfile::RICK_AND_MORTY:
+		return {"rickandmorty", "rickandmorty", "rickandmorty_migration", "rickandmortyapi.com"};
+	}
+	throw std::invalid_argument("unknown migration profile");
+}
+
+duckdb_api::connector::PackageCompileResult
+CompileMigrationEnvelopeWithMutation(const std::string &absolute_repository_root, MigrationProfile profile,
+                                     const std::vector<MigrationReplacement> &manifest_replacements,
+                                     const std::vector<MigrationReplacement> &relation_replacements) {
+	const auto source = ResolveMigrationProfile(profile);
+	char pattern[] = "/private/tmp/duckdb-api-migration-fixture-XXXXXX";
+	const auto *created = ::mkdtemp(pattern);
+	if (!created) {
+		throw std::runtime_error("could not create migration local-package fixture root");
+	}
+	const std::string root = created;
+	try {
+		if (::mkdir((root + "/relations").c_str(), 0700) != 0) {
+			throw std::runtime_error("could not create migration local-package fixture relations");
+		}
+		const std::string evidence = absolute_repository_root + "/connectors/" + source.package + "/";
+		WriteFile(root + "/connector.yaml",
+		          ApplyReplacements(DeriveMigrationManifest(ReadFile(evidence + "connector.yaml"), source.real_id,
+		                                                    source.migration_id),
+		                            manifest_replacements));
+		WriteFile(root + "/relations/migration_probe.yaml",
+		          ApplyReplacements(RenderMigrationProbeRelation(source.host), relation_replacements));
+		NeverCancel cancellation;
+		auto result = duckdb_api::connector::CompileLocalPackageRoot(root, cancellation);
+		// A successful compilation retains the root through the returned
+		// custody; a failed compilation has no custody, so the provider owns
+		// the private root for process lifetime in both cases.
+		RetainedFixtureRoots().Retain(root);
+		return result;
+	} catch (...) {
+		(void)::nftw(root.c_str(), RemoveEntry, 32, FTW_DEPTH | FTW_PHYS);
+		throw;
+	}
+}
+
+CrossPackageMigrationFixture BuildRepositoryCrossPackageMigrationFixture(const std::string &absolute_repository_root) {
+	const auto github =
+	    CompileMigrationEnvelopeWithMutation(absolute_repository_root, MigrationProfile::GITHUB, {}, {});
+	if (!github.Succeeded() || github.Package() == nullptr) {
+		throw std::runtime_error("github-profile migration envelope did not compile");
+	}
+	const auto rickandmorty =
+	    CompileMigrationEnvelopeWithMutation(absolute_repository_root, MigrationProfile::RICK_AND_MORTY, {}, {});
+	if (!rickandmorty.Succeeded() || rickandmorty.Package() == nullptr) {
+		throw std::runtime_error("rickandmorty-profile migration envelope did not compile");
+	}
+	return CrossPackageMigrationFixture {duckdb_api::CompiledLocalPackage(*github.Package()),
+	                                     duckdb_api::CompiledLocalPackage(*rickandmorty.Package())};
 }
 
 duckdb_api::CompiledLocalPackage

@@ -239,7 +239,8 @@ for target in \
     duckdb_api_adapter_stream_contract_tests \
     duckdb_api_package_generation_composition_tests \
     duckdb_api_package_query_surface_tests \
-    duckdb_api_package_product_contract_tests; do
+    duckdb_api_package_product_contract_tests \
+    duckdb_api_cross_package_migration_tests; do
     python3 -I -B "${PROJECT_SOURCE}/scripts/verify-native-dependencies.py" \
         linkage "${PINS_FILE}" curl-free "${NATIVE_TEST_ROOT}/${target}" >/dev/null
 done
@@ -287,6 +288,7 @@ python3 -I -B "${PROJECT_SOURCE}/scripts/test-native-dependencies.py"
     "${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_candidate_tests" "${PROJECT_SOURCE}"
     "${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_coverage_tests" "${PROJECT_SOURCE}"
     "${NATIVE_TEST_ROOT}/duckdb_api_rickandmorty_package_compiler_tests" "${PROJECT_SOURCE}"
+    "${NATIVE_TEST_ROOT}/duckdb_api_cross_package_migration_tests" "${PROJECT_SOURCE}"
 )
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_typed_value_adapter_tests"
