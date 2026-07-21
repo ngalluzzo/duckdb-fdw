@@ -57,6 +57,13 @@ shaped, assigned, and delivered.
   changes involving relational correctness, network policy, credentials,
   retries, caching, concurrency, FFI, or lifecycle behavior.
 
+`.agents/skills/` is the source of truth for these skills and is what
+`scripts/validate-agent-assets.rb` validates against `agents/openai.yaml`.
+`.claude/skills/` is a generated mirror so Claude Code can discover the same
+skills in this repository; regenerate it with
+`python3 scripts/write-claude-skills.py` after adding, removing, or editing a
+skill, and do not hand-edit files under `.claude/skills/` directly.
+
 ## Engineering invariants
 
 - Ordinary bind and planning are deterministic and perform no network I/O.
