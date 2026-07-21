@@ -12,14 +12,45 @@ columns:
     type: BOOLEAN
     nullable: false
     extract: $.active
+  - id: attendance
+    type: BIGINT
+    nullable: false
+    extract: $.stats.attendance
+  - id: category
+    type: VARCHAR
+    nullable: true
+    extract: $.classification.label
 
 inputs:
   - id: region
     type: VARCHAR
+    nullable: true
+  - id: graph_view
+    type: BOOLEAN
     nullable: false
+  - id: rest_view
+    type: BOOLEAN
+    nullable: false
+  - id: include_cancelled
+    type: BOOLEAN
+    nullable: false
+    default: {kind: value, value: false}
+  - id: minimum_attendance
+    type: BIGINT
+    nullable: false
+    default: {kind: value, value: 25}
+  - id: audience
+    type: VARCHAR
+    nullable: true
+    default: {kind: value, value: "public"}
+  - id: note
+    type: VARCHAR
+    nullable: true
+    default: {kind: null}
 
 auth:
-  mode: anonymous
+  mode: credential
+  credential: acme_token
 
 resources:
   max_response_bytes_per_page: 16777216
@@ -31,7 +62,7 @@ resources:
 operations:
   - id: regional_event_graph
     when:
-      required_inputs: [input.region]
+      required_inputs: [input.region, input.graph_view]
     cardinality: many
     replay_safety: safe
     request:
@@ -47,13 +78,25 @@ operations:
           value: duckdb-api-test
       query:
         operation_name: AcmeRegionalEvents
-        root: [account, events]
+        root: [organization, eventFeed]
         fixed_arguments:
-          - name: scope
-            value: {enum: PUBLIC}
+          - name: filter
+            value:
+              object:
+                - name: audience
+                  value: {enum: PUBLIC}
+                - name: tags
+                  value:
+                    list:
+                      - {string: "community"}
+                      - {string: "duckdb"}
+                - name: includeCancelled
+                  value: {boolean: false}
         selection:
           - {column: event_id, field_path: [id]}
           - {column: active, field_path: [active]}
+          - {column: attendance, field_path: [stats, attendance]}
+          - {column: category, field_path: [classification, label]}
       pagination:
         strategy: relay_forward
         dependency: sequential
@@ -72,6 +115,67 @@ operations:
       max_document_bytes: 2048
       max_serialized_body_bytes_per_request: 32768
       max_serialized_body_bytes_per_scan: 98304
+
+  - id: regional_event_rest
+    when:
+      required_inputs: [input.region, input.rest_view]
+    cardinality: many
+    replay_safety: safe
+    request:
+      protocol: rest
+      method: GET
+      origin:
+        scheme: https
+        host: api.example.com
+        port: 8443
+      path: /v1/regional-events
+      query:
+        - name: per_page
+          literal: "50"
+          encoding: form_urlencoded
+        - name: page
+          literal: "1"
+          encoding: form_urlencoded
+        - name: region
+          input: region
+          encoding: form_urlencoded
+          omit_when_unbound: true
+          omit_when_null: true
+        - name: include_cancelled
+          input: include_cancelled
+          encoding: form_urlencoded
+          omit_when_unbound: true
+          omit_when_null: true
+        - name: minimum_attendance
+          input: minimum_attendance
+          encoding: form_urlencoded
+          omit_when_unbound: true
+          omit_when_null: true
+        - name: audience
+          input: audience
+          encoding: form_urlencoded
+          omit_when_unbound: true
+          omit_when_null: true
+        - name: active
+          conditional_input: active
+          encoding: form_urlencoded
+          omit_when_unbound: true
+      headers:
+        - name: X-Client
+          value: duckdb-api-test
+    response:
+      source: root_array
+    pagination:
+      strategy: link_next
+      dependency: sequential
+      consistency: mutable
+      target_scope: exact_operation_origin_and_path
+      page_size_parameter: per_page
+      page_size: 50
+      page_number_parameter: page
+      first_page: 1
+      page_increment: 1
+      max_pages_per_scan: 3
 
   - id: fallback_events
     fallback: true
@@ -92,8 +196,8 @@ operations:
         - name: page
           literal: "1"
           encoding: form_urlencoded
-        - name: active
-          conditional_input: active
+        - name: category
+          conditional_input: public_category
           encoding: form_urlencoded
           omit_when_unbound: true
       headers:
@@ -122,9 +226,23 @@ predicates:
       value: true
     conditional_input: active
     operations:
-      - fallback_events
+      - regional_event_rest
     accuracy: exact
     occurrence_fixtures:
       matching: active_events_matching
       false_or_null: active_events_false_or_null
       duplicates: active_events_duplicates
+  - id: public_events
+    column: category
+    operator: eq
+    literal:
+      type: VARCHAR
+      value: public
+    conditional_input: public_category
+    operations:
+      - fallback_events
+    accuracy: superset
+    occurrence_fixtures:
+      matching: public_events_matching
+      false_or_null: public_events_false_or_null
+      duplicates: public_events_duplicates

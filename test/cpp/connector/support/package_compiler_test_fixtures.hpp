@@ -69,9 +69,10 @@ duckdb_api::CompiledPackageGeneration
 CompileRepositoryGithubGenerationFixture(const std::string &absolute_repository_root);
 
 // Compiles a deliberately non-GitHub v1 package with an explicit 8443 origin,
-// a required-input GraphQL candidate, a REST fallback owning predicate
-// mappings, a separate unpaginated root-array relation with no mappings, and
-// resource declarations wider than the current host cell.
+// equally ranked GraphQL and REST candidates, an unconditional REST fallback,
+// typed defaults, exact and superset predicate mappings, and a separate
+// unpaginated root-array relation. Resource declarations are deliberately
+// wider than the current host cell.
 duckdb_api::CompiledPackageGeneration
 CompileNonGithubGraphqlGenerationFixture(const std::string &absolute_repository_root);
 

@@ -4,7 +4,15 @@ id: acme_events
 version: 1.0.0
 extractor_dialect: duckdb_api/json_path_v1
 
-credentials: []
+credentials:
+  - id: acme_token
+    kind: bearer
+    secret_field: token
+    placement: authorization_header
+    destinations:
+      - scheme: https
+        host: api.example.com
+        port: 8443
 
 network_policy:
   origins:

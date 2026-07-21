@@ -30,14 +30,14 @@ public:
 	}
 };
 
-class UnexpectedExecutionService final : public duckdb_api::connector::PackageFixtureExecutionService {
+class FirstCaseProbe final : public duckdb_api::connector::PackageFixtureExecutionService {
 public:
 	duckdb_api::connector::PackageFixtureObservation
 	Execute(const duckdb_api::CompiledPackageGeneration &, const duckdb_api::connector::PackageFixtureCase &,
 	        const std::vector<duckdb_api::connector::PackageFixtureCoverageEntry> &,
 	        duckdb_api::connector::PackageCancellation &) override {
 		calls++;
-		throw std::runtime_error("execution must remain unreachable before fixture identity is complete");
+		throw std::runtime_error("corpus probe stops at the first identity-verified case");
 	}
 
 	std::size_t calls = 0;
@@ -105,9 +105,54 @@ void TestCoverageIsCompiledFactDriven(const std::string &repository_root) {
 	            Contains(coverage, "selection_regional_events_fallback_events_selected") &&
 	            Contains(coverage, "selection_regional_events_highest_rank_tie_rejected") &&
 	            Contains(coverage, "predicate_regional_events_active_events_positive") &&
+	            Contains(coverage, "predicate_regional_events_public_events_positive") &&
 	            Contains(coverage, "graphql_regional_events_regional_event_graph_serialized_body_identity") &&
 	            !Contains(coverage, "predicate_authenticated_repositories_private_visibility_positive"),
 	        "coverage derivation used repository identity instead of compiled feature facts");
+	Require(coverage.RequiredKeys().size() == 198,
+	        "controlled package did not derive its complete semantic coverage matrix");
+
+	const auto *relation = generation.Connector().FindRelation("regional_events");
+	Require(relation != nullptr && relation->Inputs().size() == 7 && relation->Operations().size() == 3 &&
+	            relation->PredicateMappings().size() == 2,
+	        "controlled package lost its input, operation-selection, or predicate matrix");
+	const auto operation = [&](const std::string &name) -> const duckdb_api::CompiledOperation & {
+		const auto found =
+		    std::find_if(relation->Operations().begin(), relation->Operations().end(),
+		                 [&](const duckdb_api::CompiledOperation &candidate) { return candidate.name == name; });
+		Require(found != relation->Operations().end(), "controlled package operation is missing");
+		return *found;
+	};
+	const auto input = [&](const std::string &name) -> const duckdb_api::CompiledRelationInput & {
+		const auto found =
+		    std::find_if(relation->Inputs().begin(), relation->Inputs().end(),
+		                 [&](const duckdb_api::CompiledRelationInput &candidate) { return candidate.Name() == name; });
+		Require(found != relation->Inputs().end(), "controlled package input is missing");
+		return *found;
+	};
+	Require(input("include_cancelled").Default().HasDefault() &&
+	            input("include_cancelled").Default().Value().Type() == duckdb_api::CompiledScalarType::BOOLEAN &&
+	            !input("include_cancelled").Default().Value().Boolean() &&
+	            input("minimum_attendance").Default().HasDefault() &&
+	            input("minimum_attendance").Default().Value().Type() == duckdb_api::CompiledScalarType::BIGINT &&
+	            input("minimum_attendance").Default().Value().Bigint() == 25 &&
+	            input("audience").Default().HasDefault() &&
+	            input("audience").Default().Value().Type() == duckdb_api::CompiledScalarType::VARCHAR &&
+	            input("audience").Default().Value().Varchar() == "public" && input("audience").Nullable() &&
+	            input("note").Default().HasDefault() && input("note").Default().Value().IsNull() &&
+	            input("note").Nullable(),
+	        "controlled package lost typed BOOLEAN/BIGINT/VARCHAR or typed NULL defaults");
+	const auto &graph = operation("regional_event_graph");
+	const auto &rest = operation("regional_event_rest");
+	const auto &fallback = operation("fallback_events");
+	Require(!graph.fallback && graph.selector.RequiredInputReferences().size() == 2 && !rest.fallback &&
+	            rest.selector.RequiredInputReferences().size() == 2 && fallback.fallback &&
+	            fallback.selector.RequiredInputReferences().empty(),
+	        "controlled package lost its equal-rank unique/tie candidates or unconditional fallback");
+	Require(relation->PredicateMappings()[0].Accuracy() == duckdb_api::CompiledPredicateAccuracy::EXACT &&
+	            relation->PredicateMappings()[1].Accuracy() == duckdb_api::CompiledPredicateAccuracy::SUPERSET &&
+	            graph.Graphql().document_digest == "ca2060e0db0b535bbf4a2b96050127159fb3e953cd52bd17dd8b2ae955464d28",
+	        "controlled package lost exact/superset proof facts or its distinct GraphQL recipe identity");
 }
 
 void TestFixtureDiagnosticVocabulary() {
@@ -137,21 +182,37 @@ void TestFixtureContractAssetsAreByteLocked(const std::string &repository_root) 
 	        "production fixture assets are not exact copies of accepted RFC 0013 evidence");
 }
 
-void TestRunnerFailsBeforeProviderWhenEvidenceIsIncomplete(const std::string &repository_root) {
-	const auto package = duckdb_api_test::CompileRepositoryGithubLocalPackageFixture(repository_root);
+duckdb_api::CompiledLocalPackage CompileControlledPackage(const std::string &repository_root) {
 	NeverCancel cancellation;
-	UnexpectedExecutionService execution;
+	const auto result = duckdb_api::connector::CompileLocalPackageRoot(
+	    repository_root + "/test/fixtures/package_graphql_non_github", cancellation);
+	Require(result.Succeeded() && result.Package() != nullptr, "controlled fixture package did not compile");
+	return *result.Package();
+}
+
+void RequireCompleteCorpusReachesProvider(const duckdb_api::CompiledLocalPackage &package,
+                                          const std::string &first_case) {
+	NeverCancel cancellation;
+	FirstCaseProbe execution;
 	const auto report = duckdb_api::connector::RunPackageFixtures(
 	    package, execution, duckdb_api::connector::PackageFixtureLimits::V1(), cancellation);
 	Require(!report.Succeeded() && report.ExecutedCases() == 0 && report.RequiredCoverageKeys().empty() &&
 	            report.Diagnostics().size() == 1 &&
 	            report.Diagnostics()[0].Code() == duckdb_api::connector::PackageDiagnosticCode::FIXTURE_MISMATCH &&
 	            report.Diagnostics()[0].Phase() == duckdb_api::connector::PackageDiagnosticPhase::FIXTURE &&
-	            report.Diagnostics()[0].Coordinate().yaml_path == "$.cases" && execution.calls == 0,
-	        "runner reached its provider before exact required/claimed fixture coverage was established");
+	            report.Diagnostics()[0].FixtureCase() == first_case && execution.calls == 1,
+	        "fixture corpus did not establish schema, exact claims, and exact payload identity before provider entry");
+}
+
+void TestCompleteCorporaAndPreProviderBoundaries(const std::string &repository_root) {
+	const auto package = duckdb_api_test::CompileRepositoryGithubLocalPackageFixture(repository_root);
+	RequireCompleteCorpusReachesProvider(package, "github_search_base");
+	RequireCompleteCorpusReachesProvider(CompileControlledPackage(repository_root), "announcements_base");
 
 	auto one_byte = duckdb_api::connector::PackageFixtureLimits::V1();
 	one_byte.max_index_bytes = 1;
+	NeverCancel cancellation;
+	FirstCaseProbe execution;
 	const auto exhausted = duckdb_api::connector::RunPackageFixtures(package, execution, one_byte, cancellation);
 	Require(!exhausted.Succeeded() && exhausted.Diagnostics().size() == 1 &&
 	            exhausted.Diagnostics()[0].Code() == duckdb_api::connector::PackageDiagnosticCode::RESOURCE_EXHAUSTED &&
@@ -178,7 +239,7 @@ int main(int argc, char **argv) {
 		TestFixtureContractAssetsAreByteLocked(argv[1]);
 		TestGithubCoverageMatchesAcceptedMapping(argv[1]);
 		TestCoverageIsCompiledFactDriven(argv[1]);
-		TestRunnerFailsBeforeProviderWhenEvidenceIsIncomplete(argv[1]);
+		TestCompleteCorporaAndPreProviderBoundaries(argv[1]);
 		std::cout << "package fixture coverage tests passed" << std::endl;
 		return 0;
 	} catch (const std::exception &error) {
