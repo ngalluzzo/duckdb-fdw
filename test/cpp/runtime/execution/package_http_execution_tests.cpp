@@ -1,5 +1,7 @@
 #include "duckdb_api/authorization.hpp"
 #include "duckdb_api/execution.hpp"
+#include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
+#include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 #include "runtime/support/controlled_http_transport.hpp"
 #include "semantics/support/repository_graphql_scan_plan_test_fixtures.hpp"
 #include "semantics/support/scan_plan_test_fixtures.hpp"
@@ -17,6 +19,10 @@ using duckdb_api_test::ControlledResponse;
 using duckdb_api_test::PackageGraphqlRuntimeRecipeCounterexample;
 using duckdb_api_test::PackageHttpNumericOriginCounterexample;
 using duckdb_api_test::Require;
+
+duckdb_api::internal::HttpExecutionProfile NonGithubProfile() {
+	return {duckdb_api::PlannedUrlScheme::HTTPS, "api.example.com", 8443, false, false, false, 30000, 250};
+}
 
 class NeverCancelled final : public duckdb_api::ExecutionControl {
 public:
@@ -40,15 +46,20 @@ std::string RestPage(const std::string &id, bool active) {
 }
 
 void TestNonGithubPackageGraphqlExecutesTwoCursorPages(const std::string &repository_root) {
+	const auto plan = duckdb_api_test::BuildNonGithubPackageGraphqlPlan(repository_root);
+	auto admitted = duckdb_api::internal::TryAdmitGraphqlPlan(plan, NonGithubProfile());
+	Require(admitted && admitted->MaxPages() == 3 && admitted->MaxRequestBodyBytes() == 16384 &&
+	            admitted->MaxScanBodyBytes() == 49152 &&
+	            admitted->MaxScanBodyBytes() == admitted->MaxRequestBodyBytes() * admitted->MaxPages(),
+	        "Runtime admission did not preserve the reachable package GraphQL body envelope");
 	const auto runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
 	runtime->RespondSequence({ControlledResponse(200, GraphqlPage("event-1", true, true, "regional-cursor")),
 	                          ControlledResponse(200, GraphqlPage("event-2", false, false, ""))});
 	std::string token = "non_github_graphql_execution_token";
 	runtime->ExpectBearer("Bearer " + token);
 	NeverCancelled control;
-	auto stream =
-	    runtime->Executor()->OpenWithAuthorization(duckdb_api_test::BuildNonGithubPackageGraphqlPlan(repository_root),
-	                                               duckdb_api::ScanAuthorization::Bearer(std::move(token)), control);
+	auto stream = runtime->Executor()->OpenWithAuthorization(
+	    plan, duckdb_api::ScanAuthorization::Bearer(std::move(token)), control);
 	Require(runtime->Observations().empty(), "package GraphQL Open performed request or body work");
 
 	duckdb_api::TypedBatch batch;
@@ -76,6 +87,26 @@ void TestNonGithubPackageGraphqlExecutesTwoCursorPages(const std::string &reposi
 	            observations[1].body.find("\"cursor\":\"regional-cursor\"") != std::string::npos &&
 	            runtime->ConsumeBearerExpectation(2),
 	        "package GraphQL renderer or cursor body materialization drifted");
+}
+
+void TestUnreachableGraphqlBodyAuthorityFailsBeforeCredentialOrTransport(const std::string &repository_root) {
+	const auto runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	const auto plan =
+	    duckdb_api_test::BuildNonGithubPackageGraphqlUnreachableBodyAuthorityCounterexample(repository_root);
+	Require(!duckdb_api::internal::TryAdmitGraphqlPlan(plan, NonGithubProfile()),
+	        "Runtime admitted aggregate body authority unreachable before page exhaustion");
+	std::string token = "unreachable_body_authority_credential_canary";
+	runtime->ExpectBearer("Bearer " + token);
+	NeverCancelled control;
+	bool rejected = false;
+	try {
+		(void)runtime->Executor()->OpenWithAuthorization(plan, duckdb_api::ScanAuthorization::Bearer(std::move(token)),
+		                                                 control);
+	} catch (const duckdb_api::ExecutionError &error) {
+		rejected = error.Stage() == duckdb_api::ErrorStage::POLICY;
+	}
+	Require(rejected && runtime->Observations().empty() && runtime->ConsumeBearerExpectation(0),
+	        "unreachable GraphQL scan body authority reached credential placement or transport");
 }
 
 void TestNondefaultPortRestAndLinkContinuation(const std::string &repository_root) {
@@ -199,6 +230,7 @@ int main(int argc, char **argv) {
 		Require(argc == 2, "expected absolute repository root argument");
 		const std::string repository_root(argv[1]);
 		TestNonGithubPackageGraphqlExecutesTwoCursorPages(repository_root);
+		TestUnreachableGraphqlBodyAuthorityFailsBeforeCredentialOrTransport(repository_root);
 		TestNondefaultPortRestAndLinkContinuation(repository_root);
 		TestPackageRecipeCounterexamplesIssueZeroRequests(repository_root);
 		TestDestinationAndAddressWideningIssueZeroRequests();

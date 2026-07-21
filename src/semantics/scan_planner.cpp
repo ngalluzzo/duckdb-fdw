@@ -203,6 +203,14 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		const auto page_response_bytes =
 		    std::min(std::min(ceilings.MaxResponseBytesPerPage(), connector.NetworkPolicy().max_response_bytes),
 		             PAGINATION_MAX_RESPONSE_BYTES_PER_PAGE);
+		const auto max_pages = graphql.cursor.max_pages_per_scan;
+		const auto page_serialized_body_bytes =
+		    std::min(graphql.max_serialized_request_body_bytes_per_request, HOST_MAX_SERIALIZED_REQUEST_BODY_BYTES);
+		// A narrower effective page cannot spend the declared scan ceiling after
+		// the cursor reaches its page limit. Keep aggregate authority reachable.
+		const auto reachable_scan_serialized_body_bytes =
+		    BoundedProduct(page_serialized_body_bytes, max_pages, PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN,
+		                   "aggregate serialized request-body scope");
 		result.pagination.page_budgets = {
 		    PAGINATION_MAX_REQUEST_ATTEMPTS_PER_PAGE,
 		    page_response_bytes,
@@ -215,8 +223,7 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    PAGINATION_OUTPUT_BATCH_ROWS,
 		    PAGINATION_MAX_EXECUTION_MILLISECONDS,
 		    PAGINATION_MAX_CONCURRENCY,
-		    std::min(graphql.max_serialized_request_body_bytes_per_request, HOST_MAX_SERIALIZED_REQUEST_BODY_BYTES)};
-		const auto max_pages = graphql.cursor.max_pages_per_scan;
+		    page_serialized_body_bytes};
 		result.pagination.scan_budgets = {
 		    max_pages,
 		    max_pages,
@@ -232,8 +239,7 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    PAGINATION_OUTPUT_BATCH_ROWS,
 		    PAGINATION_MAX_EXECUTION_MILLISECONDS,
 		    PAGINATION_MAX_CONCURRENCY,
-		    std::min(graphql.max_serialized_request_body_bytes_per_scan,
-		             PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN)};
+		    std::min(graphql.max_serialized_request_body_bytes_per_scan, reachable_scan_serialized_body_bytes)};
 		result.budgets = result.pagination.page_budgets;
 		if (!result.pagination.PageBudgets().IsWithinPaginatedPageBounds() ||
 		    !result.pagination.ScanBudgets().IsWithinPaginatedScanBounds() ||

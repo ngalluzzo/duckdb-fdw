@@ -157,8 +157,11 @@ void TestPackageGraphqlPlanning(const std::string &absolute_repository_root) {
 	            non_github_page.serialized_request_body_bytes == duckdb_api::HOST_MAX_SERIALIZED_REQUEST_BODY_BYTES &&
 	            non_github_scan.response_bytes == 48ULL * 1024ULL * 1024ULL && non_github_scan.decoded_records == 750 &&
 	            non_github_scan.extracted_string_bytes == duckdb_api::PAGINATION_MAX_EXTRACTED_STRING_BYTES &&
-	            non_github_scan.serialized_request_body_bytes == 98304,
-	        "non-GitHub author resource declarations were not intersected with host policy");
+	            non_github_operation.cursor.max_pages_per_scan == 3 &&
+	            non_github_scan.serialized_request_body_bytes == 49152 &&
+	            non_github_scan.serialized_request_body_bytes ==
+	                non_github_page.serialized_request_body_bytes * non_github_operation.cursor.max_pages_per_scan,
+	        "non-GitHub resource plan retained authority outside its host-narrowed page sequence");
 
 	const auto package =
 	    BuildRepositoryGithubPackageGraphqlPlan(absolute_repository_root, "repository_package_graphql_secret");

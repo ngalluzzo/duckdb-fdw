@@ -6,6 +6,7 @@
 #include "duckdb_api/scan_planner.hpp"
 #include "semantics/support/scan_plan_test_access.hpp"
 
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -49,6 +50,12 @@ duckdb_api::ScanPlan BuildNonGithubPackageRestPlan(const std::string &absolute_r
 	return planning.Plan(generation.QueryRegistration().GenerationHandle(), request);
 }
 
+duckdb_api::ScanPlan
+BuildNonGithubPackageGraphqlUnreachableBodyAuthorityCounterexample(const std::string &absolute_repository_root) {
+	return ScanPlanTestAccess::PackageGraphqlUnreachableBodyAuthority(
+	    BuildNonGithubPackageGraphqlPlan(absolute_repository_root));
+}
+
 namespace {
 
 duckdb_api::ScanPlan BuildRepositoryGithubPackageRestPlan(const std::string &absolute_repository_root,
@@ -87,6 +94,23 @@ const char *NumericOrigin(PackageHttpNumericOriginCounterexample counterexample)
 }
 
 } // namespace
+
+duckdb_api::ScanPlan ScanPlanTestAccess::PackageGraphqlUnreachableBodyAuthority(duckdb_api::ScanPlan plan) {
+	if (plan.Operation().Protocol() != duckdb_api::PlannedProtocol::GRAPHQL ||
+	    plan.Pagination().Strategy() != duckdb_api::PlannedPaginationStrategy::GRAPHQL_CURSOR) {
+		throw std::invalid_argument("unreachable body authority counterexample requires a cursor GraphQL plan");
+	}
+	auto &scan = plan.pagination.scan_budgets;
+	const auto page_body = plan.pagination.page_budgets.serialized_request_body_bytes;
+	const auto max_pages = plan.pagination.graphql_cursor.max_pages_per_scan;
+	if (page_body == 0 || max_pages == 0 || page_body > std::numeric_limits<std::uint64_t>::max() / max_pages ||
+	    scan.serialized_request_body_bytes != page_body * max_pages ||
+	    scan.serialized_request_body_bytes == std::numeric_limits<std::uint64_t>::max()) {
+		throw std::invalid_argument("package GraphQL plan lacks an exact reachable body-authority baseline");
+	}
+	scan.serialized_request_body_bytes++;
+	return plan;
+}
 
 duckdb_api::ScanPlan
 ScanPlanTestAccess::PackageHttpNumericOrigin(duckdb_api::ScanPlan plan,

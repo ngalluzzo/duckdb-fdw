@@ -1,6 +1,10 @@
 #include "semantics/support/graphql_semantics_test_cases.hpp"
 
+#include "scan_planner_internal.hpp"
 #include "support/require.hpp"
+
+#include <limits>
+#include <stdexcept>
 
 namespace duckdb_api_test {
 namespace graphql_semantics {
@@ -29,6 +33,16 @@ void TestCursorResources() {
 	Require(plan.Retry() == duckdb_api::FeatureState::DISABLED && plan.Cache() == duckdb_api::FeatureState::DISABLED &&
 	            plan.Providers() == duckdb_api::FeatureState::DISABLED,
 	        "GraphQL plan enabled retry, cache, or provider authority");
+
+	bool overflow_rejected = false;
+	try {
+		(void)duckdb_api::scan_planner_internal::BoundedProduct(std::numeric_limits<std::uint64_t>::max(), 2,
+		                                                        std::numeric_limits<std::uint64_t>::max(),
+		                                                        "GraphQL scan serialized-body scope");
+	} catch (const std::logic_error &) {
+		overflow_rejected = true;
+	}
+	Require(overflow_rejected, "GraphQL aggregate body authority accepted an overflowing page sequence");
 }
 
 } // namespace graphql_semantics

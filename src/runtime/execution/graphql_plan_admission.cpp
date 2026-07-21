@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <new>
 #include <set>
 
@@ -175,9 +176,19 @@ bool HasBudgets(const ScanPlan &plan, const HttpExecutionProfile &profile) {
 	    package_generated
 	        ? std::min(operation.max_serialized_request_body_bytes_per_request, HOST_MAX_SERIALIZED_REQUEST_BODY_BYTES)
 	        : operation.max_serialized_request_body_bytes_per_request;
-	const auto expected_scan_body = package_generated ? std::min(operation.max_serialized_request_body_bytes_per_scan,
-	                                                             PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN)
-	                                                  : operation.max_serialized_request_body_bytes_per_scan;
+	auto expected_scan_body = operation.max_serialized_request_body_bytes_per_scan;
+	if (package_generated) {
+		// Recompute Semantics' reachable aggregate instead of trusting either the
+		// declared operation ceiling or the plan's copied scan budget.
+		if (operation.cursor.max_pages_per_scan == 0 ||
+		    expected_page_body > std::numeric_limits<std::uint64_t>::max() / operation.cursor.max_pages_per_scan) {
+			return false;
+		}
+		const auto reachable_scan_body = expected_page_body * operation.cursor.max_pages_per_scan;
+		expected_scan_body = std::min(std::min(operation.max_serialized_request_body_bytes_per_scan,
+		                                       PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN),
+		                              reachable_scan_body);
+	}
 	return page.IsWithinPaginatedPageBounds() && scan.IsWithinPaginatedScanBounds() &&
 	       SamePageBudgets(plan.Budgets(), page) && page.decoded_records <= profile.max_decoded_records &&
 	       page.serialized_request_body_bytes > 0 && page.serialized_request_body_bytes == expected_page_body &&
@@ -325,8 +336,8 @@ AdmittedGraphqlRequestProfile::AdmittedGraphqlRequestProfile(const ScanPlan &pla
     : method("POST"), scheme("https"), port(plan.Operation().Graphql().origin.port),
       page_size(plan.Operation().Graphql().cursor.page_size),
       max_pages(plan.Operation().Graphql().cursor.max_pages_per_scan),
-      max_request_body_bytes(plan.Operation().Graphql().max_serialized_request_body_bytes_per_request),
-      max_scan_body_bytes(plan.Operation().Graphql().max_serialized_request_body_bytes_per_scan),
+      max_request_body_bytes(plan.Pagination().PageBudgets().serialized_request_body_bytes),
+      max_scan_body_bytes(plan.Pagination().ScanBudgets().serialized_request_body_bytes),
       requires_bearer(requires_bearer_p), page_budgets(plan.Pagination().PageBudgets()),
       scan_budgets(plan.Pagination().ScanBudgets()) {
 	const auto &operation = plan.Operation().Graphql();

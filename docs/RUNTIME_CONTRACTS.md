@@ -561,6 +561,13 @@ increment and multiplication is checked before state mutation. Exceeded or
 overflowing budgets fail without another allocation or request. Zero never
 means unlimited.
 
+For GraphQL, the aggregate serialized-request-body ceiling is no greater than
+the checked product of the effective per-request body ceiling and the maximum
+page count. Semantics intersects that reachable total with the declared and
+host scan ceilings, and Runtime admission independently requires the same
+value. A plan never advertises body authority that page exhaustion makes
+unreachable.
+
 One request/page is the replay unit, but v1 performs one attempt. Retry, cache,
 provider, parallel-page, and progress states are disabled and unknown enum
 values fail admission.

@@ -24,6 +24,7 @@ public:
 	                                                 PackageGraphqlRuntimeRecipeCounterexample counterexample);
 	static duckdb_api::ScanPlan PackageHttpNumericOrigin(duckdb_api::ScanPlan plan,
 	                                                     PackageHttpNumericOriginCounterexample counterexample);
+	static duckdb_api::ScanPlan PackageGraphqlUnreachableBodyAuthority(duckdb_api::ScanPlan plan);
 	static duckdb_api::ScanPlan Graphql(duckdb_api::ScanPlan plan,
 	                                    GraphqlRuntimeAdmissionCounterexample counterexample);
 	static duckdb_api::ScanPlan GraphqlNonAuthorityVariation(duckdb_api::ScanPlan plan,

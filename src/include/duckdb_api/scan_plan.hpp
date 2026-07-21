@@ -240,6 +240,8 @@ struct ScanResourceBudgets {
 	uint64_t batch_rows;
 	uint64_t wall_milliseconds;
 	uint64_t concurrency;
+	// GraphQL aggregate body authority is additionally bounded by the checked
+	// product of the effective page body ceiling and maximum page count.
 	uint64_t serialized_request_body_bytes;
 
 	bool IsWithinPaginatedScanBounds() const;
