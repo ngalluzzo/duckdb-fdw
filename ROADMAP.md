@@ -264,6 +264,44 @@ inventory, connector-spec migration fixtures, prior-package and prior-SQL
 compatibility tests, a green declared DuckDB support matrix, installation and
 upgrade narratives, release and support policies, and reproducible artifacts.
 
+### `0.10.0` — body-signaled REST pagination
+
+A connector author can declare a third REST pagination strategy, `response_next`,
+that reads its continuation signal from a declared JSON path in the decoded
+response body rather than an HTTP `Link` header, while preserving the
+reconstruct-and-verify safety model `link_next` already enforces. This unlocks
+the common shape the Rick and Morty trial could not represent under `0.9.0`
+(body-embedded `info.next` absolute URLs).
+
+Accepted [RFC 0016](rfcs/0016-decide-body-signaled-rest-pagination.md) decides
+the design and commits its implementation to this release. The strategy is
+architecturally identical to `link_next` (`dependency: sequential`,
+`consistency: mutable`, `target_scope: exact_operation_origin_and_path`,
+identical page-number/page-size/ceiling fields) except that the continuation
+signal is read from a new required `next_url_path` field under the existing
+`json_path_v1` extractor grammar, and a present value is validated against the
+same generalized target-comparison rule `link_next` already applies to a
+header value. The scoping spike RFC 0016's review required (decoder
+single-pass-vs-second-parse and the encoding-normalization rule) gates
+implementation before it commits.
+
+This release is a backward-compatible capability addition under the pre-1.0
+versioning model, so it is a `0.Y.0` minor rather than a `0.9.x` patch. The
+`1.0.0` candidate freeze records `response_next` as an
+`accepted_candidate_revision` until this release ships; graduation into the
+schema-closed `pagination_strategies.rest` set happens with this release's
+freeze snapshot.
+
+Release evidence includes the new schema/decoder/compiled-IR branch, the
+generalized Runtime validator with header/body target-source parity (including
+at least one encoding-divergence case), the Relational Semantics
+`BaseDomain`-equivalence property test, the Query-owned `EXPLAIN`
+differential test, the corrected fixture-coverage variant set including the
+`next_field_wrong_type_rejected` category GraphQL cursor pagination already
+establishes, and adoption of the strategy in
+[`connectors/rickandmorty`](connectors/rickandmorty)'s `character_search`
+relation.
+
 ### `1.0.0-rc.N` — compatibility rehearsal
 
 Each release candidate is an immutable build of the frozen `1.0.0` contract.
@@ -272,12 +310,27 @@ security, lifecycle, failure-path, and support or backport rehearsals. A later
 candidate is a new version; an existing candidate is never rebuilt or relabeled
 as final.
 
+`1.0.0-rc.N` cannot begin until the `1.0.0` release gate below is satisfied.
+
 ### `1.0.0` — narrow stable contract
 
 The declared public surface is stable and supportable. Every promised
 compatibility-matrix row passes the complete release gate, unsupported
 combinations fail clearly, and installable artifacts, release notes, migration
 guidance, checksums, and provenance are reproducible and immutable.
+
+**`1.0.0` release gate (product-manager decision, 2026-07-21):** `1.0.0` will
+not ship until the project supports at least 10 different API providers in
+[`connectors/`](connectors/) (two exist as of `0.9.0`: GitHub and Rick and
+Morty). This dissolves the freeze-pressure rationale that drove the original
+"defer to post-`1.0.0`" dispositions in RFCs considered during the `0.9.0`
+window and reframes the `1.0.0` candidate freeze at
+[`release/1.0.0/freeze.json`](release/1.0.0/freeze.json) as a snapshot that
+subsequent `0.Y.0` releases (starting with `0.10.0`) deliberately extend via
+`accepted_candidate_revisions` until enough provider coverage accumulates to
+justify the stable contract. The freeze's authority chain is unchanged; only
+the timeline to publication is unblocked from "next" to "when coverage is
+sufficient."
 
 RFC 0009 sets the intended stable boundary:
 

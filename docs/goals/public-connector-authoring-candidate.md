@@ -312,7 +312,17 @@ governance rule:
    `TestUnsupportedPaginationStrategyRejected`) pins the rejection at
    `DUCKDB_API_UNSUPPORTED_DECLARATION` in the schema phase, so the exclusion
    rests on direct validation evidence rather than prose. Adding any such
-   strategy remains a post-`1.0.0` RFC candidate.
+   strategy remains a post-`0.9.0` RFC candidate.
+
+   **Update 2026-07-21 (post-`0.9.0`-ship):** the body-URL reconstruct-and-
+   verify shape (`response_next`) was subsequently accepted by
+   [RFC 0016](../rfcs/0016-decide-body-signaled-rest-pagination.md) for the
+   `0.10.0` release after the product manager re-prioritized `1.0.0` to
+   require ≥10 supported API providers. The candidate freeze records it under
+   `accepted_candidate_revisions`; the schema-closed set, the
+   `pagination_body_url_offset_or_cursor_in_body_strategies` exclusion, and
+   the `TestUnsupportedPaginationStrategyRejected` oracle all remain accurate
+   until `0.10.0` graduates the strategy.
 2. **Fixture-execution evidence scope (product-manager decision: freeze now,
    record fast-follow).** The freeze proceeds on the schema, coverage-key, and
    payload-digest agreement basis already proven for both packages. Real

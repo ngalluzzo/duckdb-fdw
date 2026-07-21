@@ -6,6 +6,15 @@ This directory holds the enumerated `1.0.0` public contract, frozen by the
 this document is the readable enumeration. A connector author or reviewer can
 read either without inspecting product source.
 
+> **Candidate revision history.** The candidate was produced by the `0.9.0`
+> release (2026-07-21). After publication, accepted RFCs may add entries under
+> `accepted_candidate_revisions` (see that section below) without re-cutting
+> the snapshot; the schema-closed sets and explicit exclusions do not move
+> until a later release graduates a candidate. The first such revision was
+> [RFC 0016](../docs/rfcs/0016-decide-body-signaled-rest-pagination.md)
+> (Accepted 2026-07-21), adding `response_next` REST pagination pending
+> `0.10.0` implementation.
+
 The `1.0.0` contract is not a single document. It is a layered set in which
 each layer draws authority from the one above it:
 
@@ -150,7 +159,13 @@ rather than silently ignoring them.
   traversal, cursor-in-body strategies, and reverse or bidirectional
   traversal. Admitting any such strategy requires a later accepted RFC and
   pre-freeze evidence; the compiler rejects the declaration today as
-  `DUCKDB_API_UNSUPPORTED_DECLARATION` in the schema phase.
+  `DUCKDB_API_UNSUPPORTED_DECLARATION` in the schema phase. **Carve-out
+  accepted by [RFC 0016](../docs/rfcs/0016-decide-body-signaled-rest-pagination.md):**
+  the narrow body-URL reconstruct-and-verify shape named `response_next` is
+  now an accepted candidate revision pending `0.10.0` implementation (see the
+  *Accepted candidate revisions pending implementation* section below). The
+  broader category — offset/page-number traversal, cursor-in-body strategies,
+  and reverse or bidirectional traversal — remains a permanent exclusion.
 - Compatibility with arbitrary upstream API drift.
 
 ## Known evidence limitations recorded during this freeze
@@ -163,6 +178,64 @@ rather than silently ignoring them.
   digest evidence basis; real end-to-end fixture execution is a recorded
   post-freeze increment, not a `1.0.0` blocker. See the
   `docs/goals/public-connector-authoring-candidate.md` completion record.
+
+## Accepted candidate revisions pending implementation
+
+This section lists decisions accepted by an RFC after `0.9.0` produced the
+candidate freeze but before their implementation graduates into the
+schema-closed contract surface. It is distinct from the categories around it:
+
+- `exclusions` are permanent — features outside the project's scope that the
+  boundary definition itself rejects.
+- `fast_follows` are discovered gaps — work the freeze surfaced but deliberately
+  deferred without blocking the freeze.
+- `not_yet_frozen` are evidence-derived rows — items that will be enumerated
+  from passing evidence rather than decided (e.g. the compatibility matrix).
+- **`accepted_candidate_revisions` are decided futures** — a contract change
+  an accepted RFC has authorized for a named target release. The decision is
+  locked in (no longer exclusion, no longer open); only the implementation and
+  its evidence remain. Each entry records the authority, the target release,
+  the rule for graduating it into the closed set, and — crucially — whether
+  the broader exclusion category it partially overlaps remains in force.
+
+`release/1.0.0/freeze.json` mirrors this section under
+`accepted_candidate_revisions`. The freeze gate
+(`scripts/verify-contract-freeze.py` plus `test/python/contract_freeze_tests.py`)
+asserts each entry has the required structure and fails closed if the section
+is removed, an entry is dropped, or the schema-closed set is widened without a
+graduation.
+
+### `response_next` REST pagination (target: `0.10.0`)
+
+Accepted [RFC 0016](../docs/rfcs/0016-decide-body-signaled-rest-pagination.md)
+(2026-07-21) adds a third REST pagination strategy, `response_next`,
+architecturally identical to `link_next` except its continuation signal is read
+from a declared JSON body path (`next_url_path`) rather than an HTTP `Link`
+header, reusing the same reconstruct-and-verify safety model. The product
+manager (Nic Galluzzo) directed this acceptance after re-prioritizing `1.0.0`
+to require ≥10 supported API providers (two exist as of `0.9.0`), dissolving
+the freeze-pressure rationale that originally deferred the design to a
+post-`1.0.0` `MINOR`. The five-team topology re-consultation produced five
+`Approved` dispositions.
+
+Until `0.10.0` ships:
+
+- `pagination_strategies.rest` stays at `{disabled, link_next}` (this is what
+  the JSON schema's closed `oneOf` actually enforces).
+- A package declaring `response_next` fails closed at the `SCHEMA` phase with
+  `DUCKDB_API_UNSUPPORTED_DECLARATION`, exactly as the freeze's
+  `rejected_diagnostic` advertises.
+- The broader exclusion `pagination_body_url_offset_or_cursor_in_body_strategies`
+  **remains mandatory** — only the body-URL reconstruct-and-verify shape is
+  accepted by RFC 0016. Numeric offset/page-number traversal, cursor-in-body
+  strategies, and reverse or bidirectional traversal still require their own
+  later accepted RFC.
+
+When `0.10.0` ships, the entry graduates: a new freeze snapshot for `0.10.0`'s
+release view moves `response_next` into `pagination_strategies.rest`, the
+schema's `oneOf` adds the corresponding branch with live decoder/IR/switch
+coverage, and the candidate-revision entry is removed because the strategy is
+now part of the closed set proper.
 
 ## Not yet frozen
 
@@ -184,7 +257,10 @@ decides:
   authoritative sources: the SQL surface matches the inventory's `0.9.0`
   release view exactly; the connector-spec identifier matches the schema
   const; the pagination strategy sets match the schema's closed `oneOf`; the
-  RFC citations resolve to accepted decisions; and mutation cases prove a
+  RFC citations resolve to accepted decisions; the
+  `accepted_candidate_revisions` entries each carry the required structure
+  (id, scope, status, authority, target_release, graduation_rule) and fail
+  closed if removed or structurally weakened; and mutation cases prove a
   removed, added, or altered declaration fails closed.
 - The existing `scripts/verify-public-surface-inventory.py` gate remains the
   SQL-surface compatibility oracle. This freeze references it; it does not

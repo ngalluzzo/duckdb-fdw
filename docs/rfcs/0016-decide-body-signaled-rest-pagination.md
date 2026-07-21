@@ -3,7 +3,7 @@
 ```yaml
 rfc: "0016"
 title: "Decide body-signaled REST pagination for duckdb_api/v1"
-status: "In review"
+status: "Accepted"
 rfc_type: "Product"
 sponsor_team: "Connector Experience"
 technical_decision_owner: "Lead agent"
@@ -25,6 +25,29 @@ affected_teams:
 linked_outcome_or_objective: "docs/goals/public-connector-authoring-candidate.md (0.9.0): resolve the pagination gap this goal's first trial surfaced before the 1.0.0 public contract is enumerated and frozen."
 supersedes: "Not applicable"
 ```
+
+## Revision history
+
+- **2026-07-21 (initial):** Draft proposed the `response_next` design as a
+  reconstruct-and-verify REST pagination strategy architecturally identical to
+  `link_next` except for the continuation signal's source. Decision proposed:
+  accept the design and defer implementation to a post-`1.0.0` `MINOR`, gated
+  on a scoping spike (decoder single-pass-vs-second-parse and encoding-
+  normalization rule). Five-team review produced four `Objected (Needs
+  evidence)` rows, all about timing/completeness rather than design soundness;
+  each was dispositioned by directly revising the RFC's technical content.
+- **2026-07-21 (PM re-direction, this revision):** The product manager (Nic
+  Galluzzo) re-prioritized `1.0.0`: it will not ship until the project supports
+  at least 10 different API providers (two exist today). The `1.0.0` freeze
+  pressure that drove every original timing objection is therefore gone for the
+  foreseeable future. PM directed that `response_next` be locked in (RFC
+  accepted) and shipped now in the next minor release (`0.10.0`, per
+  `ROADMAP.md`'s pre-1.0 versioning model) rather than deferred to a
+  post-`1.0.0` `MINOR`. The design itself, the cross-team corrections review
+  produced, and the scoping-spike-first sequencing are all unchanged. The four
+  substantive reviewers were re-consulted under `$topology-consult` and each
+  returned `Approved` (see *PM re-direction re-consultation* below). Status
+  moved to `Accepted` with this revision.
 
 ## Summary
 
@@ -405,19 +428,27 @@ pagination fact) tracked as a follow-on, not decided here.
 | Source of truth or artifact | Impact | Required update | Completion evidence |
 | --- | --- | --- | --- |
 | `docs/ARCHITECTURE.md` | Not affected | No architectural-invariant change | Not applicable |
-| `docs/CONNECTOR_SPECIFICATIONS.md` | Affected if accepted for implementation | New `response_next` strategy and `next_url_path` field in the REST operations section | Pending a follow-on implementation goal, not this RFC |
-| `docs/RUNTIME_CONTRACTS.md` | Affected if accepted for implementation | Document the generalized target-validation rule covering both header and body sources | Pending a follow-on implementation goal |
+| `docs/CONNECTOR_SPECIFICATIONS.md` | Affected by this acceptance (decision recorded now); full grammar reference lands with `0.10.0` | Note in the REST operations section that `response_next` is accepted by RFC 0016 and pending `0.10.0` implementation; the closed-set grammar (`{disabled, link_next}`) and the explicit-exclusion prose remain accurate until `0.10.0` ships | Completed by this RFC's acceptance (the note is added in the same change) |
+| `docs/RUNTIME_CONTRACTS.md` | Affected by `0.10.0` implementation | Document the generalized target-validation rule covering both header and body sources | Pending the `0.10.0` implementation goal |
 | `docs/TEAM_TOPOLOGY.md` and active charters | Not affected | No interface or accountability boundary moves | Not applicable |
 | `docs/PRODUCT_DELIVERY.md`, `AGENTS.md`, and skills | Not affected | No change | Not applicable |
-| Examples, diagnostics, fixtures, and tests | Affected if accepted for implementation | New fixture-coverage variant set, differential header/body target tests | Pending a follow-on implementation goal |
-| `1.0.0` frozen public contract (0.9.0's own deliverable) | Affected | Record `response_next` as an explicit, reasoned exclusion from `1.0.0`, reserved for a fast-follow `MINOR` version once the scoping spike and implementation goal complete | Completed by this RFC's Decision and rationale |
+| `ROADMAP.md` | Affected by this acceptance | Record the ≥10-API-provider `1.0.0` release gate that dissolves the freeze-pressure rationale for this and any future `1.0.0`-candidate decision | Completed by this RFC's acceptance (the release-gate note is added in the same change) |
+| `release/1.0.0/freeze.json` and `release/1.0.0/freeze.md` | Affected by this acceptance | Add a new `accepted_candidate_revisions` section recording `response_next` as decided-but-pending-`0.10.0`-implementation; the schema-closed `pagination_strategies.rest` set stays at `{disabled, link_next}` and `pagination_body_url_offset_or_cursor_in_body_strategies` remains a mandatory exclusion of the `1.0.0` boundary until `0.10.0` graduates the strategy | Completed by this RFC's acceptance (the section is added in the same change, with mutation coverage in `test/python/contract_freeze_tests.py`) |
+| Examples, diagnostics, fixtures, and tests | Affected by `0.10.0` implementation | New fixture-coverage variant set, differential header/body target tests, the `BaseDomain`-equivalence property test | Pending the `0.10.0` implementation goal |
+| `1.0.0` frozen public contract (0.9.0's own deliverable) | Not affected by this acceptance | The `1.0.0` candidate freeze records `response_next` as a pending candidate revision; the frozen boundary itself is unchanged | The candidate-revision section is the completion evidence; the boundary change happens when `0.10.0` ships and the candidate freeze is re-cut |
 
 ## Unresolved questions
 
 - **Decision-critical, resolved by review:** does `response_next` land
   inside the `1.0.0` frozen contract now, or is it explicitly excluded from
-  `1.0.0` and reserved for a later minor version? Resolved below: excluded
-  from `1.0.0`, reserved as a fast-follow `MINOR` gated on a scoping spike.
+  `1.0.0` and reserved for a later minor version? **Resolved by PM
+  re-direction (2026-07-21):** the `1.0.0` versus post-`1.0.0` framing no
+  longer applies in its original form, because `1.0.0` is no longer imminent
+  (PM gated it on ≥10 API providers). `response_next` is implemented in
+  `0.10.0` and graduates into the schema-closed set when `0.10.0` ships. The
+  `1.0.0` candidate freeze records it under `accepted_candidate_revisions`
+  until then; `1.0.0`'s eventual publication will inherit the closed set
+  `0.10.0` ships with, not the `0.9.0` snapshot.
 - Non-blocking: exact field name (`next_url_path` vs. an alternative
   spelling) — cosmetic, resolved at implementation time.
 - Non-blocking: whether a future opaque-cursor REST strategy should be
@@ -428,13 +459,13 @@ pagination fact) tracked as a follow-on, not decided here.
   request variable is attacker-influenced" (as GraphQL cursor pagination
   already demonstrates) — useful framing for whoever picks this up later,
   not a decision this RFC makes.
-- Non-blocking, raised by Remote Runtime: whether `next_url_path` extraction
-  requires a second parse of the decoded body or can share the decoder's
-  single pass, and the exact encoding-normalization rule for comparing a
-  body-extracted target against a reconstructed expectation. Both are
-  decision-critical for the *implementation* goal and are carried there as
-  its first required outputs (the scoping spike), not blocking for this
-  RFC's own decision, which is about whether to pursue the design at all.
+- **Decision-critical for the `0.10.0` implementation goal (carried there as
+  its first required outputs, the scoping spike):** whether `next_url_path`
+  extraction requires a second parse of the decoded body or can share the
+  decoder's single pass, and the exact encoding-normalization rule for
+  comparing a body-extracted target against a reconstructed expectation. The
+  original RFC review required both be answered before implementation
+  commits; that requirement is preserved unchanged by the PM re-direction.
 
 ## Review record
 
@@ -459,46 +490,103 @@ oracle category, unresolved implementation questions), which this revision
 resolves directly in the RFC text, not about the design being unsafe or
 contract-violating.
 
+## PM re-direction re-consultation (2026-07-21)
+
+After the original five-team review produced the proposed *defer-to-post-
+`1.0.0`* disposition, the product manager (Nic Galluzzo) re-prioritized
+`1.0.0`: it will not ship until the project supports at least 10 different
+API providers (two exist today). The freeze pressure that drove every
+original timing objection is therefore gone for the foreseeable future, and
+PM directed that `response_next` be locked in (RFC accepted) and shipped in
+the next minor release (`0.10.0`) rather than deferred. Because this changes
+the decision the original review objected to, the four substantive reviewers
+were re-consulted under `$topology-consult` with fresh reviewer contexts
+that received the PM direction, the original objection, and the unchanged
+RFC text, and were asked whether the revised timing resolves or escalates
+the original concern. The sponsoring team (Connector Experience) originally
+`Approved` and its approval carries forward: the revised decision moves in
+the direction it preferred (immediate inclusion).
+
+| Required reviewer | Team | Original result | Re-consultation result | Evidence | Disposition |
+| --- | --- | --- | --- | --- | --- |
+| Connector Experience perspective | Connector Experience | Approved | Approved (carries forward) | Sponsoring team; immediate-inclusion preference now adopted. Schema/compiler surface extension unchanged by version label. | Accepted; designee remains Connector Experience as the `0.10.0` accountable team |
+| Query Experience perspective | Query Experience | Objected (Needs evidence) | Approved | Original objection was timing-only ("compress into `1.0.0` freeze"). `1.0.0` is now far away (≥10-provider gate); the Query-owned `EXPLAIN` switch extension and required differential test land as primary work, not a race against a freeze. Raised one cross-team note: pre-1.0 versioning model requires `0.Y.0` for capability additions, satisfied by `0.10.0` (PM-confirmed). | Accepted; versioning concern resolved by PM's `0.10.0` direction |
+| Remote Runtime perspective | Remote Runtime | Objected (Needs evidence) | Approved | `ValidateNextTarget` (`src/runtime/pagination/link_pagination.cpp:47-137`) is source-agnostic and reuses cleanly under either release label. `LinkPaginationState::Advance` (`:211-235`) is the genuine non-reuse point; the sibling-entry-point requirement is invariant to version numbering. The two original open questions (decoder single-pass-vs-second-parse; JSON `\uXXXX`-vs-percent-encoding byte divergence) carry forward as the gating scoping spike's first outputs, exactly as originally required. Removing freeze pressure strictly reduces schedule-compression hazard without weakening any invariant. | Accepted; spike-first sequencing preserved |
+| Relational Semantics perspective | Relational Semantics | Objected (Needs evidence) | Approved | The amendment the original objection required is preserved verbatim: Follow-on goals names Relational Semantics as Collaboration participant with the `BaseDomain` property test; Shared interfaces reserves the base-occurrence-domain equivalence question to this team; Topology impact records the property-test exit. All three exhaustive switches confirmed fail-closed today (`scan_planner_internal.hpp:93`, `scan_planner_validation.cpp:125`, `scan_plan_explain.cpp:230`) and require a `RESPONSE_NEXT_URL` arm or crash with uncaught `std::logic_error`; that obligation is unchanged by version numbering. | Accepted; the conditional support condition is satisfied |
+| Engineering Enablement perspective | Engineering Enablement | Objected (Needs evidence) | Approved (with required action on freeze lifecycle) | Original oracle concern resolved: the corrected coverage category (`next_field_wrong_type_rejected`) plus the GraphQL `missing_cursor_rejected` precedent (`fixture-coverage-v1.json:133`) close the gap. Required action on the new `accepted_candidate_revisions` freeze section: (a) a documented semantic distinguishing it from `exclusions`/`not_yet_frozen`/`fast_follows`; (b) mutation coverage in `contract_freeze_tests.py`; (c) a graduation rule for when an entry moves into the closed set. RFC 0016 itself stays out of `rfc_authorities.accepted` (which binds the `1.0.0` boundary directly) since `response_next` is excluded from `1.0.0`. | Accepted; required action committed in this acceptance's contract propagation (the new section lands with semantic, mutation tests, and graduation rule) |
+
+All five required reviewers approved the revised decision. Each confirmed
+the revised timing satisfies rather than escalates the original concern; no
+new objection was raised. Two cross-team observations surfaced (versioning
+semantics and freeze-lifecycle discipline), both addressed by this RFC's
+acceptance: the versioning choice is `0.10.0` (PM-confirmed, follows
+`ROADMAP.md`'s pre-1.0 rule), and the new freeze section lands with the
+documentation, mutation coverage, and graduation rule Engineering Enablement
+required.
+
 ## Decision and rationale
 
 - **Technical decision owner:** Lead agent.
-- **Product approval:** Pending — Nic Galluzzo directed opening this RFC
-  after the `0.9.0` trial surfaced the gap; final sign-off on the
-  exclude-and-fast-follow disposition below is presented alongside this
-  completed review record.
+- **Product approval:** **Received — Nic Galluzzo, 2026-07-21.** The product
+  manager directed (1) that `1.0.0` will not ship until the project supports
+  at least 10 different API providers (two exist today), dissolving the
+  `1.0.0`-freeze-pressure rationale that drove every original timing
+  objection; and (2) that `response_next` be locked in (this RFC accepted) and
+  shipped in the next minor release (`0.10.0`) rather than deferred to a
+  post-`1.0.0` `MINOR`. The versioning choice follows `ROADMAP.md`'s pre-1.0
+  rule that backward-compatible capability additions are `0.Y.0` minors, not
+  `0.Y.Z` patches; the active goal therefore targets `0.10.0`, not `0.9.1`.
+- **Decision:** The `response_next` design is **accepted**, and
+  **implementation is committed for `0.10.0`** (not deferred to a
+  post-`1.0.0` `MINOR`). The scoping spike (decoder single-pass-vs-second-parse
+  question and encoding-normalization rule) remains the gating first output of
+  the `0.10.0` implementation goal exactly as the original Remote Runtime
+  review required. The freeze artifact records `response_next` as an
+  **accepted candidate revision pending implementation** in a new
+  `accepted_candidate_revisions` section (distinct from permanent exclusions,
+  evidence-derived `not_yet_frozen`, and discovered-gap `fast_follows`):
+  decided, but not yet graduated into the schema-closed `pagination_strategies`
+  set, which stays at `{disabled, link_next}` until `0.10.0` ships.
 - **Rationale:** The design itself — a REST pagination strategy identical to
-  `link_next` except its continuation signal is read from a declared JSON
-  body path, reusing the same reconstruct-and-verify safety model — is
-  sound and unobjected-to by any reviewer. What review changed is the
-  *timing* decision: the cross-team surface is real and larger than
-  initially scoped (two additional exhaustive switches in Relational
-  Semantics, one in Query Experience, an unresolved decoder-architecture
-  question, an incomplete fixture-coverage oracle, and a genuinely new
-  encoding-correctness edge case), and four of five reviewers independently
-  recommended not compressing that work into the `1.0.0` freeze window. This
-  matches `0.9.0`'s own guardrail — "prove and freeze, do not expand" — more
-  faithfully than forcing inclusion now would. `response_next` is therefore
-  **decided as a design (accepted) and excluded from `1.0.0` (deferred as a
-  fast-follow `MINOR`)**, gated on the scoping spike and the corrected,
-  cross-team implementation goal recorded in Follow-on goals. This keeps
-  faith with `docs/CONNECTOR_SPECIFICATIONS.md`'s own rule — "adding any such
-  capability requires a later accepted contract" — this RFC is that
-  contract, and it is honest about what is and is not ready yet.
-- **Material objections:** All four objections (Query Experience, Remote
-  Runtime, Relational Semantics, Engineering Enablement) were dispositioned
-  by directly revising the RFC's technical content (see Review record table
-  above for each disposition) rather than by overriding them; none was
-  rejected. Connector Experience's approval and its preference for immediate
-  inclusion are recorded and respected as the sponsoring team's view; the
-  decision owner weighed it against the fuller evidence the other four
-  reviews supplied specifically because they, not Connector Experience,
-  hold the interfaces that evidence concerns.
+  `link_next` except its continuation signal is read from a declared JSON body
+  path, reusing the same reconstruct-and-verify safety model — is sound and
+  unobjected-to by any reviewer in either the original or re-consultation
+  review. What changed between the initial proposed decision (defer to
+  post-`1.0.0` `MINOR`) and this accepted decision (implement now in
+  `0.10.0`) is *only the product context*: the PM dissolved the time pressure
+  that drove every original timing objection. With `1.0.0` gated on 10+
+  providers, the cross-team implementation surface (two additional exhaustive
+  switches in Relational Semantics, one in Query Experience, the unresolved
+  decoder-architecture question, the fixture-coverage oracle, and the
+  encoding-correctness edge case) is no longer compressed against a freeze
+  window — exactly what four of five reviewers asked for. The RFC's text
+  corrections review produced (naming Relational Semantics and Query Experience
+  as required implementation participants, adding the new fixture-coverage
+  category, reserving the `BaseDomain`-equivalence decision to Relational
+  Semantics) carry forward verbatim into the `0.10.0` goal. This keeps faith
+  with `docs/CONNECTOR_SPECIFICATIONS.md`'s own rule — "adding any such
+  capability requires a later accepted contract" — this RFC is that contract,
+  and it now commits to implementation rather than deferring it.
+- **Material objections:** All four original objections (Query Experience,
+  Remote Runtime, Relational Semantics, Engineering Enablement) were
+  dispositioned by directly revising the RFC's technical content (see Review
+  record table above for each disposition) rather than by overriding them; none
+  was rejected. The PM re-direction re-consultation (below) returned
+  `Approved` from all four substantive reviewers, each confirming the revised
+  timing satisfies rather than escalates the original concern. Connector
+  Experience's original approval and its preference for immediate inclusion
+  are recorded and respected as the sponsoring team's view; the original
+  decision owner weighed it against the fuller evidence the other four reviews
+  supplied specifically because they, not Connector Experience, hold the
+  interfaces that evidence concerns. The PM's re-direction reconciles both:
+  inclusion proceeds, on the sequenced, corrected, spike-first plan the four
+  reviewers specified.
 - **Superseded by:** Not applicable.
 
 ## Follow-on goals
 
 | Outcome or objective | Accountable team | Supporting teams and interaction modes | Activation condition |
 | --- | --- | --- | --- |
-| Resolve the decoder single-pass-vs-second-parse question and define the encoding-normalization rule (scoping spike) | Remote Runtime | Engineering Enablement (Facilitation) | This RFC accepted; runs before the implementation goal below is scoped with a timeline |
-| Implement `response_next` pagination (schema, compiler, generalized Runtime validator and pagination-state entry point, `BaseDomain` classification and property test, `EXPLAIN` arm and differential test, corrected fixture-coverage set) | Connector Experience | Remote Runtime (Collaboration), Relational Semantics (Collaboration), Query Experience (X-as-a-Service for `EXPLAIN`), Engineering Enablement (Facilitation) | This RFC accepted as a `MINOR` post-`1.0.0` addition; the scoping spike above complete |
-| Adopt `response_next` in `connectors/rickandmorty`'s `character_search` relation | Connector Experience | None beyond the implementation goal above | Implementation goal complete; tracked as a `MINOR` package version change under RFC 0013 |
+| Resolve the decoder single-pass-vs-second-parse question and define the encoding-normalization rule (scoping spike) | Remote Runtime | Engineering Enablement (Facilitation) | This RFC accepted (2026-07-21). Runs as the gating first work item of the `0.10.0` implementation goal below; no separate goal activation. |
+| Implement `response_next` pagination and ship it in `0.10.0` (schema, compiler, generalized Runtime validator and pagination-state entry point, `BaseDomain` classification and property test, `EXPLAIN` arm and differential test, corrected fixture-coverage set, adoption in `connectors/rickandmorty`'s `character_search` relation) | Connector Experience | Remote Runtime (Collaboration), Relational Semantics (Collaboration), Query Experience (X-as-a-Service for `EXPLAIN`), Engineering Enablement (Facilitation) | This RFC accepted as the `0.10.0` implementation authority; the scoping spike above complete; PM-approved product goal activates delivery. The active goal at `docs/goals/public-connector-authoring-candidate.md` does not absorb this work — `0.9.0`'s guardrail forbids expanding capability inside that goal. A new `0.10.0` goal brief must be drafted (under `$draft-product-goal`) before implementation begins. |
+| Graduate `response_next` from `accepted_candidate_revisions` into the schema-closed `pagination_strategies.rest` set | Connector Experience | Engineering Enablement (Facilitation, for the freeze lifecycle) | `0.10.0` ships with the live schema/decoder/IR/switches/test-oracle evidence. Graduation is mechanical: a new freeze snapshot is produced for `0.10.0`'s release view, and the candidate-revision entry is removed because the strategy is now part of the closed set proper. |

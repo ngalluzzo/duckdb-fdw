@@ -129,6 +129,85 @@ class ContractFreezeTests(unittest.TestCase):
     def test_fast_follow_removed_fails(self) -> None:
         self.require_rejected(lambda value: value["fast_follows"].clear(), "fixture execution fast-follow")
 
+    def test_accepted_candidate_revisions_section_removed_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value.pop("accepted_candidate_revisions"),
+            "accepted_candidate_revisions",
+        )
+
+    def test_accepted_candidate_revisions_section_emptied_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["accepted_candidate_revisions"].clear(),
+            "accepted_candidate_revisions is empty",
+        )
+
+    def test_accepted_candidate_revisions_entry_removed_fails(self) -> None:
+        # With only one expected candidate today, removing the entry empties
+        # the list, so the empty-list invariant fires first; the test still
+        # proves the entry cannot be silently dropped. When more candidates
+        # accumulate, a focused removal test should match on the entry id.
+        self.require_rejected(
+            lambda value: value["accepted_candidate_revisions"].pop(),
+            "accepted_candidate_revisions is empty",
+        )
+
+    def test_accepted_candidate_revisions_required_key_missing_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["accepted_candidate_revisions"][0].pop("graduation_rule"),
+            "graduation_rule",
+        )
+
+    def test_accepted_candidate_revisions_authority_not_accepted_fails(self) -> None:
+        import shutil
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temporary:
+            mirror = pathlib.Path(temporary) / "rfcs"
+            shutil.copytree(self.rfc_directory, mirror)
+            target = mirror / "0016-decide-body-signaled-rest-pagination.md"
+            text = target.read_text(encoding="utf-8").replace(
+                'status: "Accepted"', 'status: "Withdrawn"', 1
+            )
+            target.write_text(text, encoding="utf-8")
+            with self.assertRaisesRegex(FreezeError, "not Accepted"):
+                verify_freeze(
+                    copy.deepcopy(self.freeze),
+                    inventory=self.inventory,
+                    schema=self.schema,
+                    rfc_directory=mirror,
+                )
+
+    def test_accepted_candidate_revisions_schema_closed_set_drift_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["accepted_candidate_revisions"][0]["schema_closed_set_today"].append(
+                "response_next"
+            ),
+            "schema_closed_set_today",
+        )
+
+    def test_accepted_candidate_revisions_broader_category_unrecognized_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["accepted_candidate_revisions"][0].__setitem__(
+                "broader_category_remains_excluded", "fabricated_category"
+            ),
+            "not a recognized mandatory exclusion",
+        )
+
+    def test_accepted_candidate_revisions_broader_category_dropped_from_exclusions_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["exclusions"].remove(
+                "pagination_body_url_offset_or_cursor_in_body_strategies"
+            ),
+            "pagination_body_url_offset_or_cursor_in_body_strategies",
+        )
+
+    def test_accepted_candidate_revisions_duplicate_id_fails(self) -> None:
+        def duplicate(value: dict) -> None:
+            entry = copy.deepcopy(value["accepted_candidate_revisions"][0])
+            value["accepted_candidate_revisions"].append(entry)
+
+        self.require_rejected(duplicate, "duplicate id")
+
     def test_not_yet_frozen_spurious_fails(self) -> None:
         self.require_rejected(
             lambda value: value["not_yet_frozen"].append(

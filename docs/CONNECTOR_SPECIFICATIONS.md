@@ -340,6 +340,23 @@ profile below. A later accepted contract and pre-freeze evidence would be
 required to admit any such strategy; the compiler rejects the declaration
 today (verified as `DUCKDB_API_UNSUPPORTED_DECLARATION` in the schema phase).
 
+**Candidate revision accepted by [RFC 0016](rfcs/0016-decide-body-signaled-rest-pagination.md),
+pending `0.10.0` implementation.** The narrow body-URL reconstruct-and-verify
+shape named `response_next` — architecturally identical to `link_next` except
+the continuation signal is read from a new required `next_url_path` JSON path
+field (under the existing `json_path_v1` extractor grammar) rather than an
+HTTP `Link` header, reusing the exact reconstruct-and-verify target-validation
+rule — has been accepted by RFC 0016 (Accepted 2026-07-21, product-manager
+approval recorded) and committed for the `0.10.0` release. Until `0.10.0`
+ships, the closed set remains `{disabled, link_next}` as enforced by the
+schema: a package declaring `response_next` fails closed at the `SCHEMA` phase
+with `DUCKDB_API_UNSUPPORTED_DECLARATION`, exactly as the unmodified closed
+schema requires. The `1.0.0` candidate freeze records this as an
+`accepted_candidate_revision` (see `release/1.0.0/freeze.md`). The broader
+category — numeric offset/page-number traversal, cursor-in-body strategies,
+and reverse or bidirectional traversal — remains a permanent exclusion;
+admitting any of those still requires its own later accepted RFC.
+
 ## Structured GraphQL operations
 
 GraphQL authoring is structured; raw documents are not accepted. A query
@@ -521,3 +538,11 @@ code, WASM, or a public C++ ABI.
 
 Adding any such capability requires a later accepted contract. An
 implementation must reject the declaration rather than accept and ignore it.
+
+> **Accepted candidate revision pending implementation.** The
+> response-body-URL reconstruct-and-verify shape (`response_next`) is
+> accepted by [RFC 0016](rfcs/0016-decide-body-signaled-rest-pagination.md)
+> for the `0.10.0` release; see the REST pagination section above for the
+> full status. Numeric offset/page-number traversal, cursor-in-body
+> strategies, and reverse or bidirectional traversal remain permanent
+> exclusions of this boundary.

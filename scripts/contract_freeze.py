@@ -54,6 +54,35 @@ EXPECTED_RFC_AUTHORITIES = frozenset(
     }
 )
 
+# Required structure for each entry in the freeze's
+# accepted_candidate_revisions section. Each entry records a contract change
+# an accepted RFC has authorized for a named target release, but whose
+# implementation has not yet graduated the change into the schema-closed set.
+# The section is conceptually distinct from exclusions (permanent),
+# fast_follows (discovered gaps), and not_yet_frozen (evidence-derived).
+REQUIRED_CANDIDATE_REVISION_KEYS = (
+    "id",
+    "scope",
+    "status",
+    "authority",
+    "target_release",
+    "target_release_authority",
+    "not_yet_in_schema_closed_set",
+    "schema_closed_set_today",
+    "graduation_rule",
+    "broader_category_remains_excluded",
+    "broader_category_exclusion_reason",
+)
+
+# Candidate revisions accepted by RFC after the 0.9.0 freeze that must be
+# present in every candidate snapshot until they graduate into the schema-
+# closed set proper. Removing an entry before its graduation must fail closed.
+EXPECTED_CANDIDATE_REVISION_IDS = frozenset(
+    {
+        "response_next_rest_pagination",
+    }
+)
+
 MANDATORY_EXCLUSIONS = frozenset(
     {
         "public_rust_native_plugin_wasm_or_columnar_binary_abi",
@@ -138,6 +167,106 @@ def _require_freeze_field(freeze: dict[str, Any], *path: Any) -> Any:
     return node
 
 
+def _verify_accepted_candidate_revisions(
+    freeze: dict[str, Any],
+    *,
+    schema: dict[str, Any],
+    rfc_directory: pathlib.Path,
+) -> None:
+    """Assert the accepted_candidate_revisions section is structurally valid and
+    consistent with the schema-closed set and the cited RFC authorities.
+
+    The section records contract changes an accepted RFC has authorized for a
+    named target release but whose implementation has not yet graduated the
+    change into the schema-closed set. Removing an entry before graduation,
+    widening the schema-closed set without a corresponding graduation, or
+    citing an RFC that is not Accepted all fail closed.
+    """
+
+    revisions = freeze.get("accepted_candidate_revisions")
+    if not isinstance(revisions, list):
+        raise FreezeError("freeze is missing the accepted_candidate_revisions list")
+    if not revisions:
+        # An empty list is permitted only when every expected candidate has
+        # graduated. The expected-IDs set is non-empty today, so an empty list
+        # is a structural error until the response_next entry graduates.
+        if EXPECTED_CANDIDATE_REVISION_IDS:
+            raise FreezeError(
+                "freeze accepted_candidate_revisions is empty but expected entries have not graduated"
+            )
+        return
+
+    revision_ids: set[str] = set()
+    schema_rest_set = _schema_rest_pagination_strategies(schema)
+    for entry in revisions:
+        if not isinstance(entry, dict):
+            raise FreezeError("accepted_candidate_revisions entry is not a mapping")
+        missing = [key for key in REQUIRED_CANDIDATE_REVISION_KEYS if key not in entry]
+        if missing:
+            raise FreezeError(
+                f"accepted_candidate_revisions entry {entry.get('id', '<unknown>')!r} "
+                f"missing required keys: {missing}"
+            )
+        revision_id = entry["id"]
+        if revision_id in revision_ids:
+            raise FreezeError(f"accepted_candidate_revisions has duplicate id {revision_id!r}")
+        revision_ids.add(revision_id)
+
+        # The cited authority must resolve to an Accepted RFC.
+        authority = entry["authority"]
+        rfc_match = re.search(r"RFC ([0-9]{4})", authority)
+        if rfc_match is None:
+            raise FreezeError(
+                f"accepted_candidate_revisions entry {revision_id!r} authority {authority!r} "
+                f"does not cite an RFC reference"
+            )
+        status = _rfc_status(rfc_match.group(0), rfc_directory)
+        if status != "Accepted":
+            raise FreezeError(
+                f"accepted_candidate_revisions entry {revision_id!r} cites {rfc_match.group(0)} "
+                f"which is {status!r}, not Accepted"
+            )
+
+        # Until the candidate graduates (not_yet_in_schema_closed_set == false),
+        # the entry's declared schema_closed_set_today must equal the actual
+        # schema's REST closed set. This is the invariant that distinguishes
+        # "decided future" (this section) from "current contract" (the closed
+        # set itself): if the schema has already been widened, the entry must
+        # graduate rather than linger here.
+        if entry["not_yet_in_schema_closed_set"]:
+            declared_today = set(entry["schema_closed_set_today"])
+            if declared_today != schema_rest_set:
+                raise FreezeError(
+                    f"accepted_candidate_revisions entry {revision_id!r} "
+                    f"schema_closed_set_today {sorted(declared_today)} disagrees with the "
+                    f"schema's actual REST closed set {sorted(schema_rest_set)}"
+                )
+
+        # The broader exclusion category the entry carves out from must
+        # remain a mandatory exclusion of the 1.0.0 boundary until the entry
+        # graduates. This prevents silent removal of an exclusion that still
+        # covers other shapes (e.g. offset/cursor-in-body) outside the
+        # candidate revision's scope.
+        broader_category = entry["broader_category_remains_excluded"]
+        if broader_category not in MANDATORY_EXCLUSIONS:
+            raise FreezeError(
+                f"accepted_candidate_revisions entry {revision_id!r} "
+                f"broader_category_remains_excluded {broader_category!r} is not a recognized "
+                f"mandatory exclusion"
+            )
+        if broader_category not in set(freeze.get("exclusions", [])):
+            raise FreezeError(
+                f"accepted_candidate_revisions entry {revision_id!r} "
+                f"requires broader exclusion {broader_category!r} to remain in the exclusions list"
+            )
+
+    missing_expected = EXPECTED_CANDIDATE_REVISION_IDS - revision_ids
+    if missing_expected:
+        raise FreezeError(
+            f"freeze lost expected accepted_candidate_revisions entries: {sorted(missing_expected)}"
+        )
+
+
 def verify_freeze(
     freeze: dict[str, Any],
     *,
@@ -206,6 +335,8 @@ def verify_freeze(
     fast_follow_ids = {follow["id"] for follow in freeze.get("fast_follows", [])}
     if "end_to_end_fixture_execution" not in fast_follow_ids:
         raise FreezeError("freeze does not record the end-to-end fixture execution fast-follow")
+
+    _verify_accepted_candidate_revisions(freeze, schema=schema, rfc_directory=rfc_directory)
 
     not_yet_frozen = {entry["item"] for entry in freeze.get("not_yet_frozen", [])}
     if not_yet_frozen != EXPECTED_NOT_YET_FROZEN:

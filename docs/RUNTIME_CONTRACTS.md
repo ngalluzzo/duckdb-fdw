@@ -527,6 +527,48 @@ transition within the exact planned origin/path. For GraphQL, received metadata
 contributes only a validated opaque cursor. Continuations cannot replace fixed
 fields or widen authority.
 
+### Body-signaled REST pagination (`response_next`)
+
+`response_next` is architecturally identical to `link_next` (`dependency:
+sequential`, `consistency: mutable`, `target_scope:
+exact_operation_origin_and_path`, identical page-number/page-size/ceiling
+fields) except that the continuation signal is read from a declared JSON path
+(`next_url_path`, e.g. `$.info.next`) in the decoded response body rather
+than an HTTP `Link` header. Both strategies share the same reconstruct-and-
+verify safety model: the received URL is a verified signal compared against
+a locally reconstructed expectation, never a dereferenced fetch target.
+
+**Continuation-source extraction (scoping-spike decision, 2026-07-21).** The
+`next_url_path` value is extracted during the same single JSON-decode pass
+that produces relation rows. The decoder's existing path-tracking
+(`ParseSelectedObject` in `src/runtime/decoding/json_decoder.cpp`) already
+compares each object key against the declared column paths; extending it to
+also recognize one optional page-level scalar path adds one comparison per
+key and one scalar slot per page, with no second parse and no retained
+intermediate tree. A JSON `null` or an absent path at runtime means "no next
+page." A present non-string value (number, object, or array) at the path is
+a runtime SCHEMA-phase rejection distinct from the link-header grammar's
+malformed-target category — see the `next_field_wrong_type_rejected`
+coverage key established by GraphQL cursor pagination's `missing_cursor_rejected`
+precedent.
+
+**Continuation-target validation (scoping-spike decision, 2026-07-21).**
+`ValidateNextTarget` in `src/runtime/pagination/link_pagination.cpp` is
+already source-agnostic: it accepts a plain `std::string` candidate,
+reconstructs the expected next-page URL from the admitted profile, and
+compares them byte-for-byte across origin, path, and query-multiset. The
+body-sourced target is held to the **same canonical ASCII percent-encoded
+form** a Link header would carry — no normalization is applied. A
+body-extracted URL that contains non-ASCII bytes (for example from JSON
+`\uXXXX` unescaping of a non-ASCII codepoint into UTF-8) or non-canonical
+percent-encoding is rejected at the POLICY phase with the existing
+`pagination.next` failure shape, exactly as an equivalent Link header
+mismatch would be. This matches v1's conservative philosophy: the body URL
+must already be in the canonical form a compliant server sends; the
+runtime does not guess at equivalences. A new sibling entry point on the
+pagination state (not a signature change to the Link path) feeds the
+body-extracted candidate into the existing validator.
+
 An empty page with a valid continuation is not exhaustion. A continuation at a
 page, record, byte, or arithmetic ceiling is a terminal resource failure before
 another request. GraphQL cursor validation preserves the last authorized
