@@ -266,8 +266,7 @@ void TestRetainedRootSurvivesRenameAndReplacement() {
 	const auto retained_path = tree.Path() + "/retained";
 	Require(::rename(original.c_str(), retained_path.c_str()) == 0, "could not rename the retained package root");
 	(void)CreateGithubPackage(tree.Path(), "github", "1.0.9");
-	WriteFile(retained_path + "/connector.yaml",
-	          WithVersion(ReadFile("connectors/github/connector.yaml"), "1.0.1"));
+	WriteFile(retained_path + "/connector.yaml", WithVersion(ReadFile("connectors/github/connector.yaml"), "1.0.1"));
 
 	duckdb_api_test::NeverCancel cancellation;
 	const auto candidate =
@@ -389,8 +388,7 @@ void TestMidFlightLoadAndReloadCancellation() {
 
 void TestCancellationWinsMalformedAndCompileDiagnostics() {
 	TemporaryPackageParent tree;
-	const std::string accepted_relation =
-	    ReadFile("connectors/github/relations/viewer_repository_metrics.yaml");
+	const std::string accepted_relation = ReadFile("connectors/github/relations/viewer_repository_metrics.yaml");
 
 	const auto malformed_load_root = CreateGithubPackage(tree.Path(), "malformed_load");
 	WriteFile(malformed_load_root + "/relations/viewer_repository_metrics.yaml", "api_version: [\n");

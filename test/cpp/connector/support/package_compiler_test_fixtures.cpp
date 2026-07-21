@@ -128,8 +128,8 @@ CompileRepositoryGithubRegistrationFixture(const std::string &absolute_repositor
 duckdb_api::CompiledLocalPackage
 CompileRepositoryGithubLocalPackageFixture(const std::string &absolute_repository_root) {
 	NeverCancel cancellation;
-	const auto result = duckdb_api::connector::CompileLocalPackageRoot(
-	    absolute_repository_root + "/connectors/github", cancellation);
+	const auto result =
+	    duckdb_api::connector::CompileLocalPackageRoot(absolute_repository_root + "/connectors/github", cancellation);
 	if (!result.Succeeded() || result.Package() == nullptr) {
 		throw std::runtime_error("repository GitHub connector package fixture did not compile");
 	}

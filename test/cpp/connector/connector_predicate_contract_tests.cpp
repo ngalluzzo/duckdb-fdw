@@ -435,10 +435,10 @@ void TestPackageCandidateLocalPredicateConflicts() {
 		// A source identifier is provenance, not a query key. It may share
 		// spelling with an unrelated fixed key when its own emitted name does
 		// not collide.
-		const auto operation = PackageOperation(
-		    false, "package_predicate_operation", "/fixtures/package-predicates",
-		    CompiledModelBuilder::DisabledPagination(), "access", "page",
-		    {CompiledModelBuilder::FixedQueryParameter("page", CompiledModelBuilder::Varchar("all"))});
+		const auto operation =
+		    PackageOperation(false, "package_predicate_operation", "/fixtures/package-predicates",
+		                     CompiledModelBuilder::DisabledPagination(), "access", "page",
+		                     {CompiledModelBuilder::FixedQueryParameter("page", CompiledModelBuilder::Varchar("all"))});
 		const auto identities =
 		    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
 		const auto relation = PackageRelation(operation, {PackageMapping("private", "private", identities, "page")});
@@ -452,8 +452,7 @@ void TestPackageCandidateLocalPredicateConflicts() {
 		    {CompiledModelBuilder::FixedQueryParameter("access", CompiledModelBuilder::Varchar("all"))});
 		const auto identities =
 		    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
-		PackageRelation(operation,
-		                {PackageMapping("private", "private", identities, "predicate_value")});
+		PackageRelation(operation, {PackageMapping("private", "private", identities, "predicate_value")});
 	});
 
 	const auto empty_mapping_relation = PackageRelation(operation, {PackageMapping("", "", identities)});
@@ -487,20 +486,19 @@ void TestPackagePredicateGenerationBinding() {
 		auto operation = PackageOperation();
 		operation.fallback = true;
 		auto rest = operation.Rest();
-		auto orphan = ConnectorCatalogTestAccess::RestOperation(
-		    operation, std::move(rest), CompiledModelBuilder::V1OperationSelector({}));
+		auto orphan = ConnectorCatalogTestAccess::RestOperation(operation, std::move(rest),
+		                                                        CompiledModelBuilder::V1OperationSelector({}));
 		const auto relation = PackageRelation(orphan, {});
 		Require(relation.PredicateMappings().empty(),
 		        "orphan conditional counterexample failed before package request validation");
-		RequireInvalid("package generation accepted an orphan conditional request binding", [&orphan]() {
-			PackageGeneration(PACKAGE_DIGEST, orphan, {});
-		});
+		RequireInvalid("package generation accepted an orphan conditional request binding",
+		               [&orphan]() { PackageGeneration(PACKAGE_DIGEST, orphan, {}); });
 	}
 	{
-		const auto operation = PackageOperation(
-		    false, "package_predicate_operation", "/fixtures/package-predicates",
-		    CompiledModelBuilder::DisabledPagination(), "visibility", "visibility",
-		    {CompiledModelBuilder::ConditionalInputQueryParameter("access", "visibility")});
+		const auto operation =
+		    PackageOperation(false, "package_predicate_operation", "/fixtures/package-predicates",
+		                     CompiledModelBuilder::DisabledPagination(), "visibility", "visibility",
+		                     {CompiledModelBuilder::ConditionalInputQueryParameter("access", "visibility")});
 		const auto identities =
 		    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
 		const auto relation = PackageRelation(operation, {PackageMapping("private", "private", identities)});
@@ -511,10 +509,10 @@ void TestPackagePredicateGenerationBinding() {
 		});
 	}
 	{
-		const auto operation = PackageOperation(
-		    false, "package_predicate_operation", "/fixtures/package-predicates",
-		    CompiledModelBuilder::DisabledPagination(), "visibility", "visibility",
-		    {CompiledModelBuilder::ConditionalInputQueryParameter("state", "state")});
+		const auto operation =
+		    PackageOperation(false, "package_predicate_operation", "/fixtures/package-predicates",
+		                     CompiledModelBuilder::DisabledPagination(), "visibility", "visibility",
+		                     {CompiledModelBuilder::ConditionalInputQueryParameter("state", "state")});
 		const auto identities =
 		    duckdb_api::internal::DerivePackagePredicateIdentities(PACKAGE_DIGEST, PACKAGE_RELATION, operation);
 		const auto relation = PackageRelation(operation, {PackageMapping("private", "private", identities)});

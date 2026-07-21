@@ -324,9 +324,8 @@ BuildGithubPackageQueryStaging(const std::string &absolute_repository_root,
 	// This Query-owned catalog oracle intentionally has no Semantics provider.
 	// The lead-owned whole-graph target supplies same-generation planning; this
 	// fixture fails if catalog-only assertions cross that unprovisioned port.
-	return std::shared_ptr<PackageQueryStagingService>(
-	    new PackageQueryStagingService(std::move(initial), std::move(replacement),
-	                                   absolute_repository_root + "/connectors/github", probe));
+	return std::shared_ptr<PackageQueryStagingService>(new PackageQueryStagingService(
+	    std::move(initial), std::move(replacement), absolute_repository_root + "/connectors/github", probe));
 }
 
 std::shared_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator>

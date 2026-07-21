@@ -230,9 +230,9 @@ void TestExtractorByteLimit() {
 void TestInvalidIdentifiersStayDiagnosticOnly() {
 	TemporaryPackage package;
 	duckdb_api_test::WriteGithubPackage(package);
-	package.Write("connector.yaml", duckdb_api_test::ReplaceOnce(
-	                                    duckdb_api_test::ReadFile("connectors/github/connector.yaml"),
-	                                    "id: github", "id: \"NOT SAFE!\""));
+	package.Write("connector.yaml",
+	              duckdb_api_test::ReplaceOnce(duckdb_api_test::ReadFile("connectors/github/connector.yaml"),
+	                                           "id: github", "id: \"NOT SAFE!\""));
 	package.Write("relations/authenticated_user.yaml",
 	              duckdb_api_test::ReplaceOnce(GithubRelation("authenticated_user"), "id: authenticated_user",
 	                                           "id: another_user"));
@@ -260,9 +260,9 @@ void TestDiagnosticCodePhaseContract() {
 	{
 		TemporaryPackage package;
 		duckdb_api_test::WriteGithubPackage(package);
-		package.Write("connector.yaml", duckdb_api_test::ReplaceOnce(
-		                                    duckdb_api_test::ReadFile("connectors/github/connector.yaml"),
-		                                    "redirects: deny", "redirects: allow"));
+		package.Write("connector.yaml",
+		              duckdb_api_test::ReplaceOnce(duckdb_api_test::ReadFile("connectors/github/connector.yaml"),
+		                                           "redirects: deny", "redirects: allow"));
 		NeverCancel cancellation;
 		RequireFirstDiagnostic(duckdb_api_test::CompileRoot(package.Root(), cancellation),
 		                       PackageDiagnosticCode::POLICY_WIDENING, PackageDiagnosticPhase::COMPILE,
