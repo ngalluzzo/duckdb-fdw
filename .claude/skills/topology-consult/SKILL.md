@@ -35,26 +35,31 @@ Choose one accountable team for the outcome or non-product objective:
 
 - Use Connector Experience when acceptance ends with a connector author
   creating, validating, testing, explaining, or maintaining a package.
+- Use Package Ecosystem when acceptance ends with a publisher, package
+  consumer, or registry operator publishing, discovering, acquiring,
+  verifying, composing, reproducing, or governing a package release.
 - Use Query Experience when acceptance ends with a DuckDB user querying,
   inspecting, or diagnosing remote data.
 - For a genuine non-product objective, use whichever charter owns the operating
   or engineering area, including a stream team, without inventing a product
   outcome.
-- Never make Remote Runtime, Relational Semantics, or Engineering Enablement
-  accountable for a product goal. Platform or subsystem work framed as product
-  delivery retains a consuming stream team.
+- Never make Remote Runtime, Relational Semantics, Trust & Provenance, or
+  Engineering Enablement accountable for a product goal. Platform or
+  subsystem work framed as product delivery retains a consuming stream team.
 
 Add an affected team only when the proposal changes its charter, consumes or
 provides its team API, creates operational burden for it, or requires its
-specialist evidence. Do not consult all five teams as ceremony.
+specialist evidence. Do not consult every team as ceremony.
 
 Read every selected charter completely and no unselected charter unless
 routing remains genuinely ambiguous:
 
 - `docs/teams/CONNECTOR_EXPERIENCE.md`
+- `docs/teams/PACKAGE_ECOSYSTEM.md`
 - `docs/teams/QUERY_EXPERIENCE.md`
 - `docs/teams/REMOTE_RUNTIME.md`
 - `docs/teams/RELATIONAL_SEMANTICS.md`
+- `docs/teams/TRUST_AND_PROVENANCE.md`
 - `docs/teams/ENGINEERING_ENABLEMENT.md`
 
 For each supporting team, record Collaboration, X-as-a-Service, or

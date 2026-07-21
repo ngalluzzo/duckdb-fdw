@@ -90,8 +90,8 @@ and lifecycle invariants from `AGENTS.md` and the design contracts.
 
 ### Team and RFC routing
 
-1. Assign Connector Experience or Query Experience from the primary acceptance
-   narrative in `docs/TEAM_TOPOLOGY.md`.
+1. Assign Connector Experience, Package Ecosystem, or Query Experience from
+   the primary acceptance narrative in `docs/TEAM_TOPOLOGY.md`.
 2. Name supporting teams, interaction modes, and exit conditions.
 3. Apply the mandatory triggers in `docs/RFC_PROCESS.md` before considering its
    diagnostic question or exemptions.

@@ -36,6 +36,28 @@ embedded credentials or required Rust code.
 The value is author confidence and a shorter path from API knowledge to a
 usable, reviewable relational definition.
 
+### Trusted connector package to governed ecosystem availability
+
+The customers are connector publishers, package consumers, and registry
+operators. The flow begins with a validated connector package and ends with a
+compiled composition candidate:
+
+```text
+validated connector package
+  -> immutable artifact
+  -> published release
+  -> trusted catalog state
+  -> discovery and resolution
+  -> canonical lock
+  -> compiled composition candidate
+```
+
+The value is that a package can be safely published, discovered, acquired,
+verified, composed, reproduced, governed, and recovered without weakening its
+semantics or granting remote registry state execution authority. This stream
+begins where Connector Experience's stream ends and stops before Query
+Experience activates the package graph.
+
 ### SQL question to trustworthy remote result
 
 The customer is a DuckDB user. The flow begins with installation, connection
@@ -64,16 +86,23 @@ not additional product value streams.
 flowchart LR
     AUTHOR["API maintainer or connector author"] --> CONNECTOR["Connector Experience<br/>Stream-aligned"]
     CONNECTOR --> PACKAGE["Trusted connector package"]
-    PACKAGE --> QUERY["Query Experience<br/>Stream-aligned"]
+    PACKAGE --> ECOSYSTEM["Package Ecosystem<br/>Stream-aligned"]
+    PUBLISHER["Publishers, consumers, and registry operators"] --> ECOSYSTEM
+    ECOSYSTEM --> CANDIDATE["Compiled composition candidate"]
+    CANDIDATE --> QUERY["Query Experience<br/>Stream-aligned"]
     USER["DuckDB user"] --> QUERY
     QUERY --> RESULT["Correct, explainable result"]
 
     SEMANTICS["Relational Semantics<br/>Complicated subsystem"] -.->|X-as-a-Service| CONNECTOR
     SEMANTICS -.->|X-as-a-Service| QUERY
+    TRUST["Trust & Provenance<br/>Complicated subsystem"] -.->|X-as-a-Service| ECOSYSTEM
     RUNTIME["Remote Runtime<br/>Platform"] -.->|X-as-a-Service| CONNECTOR
     RUNTIME -.->|X-as-a-Service| QUERY
+    RUNTIME -.->|X-as-a-Service| ECOSYSTEM
     ENABLEMENT["Engineering Enablement<br/>Enabling"] -.->|Facilitation| CONNECTOR
     ENABLEMENT -.->|Facilitation| QUERY
+    ENABLEMENT -.->|Facilitation| ECOSYSTEM
+    ENABLEMENT -.->|Facilitation| TRUST
     ENABLEMENT -.->|Facilitation| RUNTIME
     ENABLEMENT -.->|Facilitation| SEMANTICS
 ```
@@ -81,9 +110,11 @@ flowchart LR
 | Team | Type | Primary customer | Accountable outcome boundary |
 | --- | --- | --- | --- |
 | Connector Experience | Stream-aligned | Connector authors and maintainers | A trusted connector package and authoring experience |
+| Package Ecosystem | Stream-aligned | Connector publishers, package consumers, and registry operators | Safe publication, discovery, acquisition, and governed availability of a package, ending at a compiled composition candidate |
 | Query Experience | Stream-aligned | DuckDB users | A correct, explainable query experience |
 | Remote Runtime | Platform | Stream-aligned teams | Reusable bounded remote-execution capabilities |
 | Relational Semantics | Complicated subsystem | Connector and Query Experience | Remote optimization that preserves DuckDB meaning |
+| Trust & Provenance | Complicated subsystem | Package Ecosystem | Conservative-by-default signing, provenance, and threat-model verification |
 | Engineering Enablement | Enabling | All delivery teams | Teams become self-sufficient in the required engineering capability |
 
 These are stable accountability contexts, not a requirement to run five agent
@@ -97,10 +128,13 @@ make the human and agent interaction around those seams explicit.
 
 | Producer | Consumer | Durable interface |
 | --- | --- | --- |
-| Connector Experience | Query Experience, Relational Semantics, and Remote Runtime | Validated package and immutable `CompiledConnector` |
+| Connector Experience | Query Experience, Relational Semantics, Remote Runtime, and Package Ecosystem | Validated package and immutable `CompiledConnector` |
+| Package Ecosystem | Query Experience | Compiled composition candidate: graph and lock identity, ordered package generations, dependency edges, generated SQL inventory, lifecycle eligibility already enforced, and safe explanation |
 | Query Experience | Relational Semantics | DuckDB capability profile and relational `ScanRequest` |
 | Relational Semantics | Connector Experience, Remote Runtime, and Query Experience | Semantically explicit, immutable `ScanPlan` with an explainable classification |
+| Trust & Provenance | Package Ecosystem | Conservative-by-default trust-state verdict and provenance-verification result for a candidate artifact |
 | Remote Runtime | Connector Experience and Query Experience | Deterministic fixture execution, bounded `BatchStream`, and structured diagnostics |
+| Remote Runtime | Package Ecosystem | Bounded authenticated registry transfer: credential scoping, destination and redirect enforcement, cancellation, and resource limits |
 | Engineering Enablement | Every team | Reusable skills, gates, fixtures, and transferred practices |
 
 An interface does not prohibit contributions across a team boundary. It makes
@@ -151,15 +185,20 @@ stream-aligned team:
 1. Choose Connector Experience when the primary acceptance narrative ends with
    a connector author creating, validating, testing, explaining, or maintaining
    a package.
-2. Choose Query Experience when the primary acceptance narrative ends with a
+2. Choose Package Ecosystem when the primary acceptance narrative ends with a
+   publisher, package consumer, or registry operator publishing, discovering,
+   acquiring, verifying, composing, reproducing, or governing a package
+   release.
+3. Choose Query Experience when the primary acceptance narrative ends with a
    DuckDB user querying, inspecting, or diagnosing remote data.
-3. Record Remote Runtime, Relational Semantics, or Engineering Enablement as a
-   supporting team with an explicit interaction mode and exit condition.
-4. Work centered on a platform or subsystem becomes a goal only when it
+4. Record Remote Runtime, Relational Semantics, Trust & Provenance, or
+   Engineering Enablement as a supporting team with an explicit interaction
+   mode and exit condition.
+5. Work centered on a platform or subsystem becomes a goal only when it
    delivers decision evidence for a named sponsoring stream outcome or directly
    enables a named stream outcome. The sponsoring or consuming stream team
    remains accountable.
-5. Engineering Enablement never assumes product accountability or quality
+6. Engineering Enablement never assumes product accountability or quality
    ownership from a delivery team.
 
 The lead agent owns orchestration across the participating teams. Supporting
@@ -181,9 +220,11 @@ interactions. Once active, each team owns one charter covering its:
 The active charters are:
 
 - [Connector Experience](teams/CONNECTOR_EXPERIENCE.md)
+- [Package Ecosystem](teams/PACKAGE_ECOSYSTEM.md)
 - [Query Experience](teams/QUERY_EXPERIENCE.md)
 - [Remote Runtime](teams/REMOTE_RUNTIME.md)
 - [Relational Semantics](teams/RELATIONAL_SEMANTICS.md)
+- [Trust & Provenance](teams/TRUST_AND_PROVENANCE.md)
 - [Engineering Enablement](teams/ENGINEERING_ENABLEMENT.md)
 
 Use `$topology-consult` to route a goal or decision through the minimum affected
