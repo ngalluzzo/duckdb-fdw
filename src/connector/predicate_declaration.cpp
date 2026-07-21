@@ -168,22 +168,23 @@ const CompiledOperation *FindOperation(const std::vector<CompiledOperation> &ope
 } // namespace
 
 CompiledPredicateMapping::CompiledPredicateMapping(
-    std::string column_name_p, CompiledPredicateOperator predicate_operator_p, CompiledPredicateLiteral literal_p,
-    std::string operation_name_p, CompiledPredicateInputPlacement input_placement_p, std::string remote_input_name_p,
-    std::string encoded_remote_value_p, CompiledPredicateAccuracy accuracy_p,
+    std::string name_p, std::string column_name_p, CompiledPredicateOperator predicate_operator_p,
+    CompiledPredicateLiteral literal_p, std::string operation_name_p, CompiledPredicateInputPlacement input_placement_p,
+    std::string remote_input_name_p, std::string encoded_remote_value_p, CompiledPredicateAccuracy accuracy_p,
     CompiledPredicateProofIdentity proof_identity_p, CompiledPredicateBaseDomain base_domain_p,
     CompiledPredicateOccurrencePreservation occurrence_preservation_p,
     CompiledPredicateEncodingCapability encoding_capability_p)
-    : column_name(std::move(column_name_p)), predicate_operator(predicate_operator_p), literal(literal_p),
-      operation_name(std::move(operation_name_p)), input_placement(input_placement_p),
+    : name(std::move(name_p)), column_name(std::move(column_name_p)), predicate_operator(predicate_operator_p),
+      literal(literal_p), operation_name(std::move(operation_name_p)), input_placement(input_placement_p),
       remote_input_name(std::move(remote_input_name_p)), encoded_remote_value(std::move(encoded_remote_value_p)),
       accuracy(accuracy_p), proof_identity(proof_identity_p), base_domain(base_domain_p),
       occurrence_preservation(occurrence_preservation_p), encoding_capability(encoding_capability_p),
       typed_literal(new CompiledScalarValue(CompiledScalarType::VARCHAR, false, false, 0, "private")),
       proof_identity_value(internal::PredicateProofIdentityName(proof_identity_p)),
       base_domain_value(internal::PredicateBaseDomainName(base_domain_p)) {
-	if (!IsIdentifier(column_name) || !IsIdentifier(operation_name) || !IsIdentifier(remote_input_name) ||
-	    encoded_remote_value.empty() || !IsSafeEncodedScalar(encoded_remote_value)) {
+	if (!IsIdentifier(name) || !IsIdentifier(column_name) || !IsIdentifier(operation_name) ||
+	    !IsIdentifier(remote_input_name) || encoded_remote_value.empty() ||
+	    !IsSafeEncodedScalar(encoded_remote_value)) {
 		throw std::invalid_argument("compiled predicate mapping contains an invalid identifier or encoded value");
 	}
 	(void)OperatorName(predicate_operator);
@@ -196,15 +197,16 @@ CompiledPredicateMapping::CompiledPredicateMapping(
 	(void)internal::PredicateEncodingCapabilityName(encoding_capability);
 }
 
-CompiledPredicateMapping::CompiledPredicateMapping(std::string column_name_p, CompiledScalarValue literal_p,
-                                                   std::string operation_name_p, std::string remote_input_name_p,
-                                                   std::string encoded_remote_value_p,
+CompiledPredicateMapping::CompiledPredicateMapping(std::string name_p, std::string column_name_p,
+                                                   CompiledScalarValue literal_p, std::string operation_name_p,
+                                                   std::string remote_input_name_p, std::string encoded_remote_value_p,
                                                    CompiledPredicateAccuracy accuracy_p, std::string proof_identity_p,
                                                    std::string base_domain_p, std::string matching_fixture_p,
                                                    std::string false_or_null_fixture_p,
                                                    std::string duplicates_fixture_p)
-    : column_name(std::move(column_name_p)), predicate_operator(CompiledPredicateOperator::EQUALS),
-      literal(CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL), operation_name(std::move(operation_name_p)),
+    : name(std::move(name_p)), column_name(std::move(column_name_p)),
+      predicate_operator(CompiledPredicateOperator::EQUALS), literal(CompiledPredicateLiteral::PACKAGE_TYPED_LITERAL),
+      operation_name(std::move(operation_name_p)),
       input_placement(CompiledPredicateInputPlacement::REST_QUERY_PARAMETER),
       remote_input_name(std::move(remote_input_name_p)), encoded_remote_value(std::move(encoded_remote_value_p)),
       accuracy(accuracy_p), proof_identity(CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1),
@@ -216,13 +218,17 @@ CompiledPredicateMapping::CompiledPredicateMapping(std::string column_name_p, Co
       typed_literal(new CompiledScalarValue(std::move(literal_p))), proof_identity_value(std::move(proof_identity_p)),
       base_domain_value(std::move(base_domain_p)), matching_fixture(std::move(matching_fixture_p)),
       false_or_null_fixture(std::move(false_or_null_fixture_p)), duplicates_fixture(std::move(duplicates_fixture_p)) {
-	if (!IsIdentifier(column_name) || !IsIdentifier(operation_name) || !IsIdentifier(remote_input_name) ||
-	    !IsIdentifier(matching_fixture) || !IsIdentifier(false_or_null_fixture) || !IsIdentifier(duplicates_fixture) ||
-	    !IsSafeEncodedScalar(encoded_remote_value) || proof_identity_value.empty() || base_domain_value.empty() ||
-	    !typed_literal || typed_literal->IsNull()) {
+	if (!IsIdentifier(name) || !IsIdentifier(column_name) || !IsIdentifier(operation_name) ||
+	    !IsIdentifier(remote_input_name) || !IsIdentifier(matching_fixture) || !IsIdentifier(false_or_null_fixture) ||
+	    !IsIdentifier(duplicates_fixture) || !IsSafeEncodedScalar(encoded_remote_value) ||
+	    proof_identity_value.empty() || base_domain_value.empty() || !typed_literal || typed_literal->IsNull()) {
 		throw std::invalid_argument("compiled package predicate contains an invalid structural fact");
 	}
 	(void)AccuracyName(accuracy);
+}
+
+const std::string &CompiledPredicateMapping::Name() const {
+	return name;
 }
 
 const std::string &CompiledPredicateMapping::ColumnName() const {

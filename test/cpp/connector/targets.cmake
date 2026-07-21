@@ -93,6 +93,18 @@ target_link_libraries(
   PRIVATE duckdb_api_package_compiler_fixture_service)
 
 add_executable(
+  duckdb_api_package_fixture_coverage_tests
+  test/cpp/connector/package/package_fixture_coverage_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_package_fixture_coverage_tests)
+target_include_directories(
+  duckdb_api_package_fixture_coverage_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_package_fixture_coverage_tests
+  PRIVATE duckdb_api_package_fixture_service
+          duckdb_api_package_compiler_fixture_service)
+
+add_executable(
   duckdb_api_local_package_compiler_tests
   test/cpp/connector/package/local_package_compiler_tests.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_local_package_compiler_tests)

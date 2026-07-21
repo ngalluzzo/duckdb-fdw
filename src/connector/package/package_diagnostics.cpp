@@ -81,6 +81,9 @@ int CompareDiagnostics(const PackageDiagnostic &left, const PackageDiagnostic &r
 	if (order == 0) {
 		order = CompareOptionalString(left.Operation(), right.Operation());
 	}
+	if (order == 0) {
+		order = CompareOptionalString(left.FixtureCase(), right.FixtureCase());
+	}
 	if (order == 0 && (left.Related() == nullptr) != (right.Related() == nullptr)) {
 		order = left.Related() == nullptr ? 1 : -1;
 	}
@@ -130,6 +133,8 @@ const char *PackageDiagnosticCodeName(PackageDiagnosticCode code) {
 		return "DUCKDB_API_RESOURCE_EXHAUSTED";
 	case PackageDiagnosticCode::PACKAGE_IDENTITY:
 		return "DUCKDB_API_PACKAGE_IDENTITY";
+	case PackageDiagnosticCode::FIXTURE_MISMATCH:
+		return "DUCKDB_API_FIXTURE_MISMATCH";
 	}
 	throw std::logic_error("package diagnostic contains an unknown code");
 }
@@ -146,6 +151,8 @@ const char *PackageDiagnosticPhaseName(PackageDiagnosticPhase phase) {
 		return "reference";
 	case PackageDiagnosticPhase::COMPILE:
 		return "compile";
+	case PackageDiagnosticPhase::FIXTURE:
+		return "fixture";
 	}
 	throw std::logic_error("package diagnostic contains an unknown phase");
 }
@@ -153,13 +160,15 @@ const char *PackageDiagnosticPhaseName(PackageDiagnosticPhase phase) {
 PackageDiagnostic::PackageDiagnostic(PackageDiagnosticCode code_p, PackageDiagnosticPhase phase_p,
                                      PackageSourceCoordinate coordinate_p, std::string connector_p,
                                      std::string relation_p, std::string operation_p,
-                                     std::shared_ptr<const PackageSourceCoordinate> related_p)
+                                     std::shared_ptr<const PackageSourceCoordinate> related_p,
+                                     std::string fixture_case_p)
     : code(code_p), phase(phase_p), coordinate(std::move(coordinate_p)), connector(std::move(connector_p)),
-      relation(std::move(relation_p)), operation(std::move(operation_p)), related(std::move(related_p)) {
+      relation(std::move(relation_p)), operation(std::move(operation_p)), fixture_case(std::move(fixture_case_p)),
+      related(std::move(related_p)) {
 	(void)PackageDiagnosticCodeName(code);
 	(void)PackageDiagnosticPhaseName(phase);
 	if (!SafeCoordinate(coordinate) || !SafeField(connector) || !SafeField(relation) || !SafeField(operation) ||
-	    (related != nullptr && !SafeCoordinate(*related))) {
+	    !SafeField(fixture_case) || (related != nullptr && !SafeCoordinate(*related))) {
 		throw std::invalid_argument("package diagnostic contains an unsafe or contradictory stable field");
 	}
 }
@@ -186,6 +195,10 @@ const std::string &PackageDiagnostic::Relation() const {
 
 const std::string &PackageDiagnostic::Operation() const {
 	return operation;
+}
+
+const std::string &PackageDiagnostic::FixtureCase() const {
+	return fixture_case;
 }
 
 const PackageSourceCoordinate *PackageDiagnostic::Related() const {

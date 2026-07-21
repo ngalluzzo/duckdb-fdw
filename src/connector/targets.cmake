@@ -50,3 +50,14 @@ target_link_libraries(
   duckdb_api_package_compiler_service
   PUBLIC duckdb_api_package_source_service
          duckdb_api_connector_metadata_service)
+
+# Connector's author-evidence service derives the immutable coverage contract
+# without source or execution access. Fixture custody and orchestration extend
+# this target; consumers never compile Connector implementation sources.
+add_library(
+  duckdb_api_package_fixture_service STATIC
+  ${CONNECTOR_PACKAGE_FIXTURE_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_package_fixture_service)
+target_link_libraries(
+  duckdb_api_package_fixture_service
+  PUBLIC duckdb_api_package_compiler_service)

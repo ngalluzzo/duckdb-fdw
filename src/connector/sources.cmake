@@ -46,6 +46,8 @@ set(CONNECTOR_PACKAGE_COMPILER_SOURCES
     src/connector/package/package_schema_asset.cpp
     src/connector/package/package_schema_helpers.cpp
     src/connector/package/package_schema_reader.cpp)
+set(CONNECTOR_PACKAGE_FIXTURE_SOURCES
+    src/connector/package/package_fixture_coverage.cpp)
 set(CONNECTOR_NATIVE_PROFILE_SOURCES
     src/connector/native_github_composition.cpp)
 set(CONNECTOR_METADATA_IMPLEMENTATION_SOURCES

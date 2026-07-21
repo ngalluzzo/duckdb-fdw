@@ -86,7 +86,7 @@ CompiledConnector BuildNativeGithubConnector() {
 	                                                               PREVIOUS_RELATION_MAX_RESPONSE_BYTES, 1, 1, 256}));
 	relations.push_back(CompiledRelation(
 	    "authenticated_repositories", repository_columns,
-	    {CompiledPredicateMapping("visibility", CompiledPredicateOperator::EQUALS,
+	    {CompiledPredicateMapping("private_visibility", "visibility", CompiledPredicateOperator::EQUALS,
 	                              CompiledPredicateLiteral::VARCHAR_PRIVATE, "github_authenticated_repositories",
 	                              CompiledPredicateInputPlacement::REST_QUERY_PARAMETER, "visibility", "private",
 	                              CompiledPredicateAccuracy::SUPERSET,

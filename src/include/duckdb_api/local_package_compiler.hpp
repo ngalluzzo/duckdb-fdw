@@ -76,10 +76,11 @@ enum class PackageDiagnosticCode : std::uint8_t {
 	INVALID_GRAPHQL_PROFILE,
 	POLICY_WIDENING,
 	RESOURCE_EXHAUSTED,
-	PACKAGE_IDENTITY
+	PACKAGE_IDENTITY,
+	FIXTURE_MISMATCH
 };
 
-enum class PackageDiagnosticPhase : std::uint8_t { SOURCE, SYNTAX, SCHEMA, REFERENCE, COMPILE };
+enum class PackageDiagnosticPhase : std::uint8_t { SOURCE, SYNTAX, SCHEMA, REFERENCE, COMPILE, FIXTURE };
 
 const char *PackageDiagnosticCodeName(PackageDiagnosticCode code);
 const char *PackageDiagnosticPhaseName(PackageDiagnosticPhase phase);
@@ -98,7 +99,8 @@ class PackageDiagnostic {
 public:
 	PackageDiagnostic(PackageDiagnosticCode code, PackageDiagnosticPhase phase, PackageSourceCoordinate coordinate,
 	                  std::string connector, std::string relation, std::string operation,
-	                  std::shared_ptr<const PackageSourceCoordinate> related = nullptr);
+	                  std::shared_ptr<const PackageSourceCoordinate> related = nullptr,
+	                  std::string fixture_case = std::string());
 
 	PackageDiagnosticCode Code() const;
 	PackageDiagnosticPhase Phase() const;
@@ -106,6 +108,7 @@ public:
 	const std::string &Connector() const;
 	const std::string &Relation() const;
 	const std::string &Operation() const;
+	const std::string &FixtureCase() const;
 	const PackageSourceCoordinate *Related() const;
 
 private:
@@ -115,6 +118,7 @@ private:
 	std::string connector;
 	std::string relation;
 	std::string operation;
+	std::string fixture_case;
 	std::shared_ptr<const PackageSourceCoordinate> related;
 };
 

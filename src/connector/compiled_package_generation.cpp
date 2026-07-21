@@ -405,15 +405,15 @@ CompiledOperation CompiledModelBuilder::GraphqlOperation(std::string name, bool 
 	                         std::move(operation), std::move(selector));
 }
 
-CompiledPredicateMapping
-CompiledModelBuilder::PackagePredicate(std::string column_name, CompiledScalarValue literal, std::string operation_name,
-                                       std::string remote_input_name, std::string encoded_remote_value,
-                                       CompiledPredicateAccuracy accuracy, std::string proof_identity,
-                                       std::string base_domain, std::string matching_fixture,
-                                       std::string false_or_null_fixture, std::string duplicates_fixture) {
-	return CompiledPredicateMapping(std::move(column_name), std::move(literal), std::move(operation_name),
-	                                std::move(remote_input_name), std::move(encoded_remote_value), accuracy,
-	                                std::move(proof_identity), std::move(base_domain), std::move(matching_fixture),
+CompiledPredicateMapping CompiledModelBuilder::PackagePredicate(
+    std::string name, std::string column_name, CompiledScalarValue literal, std::string operation_name,
+    std::string remote_input_name, std::string encoded_remote_value, CompiledPredicateAccuracy accuracy,
+    std::string proof_identity, std::string base_domain, std::string matching_fixture,
+    std::string false_or_null_fixture, std::string duplicates_fixture) {
+	return CompiledPredicateMapping(std::move(name), std::move(column_name), std::move(literal),
+	                                std::move(operation_name), std::move(remote_input_name),
+	                                std::move(encoded_remote_value), accuracy, std::move(proof_identity),
+	                                std::move(base_domain), std::move(matching_fixture),
 	                                std::move(false_or_null_fixture), std::move(duplicates_fixture));
 }
 

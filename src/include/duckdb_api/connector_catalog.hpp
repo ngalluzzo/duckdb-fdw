@@ -209,6 +209,10 @@ public:
 	CompiledPredicateMapping &operator=(const CompiledPredicateMapping &) = delete;
 	CompiledPredicateMapping &operator=(CompiledPredicateMapping &&) = delete;
 
+	// Stable author-declared mapping identity. Coverage and diagnostics use this
+	// value directly; consumers never infer it from a column, conditional input,
+	// operation, or fixture-case spelling.
+	const std::string &Name() const;
 	const std::string &ColumnName() const;
 	CompiledPredicateOperator Operator() const;
 	CompiledPredicateLiteral Literal() const;
@@ -238,19 +242,20 @@ private:
 	friend class internal::CompiledModelBuilder;
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 
-	CompiledPredicateMapping(std::string column_name, CompiledPredicateOperator predicate_operator,
+	CompiledPredicateMapping(std::string name, std::string column_name, CompiledPredicateOperator predicate_operator,
 	                         CompiledPredicateLiteral literal, std::string operation_name,
 	                         CompiledPredicateInputPlacement input_placement, std::string remote_input_name,
 	                         std::string encoded_remote_value, CompiledPredicateAccuracy accuracy,
 	                         CompiledPredicateProofIdentity proof_identity, CompiledPredicateBaseDomain base_domain,
 	                         CompiledPredicateOccurrencePreservation occurrence_preservation,
 	                         CompiledPredicateEncodingCapability encoding_capability);
-	CompiledPredicateMapping(std::string column_name, CompiledScalarValue literal, std::string operation_name,
-	                         std::string remote_input_name, std::string encoded_remote_value,
-	                         CompiledPredicateAccuracy accuracy, std::string proof_identity, std::string base_domain,
-	                         std::string matching_fixture, std::string false_or_null_fixture,
-	                         std::string duplicates_fixture);
+	CompiledPredicateMapping(std::string name, std::string column_name, CompiledScalarValue literal,
+	                         std::string operation_name, std::string remote_input_name,
+	                         std::string encoded_remote_value, CompiledPredicateAccuracy accuracy,
+	                         std::string proof_identity, std::string base_domain, std::string matching_fixture,
+	                         std::string false_or_null_fixture, std::string duplicates_fixture);
 
+	std::string name;
 	std::string column_name;
 	CompiledPredicateOperator predicate_operator;
 	CompiledPredicateLiteral literal;

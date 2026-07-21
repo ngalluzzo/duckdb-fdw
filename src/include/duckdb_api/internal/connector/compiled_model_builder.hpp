@@ -60,9 +60,9 @@ public:
 	                                       CompiledOperationSelector selector);
 	static CompiledOperation GraphqlOperation(std::string name, bool fallback, CompiledGraphqlOperation operation,
 	                                          CompiledOperationSelector selector);
-	static CompiledPredicateMapping PackagePredicate(std::string column_name, CompiledScalarValue literal,
-	                                                 std::string operation_name, std::string remote_input_name,
-	                                                 std::string encoded_remote_value,
+	static CompiledPredicateMapping PackagePredicate(std::string name, std::string column_name,
+	                                                 CompiledScalarValue literal, std::string operation_name,
+	                                                 std::string remote_input_name, std::string encoded_remote_value,
 	                                                 CompiledPredicateAccuracy accuracy, std::string proof_identity,
 	                                                 std::string base_domain, std::string matching_fixture,
 	                                                 std::string false_or_null_fixture, std::string duplicates_fixture);

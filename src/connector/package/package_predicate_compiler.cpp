@@ -126,7 +126,8 @@ bool CompilePredicateMappings(const RelationDeclaration &relation, const std::st
 			const auto identities =
 			    duckdb_api::internal::DerivePackagePredicateIdentities(package_digest, relation.id.value, *operation);
 			mappings.push_back(duckdb_api::internal::CompiledModelBuilder::PackagePredicate(
-			    predicate.column.value, literal, operation->name, predicate.conditional_input.value, encoded_literal,
+			    predicate.id.value, predicate.column.value, literal, operation->name, predicate.conditional_input.value,
+			    encoded_literal,
 			    predicate.accuracy.value == "exact" ? CompiledPredicateAccuracy::EXACT
 			                                        : CompiledPredicateAccuracy::SUPERSET,
 			    identities.proof, identities.base_domain, predicate.matching_fixture.value,
