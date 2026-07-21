@@ -9,7 +9,8 @@ confirmation: the generation owner is opaque throughout the real
 `Open()`/execution path, but `src/query/package_generation_composition.cpp`
 downcasts it back to a concrete Connector type for reload. This is confined
 to the lead-owned composition root and may be an accepted exception rather
-than a defect — not yet confirmed against `docs/ARCHITECTURE.md` (see
+than a defect — not yet confirmed against `docs/ARCHITECTURE.md` (tracked as
+[duckdb-fdw#3](https://github.com/ngalluzzo/duckdb-fdw/issues/3); see also
 [the goal's Completion record](../stable-local-connector-packages.md)).
 
 Remote Runtime will execute package-derived plans through the existing bounded

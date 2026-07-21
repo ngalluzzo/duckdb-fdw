@@ -177,22 +177,26 @@ Explore-agent reads of real source and test dependencies, not the plan docs'
 prose) found most exits genuinely met, with three specific gaps remaining
 before this goal can be marked Complete:
 
-1. **Connector Experience ↔ Relational Semantics** (shared gap). Native/package
-   plan differentials exist only for the GraphQL relation
+1. **Connector Experience ↔ Relational Semantics** (shared gap,
+   [duckdb-fdw#1](https://github.com/ngalluzzo/duckdb-fdw/issues/1)).
+   Native/package plan differentials exist only for the GraphQL relation
    (`test/cpp/semantics/package_graphql_planning_tests.cpp`); the three REST
    GitHub relations (`authenticated_user`, `authenticated_repositories`,
    `duckdb_login_search_page`) have no equivalent differential proving
    package-compiled REST plans match the native ones. The goal's own
    acceptance evidence requires this parity for all four relations.
-2. **Query Experience ↔ Connector Experience.**
+2. **Query Experience ↔ Connector Experience**
+   ([duckdb-fdw#2](https://github.com/ngalluzzo/duckdb-fdw/issues/2)).
    `src/query/duckdb/typed_value_adapter.cpp`'s `ValueKindForLogicalType`
    re-derives a `ValueKind` enum from Connector's `logical_type` string
    instead of consuming a closed enum Connector already computes
    (`ScalarTypeFromName` in `src/connector/catalog_model.cpp`), duplicating
    the same string-to-enum mapping across Connector, Semantics, and Query.
    This is a `$contract-change`-scoped decision, not a mechanical fix.
-3. **Remote Runtime ↔ Connector Experience.** Runtime's generation owner is
-   opaque throughout the real `Open()`/execution path, but
+3. **Remote Runtime ↔ Connector Experience**
+   ([duckdb-fdw#3](https://github.com/ngalluzzo/duckdb-fdw/issues/3)).
+   Runtime's generation owner is opaque throughout the real
+   `Open()`/execution path, but
    `src/query/package_generation_composition.cpp` downcasts it back to a
    concrete `CompiledLocalPackage`/`CompiledPackageGeneration` for reload.
    This is confined to the lead-owned composition root, which may be an

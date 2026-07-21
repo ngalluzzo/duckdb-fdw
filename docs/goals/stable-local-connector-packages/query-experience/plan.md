@@ -10,7 +10,9 @@ Connector interaction is open:
 re-derives a type enum from Connector's `logical_type` string instead of
 consuming a closed enum Connector already computes, duplicating the same
 string-to-enum mapping across three layers — a `$contract-change`-scoped
-decision (see [the goal's Completion record](../stable-local-connector-packages.md)).
+decision (tracked as
+[duckdb-fdw#2](https://github.com/ngalluzzo/duckdb-fdw/issues/2); see also
+[the goal's Completion record](../stable-local-connector-packages.md)).
 
 Query Experience will project an accepted immutable package generation into
 DuckDB exactly as approved by

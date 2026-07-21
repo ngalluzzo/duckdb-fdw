@@ -7,7 +7,8 @@ Runtime, and Engineering Enablement interactions are confirmed exited to
 X-as-a-Service by source/test-dependency audit. The Relational Semantics
 interaction remains Collaboration: native/package plan differentials are
 proven only for the GraphQL relation, not the three REST GitHub relations
-(see [the goal's Completion record](../stable-local-connector-packages.md)).
+(tracked as [duckdb-fdw#1](https://github.com/ngalluzzo/duckdb-fdw/issues/1);
+see also [the goal's Completion record](../stable-local-connector-packages.md)).
 
 Connector Experience will turn the complete accepted `duckdb_api/v1` source
 contract into one immutable package generation. An author can load the
