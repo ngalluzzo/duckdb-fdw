@@ -2,15 +2,22 @@
 
 ## Outcome and authority
 
-Status: **In progress as of 2026-07-21; supporting platform.** The Relational
-Semantics and Query interactions are confirmed exited to X-as-a-Service by
-source/test-dependency audit. The Connector interaction is open pending
-confirmation: the generation owner is opaque throughout the real
-`Open()`/execution path, but `src/query/package_generation_composition.cpp`
-downcasts it back to a concrete Connector type for reload. This is confined
-to the lead-owned composition root and may be an accepted exception rather
-than a defect — not yet confirmed against `docs/ARCHITECTURE.md` (tracked as
-[duckdb-fdw#3](https://github.com/ngalluzzo/duckdb-fdw/issues/3); see also
+Status: **Confirmed exited as of 2026-07-21.** The Relational Semantics and
+Query interactions are confirmed exited to X-as-a-Service by
+source/test-dependency audit. The Connector interaction
+([duckdb-fdw#3](https://github.com/ngalluzzo/duckdb-fdw/issues/3)) is also
+confirmed: `src/query/package_generation_composition.cpp` downcasts the
+generation owner back to a concrete Connector type for reload, but this is
+an accepted, already-documented exception rather than a defect —
+`docs/RUNTIME_CONTRACTS.md`'s staging section states it explicitly ("Every
+Runtime owner retains Connector's complete `CompiledLocalPackage`, not a
+separately supplied generation. Runtime may inspect only the public
+immutable generation and return the opaque pair to Connector for
+retained-root reload; it cannot inspect, copy out, or reconstruct source
+custody"). The downcast is confined to the lead-owned composition root,
+which hands the retained package straight to Connector's own
+`RecompileLocalPackage`; Runtime's real `Open()`/execution path never
+reaches it, and Query never unwraps it directly (see
 [the goal's Completion record](../stable-local-connector-packages.md)).
 
 Remote Runtime will execute package-derived plans through the existing bounded
