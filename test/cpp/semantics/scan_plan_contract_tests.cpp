@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <locale>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -43,6 +44,18 @@ static_assert(
     std::is_same<decltype(duckdb_api::PlannedRestOperation::response_source), duckdb_api::PlannedResponseSource>::value,
     "response source must remain a typed Runtime handoff");
 
+duckdb_api::PlannedColumnScalarKind PlannedKindForCompiled(duckdb_api::CompiledScalarType type) {
+	switch (type) {
+	case duckdb_api::CompiledScalarType::BOOLEAN:
+		return duckdb_api::PlannedColumnScalarKind::BOOLEAN;
+	case duckdb_api::CompiledScalarType::BIGINT:
+		return duckdb_api::PlannedColumnScalarKind::BIGINT;
+	case duckdb_api::CompiledScalarType::VARCHAR:
+		return duckdb_api::PlannedColumnScalarKind::VARCHAR;
+	}
+	throw std::logic_error("compiled column has an unknown scalar type");
+}
+
 void RequireColumnsMatch(const duckdb_api::ScanPlan &plan, const duckdb_api::CompiledRelation &relation) {
 	Require(plan.OutputColumns().size() == relation.Columns().size(), "plan did not preserve the full selected schema");
 	for (std::size_t index = 0; index < relation.Columns().size(); index++) {
@@ -51,7 +64,29 @@ void RequireColumnsMatch(const duckdb_api::ScanPlan &plan, const duckdb_api::Com
 		Require(planned.name == compiled.name && planned.logical_type == compiled.logical_type &&
 		            planned.nullable == compiled.nullable && planned.extractor == compiled.extractor,
 		        "plan output column drifted from selected relation metadata");
+		Require(planned.ScalarKind() == PlannedKindForCompiled(compiled.ScalarType()),
+		        "planned column's own ScalarKind() derivation drifted from Connector's compiled scalar type");
 	}
+}
+
+void TestPlannedColumnScalarKindRejectsUnsupportedTypes() {
+	duckdb_api::PlannedColumn column {"probe", "BIGINT", false, "$.probe"};
+	Require(column.ScalarKind() == duckdb_api::PlannedColumnScalarKind::BIGINT,
+	        "planned column lost its BIGINT scalar kind");
+	column.logical_type = "VARCHAR";
+	Require(column.ScalarKind() == duckdb_api::PlannedColumnScalarKind::VARCHAR,
+	        "planned column lost its VARCHAR scalar kind");
+	column.logical_type = "BOOLEAN";
+	Require(column.ScalarKind() == duckdb_api::PlannedColumnScalarKind::BOOLEAN,
+	        "planned column lost its BOOLEAN scalar kind");
+	column.logical_type = "DOUBLE";
+	bool rejected = false;
+	try {
+		(void)column.ScalarKind();
+	} catch (const std::logic_error &) {
+		rejected = true;
+	}
+	Require(rejected, "planned column accepted a logical type outside its closed scalar vocabulary");
 }
 
 void RequireOperationMatches(const duckdb_api::ScanPlan &plan, const duckdb_api::CompiledRelation &relation) {
@@ -401,6 +436,7 @@ int main() {
 		TestProviderOwnedDistinctSchemaPlans();
 		TestReferenceIdentityChangesOnlyReferenceAndExplanation();
 		TestDeterministicCopyAndRedactedEnvironment();
+		TestPlannedColumnScalarKindRejectsUnsupportedTypes();
 		std::cout << "scan plan contract tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

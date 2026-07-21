@@ -2,16 +2,18 @@
 
 ## Outcome and authority
 
-Status: **In progress as of 2026-07-21; supporting stream.** The Relational
-Semantics, Remote Runtime, and Engineering Enablement interactions are
-confirmed exited to X-as-a-Service by source/test-dependency audit. The
-Connector interaction is open:
+Status: **All interactions confirmed exited as of 2026-07-21; supporting
+stream.** The Relational Semantics, Remote Runtime, and Engineering
+Enablement interactions were already exited to X-as-a-Service by
+source/test-dependency audit. The Connector interaction is now also exited:
 `src/query/duckdb/typed_value_adapter.cpp`'s `ValueKindForLogicalType`
-re-derives a type enum from Connector's `logical_type` string instead of
-consuming a closed enum Connector already computes, duplicating the same
-string-to-enum mapping across three layers — a `$contract-change`-scoped
-decision (tracked as
-[duckdb-fdw#2](https://github.com/ngalluzzo/duckdb-fdw/issues/2); see also
+previously re-derived a type enum from Connector's `logical_type` string
+itself. `$contract-change` closed
+[duckdb-fdw#2](https://github.com/ngalluzzo/duckdb-fdw/issues/2) by adding a
+canonical `PlannedColumn::ScalarKind()` method (Semantics-owned,
+`src/semantics/scan_plan.cpp`, returning the new protocol-neutral
+`PlannedColumnScalarKind`); Query now maps that closed enum instead of
+parsing the string (see also
 [the goal's Completion record](../stable-local-connector-packages.md)).
 
 Query Experience will project an accepted immutable package generation into

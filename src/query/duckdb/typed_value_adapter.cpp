@@ -18,17 +18,19 @@ LogicalType LogicalTypeForKind(duckdb_api::ValueKind kind) {
 	throw std::logic_error("runtime value contract contains an unknown scalar kind");
 }
 
-duckdb_api::ValueKind ValueKindForLogicalType(const std::string &logical_type) {
-	if (logical_type == "BIGINT") {
+// Query never re-parses PlannedColumn::logical_type itself; it maps
+// Semantics' own closed ScalarKind() derivation onto the Runtime/Query
+// value-kind vocabulary.
+duckdb_api::ValueKind ValueKindForScalarKind(duckdb_api::PlannedColumnScalarKind kind) {
+	switch (kind) {
+	case duckdb_api::PlannedColumnScalarKind::BIGINT:
 		return duckdb_api::ValueKind::BIGINT;
-	}
-	if (logical_type == "VARCHAR") {
+	case duckdb_api::PlannedColumnScalarKind::VARCHAR:
 		return duckdb_api::ValueKind::VARCHAR;
-	}
-	if (logical_type == "BOOLEAN") {
+	case duckdb_api::PlannedColumnScalarKind::BOOLEAN:
 		return duckdb_api::ValueKind::BOOLEAN;
 	}
-	throw std::logic_error("scan plan contains an unsupported logical type");
+	throw std::logic_error("planned column contains an unknown scalar kind");
 }
 
 Value DuckdbValue(const duckdb_api::TypedValue &value, const PlannedValueColumn &expected) {
@@ -82,14 +84,14 @@ void ValidateTypedBatch(const duckdb_api::TypedBatch &batch, const std::vector<P
 } // namespace
 
 LogicalType PlannedLogicalType(const duckdb_api::PlannedColumn &column) {
-	return LogicalTypeForKind(ValueKindForLogicalType(column.logical_type));
+	return LogicalTypeForKind(ValueKindForScalarKind(column.ScalarKind()));
 }
 
 std::vector<PlannedValueColumn> PlannedValueColumns(const duckdb_api::ScanPlan &plan) {
 	std::vector<PlannedValueColumn> result;
 	result.reserve(plan.OutputColumns().size());
 	for (const auto &column : plan.OutputColumns()) {
-		result.push_back({ValueKindForLogicalType(column.logical_type), column.nullable});
+		result.push_back({ValueKindForScalarKind(column.ScalarKind()), column.nullable});
 	}
 	return result;
 }

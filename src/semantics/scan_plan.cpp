@@ -338,6 +338,19 @@ const std::vector<PlannedColumn> &ScanPlan::OutputColumns() const {
 	return output_columns;
 }
 
+PlannedColumnScalarKind PlannedColumn::ScalarKind() const {
+	if (logical_type == "BOOLEAN") {
+		return PlannedColumnScalarKind::BOOLEAN;
+	}
+	if (logical_type == "BIGINT") {
+		return PlannedColumnScalarKind::BIGINT;
+	}
+	if (logical_type == "VARCHAR") {
+		return PlannedColumnScalarKind::VARCHAR;
+	}
+	throw std::logic_error("planned column contains an unsupported logical type");
+}
+
 PlannedPredicate ScanPlan::RemotePredicate() const {
 	return remote_predicate;
 }

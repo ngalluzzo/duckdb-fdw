@@ -168,11 +168,24 @@ enum class PlannedCredentialRequirement { NONE, REQUIRED };
 enum class PlannedAuthenticator { NONE, BEARER };
 enum class PlannedCredentialPlacement { NONE, AUTHORIZATION_HEADER };
 
+// Protocol-neutral output-column scalar vocabulary: PlannedColumn describes a
+// relation's declared output schema uniformly for both REST and GraphQL
+// domains, so it does not borrow either protocol's own scalar-kind enum.
+enum class PlannedColumnScalarKind { BOOLEAN, BIGINT, VARCHAR };
+
 struct PlannedColumn {
 	std::string name;
 	std::string logical_type;
 	bool nullable;
 	std::string extractor;
+
+	// Canonical derivation of logical_type's closed scalar vocabulary for
+	// consumers (currently Query) that would otherwise independently
+	// re-parse logical_type themselves. This does not replace Connector's or
+	// Semantics' own separate closed-vocabulary validation of untrusted
+	// input; logical_type remains a plain string for safe explanation and
+	// Runtime's own independent admission checks.
+	PlannedColumnScalarKind ScalarKind() const;
 };
 
 // Planner-owned classification. Runtime consumes these facts without deriving
