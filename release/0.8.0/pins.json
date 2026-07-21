@@ -111,7 +111,14 @@
         "src/runtime/transport/curl_transfer.cpp",
         "src/runtime/transport/curl_http_transport.cpp",
         "src/runtime/transport/http_runtime.cpp",
+        "src/query/package_generation_composition.cpp",
         "src/query/duckdb/secret_integration.cpp",
+        "src/query/duckdb/catalog_generation_coordinator.cpp",
+        "src/query/duckdb/generated_relation_adapter.cpp",
+        "src/query/duckdb/package_catalog_snapshot.cpp",
+        "src/query/duckdb/package_introspection_functions.cpp",
+        "src/query/duckdb/package_lifecycle_sentry.cpp",
+        "src/query/duckdb/package_management_functions.cpp",
         "src/query/duckdb/table_function_adapter.cpp",
         "test/cpp/runtime/support/loopback_curl_runtime.cpp",
         "src/query/duckdb/complex_filter_adapter.cpp",
@@ -245,7 +252,7 @@
         "test/cpp/runtime/support/loopback_curl_runtime.cpp",
         "test/cpp/runtime/support/loopback_curl_runtime.hpp"
       ],
-      "sha256": "e5d095da069011703fbac16acd1574ac8d416dcb3bc2111cb5e2ac16991afe38"
+      "sha256": "4e2371f8a6c019189a229072666bd44a1b7899420f9d9ef96bfc0854aadc3c26"
     },
     "native_product_sources": {
       "algorithm": "sha256-length-prefixed-path-and-bytes-v1",

@@ -139,14 +139,7 @@ CONTROLLED_PRODUCT_SOURCE_PATHS = (
     "test/cpp/runtime/support/loopback_curl_runtime.hpp",
 )
 CONTROLLED_PUBLIC_EXCLUDED_UNITS = {
-    "src/query/duckdb/catalog_generation_coordinator.cpp",
     "src/query/duckdb/extension_entrypoint.cpp",
-    "src/query/duckdb/generated_relation_adapter.cpp",
-    "src/query/duckdb/package_catalog_snapshot.cpp",
-    "src/query/duckdb/package_introspection_functions.cpp",
-    "src/query/duckdb/package_lifecycle_sentry.cpp",
-    "src/query/duckdb/package_management_functions.cpp",
-    "src/query/package_generation_composition.cpp",
     "src/query/product_composition.cpp",
 }
 
