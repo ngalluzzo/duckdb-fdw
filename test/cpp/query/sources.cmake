@@ -19,7 +19,8 @@ set(QUERY_PACKAGE_TEST_SOURCES
     test/cpp/query/packages/generated_relation_tests.cpp
     test/cpp/query/packages/package_lifecycle_tests.cpp
     test/cpp/query/packages/package_publication_cancellation_tests.cpp
-    test/cpp/query/packages/github_package_surface_tests.cpp)
+    test/cpp/query/packages/github_package_surface_tests.cpp
+    test/cpp/query/packages/rickandmorty_package_surface_tests.cpp)
 set(QUERY_CONTROLLED_COMPOSITION_SOURCES
     ${QUERY_DUCKDB_ADAPTER_SUPPORT_SOURCES}
     test/cpp/query/integration/support/controlled_product_composition.cpp

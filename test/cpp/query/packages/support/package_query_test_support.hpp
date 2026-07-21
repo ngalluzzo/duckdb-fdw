@@ -85,6 +85,9 @@ BuildCompatibilityPackageQueryStaging(const std::string &absolute_root,
 std::shared_ptr<PackageQueryStagingService>
 BuildGithubPackageQueryStaging(const std::string &absolute_repository_root,
                                const std::shared_ptr<PackageQueryProbe> &probe);
+std::shared_ptr<PackageQueryStagingService>
+BuildRickAndMortyPackageQueryStaging(const std::string &absolute_repository_root,
+                                     const std::shared_ptr<PackageQueryProbe> &probe);
 
 std::shared_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator>
 RegisterPackageQuerySurface(duckdb::DuckDB &database,

@@ -1,0 +1,88 @@
+#include "query/packages/support/package_query_test_support.hpp"
+
+#include "duckdb/main/connection.hpp"
+#include "duckdb/main/database.hpp"
+#include "support/require.hpp"
+
+#include <atomic>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace duckdb_api_test {
+namespace {
+
+void TestCompiledRickAndMortyPackageIsThePublishedSqlSurface(const std::string &absolute_repository_root) {
+	auto probe = std::shared_ptr<PackageQueryProbe>(new PackageQueryProbe());
+	auto staging = BuildRickAndMortyPackageQueryStaging(absolute_repository_root, probe);
+	duckdb::DuckDB database(nullptr);
+	(void)RegisterPackageQuerySurface(database, staging);
+	duckdb::Connection connection(database);
+	const auto package_root = absolute_repository_root + "/connectors/rickandmorty";
+	RequirePackageQuerySuccess(connection,
+	                           "CALL system.main.duckdb_api_load_connector(package_root := '" + package_root + "')");
+
+	auto connector = connection.Query("SELECT connector, package_version, spec_version, relation_count "
+	                                  "FROM system.main.duckdb_api_loaded_connectors()");
+	Require(!connector->HasError() && connector->RowCount() == 1 &&
+	            connector->GetValue(0, 0).ToString() == "rickandmorty" &&
+	            connector->GetValue(1, 0).ToString() == "1.0.0" &&
+	            connector->GetValue(2, 0).ToString() == "duckdb_api/v1" &&
+	            connector->GetValue(3, 0).GetValue<std::uint64_t>() == 2,
+	        "published Rick and Morty connector identity did not come from the compiled repository package");
+	Require(probe->publication_commits.load(std::memory_order_relaxed) == 1 &&
+	            probe->publication_discards.load(std::memory_order_relaxed) == 0,
+	        "compiled Rick and Morty package did not publish its Runtime candidate exactly once");
+
+	auto relations =
+	    connection.Query("SELECT relation, sql_name FROM system.main.duckdb_api_loaded_relations() ORDER BY relation");
+	Require(!relations->HasError() && relations->RowCount() == 2,
+	        "compiled Rick and Morty package did not publish exactly two relation rows");
+	const std::vector<std::pair<const char *, const char *>> expected_relations = {
+	    {"character_search", "rickandmorty_character_search"},
+	    {"pilot_episode", "rickandmorty_pilot_episode"},
+	};
+	for (duckdb::idx_t row = 0; row < relations->RowCount(); row++) {
+		Require(relations->GetValue(0, row).ToString() == expected_relations[row].first &&
+		            relations->GetValue(1, row).ToString() == expected_relations[row].second,
+		        "compiled Rick and Morty relation identity drifted at deterministic inventory row " +
+		            std::to_string(row));
+	}
+
+	auto functions =
+	    connection.Query("SELECT function_name, database_name, schema_name FROM duckdb_functions() "
+	                     "WHERE function_name IN ('rickandmorty_character_search', 'rickandmorty_pilot_episode') "
+	                     "ORDER BY function_name");
+	Require(!functions->HasError() && functions->RowCount() == 2,
+	        "compiled Rick and Morty package did not install two exact DuckDB functions");
+	for (duckdb::idx_t row = 0; row < functions->RowCount(); row++) {
+		Require(functions->GetValue(0, row).ToString() == expected_relations[row].second &&
+		            functions->GetValue(1, row).ToString() == "system" &&
+		            functions->GetValue(2, row).ToString() == "main",
+		        "compiled Rick and Morty function was not installed with its exact system.main identity");
+	}
+
+	auto arguments = connection.Query(
+	    "SELECT relation, argument, duckdb_type, nullable, has_default, default_value, argument_origin "
+	    "FROM system.main.duckdb_api_relation_arguments() ORDER BY relation, argument");
+	Require(!arguments->HasError() && arguments->RowCount() == 1,
+	        "compiled Rick and Morty package did not expose exactly one declared relation argument");
+	Require(arguments->GetValue(0, 0).ToString() == "character_search" &&
+	            arguments->GetValue(1, 0).ToString() == "status" && arguments->GetValue(2, 0).ToString() == "VARCHAR" &&
+	            arguments->GetValue(3, 0).GetValue<bool>() && !arguments->GetValue(4, 0).GetValue<bool>() &&
+	            arguments->GetValue(5, 0).IsNull() && arguments->GetValue(6, 0).ToString() == "relation",
+	        "compiled Rick and Morty relation-input argument shape drifted for character_search.status");
+	Require(probe->plans.load(std::memory_order_relaxed) == 0 &&
+	            probe->streams_opened.load(std::memory_order_relaxed) == 0,
+	        "compiled registration publication crossed an unprovisioned Semantics or Runtime port");
+}
+
+} // namespace
+
+void RunRickAndMortyPackageSurfaceTests(const std::string &absolute_repository_root) {
+	TestCompiledRickAndMortyPackageIsThePublishedSqlSurface(absolute_repository_root);
+}
+
+} // namespace duckdb_api_test

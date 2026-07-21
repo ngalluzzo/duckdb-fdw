@@ -33,6 +33,17 @@ CompileRepositoryGithubLocalPackageFixture(const std::string &absolute_repositor
 duckdb_api::CompiledLocalPackage
 CompileRepositoryDistinctLocalPackageFixture(const std::string &absolute_repository_root);
 
+// Compiles the repository's permanent `connectors/rickandmorty` package
+// through the same real local-root production entry point as the GitHub
+// fixtures above. This is the repository's second, independently authored
+// package: every relation is anonymous and its host, response envelope, and
+// JSON shape differ entirely from GitHub's.
+duckdb_api::CompiledQueryRegistrationView
+CompileRepositoryRickAndMortyRegistrationFixture(const std::string &absolute_repository_root);
+
+duckdb_api::CompiledLocalPackage
+CompileRepositoryRickAndMortyLocalPackageFixture(const std::string &absolute_repository_root);
+
 enum class LocalPackageReloadFixtureVariant {
 	EXACT_NO_OP,
 	COMPATIBLE_PROVENANCE_PATCH,

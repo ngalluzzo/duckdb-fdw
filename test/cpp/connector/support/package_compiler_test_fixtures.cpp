@@ -136,6 +136,22 @@ CompileRepositoryGithubLocalPackageFixture(const std::string &absolute_repositor
 	return duckdb_api::CompiledLocalPackage(*result.Package());
 }
 
+duckdb_api::CompiledQueryRegistrationView
+CompileRepositoryRickAndMortyRegistrationFixture(const std::string &absolute_repository_root) {
+	return CompileRepositoryRickAndMortyLocalPackageFixture(absolute_repository_root).Generation().QueryRegistration();
+}
+
+duckdb_api::CompiledLocalPackage
+CompileRepositoryRickAndMortyLocalPackageFixture(const std::string &absolute_repository_root) {
+	NeverCancel cancellation;
+	const auto result = duckdb_api::connector::CompileLocalPackageRoot(
+	    absolute_repository_root + "/connectors/rickandmorty", cancellation);
+	if (!result.Succeeded() || result.Package() == nullptr) {
+		throw std::runtime_error("repository Rick and Morty connector package fixture did not compile");
+	}
+	return duckdb_api::CompiledLocalPackage(*result.Package());
+}
+
 duckdb_api::CompiledLocalPackage
 CompileRepositoryDistinctLocalPackageFixture(const std::string &absolute_repository_root) {
 	char pattern[] = "/private/tmp/duckdb-api-distinct-fixture-XXXXXX";

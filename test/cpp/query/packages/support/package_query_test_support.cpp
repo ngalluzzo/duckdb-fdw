@@ -328,6 +328,17 @@ BuildGithubPackageQueryStaging(const std::string &absolute_repository_root,
 	    std::move(initial), std::move(replacement), absolute_repository_root + "/connectors/github", probe));
 }
 
+std::shared_ptr<PackageQueryStagingService>
+BuildRickAndMortyPackageQueryStaging(const std::string &absolute_repository_root,
+                                     const std::shared_ptr<PackageQueryProbe> &probe) {
+	auto initial = CompileRepositoryRickAndMortyRegistrationFixture(absolute_repository_root);
+	auto replacement = CompileRepositoryRickAndMortyRegistrationFixture(absolute_repository_root);
+	// Same Query-owned catalog oracle as the GitHub fixture above, exercised
+	// against the repository's second, independently authored package.
+	return std::shared_ptr<PackageQueryStagingService>(new PackageQueryStagingService(
+	    std::move(initial), std::move(replacement), absolute_repository_root + "/connectors/rickandmorty", probe));
+}
+
 std::shared_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator>
 RegisterPackageQuerySurface(duckdb::DuckDB &database,
                             const std::shared_ptr<const duckdb_api::QueryPackageStagingService> &staging) {

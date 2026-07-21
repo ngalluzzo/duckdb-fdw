@@ -253,6 +253,7 @@ run_tests() {
         "${NATIVE_TEST_ROOT}/duckdb_api_package_compiler_fixture_tests" "${REPOSITORY_ROOT}"
         "${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_candidate_tests" "${REPOSITORY_ROOT}"
         "${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_coverage_tests" "${REPOSITORY_ROOT}"
+        "${NATIVE_TEST_ROOT}/duckdb_api_rickandmorty_package_compiler_tests" "${REPOSITORY_ROOT}"
     )
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_typed_value_adapter_tests"

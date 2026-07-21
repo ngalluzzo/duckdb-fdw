@@ -286,6 +286,7 @@ python3 -I -B "${PROJECT_SOURCE}/scripts/test-native-dependencies.py"
     "${NATIVE_TEST_ROOT}/duckdb_api_package_compiler_fixture_tests" "${PROJECT_SOURCE}"
     "${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_candidate_tests" "${PROJECT_SOURCE}"
     "${NATIVE_TEST_ROOT}/duckdb_api_package_fixture_coverage_tests" "${PROJECT_SOURCE}"
+    "${NATIVE_TEST_ROOT}/duckdb_api_rickandmorty_package_compiler_tests" "${PROJECT_SOURCE}"
 )
 "${NATIVE_TEST_ROOT}/duckdb_api_scan_request_tests"
 "${NATIVE_TEST_ROOT}/duckdb_api_typed_value_adapter_tests"
