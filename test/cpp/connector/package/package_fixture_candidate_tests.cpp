@@ -52,18 +52,53 @@ void TestReloadCandidates(const duckdb_api::CompiledLocalPackage &active,
 	NeverCancel cancellation;
 	for (const auto &item : expected) {
 		const auto &entry = FindEntry(coverage, "reload_" + std::string(item.variant));
-		const auto candidate = duckdb_api::connector::BuildPackageFixtureSourceCandidate(active, entry, cancellation);
-		Require(candidate.Succeeded() && candidate.Candidate() != nullptr && candidate.Diagnostics().empty() &&
-		            candidate.ReloadDecision() != nullptr &&
-		            candidate.ReloadDecision()->Classification() == item.classification &&
-		            candidate.ReloadDecision()->Matches(active.Generation().OpaqueHandle(),
-		                                                candidate.Candidate()->Generation().OpaqueHandle()) &&
-		            candidate.CoverageEntry().key == entry.key,
-		        std::string("reload source candidate did not produce its exact production decision: ") + item.variant);
-		const auto reacquired = duckdb_api::connector::RecompileLocalPackage(
-		    *candidate.Candidate(), candidate.Candidate()->Generation().OpaqueHandle(), cancellation);
-		Require(reacquired.Succeeded(),
-		        std::string("reload source candidate did not retain private source custody: ") + item.variant);
+		const auto outcome = duckdb_api::connector::RunPackageFixtureReloadVariant(active, entry, cancellation);
+		Require(outcome.Classification() == item.classification && outcome.DecisionMatchesIsolatedPair() &&
+		            outcome.CurrentGenerationPreserved() && outcome.CoverageEntry().key == entry.key &&
+		            outcome.CurrentGenerationRole() ==
+		                (std::string(item.variant) == "exact_no_op"
+		                     ? duckdb_api::connector::PackageFixtureCurrentGenerationRole::BOTH
+		                     : duckdb_api::connector::PackageFixtureCurrentGenerationRole::ACTIVE) &&
+		            ((item.classification == duckdb_api::PackageReloadClassification::REJECTED_PACKAGE_IDENTITY ||
+		              item.classification == duckdb_api::PackageReloadClassification::INCOMPATIBLE_RELOAD)
+		                 ? !outcome.DiagnosticCode().empty() && outcome.DiagnosticPhase() == "compatibility"
+		                 : outcome.DiagnosticCode().empty() && outcome.DiagnosticPhase().empty()),
+		        std::string("reload variant did not produce its exact typed production outcome: ") + item.variant);
+	}
+}
+
+void TestReloadSemVerBoundaries(const std::string &repository_root) {
+	struct Boundary {
+		duckdb_api_test::LocalPackageReloadFixtureVariant fixture;
+		const char *label;
+		const char *variant;
+		duckdb_api::PackageReloadClassification classification;
+		const char *diagnostic;
+	};
+	const Boundary boundaries[] = {
+	    {duckdb_api_test::LocalPackageReloadFixtureVariant::CURRENT_MAX_PATCH, "1.2.4294967295", "compatible_patch",
+	     duckdb_api::PackageReloadClassification::COMPATIBLE_PROVENANCE_PATCH, ""},
+	    {duckdb_api_test::LocalPackageReloadFixtureVariant::CURRENT_MAX_MINOR, "1.4294967295.7", "compatible_minor",
+	     duckdb_api::PackageReloadClassification::COMPATIBLE_PROVENANCE_MINOR, ""},
+	    {duckdb_api_test::LocalPackageReloadFixtureVariant::CURRENT_ZERO, "0.0.0", "downgrade_rejected",
+	     duckdb_api::PackageReloadClassification::REJECTED_PACKAGE_IDENTITY, "DUCKDB_API_PACKAGE_IDENTITY"},
+	};
+	NeverCancel cancellation;
+	for (const auto &boundary : boundaries) {
+		const auto fixture =
+		    duckdb_api_test::BuildRepositoryGithubLocalPackageReloadFixture(repository_root, boundary.fixture);
+		const auto &current = fixture.Candidate();
+		const auto coverage = duckdb_api::connector::DerivePackageFixtureCoverage(current.Generation());
+		const auto &entry = FindEntry(coverage, "reload_" + std::string(boundary.variant));
+		const auto outcome = duckdb_api::connector::RunPackageFixtureReloadVariant(current, entry, cancellation);
+		Require(outcome.Classification() == boundary.classification &&
+		            outcome.CurrentGenerationRole() ==
+		                duckdb_api::connector::PackageFixtureCurrentGenerationRole::CANDIDATE &&
+		            outcome.DecisionMatchesIsolatedPair() && outcome.CurrentGenerationPreserved() &&
+		            outcome.DiagnosticCode() == boundary.diagnostic &&
+		            (boundary.diagnostic[0] == '\0' ? outcome.DiagnosticPhase().empty()
+		                                            : outcome.DiagnosticPhase() == "compatibility"),
+		        std::string("reload variant did not preserve the exact SemVer boundary: ") + boundary.label);
 	}
 }
 
@@ -73,7 +108,7 @@ void TestGraphqlDocumentCandidates(const duckdb_api::CompiledLocalPackage &activ
 	const auto &boundary = FindEntry(
 	    coverage, "resource_viewer_repository_metrics_github_viewer_repository_metrics_max_document_bytes_boundary");
 	const auto accepted = duckdb_api::connector::BuildPackageFixtureSourceCandidate(active, boundary, cancellation);
-	Require(accepted.Succeeded() && accepted.Candidate() != nullptr && accepted.ReloadDecision() == nullptr,
+	Require(accepted.Succeeded() && accepted.Candidate() != nullptr,
 	        "GraphQL document boundary did not compile through the production candidate service");
 	const auto *relation = accepted.Candidate()->Generation().Connector().FindRelation("viewer_repository_metrics");
 	Require(relation != nullptr && relation->Operations().size() == 1 &&
@@ -85,8 +120,7 @@ void TestGraphqlDocumentCandidates(const duckdb_api::CompiledLocalPackage &activ
 	    coverage,
 	    "resource_viewer_repository_metrics_github_viewer_repository_metrics_max_document_bytes_one_over_rejected");
 	const auto rejected = duckdb_api::connector::BuildPackageFixtureSourceCandidate(active, one_over, cancellation);
-	Require(!rejected.Succeeded() && rejected.Candidate() == nullptr && rejected.ReloadDecision() == nullptr &&
-	            rejected.Diagnostics().size() == 1 &&
+	Require(!rejected.Succeeded() && rejected.Candidate() == nullptr && rejected.Diagnostics().size() == 1 &&
 	            rejected.Diagnostics()[0].Code() ==
 	                duckdb_api::connector::PackageDiagnosticCode::INVALID_GRAPHQL_PROFILE,
 	        "GraphQL document one-over candidate did not fail through the production compiler");
@@ -134,14 +168,16 @@ void TestNoCandidateSource(const std::string &repository_root) {
 	const duckdb_api::CompiledLocalPackage active(*compiled.Package());
 	const auto coverage = duckdb_api::connector::DerivePackageFixtureCoverage(active.Generation());
 	const auto &entry = FindEntry(coverage, "selection_regional_events_no_candidate_rejected");
+	const auto *active_relation = active.Generation().Connector().FindRelation("regional_events");
+	Require(active_relation != nullptr && active_relation->Operations().size() >= 2,
+	        "active no-candidate fixture lost its selectable relation");
 	const auto candidate = duckdb_api::connector::BuildPackageFixtureSourceCandidate(active, entry, cancellation);
 	Require(candidate.Succeeded() && candidate.Candidate() != nullptr && candidate.Diagnostics().empty() &&
-	            candidate.ReloadDecision() == nullptr &&
 	            candidate.SourceIdentityOutcome() ==
 	                duckdb_api::connector::PackageFixtureSourceIdentityOutcome::NOT_APPLICABLE,
 	        "no-candidate selection source did not compile through the production boundary");
 	const auto *relation = candidate.Candidate()->Generation().Connector().FindRelation("regional_events");
-	Require(relation != nullptr && relation->Operations().size() == 2,
+	Require(relation != nullptr && relation->Operations().size() == active_relation->Operations().size(),
 	        "no-candidate selection source lost its multi-operation relation");
 	for (const auto &operation : relation->Operations()) {
 		Require(!operation.fallback && !operation.selector.RequiredInputReferences().empty(),
@@ -219,6 +255,49 @@ void TestStableDiagnostics(const duckdb_api::CompiledLocalPackage &active,
 	throw std::runtime_error("Connector accepted Query-owned publication-conflict diagnostic");
 }
 
+void TestMinimalPackageShapes(const std::string &repository_root) {
+	const auto minimal = duckdb_api_test::BuildRepositoryDerivedLocalPackageShape(
+	    repository_root, duckdb_api_test::LocalPackageShapeFixtureVariant::MINIMAL_REST);
+	const auto &minimal_generation = minimal.Package().Generation();
+	Require(minimal_generation.Connector().Relations().size() == 1,
+	        "minimal source-neutral package did not retain exactly one relation");
+	const auto &minimal_relation = minimal_generation.Connector().Relations().front();
+	Require(minimal_relation.Columns().size() == 1 && minimal_relation.Inputs().empty() &&
+	            minimal_relation.PredicateMappings().empty() && minimal_relation.Operations().size() == 1 &&
+	            minimal_relation.Operations().front().Protocol() == duckdb_api::CompiledProtocol::REST &&
+	            minimal_relation.Authentication().Requirement() == duckdb_api::CompiledCredentialRequirement::NONE,
+	        "minimal source-neutral package retained an input, predicate, GraphQL, auth, or extra-column feature");
+	TestStableDiagnostics(minimal.Package(), duckdb_api::connector::DerivePackageFixtureCoverage(minimal_generation));
+
+	const auto no_fallback = duckdb_api_test::BuildRepositoryDerivedLocalPackageShape(
+	    repository_root, duckdb_api_test::LocalPackageShapeFixtureVariant::NO_FALLBACK_SELECTION);
+	const auto *active_relation = no_fallback.Package().Generation().Connector().FindRelation("regional_events");
+	Require(active_relation != nullptr && active_relation->Operations().size() >= 2,
+	        "no-fallback source-neutral package lost its selectable relation");
+	for (const auto &operation : active_relation->Operations()) {
+		Require(!operation.fallback, "no-fallback source-neutral package retained a fallback operation");
+	}
+	const auto coverage = duckdb_api::connector::DerivePackageFixtureCoverage(no_fallback.Package().Generation());
+	NeverCancel cancellation;
+	const auto selector = duckdb_api::connector::RunPackageFixtureDiagnostic(
+	    no_fallback.Package(), FindEntry(coverage, "diagnostic_duckdb_api_invalid_selector"), cancellation);
+	Require(selector.Code() == "DUCKDB_API_INVALID_SELECTOR" && selector.Phase() == "compile",
+	        "no-fallback package did not synthesize the stable selector diagnostic");
+	const auto candidate = duckdb_api::connector::BuildPackageFixtureSourceCandidate(
+	    no_fallback.Package(), FindEntry(coverage, "selection_regional_events_no_candidate_rejected"), cancellation);
+	const auto *candidate_relation =
+	    candidate.Candidate() == nullptr
+	        ? nullptr
+	        : candidate.Candidate()->Generation().Connector().FindRelation("regional_events");
+	Require(candidate.Succeeded() && candidate.Diagnostics().empty() && candidate_relation != nullptr &&
+	            candidate_relation->Operations().size() == active_relation->Operations().size(),
+	        "no-fallback relation did not produce the closed no-candidate source variant");
+	for (const auto &operation : candidate_relation->Operations()) {
+		Require(!operation.fallback && !operation.selector.RequiredInputReferences().empty(),
+		        "no-candidate augmentation left an unconditionally eligible operation");
+	}
+}
+
 void TestCandidateDispatchAndCancellation(const duckdb_api::CompiledLocalPackage &active,
                                           const duckdb_api::connector::PackageFixtureCoverage &coverage) {
 	NeverCancel cancellation;
@@ -229,7 +308,7 @@ void TestCandidateDispatchAndCancellation(const duckdb_api::CompiledLocalPackage
 		const auto &exact = FindEntry(coverage, "reload_exact_no_op");
 		AlwaysCancel cancelled;
 		try {
-			(void)duckdb_api::connector::BuildPackageFixtureSourceCandidate(active, exact, cancelled);
+			(void)duckdb_api::connector::RunPackageFixtureReloadVariant(active, exact, cancelled);
 		} catch (const duckdb_api::connector::PackageCompilationCancelled &) {
 			return;
 		}
@@ -246,6 +325,7 @@ int main(int argc, char **argv) {
 		const auto active = duckdb_api_test::CompileRepositoryGithubLocalPackageFixture(argv[1]);
 		const auto coverage = duckdb_api::connector::DerivePackageFixtureCoverage(active.Generation());
 		TestReloadCandidates(active, coverage);
+		TestReloadSemVerBoundaries(argv[1]);
 		TestGraphqlDocumentCandidates(active, coverage);
 		TestSourceIdentityCandidates(active, coverage);
 		TestNoCandidateSource(argv[1]);
@@ -258,6 +338,7 @@ int main(int argc, char **argv) {
 		        "controlled diagnostic package did not compile");
 		const duckdb_api::CompiledLocalPackage controlled(*controlled_result.Package());
 		TestStableDiagnostics(controlled, duckdb_api::connector::DerivePackageFixtureCoverage(controlled.Generation()));
+		TestMinimalPackageShapes(argv[1]);
 		TestCandidateDispatchAndCancellation(active, coverage);
 		std::cout << "package fixture candidate tests passed" << std::endl;
 		return 0;

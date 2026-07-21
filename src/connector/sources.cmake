@@ -60,6 +60,7 @@ set(CONNECTOR_PACKAGE_FIXTURE_SOURCES
     src/connector/package/package_fixture_index_transcript.cpp
     src/connector/package/package_fixture_index_validation.cpp
     src/connector/package/package_fixture_limits.cpp
+    src/connector/package/package_fixture_reload_variants.cpp
     src/connector/package/package_fixture_runner.cpp
     src/connector/package/package_fixture_source.cpp)
 set(CONNECTOR_NATIVE_PROFILE_SOURCES

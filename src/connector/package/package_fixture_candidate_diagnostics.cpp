@@ -3,6 +3,7 @@
 
 #include "duckdb_api/internal/connector/package/failsafe_yaml.hpp"
 
+#include <sstream>
 #include <stdexcept>
 
 namespace duckdb_api {
@@ -124,6 +125,207 @@ void InsertAfterScalarLine(SemanticSourceFile &source, const FailsafeYamlNode &s
 	source.bytes.insert(insertion, bytes);
 }
 
+void InsertAfterMappingEntry(SemanticSourceFile &source, const FailsafeYamlNode &mapping, const std::string &field,
+                             const std::string &bytes) {
+	if (mapping.Type() != FailsafeYamlNode::Kind::MAPPING) {
+		throw std::logic_error("compiled package source root is no longer a mapping");
+	}
+	for (std::size_t index = 0; index < mapping.Size(); index++) {
+		if (mapping.MappingKey(index) != field) {
+			continue;
+		}
+		const auto value_end = static_cast<std::size_t>(mapping.MappingValue(index).Span().end.byte_offset);
+		if (value_end > source.bytes.size()) {
+			throw std::logic_error("compiled package source mapping entry has an invalid insertion span");
+		}
+		const auto newline = source.bytes.find('\n', value_end);
+		auto insertion = newline == std::string::npos ? source.bytes.size() : newline + 1;
+		if (insertion == source.bytes.size() && !source.bytes.empty() && source.bytes.back() != '\n') {
+			source.bytes.push_back('\n');
+			insertion = source.bytes.size();
+		}
+		source.bytes.insert(insertion, bytes);
+		return;
+	}
+	throw std::logic_error("compiled package source insertion field is absent");
+}
+
+std::string ScalarTypeName(CompiledScalarType type) {
+	switch (type) {
+	case CompiledScalarType::BOOLEAN:
+		return "BOOLEAN";
+	case CompiledScalarType::BIGINT:
+		return "BIGINT";
+	case CompiledScalarType::VARCHAR:
+		return "VARCHAR";
+	}
+	throw std::logic_error("compiled column has an unknown scalar type");
+}
+
+std::string ScalarLiteral(CompiledScalarType type) {
+	switch (type) {
+	case CompiledScalarType::BOOLEAN:
+		return "true";
+	case CompiledScalarType::BIGINT:
+		return "0";
+	case CompiledScalarType::VARCHAR:
+		return "fixture";
+	}
+	throw std::logic_error("compiled column has an unknown scalar type");
+}
+
+std::string UniqueInputId(const CompiledRelation &relation) {
+	std::string value = "fixture_variant_input";
+	for (std::size_t suffix = 2;; suffix++) {
+		bool found = false;
+		for (const auto &input : relation.Inputs()) {
+			found = found || input.Name() == value;
+		}
+		if (!found) {
+			return value;
+		}
+		value = "fixture_variant_input_" + std::to_string(suffix);
+	}
+}
+
+std::string UniqueOperationId(const CompiledRelation &relation) {
+	std::string value = "fixture_variant_graphql";
+	for (std::size_t suffix = 2;; suffix++) {
+		bool found = false;
+		for (const auto &operation : relation.Operations()) {
+			found = found || operation.name == value;
+		}
+		if (!found) {
+			return value;
+		}
+		value = "fixture_variant_graphql_" + std::to_string(suffix);
+	}
+}
+
+const CompiledOperation &FirstRestOperation(const CompiledRelation &relation) {
+	for (const auto &operation : relation.Operations()) {
+		if (operation.Protocol() == CompiledProtocol::REST) {
+			return operation;
+		}
+	}
+	throw std::logic_error("diagnostic REST augmentation lost its operation");
+}
+
+const CompiledRelation &RelationWithRest(const CompiledPackageGeneration &generation) {
+	for (const auto &relation : generation.Connector().Relations()) {
+		for (const auto &operation : relation.Operations()) {
+			if (operation.Protocol() == CompiledProtocol::REST) {
+				return relation;
+			}
+		}
+	}
+	throw std::invalid_argument("diagnostic source variant requires a REST operation");
+}
+
+void AppendDuplicateColumn(SemanticSourceFile &source, const CompiledRelation &relation,
+                           PackageCancellation &cancellation) {
+	const auto root = ParseSource(source, cancellation);
+	const auto &column = relation.Columns().front();
+	std::ostringstream bytes;
+	bytes << "  - id: " << column.name << "\n"
+	      << "    type: " << ScalarTypeName(column.ScalarType()) << "\n"
+	      << "    nullable: " << (column.nullable ? "true" : "false") << "\n"
+	      << "    extract: " << column.extractor << "\n";
+	InsertAfterMappingEntry(source, root, "columns", bytes.str());
+}
+
+void AddInvalidPredicate(SemanticSourceFile &source, const CompiledRelation &relation) {
+	const auto &operation = FirstRestOperation(relation);
+	const auto &column = relation.Columns().front();
+	std::ostringstream bytes;
+	bytes << "\npredicates:\n"
+	      << "  - id: fixture_variant_predicate\n"
+	      << "    column: " << column.name << "\n"
+	      << "    operator: eq\n"
+	      << "    literal:\n"
+	      << "      type: " << ScalarTypeName(column.ScalarType()) << "\n"
+	      << "      value: " << ScalarLiteral(column.ScalarType()) << "\n"
+	      << "    conditional_input: fixture_variant_conditional\n"
+	      << "    operations: [" << operation.name << "]\n"
+	      << "    accuracy: approximate\n"
+	      << "    occurrence_fixtures:\n"
+	      << "      matching: fixture_variant_matching\n"
+	      << "      false_or_null: fixture_variant_false_or_null\n"
+	      << "      duplicates: fixture_variant_duplicates\n";
+	source.bytes += bytes.str();
+}
+
+void AddInvalidGraphqlOperation(SemanticSourceFile &source, const CompiledRelation &relation,
+                                PackageCancellation &cancellation) {
+	const auto &rest = FirstRestOperation(relation);
+	const auto &column = relation.Columns().front();
+	const auto operation_id = UniqueOperationId(relation);
+	const CompiledOperation *fallback = nullptr;
+	for (const auto &operation : relation.Operations()) {
+		if (operation.fallback) {
+			fallback = &operation;
+			break;
+		}
+	}
+	if (fallback != nullptr) {
+		const auto input_id = UniqueInputId(relation);
+		auto root = ParseSource(source, cancellation);
+		const auto &fallback_node = FindEntry(root, "operations", fallback->name);
+		RemoveMappingEntry(source, fallback_node, "fallback");
+		root = ParseSource(source, cancellation);
+		const auto &amended_fallback = FindEntry(root, "operations", fallback->name);
+		InsertAfterScalarLine(source, Required(amended_fallback, "id"),
+		                      "    when: {required_inputs: [input." + input_id + "]}\n");
+		root = ParseSource(source, cancellation);
+		const auto input_bytes = "  - id: " + input_id + "\n    type: BOOLEAN\n    nullable: false\n";
+		if (root.Find("inputs") == nullptr) {
+			InsertBeforeMappingEntry(source, root, "auth", "inputs:\n" + input_bytes + "\n");
+		} else {
+			InsertAfterMappingEntry(source, root, "inputs", input_bytes);
+		}
+	}
+	const auto root = ParseSource(source, cancellation);
+	std::ostringstream bytes;
+	bytes << "  - id: " << operation_id << "\n"
+	      << "    fallback: true\n"
+	      << "    cardinality: many\n"
+	      << "    replay_safety: safe\n"
+	      << "    request:\n"
+	      << "      protocol: graphql\n"
+	      << "      endpoint:\n"
+	      << "        origin:\n"
+	      << "          scheme: https\n"
+	      << "          host: " << rest.Rest().request.origin.host.Value() << "\n"
+	      << "          port: " << rest.Rest().request.origin.port << "\n"
+	      << "        path: /fixture-variant\n"
+	      << "      headers: []\n"
+	      << "      query:\n"
+	      << "        operation_name: 1Invalid\n"
+	      << "        root: [fixtureVariant]\n"
+	      << "        fixed_arguments: []\n"
+	      << "        selection:\n"
+	      << "          - {column: " << column.name << ", field_path: [value]}\n"
+	      << "      pagination:\n"
+	      << "        strategy: relay_forward\n"
+	      << "        dependency: sequential\n"
+	      << "        consistency: mutable\n"
+	      << "        page_size_argument: first\n"
+	      << "        page_size_variable: pageSize\n"
+	      << "        page_size: 1\n"
+	      << "        cursor_argument: after\n"
+	      << "        cursor_variable: cursor\n"
+	      << "        page_info_field: pageInfo\n"
+	      << "        has_next_page_field: hasNextPage\n"
+	      << "        end_cursor_field: endCursor\n"
+	      << "        max_pages_per_scan: 1\n"
+	      << "        max_concurrent_pages: 1\n"
+	      << "      partial_data: fail_on_any_error\n"
+	      << "      max_document_bytes: 4096\n"
+	      << "      max_serialized_body_bytes_per_request: 8192\n"
+	      << "      max_serialized_body_bytes_per_scan: 8192\n";
+	InsertAfterMappingEntry(source, root, "operations", bytes.str());
+}
+
 const CompiledRelation &FirstRelation(const CompiledPackageGeneration &generation) {
 	const auto &relations = generation.Connector().Relations();
 	if (relations.empty()) {
@@ -176,24 +378,6 @@ SemanticSourceFile &RelationSource(std::vector<SemanticSourceFile> &files, const
 	return FindSource(files, "relations/" + relation.Name() + ".yaml");
 }
 
-const CompiledOperation &FallbackOperation(const CompiledRelation &relation) {
-	for (const auto &operation : relation.Operations()) {
-		if (operation.fallback) {
-			return operation;
-		}
-	}
-	throw std::logic_error("compiled relation lost its fallback operation");
-}
-
-const CompiledOperation &GraphqlOperation(const CompiledRelation &relation) {
-	for (const auto &operation : relation.Operations()) {
-		if (operation.Protocol() == CompiledProtocol::GRAPHQL) {
-			return operation;
-		}
-	}
-	throw std::logic_error("compiled relation lost its GraphQL operation");
-}
-
 std::string UppercaseFirst(std::string value) {
 	for (auto &character : value) {
 		if (character >= 'a' && character <= 'z') {
@@ -222,11 +406,15 @@ void MutateCompilerDiagnostic(std::vector<SemanticSourceFile> &files, const Comp
 		const auto root = ParseSource(source, cancellation);
 		RemoveMappingEntry(source, root, "columns");
 	} else if (diagnostic == "DUCKDB_API_DUPLICATE_ID") {
-		const auto &relation = RelationWithColumns(generation, 2);
+		const auto &relation = RelationWithColumns(generation, 1);
 		auto &source = RelationSource(files, relation);
-		const auto root = ParseSource(source, cancellation);
-		const auto &columns = Required(root, "columns");
-		ReplaceScalar(source, Required(columns.SequenceValue(1), "id"), relation.Columns()[0].name);
+		if (relation.Columns().size() == 1) {
+			AppendDuplicateColumn(source, relation, cancellation);
+		} else {
+			const auto root = ParseSource(source, cancellation);
+			const auto &columns = Required(root, "columns");
+			ReplaceScalar(source, Required(columns.SequenceValue(1), "id"), relation.Columns()[0].name);
+		}
 	} else if (diagnostic == "DUCKDB_API_INVALID_REFERENCE") {
 		const auto &relation = FirstRelation(generation);
 		auto &source = RelationSource(files, relation);
@@ -274,26 +462,67 @@ void MutateCompilerDiagnostic(std::vector<SemanticSourceFile> &files, const Comp
 	} else if (diagnostic == "DUCKDB_API_UNSUPPORTED_DECLARATION") {
 		ReplaceScalar(manifest_source, Required(manifest, "kind"), "unsupported");
 	} else if (diagnostic == "DUCKDB_API_INVALID_SELECTOR") {
-		const auto &relation = RelationWithFallback(generation);
-		auto &source = RelationSource(files, relation);
+		const CompiledRelation *relation = nullptr;
+		try {
+			relation = &RelationWithFallback(generation);
+		} catch (const std::invalid_argument &) {
+			relation = &FirstRelation(generation);
+		}
+		auto &source = RelationSource(files, *relation);
 		const auto root = ParseSource(source, cancellation);
-		ReplaceScalar(source, Required(FindEntry(root, "operations", FallbackOperation(relation).name), "fallback"),
-		              "false");
+		bool mutated = false;
+		for (const auto &operation : relation->Operations()) {
+			if (!operation.fallback) {
+				continue;
+			}
+			ReplaceScalar(source, Required(FindEntry(root, "operations", operation.name), "fallback"), "false");
+			mutated = true;
+			break;
+		}
+		if (!mutated) {
+			const auto &operation = relation->Operations().front();
+			InsertAfterScalarLine(source, Required(FindEntry(root, "operations", operation.name), "id"),
+			                      "    fallback: true\n");
+		}
 	} else if (diagnostic == "DUCKDB_API_INVALID_PREDICATE") {
-		const auto &relation = RelationWithPredicate(generation);
-		auto &source = RelationSource(files, relation);
-		const auto root = ParseSource(source, cancellation);
-		ReplaceScalar(source,
-		              Required(FindEntry(root, "predicates", relation.PredicateMappings()[0].Name()), "accuracy"),
-		              "approximate");
+		const CompiledRelation *relation = nullptr;
+		try {
+			relation = &RelationWithPredicate(generation);
+		} catch (const std::invalid_argument &) {
+			relation = &RelationWithRest(generation);
+		}
+		auto &source = RelationSource(files, *relation);
+		if (relation->PredicateMappings().empty()) {
+			AddInvalidPredicate(source, *relation);
+		} else {
+			const auto root = ParseSource(source, cancellation);
+			ReplaceScalar(source,
+			              Required(FindEntry(root, "predicates", relation->PredicateMappings()[0].Name()), "accuracy"),
+			              "approximate");
+		}
 	} else if (diagnostic == "DUCKDB_API_INVALID_GRAPHQL_PROFILE") {
-		const auto &relation = RelationWithGraphql(generation);
-		const auto &operation = GraphqlOperation(relation);
-		auto &source = RelationSource(files, relation);
-		const auto root = ParseSource(source, cancellation);
-		const auto &operation_node = FindEntry(root, "operations", operation.name);
-		ReplaceScalar(source, Required(Required(Required(operation_node, "request"), "query"), "operation_name"),
-		              "1Invalid");
+		const CompiledRelation *relation = nullptr;
+		try {
+			relation = &RelationWithGraphql(generation);
+		} catch (const std::invalid_argument &) {
+			relation = &RelationWithRest(generation);
+		}
+		auto &source = RelationSource(files, *relation);
+		bool mutated = false;
+		for (const auto &operation : relation->Operations()) {
+			if (operation.Protocol() != CompiledProtocol::GRAPHQL) {
+				continue;
+			}
+			const auto root = ParseSource(source, cancellation);
+			const auto &operation_node = FindEntry(root, "operations", operation.name);
+			ReplaceScalar(source, Required(Required(Required(operation_node, "request"), "query"), "operation_name"),
+			              "1Invalid");
+			mutated = true;
+			break;
+		}
+		if (!mutated) {
+			AddInvalidGraphqlOperation(source, *relation, cancellation);
+		}
 	} else if (diagnostic == "DUCKDB_API_POLICY_WIDENING") {
 		ReplaceScalar(manifest_source, Required(Required(manifest, "network_policy"), "private_addresses"), "allow");
 	} else if (diagnostic == "DUCKDB_API_INCOMPATIBLE_RELOAD") {

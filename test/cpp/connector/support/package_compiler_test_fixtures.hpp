@@ -33,7 +33,14 @@ CompileRepositoryGithubLocalPackageFixture(const std::string &absolute_repositor
 duckdb_api::CompiledLocalPackage
 CompileRepositoryDistinctLocalPackageFixture(const std::string &absolute_repository_root);
 
-enum class LocalPackageReloadFixtureVariant { EXACT_NO_OP, COMPATIBLE_PROVENANCE_PATCH, INCOMPATIBLE_MAJOR };
+enum class LocalPackageReloadFixtureVariant {
+	EXACT_NO_OP,
+	COMPATIBLE_PROVENANCE_PATCH,
+	INCOMPATIBLE_MAJOR,
+	CURRENT_ZERO,
+	CURRENT_MAX_PATCH,
+	CURRENT_MAX_MINOR
+};
 
 // Connector-owned real-source fixture for Runtime publication tests. The
 // private state owns a temporary package tree plus exact active/candidate
@@ -61,6 +68,34 @@ private:
 
 LocalPackageReloadFixture BuildRepositoryGithubLocalPackageReloadFixture(const std::string &absolute_repository_root,
                                                                          LocalPackageReloadFixtureVariant variant);
+
+enum class LocalPackageShapeFixtureVariant { MINIMAL_REST, NO_FALLBACK_SELECTION };
+
+// Connector-owned source-neutral shapes derived from permanent admitted
+// packages. MINIMAL_REST retains one anonymous REST relation and one column;
+// NO_FALLBACK_SELECTION retains the controlled multi-operation relation while
+// making every selector conditional. The private no-follow root remains owned
+// by the fixture and no new connector identity is introduced.
+class LocalPackageShapeFixture {
+public:
+	LocalPackageShapeFixture(const LocalPackageShapeFixture &) = default;
+	LocalPackageShapeFixture(LocalPackageShapeFixture &&) = default;
+	LocalPackageShapeFixture &operator=(const LocalPackageShapeFixture &) = delete;
+	LocalPackageShapeFixture &operator=(LocalPackageShapeFixture &&) = delete;
+
+	const duckdb_api::CompiledLocalPackage &Package() const;
+
+private:
+	class State;
+	explicit LocalPackageShapeFixture(std::shared_ptr<const State> state);
+	std::shared_ptr<const State> state;
+
+	friend LocalPackageShapeFixture BuildRepositoryDerivedLocalPackageShape(const std::string &,
+	                                                                        LocalPackageShapeFixtureVariant);
+};
+
+LocalPackageShapeFixture BuildRepositoryDerivedLocalPackageShape(const std::string &absolute_repository_root,
+                                                                 LocalPackageShapeFixtureVariant variant);
 
 // Compiles and returns the complete immutable generation for cross-team
 // Semantics tests that must prove exact generation-handle ownership. Consumers

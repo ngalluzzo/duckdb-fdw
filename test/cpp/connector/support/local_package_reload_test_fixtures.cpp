@@ -76,6 +76,12 @@ std::string VersionFor(LocalPackageReloadFixtureVariant variant) {
 		return "1.0.1";
 	case LocalPackageReloadFixtureVariant::INCOMPATIBLE_MAJOR:
 		return "2.0.0";
+	case LocalPackageReloadFixtureVariant::CURRENT_ZERO:
+		return "0.0.0";
+	case LocalPackageReloadFixtureVariant::CURRENT_MAX_PATCH:
+		return "1.2.4294967295";
+	case LocalPackageReloadFixtureVariant::CURRENT_MAX_MINOR:
+		return "1.4294967295.7";
 	}
 	throw std::invalid_argument("unknown local-package reload fixture variant");
 }
@@ -88,6 +94,11 @@ duckdb_api::PackageReloadClassification ExpectedClassification(LocalPackageReloa
 		return duckdb_api::PackageReloadClassification::COMPATIBLE_PROVENANCE_PATCH;
 	case LocalPackageReloadFixtureVariant::INCOMPATIBLE_MAJOR:
 		return duckdb_api::PackageReloadClassification::INCOMPATIBLE_RELOAD;
+	case LocalPackageReloadFixtureVariant::CURRENT_ZERO:
+		return duckdb_api::PackageReloadClassification::REJECTED_PACKAGE_IDENTITY;
+	case LocalPackageReloadFixtureVariant::CURRENT_MAX_PATCH:
+	case LocalPackageReloadFixtureVariant::CURRENT_MAX_MINOR:
+		return duckdb_api::PackageReloadClassification::COMPATIBLE_PROVENANCE_MINOR;
 	}
 	throw std::invalid_argument("unknown local-package reload fixture variant");
 }

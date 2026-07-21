@@ -37,6 +37,10 @@ private:
 std::vector<SemanticSourceFile> BuildFixtureCandidateSources(const CompiledLocalPackage &active,
                                                              const PackageFixtureCoverageEntry &coverage_entry,
                                                              PackageCancellation &cancellation);
+std::vector<SemanticSourceFile> BuildFixtureReloadSources(const CompiledLocalPackage &current,
+                                                          const PackageFixtureCoverageEntry &coverage_entry,
+                                                          const std::string &package_version,
+                                                          PackageCancellation &cancellation);
 std::vector<SemanticSourceFile> BuildFixtureDiagnosticSources(const CompiledLocalPackage &active,
                                                               const PackageFixtureCoverageEntry &coverage_entry,
                                                               PackageCancellation &cancellation);

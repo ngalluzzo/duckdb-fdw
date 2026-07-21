@@ -2,9 +2,6 @@
 
 #include "compiled_local_package_internal.hpp"
 #include "duckdb_api/internal/connector/package/failsafe_yaml.hpp"
-#include "duckdb_api/package_semver.hpp"
-
-#include <limits>
 #include <stdexcept>
 
 namespace duckdb_api {
@@ -60,63 +57,51 @@ void ReplaceScalar(SemanticSourceFile &source, const FailsafeYamlNode &node, con
 	                     replacement);
 }
 
-void ReplaceMappingEntry(SemanticSourceFile &source, const FailsafeYamlNode &value, const std::string &field,
+void ReplaceMappingEntry(SemanticSourceFile &source, const FailsafeYamlNode &mapping, const std::string &field,
                          const std::string &replacement) {
-	if (value.Type() != FailsafeYamlNode::Kind::SCALAR ||
-	    value.Span().begin.byte_offset > value.Span().end.byte_offset ||
-	    value.Span().end.byte_offset > source.bytes.size()) {
-		throw std::logic_error("compiled package source mapping entry has an invalid retained span");
+	if (mapping.Type() != FailsafeYamlNode::Kind::MAPPING) {
+		throw std::logic_error("compiled package source mapping entry has an invalid retained shape");
 	}
-	const auto value_begin = static_cast<std::size_t>(value.Span().begin.byte_offset);
-	const auto preceding_newline = value_begin == 0 ? std::string::npos : source.bytes.rfind('\n', value_begin - 1);
-	const auto line_begin = preceding_newline == std::string::npos ? 0 : preceding_newline + 1;
-	const auto line_end_offset = source.bytes.find('\n', value_begin);
-	const auto line_end = line_end_offset == std::string::npos ? source.bytes.size() : line_end_offset;
-	const auto field_offset = source.bytes.find_first_not_of(" \t", line_begin);
-	if (field_offset == std::string::npos || field_offset >= value_begin ||
-	    source.bytes.compare(field_offset, field.size(), field) != 0 || field_offset + field.size() >= value_begin ||
-	    source.bytes[field_offset + field.size()] != ':') {
-		throw std::logic_error("compiled package source mapping entry no longer matches its retained field");
-	}
-	const auto indentation = source.bytes.substr(line_begin, field_offset - line_begin);
-	source.bytes.replace(line_begin, line_end - line_begin, indentation + replacement);
-}
-
-std::string IncrementedPatch(const PackageSemVer &version) {
-	if (version.Patch() == std::numeric_limits<std::uint32_t>::max()) {
-		throw std::invalid_argument("fixture reload patch variant is unavailable at the SemVer boundary");
-	}
-	return std::to_string(version.Major()) + "." + std::to_string(version.Minor()) + "." +
-	       std::to_string(version.Patch() + 1);
-}
-
-std::string IncrementedMinor(const PackageSemVer &version) {
-	if (version.Minor() == std::numeric_limits<std::uint32_t>::max()) {
-		throw std::invalid_argument("fixture reload minor variant is unavailable at the SemVer boundary");
-	}
-	return std::to_string(version.Major()) + "." + std::to_string(version.Minor() + 1) + ".0";
-}
-
-std::string Downgraded(const PackageSemVer &version) {
-	if (version.Patch() > 0) {
-		return std::to_string(version.Major()) + "." + std::to_string(version.Minor()) + "." +
-		       std::to_string(version.Patch() - 1);
-	}
-	if (version.Minor() > 0) {
-		return std::to_string(version.Major()) + "." + std::to_string(version.Minor() - 1) + ".0";
-	}
-	if (version.Major() > 0) {
-		return std::to_string(version.Major() - 1) + ".0.0";
-	}
-	throw std::invalid_argument("fixture reload downgrade variant is unavailable at version 0.0.0");
-}
-
-void MutateReload(std::vector<SemanticSourceFile> &files, const CompiledPackageGeneration &generation,
-                  const std::string &variant, PackageCancellation &cancellation) {
-	auto &manifest = FindSource(files, "connector.yaml");
-	if (variant == "exact_no_op") {
+	for (std::size_t index = 0; index < mapping.Size(); index++) {
+		if (mapping.MappingKey(index) != field) {
+			continue;
+		}
+		const auto key_offset = static_cast<std::size_t>(mapping.MappingKeySpan(index).begin.byte_offset);
+		const auto value_end = static_cast<std::size_t>(mapping.MappingValue(index).Span().end.byte_offset);
+		const auto preceding_newline = key_offset == 0 ? std::string::npos : source.bytes.rfind('\n', key_offset - 1);
+		const auto line_begin = preceding_newline == std::string::npos ? 0 : preceding_newline + 1;
+		const auto line_end_offset = source.bytes.find('\n', value_end);
+		const auto line_end = line_end_offset == std::string::npos ? source.bytes.size() : line_end_offset;
+		if (line_begin > line_end || line_end > source.bytes.size()) {
+			throw std::logic_error("compiled package source mapping entry has an invalid retained span");
+		}
+		const auto indentation = source.bytes.substr(line_begin, key_offset - line_begin);
+		source.bytes.replace(line_begin, line_end - line_begin, indentation + replacement);
 		return;
 	}
+	throw std::logic_error("compiled package source mapping entry no longer matches its retained field");
+}
+
+void InsertBeforeMappingEntry(SemanticSourceFile &source, const FailsafeYamlNode &mapping, const std::string &field,
+                              const std::string &bytes) {
+	if (mapping.Type() != FailsafeYamlNode::Kind::MAPPING) {
+		throw std::logic_error("compiled package source root is no longer a mapping");
+	}
+	for (std::size_t index = 0; index < mapping.Size(); index++) {
+		if (mapping.MappingKey(index) == field) {
+			const auto key_offset = static_cast<std::size_t>(mapping.MappingKeySpan(index).begin.byte_offset);
+			const auto prior_newline = key_offset == 0 ? std::string::npos : source.bytes.rfind('\n', key_offset - 1);
+			const auto begin = prior_newline == std::string::npos ? 0 : prior_newline + 1;
+			source.bytes.insert(begin, bytes);
+			return;
+		}
+	}
+	throw std::logic_error("compiled package source insertion field is absent");
+}
+
+void MutateReload(std::vector<SemanticSourceFile> &files, const std::string &variant,
+                  const std::string &package_version, PackageCancellation &cancellation) {
+	auto &manifest = FindSource(files, "connector.yaml");
 	if (variant == "version_reuse_rejected") {
 		manifest.bytes += "\n# duckdb_api closed fixture identity variant\n";
 		return;
@@ -130,18 +115,10 @@ void MutateReload(std::vector<SemanticSourceFile> &files, const CompiledPackageG
 		return;
 	}
 	const auto &version_node = Required(root, "version");
-	const auto version = PackageSemVer::Parse(generation.Identity().PackageVersion());
-	std::string replacement;
-	if (variant == "compatible_patch") {
-		replacement = IncrementedPatch(version);
-	} else if (variant == "compatible_minor") {
-		replacement = IncrementedMinor(version);
-	} else if (variant == "downgrade_rejected") {
-		replacement = Downgraded(version);
-	} else {
+	if (variant != "compatible_patch" && variant != "compatible_minor" && variant != "downgrade_rejected") {
 		throw std::invalid_argument("coverage entry is not a closed reload source variant");
 	}
-	ReplaceScalar(manifest, version_node, replacement);
+	ReplaceScalar(manifest, version_node, package_version);
 }
 
 const CompiledOperation &FindGraphqlOperation(const CompiledPackageGeneration &generation,
@@ -199,60 +176,40 @@ void MutateSelectionNoCandidate(std::vector<SemanticSourceFile> &files, const Co
 		throw std::invalid_argument("coverage entry is not the closed no-candidate selection variant");
 	}
 	const auto *relation = generation.Connector().FindRelation(entry.relation);
-	if (relation == nullptr || relation->Operations().size() < 2 || relation->Inputs().empty()) {
-		throw std::invalid_argument("no-candidate source variant requires a selectable relation with an input");
+	if (relation == nullptr || relation->Operations().size() < 2) {
+		throw std::invalid_argument("no-candidate source variant requires a selectable relation");
 	}
-	const CompiledRelationInput *unbound_input = nullptr;
-	for (const auto &input : relation->Inputs()) {
-		if (!input.Default().HasDefault() || input.Default().Value().IsNull()) {
-			unbound_input = &input;
+	std::string variant_input = "fixture_variant_required";
+	for (std::size_t suffix = 2;; suffix++) {
+		bool unique = true;
+		for (const auto &input : relation->Inputs()) {
+			if (input.Name() == variant_input) {
+				unique = false;
+				break;
+			}
+		}
+		if (unique) {
 			break;
 		}
-	}
-	if (unbound_input == nullptr) {
-		throw std::invalid_argument(
-		    "no-candidate source variant requires an input not satisfied by a concrete default");
-	}
-	const CompiledOperation *fallback = nullptr;
-	for (const auto &operation : relation->Operations()) {
-		if (operation.fallback) {
-			if (fallback != nullptr) {
-				throw std::logic_error("compiled relation retained multiple fallback operations");
-			}
-			fallback = &operation;
-			continue;
-		}
-		bool requires_absent_binding = false;
-		for (const auto &reference : operation.selector.RequiredInputReferences()) {
-			if (reference.Kind() == CompiledRequiredInputKind::CONDITIONAL_INPUT) {
-				requires_absent_binding = true;
-				break;
-			}
-			for (const auto &input : relation->Inputs()) {
-				if (input.Name() == reference.Id() &&
-				    (!input.Default().HasDefault() || input.Default().Value().IsNull())) {
-					requires_absent_binding = true;
-					break;
-				}
-			}
-			if (requires_absent_binding) {
-				break;
-			}
-		}
-		if (!requires_absent_binding) {
-			throw std::invalid_argument(
-			    "no-candidate source variant has an operation eligible without caller bindings");
-		}
-	}
-	if (fallback == nullptr) {
-		throw std::invalid_argument("no-candidate source variant requires one fallback operation");
+		variant_input = "fixture_variant_required_" + std::to_string(suffix);
 	}
 	auto &relation_source = FindSource(files, "relations/" + entry.relation + ".yaml");
 	const auto root = ParseSource(relation_source, cancellation);
-	const auto &operation_node = FindOperationNode(root, fallback->name);
-	const auto &fallback_node = Required(operation_node, "fallback");
-	ReplaceMappingEntry(relation_source, fallback_node, "fallback",
-	                    "when: {required_inputs: [input." + unbound_input->Name() + "]}");
+	for (auto operation = relation->Operations().rbegin(); operation != relation->Operations().rend(); operation++) {
+		const auto &operation_node = FindOperationNode(root, operation->name);
+		const auto replacement = "when: {required_inputs: [input." + variant_input + "]}";
+		if (operation_node.Find("fallback") != nullptr) {
+			ReplaceMappingEntry(relation_source, operation_node, "fallback", replacement);
+		} else if (operation_node.Find("when") != nullptr) {
+			ReplaceMappingEntry(relation_source, operation_node, "when", replacement);
+		} else {
+			throw std::logic_error("compiled selectable operation lost its selector source");
+		}
+	}
+	const auto amended_root = ParseSource(relation_source, cancellation);
+	const auto input_bytes = "  - id: " + variant_input + "\n    type: BOOLEAN\n    nullable: false\n\n";
+	InsertBeforeMappingEntry(relation_source, amended_root, "auth",
+	                         amended_root.Find("inputs") == nullptr ? "inputs:\n" + input_bytes : input_bytes);
 }
 
 } // namespace
@@ -265,9 +222,7 @@ std::vector<SemanticSourceFile> BuildFixtureCandidateSources(const CompiledLocal
 		throw std::invalid_argument("fixture source candidate requires a valid active package");
 	}
 	auto files = duckdb_api::internal::CompiledLocalPackageAccess::Source(active).Files();
-	if (coverage_entry.scope == PackageFixtureCoverageScope::RELOAD) {
-		MutateReload(files, active.Generation(), coverage_entry.variant, cancellation);
-	} else if (coverage_entry.scope == PackageFixtureCoverageScope::GRAPHQL_RESOURCE) {
+	if (coverage_entry.scope == PackageFixtureCoverageScope::GRAPHQL_RESOURCE) {
 		MutateGraphqlDocumentLimit(files, active.Generation(), coverage_entry, cancellation);
 	} else if (coverage_entry.scope == PackageFixtureCoverageScope::SOURCE_IDENTITY) {
 		if (coverage_entry.variant == "byte_change") {
@@ -289,6 +244,21 @@ std::vector<SemanticSourceFile> BuildFixtureCandidateSources(const CompiledLocal
 	} else {
 		throw std::invalid_argument("coverage entry has no Connector-owned source candidate");
 	}
+	CheckCancellation(cancellation);
+	return files;
+}
+
+std::vector<SemanticSourceFile> BuildFixtureReloadSources(const CompiledLocalPackage &current,
+                                                          const PackageFixtureCoverageEntry &coverage_entry,
+                                                          const std::string &package_version,
+                                                          PackageCancellation &cancellation) {
+	CheckCancellation(cancellation);
+	if (!current.IsValid() || coverage_entry.scope != PackageFixtureCoverageScope::RELOAD ||
+	    coverage_entry.variant == "exact_no_op") {
+		throw std::invalid_argument("fixture reload source requires a changed closed reload variant");
+	}
+	auto files = duckdb_api::internal::CompiledLocalPackageAccess::Source(current).Files();
+	MutateReload(files, coverage_entry.variant, package_version, cancellation);
 	CheckCancellation(cancellation);
 	return files;
 }

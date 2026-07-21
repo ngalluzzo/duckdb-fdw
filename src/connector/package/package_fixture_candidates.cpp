@@ -192,12 +192,11 @@ public:
 	State(PackageFixtureCoverageEntry coverage_entry_p,
 	      std::unique_ptr<internal::PrivatePackageSourceCopy> source_copy_p,
 	      std::shared_ptr<const CompiledLocalPackage> candidate_p, std::vector<PackageDiagnostic> diagnostics_p,
-	      std::shared_ptr<const PackageReloadDecision> reload_decision_p,
 	      PackageFixtureSourceIdentityOutcome source_identity_outcome_p)
 	    : coverage_entry(std::move(coverage_entry_p)), source_copy(std::move(source_copy_p)),
 	      candidate(std::move(candidate_p)), diagnostics(std::move(diagnostics_p)),
-	      reload_decision(std::move(reload_decision_p)), source_identity_outcome(source_identity_outcome_p) {
-		if ((candidate != nullptr) == !diagnostics.empty() || (reload_decision != nullptr && candidate == nullptr)) {
+	      source_identity_outcome(source_identity_outcome_p) {
+		if ((candidate != nullptr) == !diagnostics.empty()) {
 			throw std::invalid_argument("fixture source candidate must contain exactly one compiler outcome");
 		}
 	}
@@ -206,7 +205,6 @@ public:
 	std::unique_ptr<internal::PrivatePackageSourceCopy> source_copy;
 	std::shared_ptr<const CompiledLocalPackage> candidate;
 	std::vector<PackageDiagnostic> diagnostics;
-	std::shared_ptr<const PackageReloadDecision> reload_decision;
 	PackageFixtureSourceIdentityOutcome source_identity_outcome;
 };
 
@@ -218,12 +216,11 @@ public:
 	                                           std::unique_ptr<PrivatePackageSourceCopy> source_copy,
 	                                           std::shared_ptr<const CompiledLocalPackage> candidate,
 	                                           std::vector<PackageDiagnostic> diagnostics,
-	                                           std::shared_ptr<const PackageReloadDecision> reload_decision,
 	                                           PackageFixtureSourceIdentityOutcome source_identity_outcome) {
 		return PackageFixtureSourceCandidate(std::shared_ptr<const PackageFixtureSourceCandidate::State>(
 		    new PackageFixtureSourceCandidate::State(std::move(coverage_entry), std::move(source_copy),
 		                                             std::move(candidate), std::move(diagnostics),
-		                                             std::move(reload_decision), source_identity_outcome)));
+		                                             source_identity_outcome)));
 	}
 };
 
@@ -250,10 +247,6 @@ const CompiledLocalPackage *PackageFixtureSourceCandidate::Candidate() const noe
 
 const std::vector<PackageDiagnostic> &PackageFixtureSourceCandidate::Diagnostics() const noexcept {
 	return state->diagnostics;
-}
-
-const PackageReloadDecision *PackageFixtureSourceCandidate::ReloadDecision() const noexcept {
-	return state->reload_decision.get();
 }
 
 PackageFixtureSourceIdentityOutcome PackageFixtureSourceCandidate::SourceIdentityOutcome() const noexcept {
@@ -283,17 +276,12 @@ PackageFixtureSourceCandidate BuildPackageFixtureSourceCandidate(const CompiledL
 	const auto source_identity_outcome = SourceIdentityOutcome(active, coverage_entry, compiled);
 	ValidateSelectionNoCandidate(coverage_entry, compiled);
 	if (!compiled.Succeeded()) {
-		return internal::PackageFixtureSourceCandidateBuilder::Build(
-		    coverage_entry, nullptr, nullptr, compiled.Diagnostics(), nullptr, source_identity_outcome);
+		return internal::PackageFixtureSourceCandidateBuilder::Build(coverage_entry, nullptr, nullptr,
+		                                                             compiled.Diagnostics(), source_identity_outcome);
 	}
 	auto candidate = std::shared_ptr<const CompiledLocalPackage>(new CompiledLocalPackage(*compiled.Package()));
-	std::shared_ptr<const PackageReloadDecision> decision;
-	if (coverage_entry.scope == PackageFixtureCoverageScope::RELOAD) {
-		decision = std::shared_ptr<const PackageReloadDecision>(
-		    new PackageReloadDecision(ClassifyPackageReload(active.Generation(), candidate->Generation())));
-	}
-	return internal::PackageFixtureSourceCandidateBuilder::Build(
-	    coverage_entry, std::move(source_copy), std::move(candidate), {}, std::move(decision), source_identity_outcome);
+	return internal::PackageFixtureSourceCandidateBuilder::Build(coverage_entry, std::move(source_copy),
+	                                                             std::move(candidate), {}, source_identity_outcome);
 }
 
 PackageFixtureCompilerCancellationOutcome
