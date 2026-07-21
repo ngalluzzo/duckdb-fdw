@@ -17,6 +17,16 @@ class CompiledLocalPackageAccess;
 
 namespace connector {
 
+class PackageCancellation;
+class PackageSourceSnapshot;
+struct PackageSourceLimits;
+
+namespace internal {
+class PackageSourceVerificationHook;
+PackageSourceSnapshot AcquirePackageSourceWithVerificationHook(const std::string &, const PackageSourceLimits &,
+                                                               PackageCancellation &, PackageSourceVerificationHook &);
+} // namespace internal
+
 enum class PackageSourceErrorCode : std::uint8_t {
 	CANCELLED,
 	INVALID_ROOT,
@@ -84,6 +94,10 @@ private:
 	                                                  PackageCancellation &);
 	friend PackageSourceSnapshot ReacquirePackageSource(const PackageSourceSnapshot &, const PackageSourceLimits &,
 	                                                    PackageCancellation &);
+	friend PackageSourceSnapshot
+	internal::AcquirePackageSourceWithVerificationHook(const std::string &, const PackageSourceLimits &,
+	                                                   PackageCancellation &,
+	                                                   internal::PackageSourceVerificationHook &);
 	friend class duckdb_api::internal::CompiledLocalPackageAccess;
 };
 

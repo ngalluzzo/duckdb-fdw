@@ -10,6 +10,18 @@ namespace duckdb_api {
 namespace connector {
 namespace internal {
 
+// Deterministic internal control invoked after every admitted semantic leaf has
+// been read and immediately before custody performs its final directory and
+// identity comparison. The hook receives no descriptor or source and cannot
+// bypass validation; a caller-side mutation can only make normal comparison
+// fail closed. Ordinary compilation never installs a hook.
+class PackageSourceVerificationHook {
+public:
+	virtual ~PackageSourceVerificationHook() noexcept {
+	}
+	virtual void BeforeFinalIdentityVerification() = 0;
+};
+
 // Private POSIX custody boundary. It owns the opened root and relations
 // descriptors, pre-read directory/identity captures, byte accounting, and
 // post-read comparison. Semantic orchestration can request only the manifest
@@ -41,6 +53,18 @@ private:
 	explicit PackageDirectoryCustody(std::unique_ptr<Impl> impl);
 	std::unique_ptr<Impl> impl;
 };
+
+PackageSourceSnapshot AcquirePackageSourceWithVerificationHook(const std::string &absolute_root,
+                                                               const PackageSourceLimits &host_limits,
+                                                               PackageCancellation &cancellation,
+                                                               PackageSourceVerificationHook &hook);
+
+// Applies the exact bounded entry-name admission used by ordinary directory
+// enumeration to one caller-provided closed capture. It grants no descriptor,
+// byte, semantic-source, or validation bypass.
+void ValidatePackageDirectoryEntryNameCapture(const std::vector<std::string> &names, const std::string &prefix,
+                                              std::uint64_t entry_limit, const PackageSourceLimits &host_limits,
+                                              PackageCancellation &cancellation);
 
 } // namespace internal
 } // namespace connector

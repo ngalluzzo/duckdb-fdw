@@ -54,6 +54,18 @@ void CheckCompilationCancellation(PackageCancellation &cancellation, const std::
 
 } // namespace
 
+namespace internal {
+
+PackageCompileResult PackageSourceFailureResult(const PackageSourceError &error, std::uint64_t maximum_diagnostics) {
+	return SourceFailureResult(error, maximum_diagnostics);
+}
+
+PackageCompileResult PackageSyntaxFailureResult(const FailsafeYamlError &error, std::uint64_t maximum_diagnostics) {
+	return SyntaxFailureResult(error, maximum_diagnostics);
+}
+
+} // namespace internal
+
 PackageCompileResult CompilePackage(const PackageSourceSnapshot &snapshot, const PackageCompilerLimits &host_limits,
                                     PackageCancellation &cancellation) {
 	internal::PackageDiagnosticSink diagnostics(host_limits.max_diagnostics);
@@ -117,12 +129,12 @@ PackageCompileResult CompileLocalPackageRoot(const std::string &absolute_root, c
 		if (error.Code() == PackageSourceErrorCode::CANCELLED) {
 			throw PackageCompilationCancelled();
 		}
-		return SourceFailureResult(error, compiler_limits.max_diagnostics);
+		return internal::PackageSourceFailureResult(error, compiler_limits.max_diagnostics);
 	} catch (const FailsafeYamlError &error) {
 		if (error.Code() == FailsafeYamlErrorCode::CANCELLED) {
 			throw PackageCompilationCancelled();
 		}
-		return SyntaxFailureResult(error, compiler_limits.max_diagnostics);
+		return internal::PackageSyntaxFailureResult(error, compiler_limits.max_diagnostics);
 	}
 }
 
@@ -148,12 +160,12 @@ PackageCompileResult RecompileLocalPackage(const CompiledLocalPackage &active,
 		if (error.Code() == PackageSourceErrorCode::CANCELLED) {
 			throw PackageCompilationCancelled();
 		}
-		return SourceFailureResult(error, compiler_limits.max_diagnostics);
+		return internal::PackageSourceFailureResult(error, compiler_limits.max_diagnostics);
 	} catch (const FailsafeYamlError &error) {
 		if (error.Code() == FailsafeYamlErrorCode::CANCELLED) {
 			throw PackageCompilationCancelled();
 		}
-		return SyntaxFailureResult(error, compiler_limits.max_diagnostics);
+		return internal::PackageSyntaxFailureResult(error, compiler_limits.max_diagnostics);
 	}
 }
 

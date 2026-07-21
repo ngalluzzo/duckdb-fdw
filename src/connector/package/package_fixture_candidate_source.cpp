@@ -50,6 +50,15 @@ void RemoveTree(const std::string &root, const std::vector<std::string> &files) 
 	(void)::rmdir(root.c_str());
 }
 
+std::string FirstRelation(const std::vector<std::string> &files) {
+	for (const auto &file : files) {
+		if (file.compare(0, 10, "relations/") == 0) {
+			return file;
+		}
+	}
+	throw std::logic_error("compiled package has no retained relation source");
+}
+
 void WriteFile(const std::string &path, const std::string &bytes) {
 	const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
 	if (fd < 0) {
@@ -121,10 +130,49 @@ PrivatePackageSourceCopy::Create(const std::vector<SemanticSourceFile> &source_f
 
 PrivatePackageSourceCopy::~PrivatePackageSourceCopy() noexcept {
 	RemoveTree(root, files);
+	for (const auto &file : external_files) {
+		(void)::unlink(file.c_str());
+	}
 }
 
 const std::string &PrivatePackageSourceCopy::Root() const noexcept {
 	return root;
+}
+
+void PrivatePackageSourceCopy::ApplySourceIdentityVariant(const std::string &variant,
+                                                          PackageCancellation &cancellation) {
+	CheckCancellation(cancellation);
+	if (variant == "copied_root" || variant == "byte_change" || variant == "entry_change_rejected" ||
+	    variant == "case_collision_rejected") {
+		return;
+	}
+	const auto relation = FirstRelation(files);
+	const auto relation_path = root + "/" + relation;
+	if (variant == "symlink_rejected") {
+		if (::unlink(relation_path.c_str()) != 0 || ::symlink("../connector.yaml", relation_path.c_str()) != 0) {
+			throw std::runtime_error("private fixture symlink variant could not be materialized");
+		}
+	} else if (variant == "hardlink_rejected") {
+		const auto external = root + "-hardlink-source";
+		external_files.push_back(external);
+		WriteFile(external, "private fixture hard-link source\n");
+		if (::unlink(relation_path.c_str()) != 0 || ::link(external.c_str(), relation_path.c_str()) != 0) {
+			throw std::runtime_error("private fixture hard-link variant could not be materialized");
+		}
+	} else if (variant == "unlisted_relation_rejected") {
+		const std::string extra = "relations/unlisted_fixture_relation.yaml";
+		files.push_back(extra);
+		WriteFile(root + "/" + extra, "private fixture unlisted relation\n");
+	} else {
+		throw std::invalid_argument("coverage entry is not a closed source-identity variant");
+	}
+	CheckCancellation(cancellation);
+}
+
+void PrivatePackageSourceCopy::InjectEntryChange() {
+	const std::string extra = "unexpected";
+	files.push_back(extra);
+	WriteFile(root + "/" + extra, "private fixture concurrent entry change\n");
 }
 
 } // namespace internal

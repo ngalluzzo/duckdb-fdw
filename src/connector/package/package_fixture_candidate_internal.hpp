@@ -24,11 +24,14 @@ public:
 	PrivatePackageSourceCopy &operator=(const PrivatePackageSourceCopy &) = delete;
 
 	const std::string &Root() const noexcept;
+	void ApplySourceIdentityVariant(const std::string &variant, PackageCancellation &cancellation);
+	void InjectEntryChange();
 
 private:
 	PrivatePackageSourceCopy(std::string root, std::vector<std::string> files);
 	std::string root;
 	std::vector<std::string> files;
+	std::vector<std::string> external_files;
 };
 
 std::vector<SemanticSourceFile> BuildFixtureCandidateSources(const CompiledLocalPackage &active,

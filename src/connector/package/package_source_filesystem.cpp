@@ -254,6 +254,24 @@ void ValidateEntryType(const struct stat &status, const std::string &path) {
 	}
 }
 
+void AdmitDirectoryEntryName(const std::string &name, const std::string &prefix, std::uint64_t entry_limit,
+                             std::size_t admitted_entries, std::uint64_t aggregate_entries,
+                             const PackageSourceLimits &limits, std::set<std::string> &folded_names) {
+	const std::string relative = prefix.empty() ? name : prefix + "/" + name;
+	if (name.empty() || name.find('/') != std::string::npos || name.find('\\') != std::string::npos ||
+	    !IsValidUtf8(name) || relative.size() > limits.max_relative_path_bytes) {
+		throw PackageSourceError(PackageSourceErrorCode::INVALID_PATH, relative, "package entry path is not admitted");
+	}
+	if (admitted_entries >= entry_limit || aggregate_entries >= limits.max_aggregate_entries) {
+		throw PackageSourceError(PackageSourceErrorCode::RESOURCE_EXHAUSTED, prefix,
+		                         "package directory-entry budget is exhausted");
+	}
+	if (!folded_names.insert(AsciiFold(name)).second) {
+		throw PackageSourceError(PackageSourceErrorCode::INVALID_PATH, relative,
+		                         "package entry names collide by ASCII case");
+	}
+}
+
 DirectoryCapture CaptureDirectory(int fd, const std::string &prefix, std::uint64_t entry_limit,
                                   std::uint64_t &aggregate_entries, const PackageSourceLimits &limits,
                                   PackageCancellation &cancellation) {
@@ -283,19 +301,8 @@ DirectoryCapture CaptureDirectory(int fd, const std::string &prefix, std::uint64
 			continue;
 		}
 		const std::string relative = prefix.empty() ? name : prefix + "/" + name;
-		if (name.empty() || name.find('/') != std::string::npos || name.find('\\') != std::string::npos ||
-		    !IsValidUtf8(name) || relative.size() > limits.max_relative_path_bytes) {
-			throw PackageSourceError(PackageSourceErrorCode::INVALID_PATH, relative,
-			                         "package entry path is not admitted");
-		}
-		if (capture.entries.size() >= entry_limit || aggregate_entries >= limits.max_aggregate_entries) {
-			throw PackageSourceError(PackageSourceErrorCode::RESOURCE_EXHAUSTED, prefix,
-			                         "package directory-entry budget is exhausted");
-		}
-		if (!folded_names.insert(AsciiFold(name)).second) {
-			throw PackageSourceError(PackageSourceErrorCode::INVALID_PATH, relative,
-			                         "package entry names collide by ASCII case");
-		}
+		AdmitDirectoryEntryName(name, prefix, entry_limit, capture.entries.size(), aggregate_entries, limits,
+		                        folded_names);
 		struct stat status;
 		if (::fstatat(fd, name.c_str(), &status, AT_SYMLINK_NOFOLLOW) != 0) {
 			throw PackageSourceError(PackageSourceErrorCode::IDENTITY_CHANGED, relative,
@@ -482,6 +489,21 @@ bool EndsWithYamlCaseInsensitive(const std::string &name) {
 }
 
 } // namespace
+
+void ValidatePackageDirectoryEntryNameCapture(const std::vector<std::string> &names, const std::string &prefix,
+                                              std::uint64_t entry_limit, const PackageSourceLimits &host_limits,
+                                              PackageCancellation &cancellation) {
+	const auto limits = EffectiveLimits(host_limits);
+	std::set<std::string> folded_names;
+	std::uint64_t aggregate_entries = 0;
+	for (const auto &name : names) {
+		CheckCancellation(cancellation, prefix);
+		AdmitDirectoryEntryName(name, prefix, entry_limit, static_cast<std::size_t>(aggregate_entries),
+		                        aggregate_entries, limits, folded_names);
+		aggregate_entries++;
+	}
+	CheckCancellation(cancellation, prefix);
+}
 
 class PackageDirectoryCustody::Impl {
 public:

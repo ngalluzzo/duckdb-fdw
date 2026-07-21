@@ -13,6 +13,9 @@ namespace duckdb_api {
 namespace connector {
 namespace internal {
 
+PackageCompileResult PackageSourceFailureResult(const PackageSourceError &error, std::uint64_t maximum_diagnostics);
+PackageCompileResult PackageSyntaxFailureResult(const FailsafeYamlError &error, std::uint64_t maximum_diagnostics);
+
 bool DecodePackageSchema(const std::vector<std::pair<std::string, FailsafeYamlNode>> &documents,
                          const PackageSourceSnapshot &snapshot, PackageDiagnosticSink &diagnostics,
                          PackageDeclaration &package, PackageCancellation &cancellation);

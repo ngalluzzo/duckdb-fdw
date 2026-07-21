@@ -60,6 +60,28 @@ void ReplaceScalar(SemanticSourceFile &source, const FailsafeYamlNode &node, con
 	                     replacement);
 }
 
+void ReplaceMappingEntry(SemanticSourceFile &source, const FailsafeYamlNode &value, const std::string &field,
+                         const std::string &replacement) {
+	if (value.Type() != FailsafeYamlNode::Kind::SCALAR ||
+	    value.Span().begin.byte_offset > value.Span().end.byte_offset ||
+	    value.Span().end.byte_offset > source.bytes.size()) {
+		throw std::logic_error("compiled package source mapping entry has an invalid retained span");
+	}
+	const auto value_begin = static_cast<std::size_t>(value.Span().begin.byte_offset);
+	const auto preceding_newline = value_begin == 0 ? std::string::npos : source.bytes.rfind('\n', value_begin - 1);
+	const auto line_begin = preceding_newline == std::string::npos ? 0 : preceding_newline + 1;
+	const auto line_end_offset = source.bytes.find('\n', value_begin);
+	const auto line_end = line_end_offset == std::string::npos ? source.bytes.size() : line_end_offset;
+	const auto field_offset = source.bytes.find_first_not_of(" \t", line_begin);
+	if (field_offset == std::string::npos || field_offset >= value_begin ||
+	    source.bytes.compare(field_offset, field.size(), field) != 0 || field_offset + field.size() >= value_begin ||
+	    source.bytes[field_offset + field.size()] != ':') {
+		throw std::logic_error("compiled package source mapping entry no longer matches its retained field");
+	}
+	const auto indentation = source.bytes.substr(line_begin, field_offset - line_begin);
+	source.bytes.replace(line_begin, line_end - line_begin, indentation + replacement);
+}
+
 std::string IncrementedPatch(const PackageSemVer &version) {
 	if (version.Patch() == std::numeric_limits<std::uint32_t>::max()) {
 		throw std::invalid_argument("fixture reload patch variant is unavailable at the SemVer boundary");
@@ -171,6 +193,68 @@ void MutateGraphqlDocumentLimit(std::vector<SemanticSourceFile> &files, const Co
 	ReplaceScalar(relation_source, limit, std::to_string(value));
 }
 
+void MutateSelectionNoCandidate(std::vector<SemanticSourceFile> &files, const CompiledPackageGeneration &generation,
+                                const PackageFixtureCoverageEntry &entry, PackageCancellation &cancellation) {
+	if (entry.variant != "no_candidate_rejected") {
+		throw std::invalid_argument("coverage entry is not the closed no-candidate selection variant");
+	}
+	const auto *relation = generation.Connector().FindRelation(entry.relation);
+	if (relation == nullptr || relation->Operations().size() < 2 || relation->Inputs().empty()) {
+		throw std::invalid_argument("no-candidate source variant requires a selectable relation with an input");
+	}
+	const CompiledRelationInput *unbound_input = nullptr;
+	for (const auto &input : relation->Inputs()) {
+		if (!input.Default().HasDefault() || input.Default().Value().IsNull()) {
+			unbound_input = &input;
+			break;
+		}
+	}
+	if (unbound_input == nullptr) {
+		throw std::invalid_argument(
+		    "no-candidate source variant requires an input not satisfied by a concrete default");
+	}
+	const CompiledOperation *fallback = nullptr;
+	for (const auto &operation : relation->Operations()) {
+		if (operation.fallback) {
+			if (fallback != nullptr) {
+				throw std::logic_error("compiled relation retained multiple fallback operations");
+			}
+			fallback = &operation;
+			continue;
+		}
+		bool requires_absent_binding = false;
+		for (const auto &reference : operation.selector.RequiredInputReferences()) {
+			if (reference.Kind() == CompiledRequiredInputKind::CONDITIONAL_INPUT) {
+				requires_absent_binding = true;
+				break;
+			}
+			for (const auto &input : relation->Inputs()) {
+				if (input.Name() == reference.Id() &&
+				    (!input.Default().HasDefault() || input.Default().Value().IsNull())) {
+					requires_absent_binding = true;
+					break;
+				}
+			}
+			if (requires_absent_binding) {
+				break;
+			}
+		}
+		if (!requires_absent_binding) {
+			throw std::invalid_argument(
+			    "no-candidate source variant has an operation eligible without caller bindings");
+		}
+	}
+	if (fallback == nullptr) {
+		throw std::invalid_argument("no-candidate source variant requires one fallback operation");
+	}
+	auto &relation_source = FindSource(files, "relations/" + entry.relation + ".yaml");
+	const auto root = ParseSource(relation_source, cancellation);
+	const auto &operation_node = FindOperationNode(root, fallback->name);
+	const auto &fallback_node = Required(operation_node, "fallback");
+	ReplaceMappingEntry(relation_source, fallback_node, "fallback",
+	                    "when: {required_inputs: [input." + unbound_input->Name() + "]}");
+}
+
 } // namespace
 
 std::vector<SemanticSourceFile> BuildFixtureCandidateSources(const CompiledLocalPackage &active,
@@ -185,6 +269,17 @@ std::vector<SemanticSourceFile> BuildFixtureCandidateSources(const CompiledLocal
 		MutateReload(files, active.Generation(), coverage_entry.variant, cancellation);
 	} else if (coverage_entry.scope == PackageFixtureCoverageScope::GRAPHQL_RESOURCE) {
 		MutateGraphqlDocumentLimit(files, active.Generation(), coverage_entry, cancellation);
+	} else if (coverage_entry.scope == PackageFixtureCoverageScope::SOURCE_IDENTITY) {
+		if (coverage_entry.variant == "byte_change") {
+			FindSource(files, "connector.yaml").bytes += "\n# duckdb_api closed fixture byte-change variant\n";
+		} else if (coverage_entry.variant != "copied_root" && coverage_entry.variant != "symlink_rejected" &&
+		           coverage_entry.variant != "hardlink_rejected" && coverage_entry.variant != "entry_change_rejected" &&
+		           coverage_entry.variant != "unlisted_relation_rejected" &&
+		           coverage_entry.variant != "case_collision_rejected") {
+			throw std::invalid_argument("coverage entry is not a closed source-identity variant");
+		}
+	} else if (coverage_entry.scope == PackageFixtureCoverageScope::RELATION_SELECTION) {
+		MutateSelectionNoCandidate(files, active.Generation(), coverage_entry, cancellation);
 	} else {
 		throw std::invalid_argument("coverage entry has no Connector-owned source candidate");
 	}

@@ -92,6 +92,63 @@ void TestGraphqlDocumentCandidates(const duckdb_api::CompiledLocalPackage &activ
 	        "GraphQL document one-over candidate did not fail through the production compiler");
 }
 
+void TestSourceIdentityCandidates(const duckdb_api::CompiledLocalPackage &active,
+                                  const duckdb_api::connector::PackageFixtureCoverage &coverage) {
+	NeverCancel cancellation;
+	const auto copied = duckdb_api::connector::BuildPackageFixtureSourceCandidate(
+	    active, FindEntry(coverage, "source_identity_copied_root"), cancellation);
+	Require(copied.Succeeded() && copied.Candidate() != nullptr &&
+	            copied.SourceIdentityOutcome() ==
+	                duckdb_api::connector::PackageFixtureSourceIdentityOutcome::IDENTICAL_GENERATION &&
+	            copied.Candidate()->Generation().Identity().PackageDigest() ==
+	                active.Generation().Identity().PackageDigest(),
+	        "copied-root source candidate did not preserve the exact semantic identity");
+	const auto changed = duckdb_api::connector::BuildPackageFixtureSourceCandidate(
+	    active, FindEntry(coverage, "source_identity_byte_change"), cancellation);
+	Require(changed.Succeeded() && changed.Candidate() != nullptr &&
+	            changed.SourceIdentityOutcome() ==
+	                duckdb_api::connector::PackageFixtureSourceIdentityOutcome::CHANGED_GENERATION &&
+	            changed.Candidate()->Generation().Identity().PackageDigest() !=
+	                active.Generation().Identity().PackageDigest(),
+	        "byte-change source candidate did not produce a distinct compiled identity");
+
+	for (const auto *variant : {"symlink_rejected", "hardlink_rejected", "entry_change_rejected",
+	                            "unlisted_relation_rejected", "case_collision_rejected"}) {
+		const auto candidate = duckdb_api::connector::BuildPackageFixtureSourceCandidate(
+		    active, FindEntry(coverage, "source_identity_" + std::string(variant)), cancellation);
+		Require(!candidate.Succeeded() && candidate.Candidate() == nullptr && candidate.Diagnostics().size() == 1 &&
+		            candidate.SourceIdentityOutcome() ==
+		                duckdb_api::connector::PackageFixtureSourceIdentityOutcome::SOURCE_IDENTITY_REJECTED &&
+		            candidate.Diagnostics()[0].Code() ==
+		                duckdb_api::connector::PackageDiagnosticCode::PACKAGE_IDENTITY &&
+		            candidate.Diagnostics()[0].Phase() == duckdb_api::connector::PackageDiagnosticPhase::SOURCE,
+		        std::string("source identity candidate did not fail through production custody: ") + variant);
+	}
+}
+
+void TestNoCandidateSource(const std::string &repository_root) {
+	NeverCancel cancellation;
+	const auto compiled = duckdb_api::connector::CompileLocalPackageRoot(
+	    repository_root + "/test/fixtures/package_graphql_non_github", cancellation);
+	Require(compiled.Succeeded() && compiled.Package() != nullptr, "multi-operation package fixture did not compile");
+	const duckdb_api::CompiledLocalPackage active(*compiled.Package());
+	const auto coverage = duckdb_api::connector::DerivePackageFixtureCoverage(active.Generation());
+	const auto &entry = FindEntry(coverage, "selection_regional_events_no_candidate_rejected");
+	const auto candidate = duckdb_api::connector::BuildPackageFixtureSourceCandidate(active, entry, cancellation);
+	Require(candidate.Succeeded() && candidate.Candidate() != nullptr && candidate.Diagnostics().empty() &&
+	            candidate.ReloadDecision() == nullptr &&
+	            candidate.SourceIdentityOutcome() ==
+	                duckdb_api::connector::PackageFixtureSourceIdentityOutcome::NOT_APPLICABLE,
+	        "no-candidate selection source did not compile through the production boundary");
+	const auto *relation = candidate.Candidate()->Generation().Connector().FindRelation("regional_events");
+	Require(relation != nullptr && relation->Operations().size() == 2,
+	        "no-candidate selection source lost its multi-operation relation");
+	for (const auto &operation : relation->Operations()) {
+		Require(!operation.fallback && !operation.selector.RequiredInputReferences().empty(),
+		        "no-candidate selection source retained an unconditionally eligible operation");
+	}
+}
+
 void TestCandidateDispatchAndCancellation(const duckdb_api::CompiledLocalPackage &active,
                                           const duckdb_api::connector::PackageFixtureCoverage &coverage) {
 	NeverCancel cancellation;
@@ -120,6 +177,8 @@ int main(int argc, char **argv) {
 		const auto coverage = duckdb_api::connector::DerivePackageFixtureCoverage(active.Generation());
 		TestReloadCandidates(active, coverage);
 		TestGraphqlDocumentCandidates(active, coverage);
+		TestSourceIdentityCandidates(active, coverage);
+		TestNoCandidateSource(argv[1]);
 		TestCandidateDispatchAndCancellation(active, coverage);
 		std::cout << "package fixture candidate tests passed" << std::endl;
 		return 0;
