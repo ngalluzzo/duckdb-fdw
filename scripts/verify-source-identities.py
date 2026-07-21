@@ -9,6 +9,12 @@ import os
 import pathlib
 import re
 import stat
+import sys
+
+SCRIPT_ROOT = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_ROOT))
+
+from release_pins import project_identity  # noqa: E402
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -330,12 +336,7 @@ def current_extension_version(reader: RepositoryReader) -> str:
 
 
 def validate_project(pins: dict, version: str) -> None:
-    expected = {
-        "extension": "duckdb_api",
-        "tag": f"v{version}",
-        "version": version,
-    }
-    if pins.get("project") != expected:
+    if pins.get("project") != project_identity(version):
         raise AssertionError("current project identity does not match its release pins")
 
 

@@ -8,15 +8,10 @@ import json
 import pathlib
 import sys
 
+SCRIPT_ROOT = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_ROOT))
 
-def load_object(path: pathlib.Path, label: str) -> dict:
-    try:
-        value = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
-        raise AssertionError(f"{label} is not readable JSON: {path}") from error
-    if not isinstance(value, dict):
-        raise AssertionError(f"{label} root must be an object")
-    return value
+from release_pins import load_json_object, project_identity  # noqa: E402
 
 
 def translation_units(value: object, label: str) -> list[str]:
@@ -31,21 +26,13 @@ def translation_units(value: object, label: str) -> list[str]:
 
 
 def verify(pins_path: pathlib.Path, observed_path: pathlib.Path) -> dict[str, int]:
-    pins = load_object(pins_path, "release pins")
-    observed = load_object(observed_path, "configured product source record")
+    pins = load_json_object(pins_path, "release pins")
+    observed = load_json_object(observed_path, "configured product source record")
     project = pins.get("project")
     if not isinstance(project, dict):
         raise AssertionError("release pins omit the project identity")
     version = project.get("version")
-    if (
-        not isinstance(version, str)
-        or project
-        != {
-            "extension": "duckdb_api",
-            "tag": f"v{version}",
-            "version": version,
-        }
-    ):
+    if not isinstance(version, str) or project != project_identity(version):
         raise AssertionError("release pins have an inconsistent project identity")
     try:
         expected = pins["identities"]["build_graph"]

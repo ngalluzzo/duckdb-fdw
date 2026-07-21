@@ -10,6 +10,12 @@ import subprocess
 import sys
 from typing import Any
 
+SCRIPT_ROOT = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_ROOT))
+
+from release_pins import load_json_object as load_object  # noqa: E402
+from release_pins import project_identity  # noqa: E402
+
 
 SHA256 = re.compile(r"[0-9a-f]{64}")
 VERSION_NUM = re.compile(r"0x[0-9a-f]{6}")
@@ -17,16 +23,6 @@ VERSION_NUM = re.compile(r"0x[0-9a-f]{6}")
 
 def fail(message: str) -> AssertionError:
     return AssertionError(message)
-
-
-def load_object(path: pathlib.Path, label: str) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
-        raise fail(f"{label} is not readable JSON: {path}") from error
-    if not isinstance(value, dict):
-        raise fail(f"{label} must be a JSON object")
-    return value
 
 
 def required_object(value: dict[str, Any], key: str, label: str) -> dict[str, Any]:
@@ -101,11 +97,7 @@ def parse_int(value: str, label: str) -> int:
 def validate_pins(pins: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     project = required_object(pins, "project", "pins")
     version = required_scalar(project, "version", str, "pins.project")
-    if project != {
-        "extension": "duckdb_api",
-        "tag": f"v{version}",
-        "version": version,
-    }:
+    if project != project_identity(version):
         raise fail("native dependency pins have an inconsistent project identity")
     cell = required_object(pins, "product_cell", "pins")
     system = required_object(pins, "system_dependencies", "pins")
