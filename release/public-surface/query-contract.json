@@ -3,7 +3,7 @@
   "owner": "query-experience",
   "decision": "RFC 0012",
   "baseline_release": "0.7.0",
-  "candidate_release": "0.8.0",
+  "candidate_release": "0.9.0",
   "planned_through": "0.9.0",
   "entries": {
     "sql.table_function.system.main.duckdb_api_scan": {
@@ -155,21 +155,6 @@
     "0.7.0": {
       "active": [
         "sql.table_function.system.main.duckdb_api_scan"
-      ],
-      "removed": []
-    },
-    "0.8.0": {
-      "active": [
-        "sql.table_function.system.main.duckdb_api_scan",
-        "sql.table_function.system.main.github_duckdb_login_search_page",
-        "sql.table_function.system.main.github_authenticated_user",
-        "sql.table_function.system.main.github_authenticated_repositories",
-        "sql.table_function.system.main.github_viewer_repository_metrics",
-        "sql.table_function.system.main.duckdb_api_load_connector",
-        "sql.table_function.system.main.duckdb_api_reload_connector",
-        "sql.table_function.system.main.duckdb_api_loaded_connectors",
-        "sql.table_function.system.main.duckdb_api_loaded_relations",
-        "sql.table_function.system.main.duckdb_api_relation_arguments"
       ],
       "removed": []
     },

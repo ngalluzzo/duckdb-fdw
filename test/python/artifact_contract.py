@@ -14,7 +14,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.8.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.9.0", True, False, "NOT_INSTALLED")
 EXPECTED_BEARER_TOKEN_BYTES = 8 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_BYTES = 16 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_ACCOUNTING = 'name + ": " + value + "\\r\\n"'
@@ -238,7 +238,7 @@ def main() -> int:
 
     repository_root = pathlib.Path(__file__).resolve().parents[2]
     expected_behavior = json.loads(
-        (repository_root / "release/0.8.0/public_contract.json").read_text()
+        (repository_root / "release/0.9.0/public_contract.json").read_text()
     )
     source_artifact = pathlib.Path(sys.argv[1]).resolve(strict=True)
     artifact_bytes = source_artifact.read_bytes()
@@ -323,7 +323,6 @@ def main() -> int:
             ).fetchall()
         ) - before_functions
         expected_initial_functions = {
-            ("duckdb_api_scan", "table"),
             ("duckdb_api_load_connector", "table"),
             ("duckdb_api_reload_connector", "table"),
             ("duckdb_api_loaded_connectors", "table"),
@@ -332,19 +331,12 @@ def main() -> int:
         }
         if added_functions != expected_initial_functions:
             raise AssertionError(f"unexpected public function inventory: {added_functions!r}")
-        functions = connection.execute(
-            """
-            SELECT parameters, parameter_types
-            FROM duckdb_functions()
-            WHERE function_name = 'duckdb_api_scan'
-            """
-        ).fetchall()
-        if len(functions) != 1 or set(zip(functions[0][0], functions[0][1])) != {
-            ("connector", "VARCHAR"),
-            ("relation", "VARCHAR"),
-            ("secret", "VARCHAR"),
-        }:
-            raise AssertionError(f"unexpected named function signature: {functions!r}")
+        # Accepted RFC 0012 removed the generic dispatcher before the 0.9.0 API
+        # candidate froze; it must never reappear in the installed product.
+        if connection.execute(
+            "SELECT count(*) FROM duckdb_functions() WHERE function_name = 'duckdb_api_scan'"
+        ).fetchone() != (0,):
+            raise AssertionError("removed dispatcher duckdb_api_scan reappeared in the product")
 
         escaped_package_root = package_root.as_posix().replace("'", "''")
         loaded = connection.execute(
@@ -496,111 +488,47 @@ def main() -> int:
         ).fetchone() != (0,):
             raise AssertionError("rejected oversized TOKEN created secret state")
 
+        # Accepted RFC 0012 removed the generic dispatcher's relation lookup
+        # (unknown_connector/unknown_relation/missing_relation) before the
+        # 0.9.0 API candidate froze: a generated function's identity is fixed
+        # at registration, so there is no runtime relation string to reject.
+        # anonymous_secret_rejected is also gone: an anonymous-authentication
+        # generated function (github_duckdb_login_search_page) never declares
+        # a `secret` named parameter, so DuckDB's own binder rejects one
+        # before Query's bind code runs at all.
         expect_bind_error(
             connection,
-            "SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'items')",
-            diagnostics["unknown_connector"],
-        )
-        expect_bind_error(
-            connection,
-            "SELECT * FROM duckdb_api_scan(connector := 'github', relation := 'items')",
-            diagnostics["unknown_relation"],
-        )
-        expect_bind_error(
-            connection,
-            "SELECT * FROM duckdb_api_scan(connector := 'github')",
-            diagnostics["missing_relation"],
-        )
-        expect_bind_error(
-            connection,
-            "SELECT * FROM duckdb_api_scan(connector := 'github', "
-            "relation := 'authenticated_user')",
+            "SELECT * FROM system.main.github_authenticated_user()",
             diagnostics["authenticated_secret_missing"],
         )
         expect_bind_error(
             connection,
-            "SELECT * FROM duckdb_api_scan(connector := 'github', "
-            "relation := 'authenticated_repositories')",
+            "SELECT * FROM system.main.github_authenticated_repositories()",
             diagnostics["repository_secret_missing"],
         )
         expect_bind_error(
             connection,
-            "SELECT * FROM duckdb_api_scan(connector := 'github', "
-            "relation := 'viewer_repository_metrics')",
+            "SELECT * FROM system.main.github_viewer_repository_metrics()",
             diagnostics["graphql_secret_missing"],
         )
-        expect_bind_error(
-            connection,
-            "SELECT * FROM duckdb_api_scan(connector := 'github', "
-            "relation := 'duckdb_login_search_page', secret := 'unused')",
-            diagnostics["anonymous_secret_rejected"],
-        )
 
-        description = connection.execute(
-            """
-            DESCRIBE SELECT * FROM duckdb_api_scan(
-                connector := 'github', relation := 'duckdb_login_search_page'
-            )
-            """
-        ).fetchall()
-        described_schema = [(row[0], row[1]) for row in description]
-        if described_schema != EXPECTED_SCHEMA:
-            raise AssertionError(f"offline bind schema drifted: {description!r}")
-        authenticated_description = connection.execute(
-            """
-            DESCRIBE SELECT * FROM duckdb_api_scan(
-                connector := 'github', relation := 'authenticated_user',
-                secret := 'not_resolved_during_bind'
-            )
-            """
-        ).fetchall()
-        if [(row[0], row[1]) for row in authenticated_description] != EXPECTED_SCHEMA:
-            raise AssertionError(
-                f"authenticated offline schema drifted: {authenticated_description!r}"
-            )
-        repository_description = connection.execute(
-            """
-            DESCRIBE SELECT * FROM duckdb_api_scan(
-                connector := 'github', relation := 'authenticated_repositories',
-                secret := 'not_resolved_during_bind'
-            )
-            """
-        ).fetchall()
-        if [
-            (row[0], row[1]) for row in repository_description
-        ] != EXPECTED_REPOSITORY_SCHEMA:
-            raise AssertionError("repository offline schema drifted")
         connection.execute(
             """
             PREPARE repository_bind AS
             SELECT id, full_name, private, fork, archived, visibility
-            FROM duckdb_api_scan(
-                connector := 'github', relation := 'authenticated_repositories',
+            FROM system.main.github_authenticated_repositories(
                 secret := 'not_resolved_during_bind'
             )
             ORDER BY id
             """
         )
         connection.execute("DEALLOCATE repository_bind")
-        graphql_description = connection.execute(
-            """
-            DESCRIBE SELECT * FROM duckdb_api_scan(
-                connector := 'github', relation := 'viewer_repository_metrics',
-                secret := 'not_resolved_during_bind'
-            )
-            """
-        ).fetchall()
-        if [
-            (row[0], row[1]) for row in graphql_description
-        ] != EXPECTED_GRAPHQL_SCHEMA:
-            raise AssertionError("GraphQL repository offline schema drifted")
         connection.execute(
             """
             PREPARE graphql_bind AS
             SELECT id, full_name, owner_login, stars, primary_language,
                    private, archived, updated_at
-            FROM duckdb_api_scan(
-                connector := 'github', relation := 'viewer_repository_metrics',
+            FROM system.main.github_viewer_repository_metrics(
                 secret := 'not_resolved_during_bind'
             )
             WHERE archived = FALSE
@@ -615,9 +543,7 @@ def main() -> int:
             for row in connection.execute(
                 """
                 EXPLAIN SELECT full_name, stars, primary_language
-                FROM duckdb_api_scan(
-                    connector := 'github',
-                    relation := 'viewer_repository_metrics',
+                FROM system.main.github_viewer_repository_metrics(
                     secret := 'not_resolved_during_explain'
                 )
                 WHERE archived = FALSE
@@ -660,9 +586,7 @@ def main() -> int:
             for row in connection.execute(
                 """
                 EXPLAIN SELECT id
-                FROM duckdb_api_scan(
-                    connector := 'github',
-                    relation := 'authenticated_repositories',
+                FROM system.main.github_authenticated_repositories(
                     secret := 'not_resolved_during_explain'
                 )
                 WHERE visibility = 'private'
@@ -690,9 +614,7 @@ def main() -> int:
             """
             PREPARE public_scan AS
             SELECT id, login, site_admin
-            FROM duckdb_api_scan(
-                connector := 'github', relation := 'duckdb_login_search_page'
-            )
+            FROM system.main.github_duckdb_login_search_page()
             ORDER BY id
             """
         )
@@ -723,15 +645,7 @@ def main() -> int:
             "diagnostics": diagnostics,
             "duckdb": list(EXPECTED_DUCKDB[:2]),
             "explain_fields": EXPECTED_EXPLAIN_FIELDS,
-            "extension": ["duckdb_api", "0.8.0"],
-            "function": {
-                "name": "duckdb_api_scan",
-                "named_parameters": {
-                    "connector": "VARCHAR",
-                    "relation": "VARCHAR",
-                    "secret": "VARCHAR",
-                },
-            },
+            "extension": ["duckdb_api", "0.9.0"],
             "generated_functions": EXPECTED_GENERATED_FUNCTIONS,
             "management_functions": EXPECTED_MANAGEMENT_FUNCTIONS,
             "relations": [
@@ -949,7 +863,7 @@ def main() -> int:
             },
         }
         if behavior != expected_behavior:
-            raise AssertionError("observed public inventory disagrees with the 0.8.0 contract")
+            raise AssertionError("observed public inventory disagrees with the 0.9.0 contract")
         print(
             json.dumps(
                 {

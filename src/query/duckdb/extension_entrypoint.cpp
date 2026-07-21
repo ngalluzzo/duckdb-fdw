@@ -4,6 +4,7 @@
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb_api/duckdb_secret.hpp"
 #include "duckdb_api/product_composition.hpp"
 
 #include <utility>
@@ -40,7 +41,11 @@ const char *InitializationStageName(duckdb_api::ErrorStage stage) {
 void LoadProduct(ExtensionLoader &loader) {
 	try {
 		auto product = duckdb_api::BuildProductComposition();
-		RegisterDuckdbApi(loader, std::move(product.connector), std::move(product.executor));
+		// RFC 0012 removed the generic duckdb_api_scan dispatcher from the
+		// installed product in 0.9.0. Secret type/provider registration still
+		// completes before any package-generated relation function becomes
+		// visible, exactly as it previously completed before the dispatcher.
+		RegisterDuckdbApiSecrets(loader);
 		RegisterDuckdbApiPackageSurface(loader, std::move(product.package_staging));
 	} catch (const duckdb_api::ExecutionError &error) {
 		if (error.Stage() == duckdb_api::ErrorStage::INTERNAL) {

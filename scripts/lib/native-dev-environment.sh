@@ -1,7 +1,7 @@
 # Environment and dependency bootstrap for the native developer cell.
 # This file is sourced by scripts/native-dev.sh.
 
-readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.8.0/pins.json"
+readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.9.0/pins.json"
 readonly REQUIREMENTS_FILE="${REPOSITORY_ROOT}/test/python/requirements-macos-py314.txt"
 readonly DEFAULT_DEV_ROOT="${REPOSITORY_ROOT}/.build/dev"
 readonly TEMPLATE_URL="https://github.com/duckdb/extension-template.git"

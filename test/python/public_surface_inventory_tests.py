@@ -156,9 +156,9 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
 
     def test_removed_surface_is_not_current(self) -> None:
         dispatcher = "sql.table_function.system.main.duckdb_api_scan"
-        self.assertIn(dispatcher, self.inventory["release_views"][1]["active"])
-        self.assertNotIn(dispatcher, self.inventory["release_views"][2]["active"])
-        self.assertIn(dispatcher, self.inventory["release_views"][2]["removed"])
+        self.assertIn(dispatcher, self.inventory["release_views"][0]["active"])
+        self.assertNotIn(dispatcher, self.inventory["release_views"][1]["active"])
+        self.assertIn(dispatcher, self.inventory["release_views"][1]["removed"])
 
     def test_coordinated_entry_omission_fails_query_contract(self) -> None:
         candidate = copy.deepcopy(self.inventory)
@@ -186,7 +186,7 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         extra["name"] = "unapproved_extra"
         candidate["entries"].append(extra)
         for view in candidate["release_views"]:
-            if view["release"] in {"0.8.0", "0.9.0"}:
+            if view["release"] == "0.9.0":
                 view["active"].append(extra["id"])
         verify_inventory(candidate, self.schema)
         with self.assertRaisesRegex(InventoryError, "Query contract entry omission/extra"):

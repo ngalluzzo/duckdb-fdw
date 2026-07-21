@@ -9,7 +9,8 @@ from record_format import AdmissionError, require
 
 
 PROJECT_DESCRIPTION = (
-    "Exposes a typed example relation through DuckDB's duckdb_api_scan table function."
+    "Loads a declarative connector package and exposes its typed relations as "
+    "generated DuckDB table functions."
 )
 APPROVED_MAINTAINERS = ["ngalluzzo"]
 SAFE_YAML_VALUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9+._/' -]*")

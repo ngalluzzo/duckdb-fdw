@@ -327,3 +327,39 @@ surface, and no new relational, security, resource, or lifecycle behavior. The
 DuckDB/profile/platform/architecture/installation matrix (step 4) and the
 per-release `release/1.0.0/pins.json` / `public_contract.json` (at shipment)
 remain the unfrozen `1.0.0` inputs and are marked as such in the freeze.
+
+**Step 3.5 delivered: the 0.9.0 release itself was cut (2026-07-21).** Steps
+1-3 above did real, substantial work under the `0.9.0` label but never
+advanced the project's actual version identity: `extension_config.cmake`
+remained pinned at `0.8.0`, no `release/0.9.0/` directory existed, and
+`release/public-surface/inventory.json`'s `candidate_release` never moved past
+`0.8.0`, even though `release/1.0.0/freeze.json` already declared the `0.9.0`
+dispatcher removal as decided. This step closes that gap and completes the
+work RFC 0012 actually specified for `0.9.0`:
+
+- Removed the `duckdb_api_scan` dispatcher from the installed product
+  (`LoadProduct` in `src/query/duckdb/extension_entrypoint.cpp` no longer
+  registers it), while keeping it available as internal test-only composition
+  for the adapter, auth, and lifecycle test suites that construct their own
+  isolated `ExtensionLoader` and never exercised the real product path.
+- Cut real `release/0.9.0/pins.json` and `public_contract.json` from actual
+  computed source digests, dropping the `function` key and the four
+  dispatcher-only diagnostics (`unknown_connector`, `unknown_relation`,
+  `missing_relation`, `anonymous_secret_rejected`) that are no longer
+  reachable now that a generated function's identity is fixed at registration.
+- Advanced `release/public-surface/inventory.json` and `query-contract.json`'s
+  `candidate_release` to `0.9.0` (`baseline_release` stays `0.7.0`: advancing
+  it would prune `duckdb_api_scan`'s `0.7.0` revision and leave its `0.8.0`
+  deprecated state as the ungoverned first revision, which the verifier
+  rejects).
+- Bumped every version anchor (`extension_config.cmake`, `CMakeLists.txt`,
+  `scripts/verify-source-identities.py`'s `CURRENT_RELEASE` and the release
+  pins consumed by both the cached developer loop and the fresh release gate)
+  and backfilled a missing `HISTORICAL_RELEASES["0.8.0"]` immutability-ratchet
+  entry that had never been added when `0.8.0` shipped.
+- Wrote `docs/releases/0.9.0-notes.md` and fixed a `CHANGELOG.md` gap where
+  `0.6.0`, `0.7.0`, and `0.8.0` had never received their own dated entries
+  (`Unreleased` still described `0.8.0`'s content).
+
+Steps 4 (compatibility matrix) and 5 (final audit) remain undelivered; `1.0.0`
+itself has still not shipped.

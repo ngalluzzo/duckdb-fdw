@@ -18,7 +18,8 @@ class ExtensionLoader;
 // secret type and provider and no corresponding unregister operation. A later
 // provider or table-function failure can therefore leave an orphan type or
 // provider in this DatabaseInstance. Callers must invoke this function before
-// publishing duckdb_api_scan and fail the load rather than attempting repair.
+// publishing any relation function that accepts a `secret` argument and fail
+// the load rather than attempting repair.
 void RegisterDuckdbApiSecrets(ExtensionLoader &loader);
 
 // Resolve the current case-insensitive exact name through DuckDB's system-

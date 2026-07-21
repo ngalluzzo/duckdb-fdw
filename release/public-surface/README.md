@@ -1,9 +1,9 @@
 # Public surface inventory
 
 This directory is the machine-readable source of truth for project-owned SQL
-table functions. It records the shipped `0.7.0` baseline, the accepted
-`0.8.0` candidate, and the planned `0.9.0` dispatcher removal without treating
-a removed identifier as part of the current surface.
+table functions. It records the shipped `0.7.0` baseline and the accepted
+`0.9.0` candidate, which completes the dispatcher removal planned since
+`0.8.0`, without treating a removed identifier as part of the current surface.
 
 Query Experience owns SQL entries, content-addressed shapes, and the independent
 exact-surface contract in `query-contract.json`. Engineering Enablement owns

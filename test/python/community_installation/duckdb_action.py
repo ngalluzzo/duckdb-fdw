@@ -25,7 +25,11 @@ except ImportError:
 
 
 EXTENSION_NAME = "duckdb_api"
-FUNCTION_NAME = "duckdb_api_scan"
+# Accepted RFC 0012 removed the generic duckdb_api_scan dispatcher before the
+# 0.9.0 API candidate froze. duckdb_api_load_connector is a management
+# function registered unconditionally at Load(), so it remains a valid
+# representative for "the extension's query surface is registered."
+FUNCTION_NAME = "duckdb_api_load_connector"
 
 
 class ActionError(ValueError):
@@ -152,11 +156,15 @@ def public_behavior(
     duckdb_identity: list[str],
     extension: dict[str, object],
 ) -> dict[str, object]:
+    # No connector package is loaded in this stock lifecycle, so the query
+    # surface is proved through the always-registered introspection function
+    # rather than a package-generated relation, which needs an explicit
+    # absolute package_root this smoke test does not have.
     query = connection.execute(
         """
-        SELECT id, name, active
-        FROM duckdb_api_scan(connector := 'example', relation := 'items')
-        ORDER BY id
+        SELECT connector, relation, sql_name, package_version
+        FROM system.main.duckdb_api_loaded_relations()
+        ORDER BY connector, relation
         """
     )
     rows = [list(row) for row in query.fetchall()]

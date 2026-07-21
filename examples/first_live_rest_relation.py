@@ -10,7 +10,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.8.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.9.0", True, False, "NOT_INSTALLED")
 EXPECTED_SCHEMA = [
     ("id", "BIGINT"),
     ("login", "VARCHAR"),

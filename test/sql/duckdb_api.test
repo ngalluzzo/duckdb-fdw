@@ -1,5 +1,5 @@
 # name: test/sql/duckdb_api.test
-# description: static public SQL and secret contract for 0.8.0
+# description: static public SQL and secret contract for 0.9.0
 # group: [duckdb_api]
 
 statement error
@@ -14,7 +14,18 @@ SELECT extension_version
 FROM duckdb_extensions()
 WHERE extension_name = 'duckdb_api';
 ----
-0.8.0
+0.9.0
+
+# Accepted RFC 0012 removed the generic dispatcher before the 0.9.0 API
+# candidate froze. It must remain absent from the installed product; every
+# queryable relation is now a package-generated function (see
+# test/python/artifact_contract.py and
+# test/cpp/query/integration/package_product_contract_tests.cpp for their
+# DESCRIBE/EXPLAIN/PREPARE and bind-diagnostic coverage).
+statement error
+SELECT * FROM duckdb_api_scan(connector := 'github', relation := 'duckdb_login_search_page');
+----
+Catalog Error: Table Function with name duckdb_api_scan does not exist!
 
 query TT
 SELECT type, default_provider
@@ -22,201 +33,6 @@ FROM duckdb_secret_types()
 WHERE type = 'duckdb_api';
 ----
 duckdb_api	config
-
-# DESCRIBE binds and plans the anonymous relation without executing its source.
-query TTTTTT
-DESCRIBE SELECT *
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'duckdb_login_search_page'
-);
-----
-id	BIGINT	YES	NULL	NULL	NULL
-login	VARCHAR	YES	NULL	NULL	NULL
-site_admin	BOOLEAN	YES	NULL	NULL	NULL
-
-# PREPARE copies immutable bind data but does not acquire network authority.
-statement ok
-PREPARE live_scan AS
-SELECT id, login, site_admin
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'duckdb_login_search_page'
-)
-ORDER BY id;
-
-statement ok
-DEALLOCATE live_scan;
-
-# Authenticated bind, describe, explain, and prepare retain only this logical
-# name. They do not resolve the missing secret or acquire network authority.
-query TTTTTT
-DESCRIBE SELECT *
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_user',
-    secret := 'offline_secret'
-);
-----
-id	BIGINT	YES	NULL	NULL	NULL
-login	VARCHAR	YES	NULL	NULL	NULL
-site_admin	BOOLEAN	YES	NULL	NULL	NULL
-
-statement ok
-EXPLAIN SELECT *
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_user',
-    secret := 'offline_secret'
-);
-
-statement ok
-PREPARE authenticated_scan AS
-SELECT id, login, site_admin
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_user',
-    secret := 'offline_secret'
-);
-
-statement ok
-DEALLOCATE authenticated_scan;
-
-# The bounded repository relation is selected exactly and remains offline for
-# describe, explain, and prepare. DuckDB owns presentation order.
-query TTTTTT
-DESCRIBE SELECT *
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_repositories',
-    secret := 'offline_secret'
-);
-----
-id	BIGINT	YES	NULL	NULL	NULL
-full_name	VARCHAR	YES	NULL	NULL	NULL
-private	BOOLEAN	YES	NULL	NULL	NULL
-fork	BOOLEAN	YES	NULL	NULL	NULL
-archived	BOOLEAN	YES	NULL	NULL	NULL
-visibility	VARCHAR	YES	NULL	NULL	NULL
-
-statement ok
-EXPLAIN SELECT id, full_name, private, fork, archived, visibility
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_repositories',
-    secret := 'offline_secret'
-)
-ORDER BY id;
-
-# The pinned structured callback recognizes only this exact equality, keeps the
-# ordinary DuckDB filter visible, and explains the selected plan without secret
-# resolution or network work.
-statement ok
-EXPLAIN SELECT id, full_name, private, visibility
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_repositories',
-    secret := 'offline_secret'
-)
-WHERE visibility = 'private';
-
-statement ok
-PREPARE authenticated_repositories_scan AS
-SELECT id, full_name, private, fork, archived, visibility
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_repositories',
-    secret := 'offline_secret'
-)
-ORDER BY id;
-
-statement ok
-PREPARE selective_repositories_scan AS
-SELECT id, full_name, private, visibility
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_repositories',
-    secret := 'offline_secret'
-)
-WHERE visibility = 'private';
-
-# DuckDB substitutes each bound VARCHAR before the structured callback. The
-# same prepared statement must therefore select, fall back, and select again
-# without resolving the logical secret or inheriting the preceding execution's
-# plan choice.
-statement ok
-PREPARE parameterized_repositories_scan AS
-SELECT id, full_name, private, visibility
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_repositories',
-    secret := 'offline_secret'
-)
-WHERE visibility = $1;
-
-statement ok
-EXPLAIN EXECUTE parameterized_repositories_scan('private');
-
-statement ok
-EXPLAIN EXECUTE parameterized_repositories_scan('public');
-
-statement ok
-EXPLAIN EXECUTE parameterized_repositories_scan('private');
-
-statement ok
-DEALLOCATE authenticated_repositories_scan;
-
-statement ok
-DEALLOCATE selective_repositories_scan;
-
-statement ok
-DEALLOCATE parameterized_repositories_scan;
-
-# The GraphQL repository relation preserves the same offline bind boundary.
-# Nullable primary_language is an execution value contract; the DuckDB table
-# function conservatively exposes every output column as nullable at bind.
-query TTTTTT
-DESCRIBE SELECT *
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'viewer_repository_metrics',
-    secret := 'offline_secret'
-);
-----
-id	VARCHAR	YES	NULL	NULL	NULL
-full_name	VARCHAR	YES	NULL	NULL	NULL
-owner_login	VARCHAR	YES	NULL	NULL	NULL
-stars	BIGINT	YES	NULL	NULL	NULL
-primary_language	VARCHAR	YES	NULL	NULL	NULL
-private	BOOLEAN	YES	NULL	NULL	NULL
-archived	BOOLEAN	YES	NULL	NULL	NULL
-updated_at	VARCHAR	YES	NULL	NULL	NULL
-
-statement ok
-EXPLAIN SELECT full_name, stars, primary_language, updated_at
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'viewer_repository_metrics',
-    secret := 'offline_secret'
-)
-WHERE archived = FALSE
-ORDER BY stars DESC, full_name
-LIMIT 10;
-
-statement ok
-PREPARE viewer_repository_metrics_scan AS
-SELECT id, full_name, owner_login, stars, primary_language, private, archived, updated_at
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'viewer_repository_metrics',
-    secret := 'offline_secret'
-)
-WHERE archived = FALSE
-ORDER BY stars DESC, full_name
-LIMIT 10;
-
-statement ok
-DEALLOCATE viewer_repository_metrics_scan;
 
 statement ok
 CREATE TEMPORARY SECRET sql_contract (
@@ -243,60 +59,3 @@ CREATE SECRET persistent_contract (
 );
 ----
 Invalid Input Error: [duckdb_api][authentication] duckdb_api secrets require explicit CREATE TEMPORARY SECRET
-
-statement error
-SELECT * FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_user'
-);
-----
-Binder Error: [duckdb_api][bind] connector=github relation=authenticated_user: required named argument secret is missing
-
-statement error
-SELECT * FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_repositories'
-);
-----
-Binder Error: [duckdb_api][bind] connector=github relation=authenticated_repositories: required named argument secret is missing
-
-statement error
-SELECT * FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'viewer_repository_metrics'
-);
-----
-Binder Error: [duckdb_api][bind] connector=github relation=viewer_repository_metrics: required named argument secret is missing
-
-statement error
-SELECT * FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'Authenticated_Repositories',
-    secret := 'offline_secret'
-);
-----
-Binder Error: [duckdb_api][bind] connector=github: unknown relation identifier
-
-statement error
-SELECT * FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'duckdb_login_search_page',
-    secret := 'rejected'
-);
-----
-Binder Error: [duckdb_api][bind] connector=github relation=duckdb_login_search_page: named argument secret is not accepted
-
-statement error
-SELECT * FROM duckdb_api_scan(connector := 'example', relation := 'items');
-----
-Binder Error: [duckdb_api][bind] unknown connector identifier
-
-statement error
-SELECT * FROM duckdb_api_scan(connector := 'github', relation := 'items');
-----
-Binder Error: [duckdb_api][bind] connector=github: unknown relation identifier
-
-statement error
-SELECT * FROM duckdb_api_scan(connector := 'github');
-----
-Binder Error: [duckdb_api][bind] required named argument relation is missing

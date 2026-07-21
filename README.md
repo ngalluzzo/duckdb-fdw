@@ -165,7 +165,7 @@ with the [source guide](src/README.md) before changing production code and
 
 - The extension is not published or signed and cannot be installed from the
   DuckDB Community repository.
-- `0.8.0` supports explicit local package loading only. Package discovery,
+- `0.9.0` supports explicit local package loading only. Package discovery,
   remote registries, installation, updates, signatures, and trust policy are
   not distribution features yet.
 - Authentication supports an explicitly named temporary `duckdb_api/config`
@@ -174,12 +174,11 @@ with the [source guide](src/README.md) before changing production code and
 - There are no retries, rate-limit waits, parallel page requests, resume state,
   or caching.
 - Compatibility is limited to the exact source-build cell above.
-- `duckdb_api_scan(...)` remains only as a deprecated migration surface for the
-  four `0.7.0` built-in GitHub relations. New code should load a package and use
-  its generated functions; the dispatcher is scheduled for removal before the
-  public API candidate is frozen.
+- `duckdb_api_scan(...)`, the deprecated migration surface for the four
+  `0.7.0` built-in GitHub relations, was removed in `0.9.0` per accepted RFC
+  0012. Load a package and use its generated functions instead.
 
-See the [0.8.0 release notes](docs/releases/0.8.0-notes.md) for the complete
+See the [0.9.0 release notes](docs/releases/0.9.0-notes.md) for the complete
 product contract and [CHANGELOG.md](CHANGELOG.md) for user-visible changes.
 Architecture and runtime details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 and [docs/RUNTIME_CONTRACTS.md](docs/RUNTIME_CONTRACTS.md).

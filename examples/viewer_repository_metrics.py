@@ -13,7 +13,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.8.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.9.0", True, False, "NOT_INSTALLED")
 EXPECTED_SCHEMA = [
     ("id", "VARCHAR"),
     ("full_name", "VARCHAR"),
@@ -91,7 +91,7 @@ def main() -> int:
             """
         ).fetchone()
         if extension != EXPECTED_EXTENSION:
-            raise SystemExit("extension identity is outside the 0.8.0 product cell")
+            raise SystemExit("extension identity is outside the 0.9.0 product cell")
 
         statements = connection.extract_statements(example_sql(sql_path, package_root))
         if len(statements) != 4:
@@ -147,7 +147,7 @@ def main() -> int:
                     "installed": False,
                     "loaded": True,
                     "name": "duckdb_api",
-                    "version": "0.8.0",
+                    "version": "0.9.0",
                 },
                 "relation": "github.viewer_repository_metrics",
                 "required_values_present": True,

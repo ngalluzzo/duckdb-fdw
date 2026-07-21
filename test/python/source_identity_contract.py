@@ -29,7 +29,7 @@ def load_module(name: str, path: pathlib.Path):
 
 VERIFIER = load_module("source_identity_verifier", VERIFIER_PATH)
 GRAPH_VERIFIER = load_module("native_product_source_verifier", GRAPH_VERIFIER_PATH)
-CURRENT_PINS = json.loads((REPOSITORY / "release/0.8.0/pins.json").read_text())
+CURRENT_PINS = json.loads((REPOSITORY / "release/0.9.0/pins.json").read_text())
 CURRENT_NATIVE_PATHS = tuple(
     CURRENT_PINS["identities"]["native_product_sources"]["paths"]
 )
@@ -58,6 +58,8 @@ SOURCE_PATHS = (
     "release/0.7.0/public_contract.json",
     "release/0.8.0/pins.json",
     "release/0.8.0/public_contract.json",
+    "release/0.9.0/pins.json",
+    "release/0.9.0/public_contract.json",
 ) + CURRENT_NATIVE_PATHS + CURRENT_CONTROLLED_PATHS + CURRENT_CONNECTOR_PACKAGE_PATHS
 
 
@@ -85,7 +87,7 @@ class SourceIdentityContractTests(unittest.TestCase):
 
     def test_selects_complete_current_path_bound_identity(self) -> None:
         result = VERIFIER.verify(self.root)
-        self.assertEqual(result["version"], "0.8.0")
+        self.assertEqual(result["version"], "0.9.0")
         self.assertEqual(result["duckdb_version"], "1.5.4")
         self.assertEqual(
             result["public_contract_sha256"],
@@ -199,14 +201,14 @@ class SourceIdentityContractTests(unittest.TestCase):
         }
         for label, paths in mutations.items():
             with self.subTest(label=label):
-                pins = self.json("release/0.8.0/pins.json")
+                pins = self.json("release/0.9.0/pins.json")
                 pins["identities"]["native_product_sources"]["paths"] = paths
-                self.write_json("release/0.8.0/pins.json", pins)
+                self.write_json("release/0.9.0/pins.json", pins)
                 with self.assertRaisesRegex(
                     AssertionError, "repository-relative|sorted unique"
                 ):
                     VERIFIER.verify(self.root)
-                self.restore("release/0.8.0/pins.json")
+                self.restore("release/0.9.0/pins.json")
 
     def test_rejects_public_and_controlled_build_graph_drift(self) -> None:
         mutations = {
@@ -226,20 +228,20 @@ class SourceIdentityContractTests(unittest.TestCase):
         }
         for label, (key, mutate) in mutations.items():
             with self.subTest(label=label):
-                pins = self.json("release/0.8.0/pins.json")
+                pins = self.json("release/0.9.0/pins.json")
                 values = pins["identities"]["build_graph"][key]
                 pins["identities"]["build_graph"][key] = mutate(values)
-                self.write_json("release/0.8.0/pins.json", pins)
+                self.write_json("release/0.9.0/pins.json", pins)
                 with self.assertRaisesRegex(
                     AssertionError,
                     "translation units are malformed|build graph omits|wrong composition",
                 ):
                     VERIFIER.verify(self.root)
-                self.restore("release/0.8.0/pins.json")
+                self.restore("release/0.9.0/pins.json")
 
     def test_configured_build_graph_must_match_release_order_and_inventory(self) -> None:
-        pins_path = self.root / "release/0.8.0/pins.json"
-        expected = self.json("release/0.8.0/pins.json")["identities"][
+        pins_path = self.root / "release/0.9.0/pins.json"
+        expected = self.json("release/0.9.0/pins.json")["identities"][
             "build_graph"
         ]
         observed = self.root / "observed.json"
@@ -388,8 +390,16 @@ duckdb_api_defer_product_source_record(
                 self.assertIn(diagnostic, completed.stderr)
 
     def test_cached_and_fresh_workflows_project_the_graph_authority(self) -> None:
-        cached = (REPOSITORY / "scripts/lib/native-dev-build.sh").read_text()
-        fresh = (REPOSITORY / "scripts/run-native-product-tests.sh").read_text()
+        # Both workflows call verify_native_build_output, a function shared
+        # from scripts/lib/native-test-suite.sh rather than duplicated inline;
+        # source each workflow's full chain, not just its entry script.
+        shared = (REPOSITORY / "scripts/lib/native-test-suite.sh").read_text()
+        cached = (
+            (REPOSITORY / "scripts/native-dev.sh").read_text()
+            + (REPOSITORY / "scripts/lib/native-dev-build.sh").read_text()
+            + shared
+        )
+        fresh = (REPOSITORY / "scripts/run-native-product-tests.sh").read_text() + shared
         for label, script in (("cached", cached), ("fresh", fresh)):
             with self.subTest(label=label):
                 self.assertIn("/cmake/", script)
@@ -410,16 +420,16 @@ duckdb_api_defer_product_source_record(
         self.assertTrue(active.endswith(expected))
 
     def test_rejects_current_contract_and_identity_pin_drift(self) -> None:
-        contract = self.json("release/0.8.0/public_contract.json")
+        contract = self.json("release/0.9.0/public_contract.json")
         contract["relations"][1]["cardinality"]["maximum"] = 2
-        self.write_json("release/0.8.0/public_contract.json", contract)
+        self.write_json("release/0.9.0/public_contract.json", contract)
         with self.assertRaisesRegex(AssertionError, "public contract digest"):
             VERIFIER.verify(self.root)
-        self.restore("release/0.8.0/public_contract.json")
+        self.restore("release/0.9.0/public_contract.json")
 
-        pins = self.json("release/0.8.0/pins.json")
+        pins = self.json("release/0.9.0/pins.json")
         pins["identities"]["native_product_sources"]["sha256"] = "0" * 64
-        self.write_json("release/0.8.0/pins.json", pins)
+        self.write_json("release/0.9.0/pins.json", pins)
         with self.assertRaisesRegex(AssertionError, "native product source digest"):
             VERIFIER.verify(self.root)
 
@@ -432,6 +442,7 @@ duckdb_api_defer_product_source_record(
             "0.5.0",
             "0.6.0",
             "0.7.0",
+            "0.8.0",
         ):
             with self.subTest(version=version):
                 relative = f"release/{version}/pins.json"
@@ -459,7 +470,7 @@ duckdb_api_defer_product_source_record(
             VERIFIER.verify(self.root)
 
     def test_rejects_duplicate_json_keys(self) -> None:
-        path = self.root / "release/0.8.0/pins.json"
+        path = self.root / "release/0.9.0/pins.json"
         original = path.read_text()
         path.write_text(original.rstrip()[:-1] + ',\n  "project": {}\n}\n')
         with self.assertRaisesRegex(AssertionError, "duplicate JSON key"):
@@ -512,12 +523,12 @@ raise SystemExit("FIFO was accepted")
     def test_rejects_anything_except_the_single_extension_declaration(self) -> None:
         accepted = (REPOSITORY / "extension_config.cmake").read_text()
         invalid = {
-            "comment decoy": '# EXTENSION_VERSION "0.8.0"\n',
+            "comment decoy": '# EXTENSION_VERSION "0.9.0"\n',
             "false block": (
                 "if(FALSE)\n"
                 "  duckdb_extension_load(duckdb_api\n"
                 "    SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}\n"
-                '    EXTENSION_VERSION "0.8.0"\n'
+                '    EXTENSION_VERSION "0.9.0"\n'
                 "  )\n"
                 "endif()\n"
             ),
@@ -527,8 +538,8 @@ raise SystemExit("FIFO was accepted")
                 "  SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}\n"
                 ")\n"
             ),
-            "unquoted version": accepted.replace('"0.8.0"', "0.8.0"),
-            "nonrelease version": accepted.replace('"0.8.0"', '"../../0.1.0"'),
+            "unquoted version": accepted.replace('"0.9.0"', "0.9.0"),
+            "nonrelease version": accepted.replace('"0.9.0"', '"../../0.1.0"'),
         }
         for label, content in invalid.items():
             with self.subTest(label=label):

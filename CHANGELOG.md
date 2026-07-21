@@ -4,6 +4,30 @@ This file records user-visible changes to duckdb-fdw.
 
 ## Unreleased
 
+## 0.9.0 — 2026-07-21
+
+### Removed
+
+- `duckdb_api_scan(connector := ..., relation := ...)`, the deprecated
+  migration surface for the four `0.7.0` built-in GitHub relations. Accepted
+  RFC 0012 scheduled this removal for `0.9.0`, before the public API
+  candidate freezes. Load a package and use its generated functions instead;
+  see the [0.8.0 release notes](docs/releases/0.8.0-notes.md#migration-from-070)
+  for the mapping from each removed call.
+
+### Added
+
+- A second, independently authored `duckdb_api/v1` connector package
+  (test-only, not distributed with the extension) proving the compiler,
+  planner, and generated-function surface depend only on the v1 contract
+  with no cross-package coupling.
+- The intended `1.0.0` public API candidate — SQL surface, diagnostics
+  vocabulary, connector-package contract, and compatibility boundary — is
+  enumerated and frozen in `release/1.0.0/freeze.json` for compatibility
+  testing.
+
+## 0.8.0 — 2026-07-20
+
 ### Added
 
 - Explicit local package loading through
@@ -35,7 +59,7 @@ This file records user-visible changes to duckdb-fdw.
 
 ### Changed
 
-- The working extension identity advances to the unreleased `0.8.0` line.
+- The extension identity advances to `0.8.0`.
 - The primary developer workflow is now extension load, connector-package
   load, then generated relation functions. Connector and relation identity are
   captured by the registered function instead of supplied on every scan.

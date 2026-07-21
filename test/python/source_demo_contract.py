@@ -30,7 +30,7 @@ EXPECTED_STATIC_SUMMARY = {
         "installed": False,
         "loaded": True,
         "name": "duckdb_api",
-        "version": "0.8.0",
+        "version": "0.9.0",
     },
     "relation": {
         "connector": "github",
@@ -43,7 +43,10 @@ EXPECTED_STATIC_SUMMARY = {
         ["site_admin", "BOOLEAN"],
     ],
 }
-EXPECTED_FAILURE = "Binder Error: [duckdb_api][bind] unknown connector identifier"
+# Accepted RFC 0012 removed the generic dispatcher before the 0.9.0 API
+# candidate froze, so an unknown connector/relation now fails at catalog
+# resolution rather than at bind.
+EXPECTED_FAILURE = "Catalog Error: Table Function with name duckdb_api_scan does not exist!"
 EXPECTED_REPOSITORY_SQL = " ".join(
     (
         "CALL duckdb_api_load_connector(",
@@ -316,7 +319,7 @@ def main() -> int:
             )
         for fragment in (
             "getpass.getpass",
-            'EXPECTED_EXTENSION = ("duckdb_api", "0.8.0"',
+            'EXPECTED_EXTENSION = ("duckdb_api", "0.9.0"',
             '"connectors/github"',
             '"private_repository_count": private_repository_count',
             '"repository_count": repository_count',

@@ -26,7 +26,7 @@ class FakeConnection:
     def execute(self, query: str, parameters=None):
         self.last = " ".join(query.split())
         if "function_name = ?" in self.last:
-            if parameters != ["duckdb_api_scan"]:
+            if parameters != ["duckdb_api_load_connector"]:
                 raise AssertionError(
                     f"unexpected function inventory parameters: {parameters!r}"
                 )
@@ -43,11 +43,12 @@ class FakeConnection:
             if not self.installed:
                 raise RuntimeError("duckdb_api is not installed")
             self.loaded = True
-        elif self.last.startswith("SELECT id, name, active FROM duckdb_api_scan"):
+        elif self.last.startswith("SELECT connector, relation, sql_name, package_version"):
             self.description = [
-                ("id", "BIGINT"),
-                ("name", "VARCHAR"),
-                ("active", "BOOLEAN"),
+                ("connector", "VARCHAR"),
+                ("relation", "VARCHAR"),
+                ("sql_name", "VARCHAR"),
+                ("package_version", "VARCHAR"),
             ]
         return self
 
@@ -79,10 +80,10 @@ class FakeConnection:
             return [("allow_unsigned_extensions",)]
         if "FROM duckdb_types()" in self.last:
             return []
-        if self.last.startswith("SELECT id, name, active FROM duckdb_api_scan"):
-            return [(1, "alpha", True), (2, "beta", False), (3, "gamma", True)]
+        if self.last.startswith("SELECT connector, relation, sql_name, package_version"):
+            return []
         if "SELECT parameters, parameter_types" in self.last:
-            return [(["connector", "relation"], ["VARCHAR", "VARCHAR"])]
+            return [(["package_root"], ["VARCHAR"])]
         raise AssertionError(f"unexpected fetchall query: {self.last}")
 
     def close(self):

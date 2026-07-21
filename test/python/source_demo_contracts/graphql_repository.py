@@ -30,7 +30,7 @@ EXPECTED_OUTPUT_EXPRESSIONS = {
     "completed": "True",
     "extension": (
         "{'install_mode': 'NOT_INSTALLED', 'installed': False, "
-        "'loaded': True, 'name': 'duckdb_api', 'version': '0.8.0'}"
+        "'loaded': True, 'name': 'duckdb_api', 'version': '0.9.0'}"
     ),
     "relation": "'github.viewer_repository_metrics'",
     "required_values_present": "True",
@@ -99,14 +99,14 @@ EXPECTED_FUNCTION_ARGUMENTS = {
     "main": (),
 }
 EXPECTED_RUNNER_AST_DIGEST = (
-    "7dc2ab2365a99461d582604b3680745ac5b771865d6fb8696ecf1c005b9a17ae"
+    "8f680256dabdbb5ed30463f9697e36c6dbd10ca0fbd9f105c363702f630d9170"
 )
 EXPECTED_EXTENSION_QUERY = (
     "SELECT extension_name, extension_version, loaded, installed, install_mode "
     "FROM duckdb_extensions() WHERE extension_name = 'duckdb_api'"
 )
 EXPECTED_CONSTANTS = {
-    "EXPECTED_EXTENSION": ("duckdb_api", "0.8.0", True, False, "NOT_INSTALLED"),
+    "EXPECTED_EXTENSION": ("duckdb_api", "0.9.0", True, False, "NOT_INSTALLED"),
     "EXPECTED_SCHEMA": [
         ("id", "VARCHAR"),
         ("full_name", "VARCHAR"),

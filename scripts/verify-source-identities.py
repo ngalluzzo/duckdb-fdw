@@ -119,6 +119,17 @@ HISTORICAL_RELEASES = {
             "4f21ab8341ccda5c6880addd0febb35eeaa9d14b18d86ac5b3a9a5b9a49385ee"
         ),
     },
+    "0.8.0": {
+        "identities_canonical_json_sha256": (
+            "2fb1f1990109d9e6f1dd0cd7240790a24e1f0d4697ddf1ff90336d6a714fba14"
+        ),
+        "pins_canonical_json_sha256": (
+            "13bf19f8f65541222712c4d5548ebce0391032a6a4fecc83d20824e26d34f3d4"
+        ),
+        "public_contract_sha256": (
+            "e02a16bbd73095b95bb1dd18bf809138af6929c60c13df5c2e9c505f08140dfc"
+        ),
+    },
 }
 GIT_ID = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -132,7 +143,7 @@ EXTENSION_CONFIG = re.compile(
 )
 MAX_IDENTITY_FILE_BYTES = 16 * 1024 * 1024
 PATH_BOUND_SHA256 = "sha256-length-prefixed-path-and-bytes-v1"
-CURRENT_RELEASE = "0.8.0"
+CURRENT_RELEASE = "0.9.0"
 REPOSITORY_CONNECTOR_PACKAGE_ROOT = "connectors/github"
 CONTROLLED_PRODUCT_SOURCE_PATHS = (
     "test/cpp/connector/support/catalog_test_access.hpp",
