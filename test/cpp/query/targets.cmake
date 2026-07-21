@@ -145,6 +145,41 @@ target_link_libraries(
           duckdb_static
           Threads::Threads)
 
+# Query's reusable publication fixture owns real isolated DuckDB catalogs and
+# exposes only closed scenarios plus safe aggregate observations. Whole-product
+# fixture consumers link this service instead of constructing Query catalog or
+# coordinator internals.
+add_library(
+  duckdb_api_query_package_fixture_publication_service STATIC
+  ${QUERY_PACKAGE_FIXTURE_PUBLICATION_SERVICE_SOURCES}
+  ${QUERY_PACKAGE_TEST_SUPPORT_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_query_package_fixture_publication_service)
+target_include_directories(
+  duckdb_api_query_package_fixture_publication_service
+  PUBLIC test/cpp/query/service
+  PRIVATE src/query/duckdb
+          test/cpp)
+target_link_libraries(
+  duckdb_api_query_package_fixture_publication_service
+  PRIVATE duckdb_api_query_package_catalog_service
+          duckdb_api_package_compiler_fixture_service
+          duckdb_api_package_generation_fixture_service
+          duckdb_api_relational_planning_service
+          dummy_static_extension_loader
+          duckdb_static
+          Threads::Threads)
+
+add_executable(
+  duckdb_api_query_package_fixture_publication_tests
+  test/cpp/query/packages/query_fixture_publication_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_query_package_fixture_publication_tests)
+target_include_directories(
+  duckdb_api_query_package_fixture_publication_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_query_package_fixture_publication_tests
+  PRIVATE duckdb_api_query_package_fixture_publication_service)
+
 # The lead-composition oracle exercises only public provider services and
 # proves that real compiler custody, Semantics planning, Runtime registry
 # admission, publication leases, no-op reload, and close form one generation.

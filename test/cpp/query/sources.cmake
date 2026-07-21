@@ -10,6 +10,8 @@ set(QUERY_SECRET_TEST_SUPPORT_SOURCES
     test/cpp/query/support/duckdb_secret_test_support.cpp)
 set(QUERY_PACKAGE_TEST_SUPPORT_SOURCES
     test/cpp/query/packages/support/package_query_test_support.cpp)
+set(QUERY_PACKAGE_FIXTURE_PUBLICATION_SERVICE_SOURCES
+    test/cpp/query/support/query_fixture_publication.cpp)
 set(QUERY_PACKAGE_TEST_SOURCES
     test/cpp/query/packages/package_query_surface_tests.cpp
     test/cpp/query/packages/package_management_tests.cpp
