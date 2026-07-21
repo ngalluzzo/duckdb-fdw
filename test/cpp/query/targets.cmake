@@ -174,6 +174,7 @@ target_link_libraries(
   PRIVATE duckdb_api_package_generation_composition_service
           duckdb_api_package_compiler_fixture_service
           duckdb_api_query_package_catalog_service
+          duckdb_api_runtime_controlled_service
           dummy_static_extension_loader
           duckdb_static
           Threads::Threads)

@@ -87,11 +87,11 @@ MalformedYamlPackageFixture BuildRepositoryMalformedYamlPackageFixture(const std
 		if (::mkdir((root + "/relations").c_str(), 0700) != 0) {
 			throw std::runtime_error("could not create malformed-package fixture relations");
 		}
-		const std::string evidence = absolute_repository_root + "/docs/rfcs/evidence/0013/github/";
-		WriteFile(root + "/connector.yaml", ReadFile(evidence + "connector.yaml"));
+		const std::string package_source = absolute_repository_root + "/connectors/github/";
+		WriteFile(root + "/connector.yaml", ReadFile(package_source + "connector.yaml"));
 		for (const auto &relation : {"authenticated_repositories", "authenticated_user", "duckdb_login_search_page"}) {
 			WriteFile(root + "/relations/" + std::string(relation) + ".yaml",
-			          ReadFile(evidence + "relations/" + std::string(relation) + ".yaml"));
+			          ReadFile(package_source + "relations/" + std::string(relation) + ".yaml"));
 		}
 		WriteFile(root + "/relations/viewer_repository_metrics.yaml", "api_version: [\n");
 		return MalformedYamlPackageFixture(

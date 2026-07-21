@@ -6,6 +6,7 @@
 #include "duckdb_api/scan_planner.hpp"
 #include "duckdb_api_extension.hpp"
 #include "connector/support/local_package_source_test_fixtures.hpp"
+#include "runtime/service/controlled_runtime_scenario.hpp"
 #include "support/require.hpp"
 
 #include <atomic>
@@ -18,6 +19,19 @@
 namespace {
 
 using duckdb_api_test::Require;
+
+void LoadRepositoryPackage(duckdb::Connection &connection, const std::string &repository_root) {
+	auto load = connection.Query("CALL system.main.duckdb_api_load_connector(package_root := '" + repository_root +
+	                             "/connectors/github')");
+	Require(!load->HasError() && load->RowCount() == 1 && load->GetValue(4, 0).GetValue<std::uint64_t>() == 4,
+	        "actual DuckDB did not load the repository package");
+}
+
+void CreatePackageRuntimeSecret(duckdb::Connection &connection) {
+	auto secret = connection.Query("CREATE TEMPORARY SECRET package_runtime "
+	                               "(TYPE duckdb_api, PROVIDER config, TOKEN 'package-runtime-token')");
+	Require(!secret->HasError(), "actual DuckDB could not create the package Runtime secret");
+}
 
 duckdb_api::ValueKind KindFor(const std::string &logical_type) {
 	if (logical_type == "BIGINT") {
@@ -124,7 +138,7 @@ void TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(const std::strin
 	duckdb::RegisterDuckdbApiSecrets(loader);
 	duckdb::RegisterDuckdbApiPackageSurface(loader, duckdb_api::BuildPackageGenerationComposition(executor));
 	duckdb::Connection connection(database);
-	const auto package_root = repository_root + "/docs/rfcs/evidence/0013/github";
+	const auto package_root = repository_root + "/connectors/github";
 	auto load = connection.Query("CALL system.main.duckdb_api_load_connector(package_root := '" + package_root + "')");
 	Require(!load->HasError() && load->RowCount() == 1 && load->GetValue(4, 0).GetValue<std::uint64_t>() == 4 &&
 	            load->GetValue(5, 0).GetValue<bool>(),
@@ -203,6 +217,57 @@ void TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(const std::strin
 	        "rejected duplicate or invalid package changed the active DuckDB catalog generation");
 }
 
+// This is the whole-graph product oracle. Runtime owns the response programs;
+// Query sees only a ScanExecutor and safe counters while the permanent package
+// supplies the declarations consumed by Connector and Semantics.
+void TestGeneratedRelationsExecuteThroughRuntime(const std::string &repository_root) {
+	{
+		auto scenario = duckdb_api_test::BuildControlledRuntimeScenario(
+		    duckdb_api_test::ControlledRuntimeScenarioId::RETAINED_REST_USER);
+		duckdb::DuckDB database(nullptr);
+		duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_package_rest_product_test");
+		duckdb::RegisterDuckdbApiSecrets(loader);
+		duckdb::RegisterDuckdbApiPackageSurface(loader,
+		                                        duckdb_api::BuildPackageGenerationComposition(scenario->Executor()));
+		duckdb::Connection connection(database);
+		LoadRepositoryPackage(connection, repository_root);
+		CreatePackageRuntimeSecret(connection);
+		auto result = connection.Query(
+		    "SELECT id, login, site_admin FROM system.main.github_authenticated_user(secret := 'package_runtime')");
+		Require(!result->HasError() && result->RowCount() == 1 && result->GetValue(0, 0).GetValue<int64_t>() == 11 &&
+		            result->GetValue(1, 0).ToString() == "duckdb" && !result->GetValue(2, 0).GetValue<bool>(),
+		        "compiler-generated REST relation did not execute through Runtime");
+		const auto observation = scenario->Observation();
+		Require(observation.request_count == observation.expected_request_count,
+		        "compiler-generated REST relation did not consume the Runtime scenario");
+	}
+	{
+		auto scenario = duckdb_api_test::BuildControlledRuntimeScenario(
+		    duckdb_api_test::ControlledRuntimeScenarioId::GRAPHQL_MULTI_PAGE_NULL_DUPLICATE);
+		duckdb::DuckDB database(nullptr);
+		duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_package_graphql_product_test");
+		duckdb::RegisterDuckdbApiSecrets(loader);
+		duckdb::RegisterDuckdbApiPackageSurface(loader,
+		                                        duckdb_api::BuildPackageGenerationComposition(scenario->Executor()));
+		duckdb::Connection connection(database);
+		LoadRepositoryPackage(connection, repository_root);
+		CreatePackageRuntimeSecret(connection);
+		for (std::uint64_t execution = 0; execution < 2; execution++) {
+			auto result =
+			    connection.Query("SELECT id, primary_language FROM system.main.github_viewer_repository_metrics("
+			                     "secret := 'package_runtime') ORDER BY primary_language NULLS FIRST");
+			Require(!result->HasError() && result->RowCount() == 2 &&
+			            result->GetValue(0, 0).ToString() == "R-duplicate" &&
+			            result->GetValue(0, 1).ToString() == "R-duplicate" && result->GetValue(1, 0).IsNull() &&
+			            result->GetValue(1, 1).ToString() == "C++",
+			        "compiler-generated GraphQL relation changed Runtime's nullable duplicate bag");
+		}
+		const auto observation = scenario->Observation();
+		Require(observation.request_count == observation.expected_request_count,
+		        "compiler-generated GraphQL relation did not consume both cursor-page scenarios");
+	}
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -211,6 +276,7 @@ int main(int argc, char **argv) {
 			throw std::invalid_argument("usage: package_product_contract_tests ABSOLUTE_REPOSITORY_ROOT");
 		}
 		TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(argv[1]);
+		TestGeneratedRelationsExecuteThroughRuntime(argv[1]);
 		std::cout << "actual-DuckDB package product contract tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

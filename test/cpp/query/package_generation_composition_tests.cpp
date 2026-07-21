@@ -31,7 +31,7 @@ void TestCompileStagePublishReloadAndClose(const std::string &repository_root) {
 	auto staging = duckdb_api::BuildPackageGenerationComposition(
 	    std::shared_ptr<const duckdb_api::ScanExecutor>(new UnopenedExecutor()));
 	NeverCancelled control;
-	auto load = staging->StageLoad(repository_root + "/docs/rfcs/evidence/0013/github", control);
+	auto load = staging->StageLoad(repository_root + "/connectors/github", control);
 	Require(load.Changed() && load.PublicationLease(), "real package load did not produce one changed Runtime lease");
 	Require(load.Generation()->Registration().Identity().ConnectorId() == "github" &&
 	            load.Generation()->Registration().Relations().size() == 4,
