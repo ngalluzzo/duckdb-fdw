@@ -1,0 +1,40 @@
+#pragma once
+
+#include "duckdb_api/scan_plan.hpp"
+
+namespace duckdb_api_test {
+
+// Closed malformed values for Runtime's REST predicate admission boundary.
+// Each variant changes exactly one conditional-binding law from the valid
+// planner-produced EXACT fixture. Consumers cannot author arbitrary ScanPlan
+// internals through this service.
+enum class RuntimeRestPredicatePlanCounterexample {
+	CONDITIONAL_SOURCE_ID,
+	CONDITIONAL_SCALAR_KIND,
+	CONDITIONAL_TYPED_VALUE,
+	NONCANONICAL_ENCODED_VALUE,
+	DUPLICATE_CONDITIONAL_BINDING,
+	COUNT
+};
+
+// Deterministic package REST plan built through the production Connector ->
+// Query request -> Semantics planner path. It carries one BIGINT conditional
+// binding, an EXACT occurrence proof, and a DuckDB-owned typed residual.
+duckdb_api::ScanPlan BuildRuntimeExactRestPredicatePlanFixture();
+
+// A matching package predicate whose selected operation remains eligible when
+// selective-predicate capability is unavailable. The real planner retains the
+// typed DuckDB residual and emits no conditional request binding.
+duckdb_api::ScanPlan BuildRuntimeResidualOnlyRestPredicatePlanFixture();
+
+// Native 0.7 visibility plan built through the production planner. Runtime
+// uses it to prove generic package predicate handling cannot reinterpret the
+// native visibility discriminant or synthesize a package conditional field.
+duckdb_api::ScanPlan BuildRuntimeNativePredicateIsolationPlanFixture();
+
+// Deliberately malformed immutable value for negative Runtime admission tests.
+// Friend access is confined to the implementation and cannot escape as a
+// general builder.
+duckdb_api::ScanPlan BuildRuntimeRestPredicatePlanCounterexample(RuntimeRestPredicatePlanCounterexample counterexample);
+
+} // namespace duckdb_api_test

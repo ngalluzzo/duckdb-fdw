@@ -14,6 +14,20 @@ target_link_libraries(
   PUBLIC duckdb_api_relational_planning_service
          duckdb_api_package_generation_fixture_service)
 
+# Link-only topology oracle for Runtime's bounded materialized-plan provider.
+# It intentionally omits the broad friend-built fixture service so unresolved
+# construction dependencies cannot hide behind aggregate Semantics targets.
+add_executable(
+  duckdb_api_runtime_rest_predicate_fixture_consumer_tests
+  test/cpp/semantics/runtime_rest_predicate_plan_fixture_consumer_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_runtime_rest_predicate_fixture_consumer_tests)
+target_include_directories(
+  duckdb_api_runtime_rest_predicate_fixture_consumer_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_runtime_rest_predicate_fixture_consumer_tests
+  PRIVATE duckdb_api_semantics_materialized_fixture_service)
+
 # Relational Semantics owns this non-installable plan-only fixture service.
 # Focused Runtime tests consume its ScanPlan factories without compiling or
 # importing Connector, Query, or planner internals.

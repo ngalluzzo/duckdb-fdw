@@ -7,6 +7,8 @@
 
 namespace duckdb_api_test {
 
+enum class RuntimeRestPredicatePlanCounterexample;
+
 // Implementation-only friend of ScanPlan. Runtime consumers must never include
 // this header; the safe fixture header exposes only closed factories. Every
 // method below applies one named invalid state and accepts no arbitrary value.
@@ -14,6 +16,8 @@ class ScanPlanTestAccess {
 public:
 	static void ReplaceRest(duckdb_api::ScanPlan &plan, duckdb_api::PlannedRestOperation operation);
 	static void ReplaceGraphql(duckdb_api::ScanPlan &plan, duckdb_api::PlannedGraphqlOperation operation);
+	static duckdb_api::ScanPlan RuntimeRestPredicate(duckdb_api::ScanPlan plan,
+	                                                 RuntimeRestPredicatePlanCounterexample counterexample);
 	static duckdb_api::ScanPlan Graphql(duckdb_api::ScanPlan plan,
 	                                    GraphqlRuntimeAdmissionCounterexample counterexample);
 	static duckdb_api::ScanPlan GraphqlNonAuthorityVariation(duckdb_api::ScanPlan plan,

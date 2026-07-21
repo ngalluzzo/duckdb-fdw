@@ -13,6 +13,7 @@ void RunPredicateCompositionLawTests();
 void RunInputResolutionLawTests();
 void RunOperationSelectionLawTests();
 void RunPermanentRestScanPlanFixtureTests();
+void RunRuntimeRestPredicatePlanFixtureTests();
 
 namespace {
 
@@ -400,6 +401,7 @@ int main() {
 		RunInputResolutionLawTests();
 		RunOperationSelectionLawTests();
 		RunPermanentRestScanPlanFixtureTests();
+		RunRuntimeRestPredicatePlanFixtureTests();
 		TestExactSelectionHasNoFallback();
 		TestCandidateSpecificOperationSelectionAndFallback();
 		TestEqualRankedOperationSelectionFailsBeforePlanConstruction();
