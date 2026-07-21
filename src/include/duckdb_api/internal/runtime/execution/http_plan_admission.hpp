@@ -100,6 +100,10 @@ public:
 	uint64_t FirstPage() const;
 	uint64_t PageIncrement() const;
 	uint64_t MaxPages() const;
+	PlannedPaginationStrategy PaginationStrategy() const;
+	// RESPONSE_NEXT_URL only: empty for other strategies. Carries the
+	// declared JSON body path the decoder uses to extract the continuation.
+	const std::string &NextUrlPath() const;
 	bool RequiresBearer() const;
 	AdmittedPaginatedRestConditionalInput ConditionalInput() const;
 	const ResourceBudgets &PageBudgets() const;
@@ -126,6 +130,8 @@ private:
 	uint64_t first_page;
 	uint64_t page_increment;
 	uint64_t max_pages;
+	PlannedPaginationStrategy pagination_strategy;
+	std::string next_url_path;
 	bool requires_bearer;
 	AdmittedPaginatedRestConditionalInput conditional_input;
 	ResourceBudgets page_budgets;

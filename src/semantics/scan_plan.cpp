@@ -179,9 +179,10 @@ PaginationPlan::PaginationPlan()
       page_budgets {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, scan_budgets {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} {
 }
 
-void PaginationPlan::RequireLinkHeader() const {
-	if (strategy != PlannedPaginationStrategy::LINK_HEADER) {
-		throw std::logic_error("disabled pagination has no Link plan payload");
+void PaginationPlan::RequirePaginated() const {
+	if (strategy != PlannedPaginationStrategy::LINK_HEADER &&
+	    strategy != PlannedPaginationStrategy::RESPONSE_NEXT_URL) {
+		throw std::logic_error("pagination accessor invoked on a non-paginated strategy");
 	}
 }
 
@@ -190,37 +191,37 @@ PlannedPaginationStrategy PaginationPlan::Strategy() const {
 }
 
 PlannedPageDependency PaginationPlan::Dependency() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return dependency;
 }
 
 PlannedPageConsistency PaginationPlan::Consistency() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return consistency;
 }
 
 PlannedLinkRelation PaginationPlan::LinkRelation() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return link_relation;
 }
 
 PlannedContinuationTargetScope PaginationPlan::TargetScope() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return target_scope;
 }
 
 bool PaginationPlan::SupportsTotal() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return supports_total;
 }
 
 bool PaginationPlan::SupportsResume() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return supports_resume;
 }
 
 const PlannedPaginationTarget &PaginationPlan::Target() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return target;
 }
 
@@ -229,6 +230,13 @@ const PlannedGraphqlCursor &PaginationPlan::GraphqlCursor() const {
 		throw std::logic_error("pagination plan does not contain a GraphQL cursor payload");
 	}
 	return graphql_cursor;
+}
+
+const std::string &PaginationPlan::NextUrlPath() const {
+	if (strategy != PlannedPaginationStrategy::RESPONSE_NEXT_URL) {
+		throw std::logic_error("pagination plan does not contain a response_next payload");
+	}
+	return next_url_path;
 }
 
 const ResourceBudgets &PaginationPlan::PageBudgets() const {

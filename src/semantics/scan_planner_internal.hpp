@@ -78,7 +78,8 @@ inline PlannedResponseSource PlanResponseSource(CompiledResponseSource source) {
 }
 
 inline BaseDomain PlanBaseDomain(CompiledResponseSource source, CompiledPaginationStrategy pagination) {
-	if (pagination == CompiledPaginationStrategy::LINK_HEADER) {
+	if (pagination == CompiledPaginationStrategy::LINK_HEADER ||
+	    pagination == CompiledPaginationStrategy::RESPONSE_NEXT_URL) {
 		switch (source) {
 		case CompiledResponseSource::JSON_PATH_MANY:
 			return BaseDomain::PAGINATED_JSON_PATH_RECORDS;

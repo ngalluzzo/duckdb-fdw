@@ -15,7 +15,8 @@ namespace internal {
 namespace {
 
 BaseDomain ExpectedRestDomain(const PlannedRestOperation &operation, PlannedPaginationStrategy pagination) {
-	if (pagination == PlannedPaginationStrategy::LINK_HEADER) {
+	if (pagination == PlannedPaginationStrategy::LINK_HEADER ||
+	    pagination == PlannedPaginationStrategy::RESPONSE_NEXT_URL) {
 		return operation.response_source == PlannedResponseSource::ROOT_ARRAY ? BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS
 		                                                                      : BaseDomain::PAGINATED_JSON_PATH_RECORDS;
 	}

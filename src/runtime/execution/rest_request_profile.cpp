@@ -67,7 +67,11 @@ AdmittedPaginatedRestRequestProfile::AdmittedPaginatedRestRequestProfile(const S
       page_size(plan.Pagination().Target().page_size),
       page_number_parameter(plan.Pagination().Target().page_number_parameter),
       first_page(plan.Pagination().Target().first_page), page_increment(plan.Pagination().Target().page_increment),
-      max_pages(plan.Pagination().ScanBudgets().pages), requires_bearer(requires_bearer_p),
+      max_pages(plan.Pagination().ScanBudgets().pages), pagination_strategy(plan.Pagination().Strategy()),
+      next_url_path(plan.Pagination().Strategy() == PlannedPaginationStrategy::RESPONSE_NEXT_URL
+                        ? plan.Pagination().NextUrlPath()
+                        : std::string()),
+      requires_bearer(requires_bearer_p),
       conditional_input(plan.ConditionalInput() == PlannedConditionalInput::VISIBILITY_PRIVATE
                             ? AdmittedPaginatedRestConditionalInput::LEGACY_VISIBILITY_PRIVATE
                             : AdmittedPaginatedRestConditionalInput::NONE),
@@ -121,6 +125,12 @@ uint64_t AdmittedPaginatedRestRequestProfile::PageIncrement() const {
 }
 uint64_t AdmittedPaginatedRestRequestProfile::MaxPages() const {
 	return max_pages;
+}
+PlannedPaginationStrategy AdmittedPaginatedRestRequestProfile::PaginationStrategy() const {
+	return pagination_strategy;
+}
+const std::string &AdmittedPaginatedRestRequestProfile::NextUrlPath() const {
+	return next_url_path;
 }
 bool AdmittedPaginatedRestRequestProfile::RequiresBearer() const {
 	return requires_bearer;

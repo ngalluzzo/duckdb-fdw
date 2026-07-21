@@ -224,6 +224,8 @@ const char *PaginationStrategyName(PlannedPaginationStrategy strategy) {
 		return "disabled";
 	case PlannedPaginationStrategy::LINK_HEADER:
 		return "link_header";
+	case PlannedPaginationStrategy::RESPONSE_NEXT_URL:
+		return "response_next";
 	case PlannedPaginationStrategy::GRAPHQL_CURSOR:
 		return "graphql_cursor";
 	}
@@ -421,6 +423,9 @@ void AppendPagination(std::ostringstream &result, const PaginationPlan &paginati
 	       << ",page_number:" << target.page_number_parameter << '=' << target.first_page
 	       << ",increment:" << target.page_increment << ",scan_budgets:";
 	AppendScanBudgets(result, pagination.ScanBudgets());
+	if (pagination.Strategy() == PlannedPaginationStrategy::RESPONSE_NEXT_URL) {
+		result << ",next_url_path:" << pagination.NextUrlPath();
+	}
 	result << ']';
 }
 

@@ -234,6 +234,38 @@ LinkPageTransition LinkPaginationState::Advance(const std::vector<std::string> &
 	}
 }
 
+LinkPageTransition LinkPaginationState::AdvanceBody(const std::string &next_url) {
+	if (failed || exhausted) {
+		ThrowState();
+	}
+	try {
+		if (next_url.empty()) {
+			// JSON null, an absent path, or an empty string all mean "no next
+			// page." This is the normal terminal signal for response_next.
+			exhausted = true;
+			return {false, 0};
+		}
+		// Apply the same reconstruct-and-verify rule a Link header target
+		// would face. The body-extracted candidate must already be in
+		// canonical ASCII percent-encoded form; no normalization is applied
+		// (see docs/RUNTIME_CONTRACTS.md body-signaled REST pagination).
+		const auto parsed_page = ValidateNextTarget(next_url, current_page, seen_pages, profile);
+		seen_pages.push_back(parsed_page);
+		current_page = parsed_page;
+		return {true, parsed_page};
+	} catch (const LinkPaginationError &) {
+		failed = true;
+		throw;
+	} catch (const std::bad_alloc &) {
+		failed = true;
+		throw LinkPaginationError(LinkPaginationErrorKind::STATE, PAGINATION_FIELD,
+		                          "Link pagination state exceeded available memory");
+	} catch (...) {
+		failed = true;
+		throw LinkPaginationError(LinkPaginationErrorKind::STATE, PAGINATION_FIELD, "Link pagination state failed");
+	}
+}
+
 uint64_t LinkPaginationState::CurrentPage() const noexcept {
 	return current_page;
 }

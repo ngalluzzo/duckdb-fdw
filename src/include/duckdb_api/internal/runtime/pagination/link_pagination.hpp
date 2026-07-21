@@ -45,7 +45,9 @@ struct LinkPageTransition {
 // field-values in receipt order, accepts zero or one rel=next target, and
 // requires the profile's exact origin, path, page progression, and copied
 // encoded query multiset. Omission, change, duplication, or extra query
-// fields fail closed. Any error makes the state terminal so a caller cannot
+// fields fail closed. AdvanceBody accepts a single body-extracted candidate
+// URL (or nullopt for "no next page") and applies the same reconstruct-and-
+// verify rule. Any error makes the state terminal so a caller cannot
 // continue after rejected remote metadata. This object owns a copy of the
 // immutable admitted profile, is scan-owned, and is not thread-safe; the owning
 // stream supplies synchronization and resource/cancellation authority.
@@ -54,6 +56,11 @@ public:
 	explicit LinkPaginationState(const AdmittedPaginatedRestRequestProfile &profile);
 
 	LinkPageTransition Advance(const std::vector<std::string> &link_field_values);
+	// Body-sourced continuation: an empty next_url means "no next page"
+	// (the path was absent, the JSON value was null, or pagination is
+	// exhausted). A non-empty URL is validated against the same
+	// reconstruct-and-verify rule as a Link header target.
+	LinkPageTransition AdvanceBody(const std::string &next_url);
 
 	uint64_t CurrentPage() const noexcept;
 	bool Exhausted() const noexcept;

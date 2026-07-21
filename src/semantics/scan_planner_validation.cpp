@@ -113,7 +113,8 @@ void ValidatePagination(const CompiledOperation &operation, const CompiledResour
 		}
 		return;
 	}
-	if (pagination.Strategy() != CompiledPaginationStrategy::LINK_HEADER ||
+	if ((pagination.Strategy() != CompiledPaginationStrategy::LINK_HEADER &&
+	     pagination.Strategy() != CompiledPaginationStrategy::RESPONSE_NEXT_URL) ||
 	    PlanPageDependency(pagination.Dependency()) != PlannedPageDependency::SEQUENTIAL ||
 	    PlanPageConsistency(pagination.Consistency()) != PlannedPageConsistency::MUTABLE ||
 	    PlanLinkRelation(pagination.LinkRelation()) != PlannedLinkRelation::NEXT ||
@@ -123,6 +124,11 @@ void ValidatePagination(const CompiledOperation &operation, const CompiledResour
 	    (rest.response_source != CompiledResponseSource::JSON_PATH_MANY &&
 	     rest.response_source != CompiledResponseSource::ROOT_ARRAY)) {
 		throw std::logic_error("selected relation contains an unsupported pagination capability profile");
+	}
+	if (pagination.Strategy() == CompiledPaginationStrategy::RESPONSE_NEXT_URL &&
+	    (pagination.NextUrlPath().empty() || pagination.NextUrlPath()[0] != '$' ||
+	     pagination.NextUrlPath().find("[*]") != std::string::npos)) {
+		throw std::logic_error("response_next pagination requires a non-collection JSON path");
 	}
 	if (pagination.PageSizeParameter().empty() || pagination.PageNumberParameter().empty() ||
 	    pagination.PageSizeParameter() == pagination.PageNumberParameter() || pagination.PageSize() == 0 ||

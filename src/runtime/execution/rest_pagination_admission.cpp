@@ -76,7 +76,8 @@ bool HasSupportedRestPagination(const ScanPlan &plan, const HttpExecutionProfile
 	if (operation.cardinality != PlannedCardinality::ZERO_TO_MANY ||
 	    (operation.response_source != PlannedResponseSource::ROOT_ARRAY &&
 	     operation.response_source != PlannedResponseSource::JSON_PATH_MANY) ||
-	    plan.Pagination().Strategy() != PlannedPaginationStrategy::LINK_HEADER) {
+	    (plan.Pagination().Strategy() != PlannedPaginationStrategy::LINK_HEADER &&
+	     plan.Pagination().Strategy() != PlannedPaginationStrategy::RESPONSE_NEXT_URL)) {
 		return false;
 	}
 	const auto &pagination = plan.Pagination();

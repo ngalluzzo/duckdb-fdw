@@ -123,6 +123,10 @@ public:
 		return ParseRecordArrayResponse();
 	}
 
+	const std::string &NextUrl() const noexcept {
+		return next_url;
+	}
+
 	uint64_t RetainedMemoryBytes() const noexcept {
 		return decoded_memory;
 	}
@@ -186,7 +190,76 @@ private:
 		if (position != input.size()) {
 			MalformedJson();
 		}
+		// Extract the optional page-level continuation scalar declared by
+		// response_next pagination. The document is already validated; this
+		// focused walk follows the continuation path segments from the root
+		// and extracts the leaf scalar (string, null, or absent). A non-string
+		// non-null leaf is the next_field_wrong_type_rejected case.
+		if (!plan.page_continuation_path.empty()) {
+			position = 0;
+			ExtractContinuation(plan.page_continuation_path, 0);
+		}
 		return result;
+	}
+
+	void ExtractContinuation(const std::vector<std::string> &cont_path, std::size_t cont_depth) {
+		SkipWhitespace();
+		if (Peek() != '{') {
+			return;
+		}
+		Expect('{');
+		SkipWhitespace();
+		bool found = false;
+		while (Peek() != '}') {
+			RequireObjectKey();
+			const auto key = ParseString();
+			SkipWhitespace();
+			Expect(':');
+			SkipWhitespace();
+			if (key == cont_path[cont_depth]) {
+				if (found) {
+					throw ExecutionError(ErrorStage::SCHEMA, cont_path.back(),
+					                     "response_next continuation field is duplicated");
+				}
+				found = true;
+				if (cont_depth + 1 == cont_path.size()) {
+					ExtractContinuationScalar(cont_path);
+				} else if (Peek() == '{') {
+					ExtractContinuation(cont_path, cont_depth + 1);
+				} else {
+					// Intermediate path segment is not an object: the
+					// continuation path is absent (no next page).
+					SkipValue();
+				}
+			} else {
+				SkipValue();
+			}
+			ConsumeObjectSeparator();
+		}
+		Expect('}');
+	}
+
+	void ExtractContinuationScalar(const std::vector<std::string> &cont_path) {
+		if (Peek() == '"') {
+			const auto value = ParseString();
+			uint64_t value_bytes = 0;
+			if (!CheckedAdd(static_cast<uint64_t>(value.capacity()), 0, value_bytes) ||
+			    value_bytes > plan.max_string_bytes) {
+				throw ExecutionError(ErrorStage::RESOURCE, "extracted_string_bytes",
+				                     "response_next continuation URL exceeded the string budget");
+			}
+			next_url = value;
+			return;
+		}
+		if (Peek() == 'n') {
+			ParseLiteral("null");
+			return;
+		}
+		// A present non-string non-null value at the continuation path is the
+		// next_field_wrong_type_rejected case (RFC 0016).
+		SkipValue();
+		throw ExecutionError(ErrorStage::SCHEMA, cont_path.back(),
+		                     "response_next continuation field has an incompatible type");
 	}
 
 	const std::vector<std::string> &EffectiveRecordsPath() const {
@@ -782,6 +855,7 @@ private:
 	ExecutionControl &control;
 	std::size_t position;
 	uint64_t decoded_memory;
+	std::string next_url;
 };
 
 } // namespace
@@ -792,7 +866,7 @@ DecodedJsonPage DecodeJsonPage(const std::string &body, const JsonDecodePlan &pl
 	try {
 		JsonParser parser(body, plan, control);
 		auto rows = parser.ParseResponse();
-		return {std::move(rows), parser.RetainedMemoryBytes()};
+		return {std::move(rows), parser.NextUrl(), parser.RetainedMemoryBytes()};
 	} catch (const ExecutionCancelled &) {
 		throw;
 	} catch (const ExecutionError &) {

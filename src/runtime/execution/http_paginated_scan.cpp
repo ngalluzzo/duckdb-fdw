@@ -42,6 +42,29 @@ JsonDecodePlan BuildPaginatedRestDecodePlan(const AdmittedPaginatedRestRequestPr
 	for (const auto &column : profile.Columns()) {
 		result.columns.push_back(JsonColumnPlan(column.name, column.source_path, column.kind, column.nullable));
 	}
+	// response_next: declare the page-level continuation path so the decoder
+	// extracts the body URL during the same pass that produces rows. The path
+	// arrives as a json_path_v1 string ($.field.field); split it into segments
+	// for the decoder.
+	if (profile.PaginationStrategy() == PlannedPaginationStrategy::RESPONSE_NEXT_URL &&
+	    !profile.NextUrlPath().empty()) {
+		std::vector<std::string> segments;
+		const auto &path = profile.NextUrlPath();
+		std::size_t start = 0;
+		if (path.size() >= 2 && path[0] == '$' && path[1] == '.') {
+			start = 2;
+		}
+		while (start < path.size()) {
+			const auto dot = path.find('.', start);
+			if (dot == std::string::npos) {
+				segments.emplace_back(path, start);
+				break;
+			}
+			segments.emplace_back(path, start, dot - start);
+			start = dot + 1;
+		}
+		result.page_continuation_path = std::move(segments);
+	}
 	result.max_records = budgets.decoded_records;
 	result.max_string_bytes = budgets.extracted_string_bytes;
 	result.max_json_nesting = budgets.json_nesting;
@@ -261,7 +284,12 @@ private:
 		                                                        decoder_memory, allowance.deadline),
 		                           control);
 		CheckState(control, allowance.deadline);
-		const auto transition = pagination.Advance(response.metadata.link_field_values);
+		// response_next reads the continuation signal from the decoded body
+		// (page.next_url); link_next reads it from response headers. Both
+		// share the same reconstruct-and-verify state machine.
+		const auto transition = admitted_profile->PaginationStrategy() == PlannedPaginationStrategy::RESPONSE_NEXT_URL
+		                            ? pagination.AdvanceBody(page.next_url)
+		                            : pagination.Advance(response.metadata.link_field_values);
 		const auto retained_memory = page.retained_memory_bytes + response.metadata.retained_bytes;
 		accounting.CommitDecodedPage({static_cast<uint64_t>(page.rows.size()), retained_memory});
 		decoded.Install(std::move(page.rows));

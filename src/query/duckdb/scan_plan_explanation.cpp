@@ -202,6 +202,8 @@ const char *PaginationStrategyName(duckdb_api::PlannedPaginationStrategy strateg
 		return "disabled";
 	case duckdb_api::PlannedPaginationStrategy::LINK_HEADER:
 		return "link_header";
+	case duckdb_api::PlannedPaginationStrategy::RESPONSE_NEXT_URL:
+		return "response_next";
 	case duckdb_api::PlannedPaginationStrategy::GRAPHQL_CURSOR:
 		return "graphql_cursor";
 	}
@@ -270,7 +272,8 @@ void AddPaginationFacts(InsertionOrderPreservingMap<string> &result, const duckd
 		result["Resume Support"] = "unavailable";
 		return;
 	}
-	if (strategy == duckdb_api::PlannedPaginationStrategy::LINK_HEADER) {
+	if (strategy == duckdb_api::PlannedPaginationStrategy::LINK_HEADER ||
+	    strategy == duckdb_api::PlannedPaginationStrategy::RESPONSE_NEXT_URL) {
 		result["Page Dependency"] = PageDependencyName(plan.Pagination().Dependency());
 		result["Page Consistency"] = PageConsistencyName(plan.Pagination().Consistency());
 		result["Page Size"] = std::to_string(plan.Pagination().Target().page_size);

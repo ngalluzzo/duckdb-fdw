@@ -137,13 +137,18 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	} else if (operation.Protocol() == CompiledProtocol::REST) {
 		const auto &rest = operation.Rest();
 		const auto &compiled_pagination = rest.pagination;
-		result.pagination.strategy = PlannedPaginationStrategy::LINK_HEADER;
+		result.pagination.strategy = compiled_pagination.Strategy() == CompiledPaginationStrategy::RESPONSE_NEXT_URL
+		                                 ? PlannedPaginationStrategy::RESPONSE_NEXT_URL
+		                                 : PlannedPaginationStrategy::LINK_HEADER;
 		result.pagination.dependency = PlanPageDependency(compiled_pagination.Dependency());
 		result.pagination.consistency = PlanPageConsistency(compiled_pagination.Consistency());
 		result.pagination.link_relation = PlanLinkRelation(compiled_pagination.LinkRelation());
 		result.pagination.target_scope = PlanTargetScope(compiled_pagination.TargetScope());
 		result.pagination.supports_total = compiled_pagination.SupportsTotal();
 		result.pagination.supports_resume = compiled_pagination.SupportsResume();
+		if (compiled_pagination.Strategy() == CompiledPaginationStrategy::RESPONSE_NEXT_URL) {
+			result.pagination.next_url_path = compiled_pagination.NextUrlPath();
+		}
 		result.pagination.target = {
 		    {PlanUrlScheme(rest.request.origin.scheme), rest.request.origin.host.Value(), rest.request.origin.port},
 		    rest.request.path,

@@ -260,7 +260,7 @@ struct ScanResourceBudgets {
 	bool IsWithinPaginatedScanBounds() const;
 };
 
-enum class PlannedPaginationStrategy { DISABLED, LINK_HEADER, GRAPHQL_CURSOR };
+enum class PlannedPaginationStrategy { DISABLED, LINK_HEADER, RESPONSE_NEXT_URL, GRAPHQL_CURSOR };
 enum class PlannedPageDependency { SEQUENTIAL };
 enum class PlannedPageConsistency { MUTABLE };
 enum class PlannedLinkRelation { NEXT };
@@ -302,6 +302,10 @@ public:
 	bool SupportsResume() const;
 	const PlannedPaginationTarget &Target() const;
 	const PlannedGraphqlCursor &GraphqlCursor() const;
+	// RESPONSE_NEXT_URL only: declared JSON body path Runtime reads to
+	// extract the continuation URL. Accessing on a non-RESPONSE_NEXT_URL
+	// plan is a logic error.
+	const std::string &NextUrlPath() const;
 	const ResourceBudgets &PageBudgets() const;
 	const ScanResourceBudgets &ScanBudgets() const;
 
@@ -312,7 +316,7 @@ private:
 	friend class ScanPlanBuilder;
 
 	PaginationPlan();
-	void RequireLinkHeader() const;
+	void RequirePaginated() const;
 
 	PlannedPaginationStrategy strategy;
 	PlannedPageDependency dependency;
@@ -323,6 +327,8 @@ private:
 	bool supports_resume;
 	PlannedPaginationTarget target;
 	PlannedGraphqlCursor graphql_cursor;
+	// RESPONSE_NEXT_URL only: empty for other strategies.
+	std::string next_url_path;
 	ResourceBudgets page_budgets;
 	ScanResourceBudgets scan_budgets;
 };
