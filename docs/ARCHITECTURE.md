@@ -308,8 +308,11 @@ required.
 
 ## Atomic catalog publication
 
-Package compilation and Runtime staging happen outside the Query publication
-lock. At the publication point, Query:
+Package compilation happens before publication locks. Runtime staging then
+acquires the Runtime generation lease, validates the exact base snapshot,
+Connector decision pair, and inseparable generation/canonical-root custody,
+and fully builds an immutable target snapshot. With that lease still held,
+Query:
 
 1. acquires a cancelable DatabaseInstance-scoped publication guard;
 2. rejects a stale base generation;
@@ -318,11 +321,13 @@ lock. At the publication point, Query:
 4. begins one DuckDB system-catalog transaction;
 5. replaces only names owned by the same connector and refreshes management
    and introspection functions against the same immutable registry snapshot;
-6. commits or rolls back while still holding the guard; and
+6. commits or rolls back the Runtime lease while still holding the guard; and
 7. releases an unpublished candidate on every failure path.
 
-There is one observable commit point: DuckDB catalog MVCC. The system does not
-publish a second independently visible mutable registry.
+The sole nested lock order is Runtime generation lease -> Query catalog guard.
+The Runtime active pointer is an internal lifetime index aligned by the same
+transaction callback, not a second user-visible catalog. Immutable Runtime
+snapshot reads acquire neither publication lock, and no scan holds either.
 
 Load fails if the connector ID is already active. Reload uses Connector's
 normalized compatibility result. An identical digest is a successful no-op.

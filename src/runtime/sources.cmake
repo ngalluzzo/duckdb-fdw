@@ -3,6 +3,10 @@
 set(REMOTE_RUNTIME_INTERFACE_SOURCES
     src/runtime/api/authorization.cpp
     src/runtime/api/execution_error.cpp)
+set(REMOTE_RUNTIME_GENERATION_SOURCES
+    src/runtime/generation/generation_snapshot.cpp
+    src/runtime/generation/generation_publication.cpp
+    src/runtime/generation/generation_registry.cpp)
 set(REMOTE_RUNTIME_PAGINATION_SOURCES
     src/runtime/pagination/uri_reference.cpp
     src/runtime/pagination/link_header.cpp

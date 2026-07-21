@@ -159,6 +159,8 @@ run_build() {
         duckdb_api_scan_plan_fixture_tests \
         duckdb_api_graphql_semantics_tests \
         duckdb_api_execution_contract_tests \
+        duckdb_api_runtime_generation_contract_tests \
+        duckdb_api_runtime_generation_lifecycle_tests \
         duckdb_api_authorization_contract_tests \
         duckdb_api_network_policy_tests \
         duckdb_api_uri_reference_tests \
@@ -251,6 +253,8 @@ run_tests() {
     "${NATIVE_TEST_ROOT}/duckdb_api_scan_plan_fixture_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_graphql_semantics_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_execution_contract_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_runtime_generation_contract_tests" "${REPOSITORY_ROOT}"
+    "${NATIVE_TEST_ROOT}/duckdb_api_runtime_generation_lifecycle_tests" "${REPOSITORY_ROOT}"
     "${NATIVE_TEST_ROOT}/duckdb_api_authorization_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_network_policy_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_uri_reference_tests"

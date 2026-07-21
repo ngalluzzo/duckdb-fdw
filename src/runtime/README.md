@@ -51,6 +51,7 @@ and produces SQL NULL only for declared nullable columns.
 | `authentication/` | Credential placement and request-header enforcement |
 | `decoding/` | JSON syntax, typed projection, conversion, and decoded-memory ownership |
 | `execution/` | Protocol admission, immutable request profiles, executor dispatch, pull state, cancellation, failure, close, and page lifecycle. REST admission is split into request materialization, relational authority, network/auth authority, pagination, and orchestration modules. |
+| `generation/` | Immutable active snapshots, exact reload-decision admission, serialized staging leases, atomic publication, and database close |
 | `pagination/` | URI and Link grammar or the sequential next-page policy |
 | `policy/` | Network-address rules and page/scan resource accounting |
 | `transport/` | Curl lifetime, request configuration, callbacks, response accumulation, and HTTP framing |
@@ -58,7 +59,13 @@ and produces SQL NULL only for declared nullable columns.
 Public consumer contracts are
 [`authorization.hpp`](../include/duckdb_api/authorization.hpp),
 [`execution.hpp`](../include/duckdb_api/execution.hpp), and
-[`http_runtime.hpp`](../include/duckdb_api/http_runtime.hpp). Headers under
+[`http_runtime.hpp`](../include/duckdb_api/http_runtime.hpp). Generation
+composition additionally consumes
+[`runtime_generation_registry.hpp`](../include/duckdb_api/runtime_generation_registry.hpp),
+which depends only on Connector's public opaque local-package custody service
+and Runtime execution control; it links no source acquisition, YAML, compiler,
+Query, catalog, or DuckDB implementation and does not implement Query's
+publication port. Headers under
 `duckdb_api/internal/runtime/` are private. Production and test inventories are
 in the package `sources.cmake` and `targets.cmake` files.
 
@@ -71,6 +78,10 @@ in the package `sources.cmake` and `targets.cmake` files.
   builder. Only the typed conditional input may select the admitted fixed field.
 - Keep credentials inside opaque, move-only capabilities bound to approved
   authenticators, placements, and hosts. Diagnostics must remain redacted.
+- Acquire a Runtime generation lease before the Query catalog guard. Finish
+  every fallible target-snapshot operation during staging; terminal commit is
+  only an atomic snapshot exchange. Keep discard, close, and destruction
+  non-throwing and idempotent.
 - Treat terminal failure as failure, never clean exhaustion.
 - Debit the complete GraphQL body before bearer placement, and subtract
   persistent seen-cursor storage from every decoded-page memory allowance.
@@ -100,6 +111,8 @@ Tests mirror the production directories under `test/cpp/runtime/`:
 - `api/` covers authorization, batches, errors, and stream contracts;
 - `policy/`, `pagination/`, and `decoding/` contain deterministic unit oracles;
 - `execution/` uses controlled transports and Semantics-owned plan fixtures;
+- `generation/` covers immutable ownership, exact decision pairs, publication
+  serialization, cancellation, stale bases, and close;
 - `transport/` contains real-curl, TLS, budget, pagination, policy, and lifecycle
   oracles;
 - `support/` contains bounded test services and private probes, not production
@@ -108,6 +121,7 @@ Tests mirror the production directories under `test/cpp/runtime/`:
 | Change area | Focused targets |
 | --- | --- |
 | Authorization and stream values | `duckdb_api_authorization_contract_tests`, `duckdb_api_execution_contract_tests` |
+| Generation ownership and publication lifecycle | `duckdb_api_runtime_generation_contract_tests`, `duckdb_api_runtime_generation_lifecycle_tests` |
 | Request, network, and resource policy | `duckdb_api_request_validation_tests`, `duckdb_api_network_policy_tests`, `duckdb_api_scan_resource_accounting_tests` |
 | URI and Link pagination | `duckdb_api_uri_reference_tests`, `duckdb_api_link_pagination_tests` |
 | JSON and decoded-page ownership | `duckdb_api_json_decoder_tests`, `duckdb_api_json_root_array_decoder_tests`, `duckdb_api_decoded_page_buffer_tests` |
@@ -118,6 +132,10 @@ Tests mirror the production directories under `test/cpp/runtime/`:
 | Runtime-private programmable and curl fixtures | `duckdb_api_runtime_programmable_test_service`, `duckdb_api_runtime_loopback_curl_test_service` (`runtime/support/controlled_http_transport.hpp`, `runtime/support/loopback_curl_runtime.hpp`) |
 | REST admission, executor, and page lifecycle | `duckdb_api_rest_plan_admission_tests`, `duckdb_api_http_scan_executor_tests`, `duckdb_api_http_scan_executor_policy_tests`, `duckdb_api_http_scan_pagination_tests` |
 | Curl transport and lifecycle | Targets beginning `duckdb_api_curl_` in `test/cpp/runtime/targets.cmake` |
+
+The generation contract and lifecycle binaries are curl-free. Both the
+reusable `make test` path and fresh `make verify` path execute them and verify
+their linkage before any product handoff.
 
 `make test` runs every focused Runtime executable. Run `make build` before
 invoking a target from `<build_root>/extension/duckdb_api/`, where `build_root`

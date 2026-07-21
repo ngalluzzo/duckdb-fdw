@@ -7,6 +7,22 @@ target_link_libraries(
   duckdb_api_execution_contract_tests
   PRIVATE duckdb_api_runtime_interface_service)
 
+foreach(generation_test contract lifecycle)
+  add_executable(
+    duckdb_api_runtime_generation_${generation_test}_tests
+    test/cpp/runtime/generation/generation_registry_${generation_test}_tests.cpp)
+  configure_duckdb_api_cpp_target(
+    duckdb_api_runtime_generation_${generation_test}_tests)
+  target_include_directories(
+    duckdb_api_runtime_generation_${generation_test}_tests
+    PRIVATE test/cpp)
+  target_link_libraries(
+    duckdb_api_runtime_generation_${generation_test}_tests
+    PRIVATE duckdb_api_runtime_generation_service
+            duckdb_api_package_compiler_fixture_service
+            Threads::Threads)
+endforeach()
+
 add_executable(
   duckdb_api_authorization_contract_tests
   test/cpp/runtime/api/authorization_contract_tests.cpp)

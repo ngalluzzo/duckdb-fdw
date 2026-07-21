@@ -355,24 +355,56 @@ Query-facing planning interface without transferring those responsibilities.
 Remote Runtime owns immutable registry snapshots and generation retention:
 
 ```text
-StageGeneration(candidate, base_snapshot, cancellation)
-    -> staged_generation
-
-CommitPublishedGeneration(staged_generation)
-    -> immutable registry snapshot
+RuntimeGenerationRegistry::StageLoad(compiled_local_package,
+                                     base_snapshot, cancellation)
+RuntimeGenerationRegistry::StageReload(compiled_local_package,
+                                       base_snapshot,
+                                       connector_reload_decision,
+                                       cancellation)
+    -> owner + target_snapshot + optional Runtime publication lease
 ```
 
 The lead-owned coordinator composes Connector compilation, Runtime staging, and
 Query catalog publication. Query owns the observable DuckDB catalog commit;
 Runtime does not mutate DuckDB objects or interpret catalog timestamps.
+Runtime's public capability does not implement or include Query's publication
+port. Lead composition adapts the move-only capability at that boundary.
+
+Every Runtime owner retains Connector's complete `CompiledLocalPackage`, not a
+separately supplied generation. Runtime may inspect only the public immutable
+generation and return the opaque pair to Connector for retained-root reload;
+it cannot inspect, copy out, or reconstruct source custody. A default package
+fails before owner construction.
+
+Staging is serialized per registry. It validates that the supplied base is the
+exact active snapshot and that Connector's `PackageReloadDecision` matches the
+exact active/candidate generation handles. A changed candidate is fully
+allocated into an immutable target snapshot before the returned lease can
+reach Query. An exact no-op returns the active owner and base snapshot with no
+lease; Runtime retains no candidate ownership or custody.
+
+Lead composition acquires the Runtime lease before Query acquires its catalog
+publication guard. Query invokes the adapted terminal method before releasing
+that guard, establishing the sole nested order Runtime lease -> Query catalog.
+Commit performs only an atomic shared-snapshot exchange and unlock. Discard,
+lease destruction, and registry destruction are non-throwing and idempotent.
+Immutable snapshot reads take neither publication lock, so scans and retained
+owners never wait for a staged catalog transaction.
 
 Each Query catalog entry carries the opaque registry/generation owner matching
 that MVCC generation. Introspection resolves through the same catalog snapshot.
 Execution never performs a mutable connector-name lookup.
 
-Staging owns candidate resources and closes them on cancellation or failure.
-Exact digest reload is a no-op. Compatibility is supplied by Connector's
-normalized classifier; Runtime does not infer it from version text.
+Staging owns candidate resources and releases them on cancellation, rejection,
+discard, or failure. Compatibility is supplied by Connector's normalized
+classifier; Runtime does not infer it from version text. A compatibility
+rejection preserves Connector's exact diagnostic code and `compatibility`
+phase on `RuntimeGenerationError`, together with Runtime-owned fixed safe
+detail; no package path, source coordinate, or explanation text crosses that
+error boundary. Close marks the registry before waiting: queued and future
+staging fail, the current lease holder may reach one terminal transition, and
+then registry ownership is released. Independently retained snapshots, owners,
+and their opaque canonical-root custody remain valid.
 
 ## Authorization capability
 
@@ -520,9 +552,11 @@ stream state. Failure or cancellation of one stream cannot poison another.
 
 ## Publication and database lifecycle
 
-The Query catalog coordinator serializes publication per DatabaseInstance and
-holds its guard through DuckDB transaction commit or rollback. Candidate name,
-ownership, and collision checks run under that guard. No scan holds the guard.
+Runtime serializes generation staging per DatabaseInstance; Query separately
+serializes catalog publication and holds its guard through DuckDB transaction
+commit or rollback. The Runtime lease is acquired first and its terminal method
+runs before the Query guard is released. Candidate name, ownership, and
+collision checks run under the Query guard. No scan holds either guard.
 
 Management bind is offline. Execution stages local compilation before waiting
 for publication and rechecks cancellation immediately before and after lock
@@ -530,8 +564,9 @@ acquisition. Once bounded catalog commit begins, the call either publishes and
 reports success or rolls back and reports failure; it cannot publish after
 reporting cancellation.
 
-The lifecycle sentry rejects future/queued publications after close and lets a
-current lock owner drain. Registry generations release only after their final
+The lifecycle sentry closes Runtime and Query publication admission, rejects
+future/queued publications, and lets a current lock owner drain. Registry
+generations and retained-root custody release only after their final
 catalog, transaction, prepared-plan, bind, or scan owner ends. Destructors
 contain exceptions. Dynamic DSO unload is not supported.
 
