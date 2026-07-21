@@ -420,7 +420,13 @@ classifier; Runtime does not infer it from version text. A compatibility
 rejection preserves Connector's exact diagnostic code and `compatibility`
 phase on `RuntimeGenerationError`, together with Runtime-owned fixed safe
 detail; no package path, source coordinate, or explanation text crosses that
-error boundary. Close marks the registry before waiting: queued and future
+error boundary. Lead composition preserves that compatibility record, maps
+every other registry-coordination refusal to
+`DUCKDB_API_PUBLICATION_CONFLICT` in the `publication` phase, and carries
+Connector compiler coordinates unchanged into Query's structured staging
+error. Query renders the package-relative `file`, paired one-based `line` and
+`column`, and optional `$`-rooted `yaml_path` without interpreting package
+source. Close marks the registry before waiting: queued and future
 staging fail, the current lease holder may reach one terminal transition, and
 then registry ownership is released. Independently retained snapshots, owners,
 and their opaque canonical-root custody remain valid.

@@ -172,6 +172,7 @@ target_include_directories(
 target_link_libraries(
   duckdb_api_package_product_contract_tests
   PRIVATE duckdb_api_package_generation_composition_service
+          duckdb_api_package_compiler_fixture_service
           duckdb_api_query_package_catalog_service
           dummy_static_extension_loader
           duckdb_static

@@ -49,9 +49,10 @@ void TestCompileStagePublishReloadAndClose(const std::string &repository_root) {
 	try {
 		(void)staging->StageReload("github", load.Generation(), control);
 	} catch (const duckdb_api::QueryStagingError &error) {
-		rejected = error.Code() == "DUCKDB_API_RUNTIME_CLOSING" && error.Phase() == "runtime";
+		rejected = error.Code() == "DUCKDB_API_PUBLICATION_CONFLICT" && error.Phase() == "publication" &&
+		           error.File().empty() && !error.HasLineAndColumn() && error.YamlPath().empty();
 	}
-	Require(rejected, "closed package composition did not reject new staging through a safe Runtime diagnostic");
+	Require(rejected, "closed package composition did not reject staging through the public publication diagnostic");
 }
 
 } // namespace

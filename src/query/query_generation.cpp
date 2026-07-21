@@ -22,14 +22,15 @@ bool IsSafeDiagnosticPart(const std::string &value, bool allow_empty) {
 
 } // namespace
 
-QueryStagingError::QueryStagingError(std::string code_p, std::string phase_p, std::string source_p, std::string field_p,
-                                     std::string safe_detail_p)
-    : code(std::move(code_p)), phase(std::move(phase_p)), source(std::move(source_p)), field(std::move(field_p)),
-      safe_detail(std::move(safe_detail_p)), message() {
+QueryStagingError::QueryStagingError(std::string code_p, std::string phase_p, std::string file_p, std::uint64_t line_p,
+                                     std::uint64_t column_p, std::string yaml_path_p, std::string safe_detail_p)
+    : code(std::move(code_p)), phase(std::move(phase_p)), file(std::move(file_p)), line(line_p), column(column_p),
+      yaml_path(std::move(yaml_path_p)), safe_detail(std::move(safe_detail_p)), message() {
 	if (!IsSafeDiagnosticPart(code, false) || !IsSafeDiagnosticPart(phase, false) ||
-	    !IsSafeDiagnosticPart(source, true) || !IsSafeDiagnosticPart(field, true) ||
-	    !IsSafeDiagnosticPart(safe_detail, false) || (!source.empty() && source[0] == '/') ||
-	    source.find("..") != std::string::npos) {
+	    !IsSafeDiagnosticPart(file, true) || !IsSafeDiagnosticPart(yaml_path, true) ||
+	    !IsSafeDiagnosticPart(safe_detail, false) || (!file.empty() && file[0] == '/') ||
+	    file.find("..") != std::string::npos || ((line == 0) != (column == 0)) || (line != 0 && file.empty()) ||
+	    (!yaml_path.empty() && (file.empty() || yaml_path[0] != '$'))) {
 		throw std::invalid_argument("Query staging diagnostic is not safely renderable");
 	}
 	message = code + ": " + safe_detail;
@@ -47,12 +48,24 @@ const std::string &QueryStagingError::Phase() const noexcept {
 	return phase;
 }
 
-const std::string &QueryStagingError::Source() const noexcept {
-	return source;
+const std::string &QueryStagingError::File() const noexcept {
+	return file;
 }
 
-const std::string &QueryStagingError::Field() const noexcept {
-	return field;
+bool QueryStagingError::HasLineAndColumn() const noexcept {
+	return line != 0;
+}
+
+std::uint64_t QueryStagingError::Line() const noexcept {
+	return line;
+}
+
+std::uint64_t QueryStagingError::Column() const noexcept {
+	return column;
+}
+
+const std::string &QueryStagingError::YamlPath() const noexcept {
+	return yaml_path;
 }
 
 const std::string &QueryStagingError::SafeDetail() const noexcept {

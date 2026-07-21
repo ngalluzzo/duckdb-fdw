@@ -92,12 +92,13 @@ private:
 
 [[noreturn]] void ThrowCompilationFailure(const connector::PackageCompileResult &result) {
 	if (result.Diagnostics().empty()) {
-		throw QueryStagingError("DUCKDB_API_PACKAGE_COMPILATION", "compile", "", "",
+		throw QueryStagingError("DUCKDB_API_PACKAGE_COMPILATION", "compile", "", 0, 0, "",
 		                        "local package compilation failed safely");
 	}
 	const auto &diagnostic = result.Diagnostics().front();
 	throw QueryStagingError(connector::PackageDiagnosticCodeName(diagnostic.Code()),
 	                        connector::PackageDiagnosticPhaseName(diagnostic.Phase()), diagnostic.Coordinate().file,
+	                        diagnostic.Coordinate().line, diagnostic.Coordinate().column,
 	                        diagnostic.Coordinate().yaml_path, "local package compilation rejected the package");
 }
 
@@ -119,31 +120,12 @@ connector::PackageCompileResult Recompile(const CompiledLocalPackage &active, co
 	}
 }
 
-const char *RuntimeFailureCode(RuntimeGenerationFailure failure) noexcept {
-	switch (failure) {
-	case RuntimeGenerationFailure::REGISTRY_CLOSING:
-		return "DUCKDB_API_RUNTIME_CLOSING";
-	case RuntimeGenerationFailure::STALE_BASE:
-		return "DUCKDB_API_STALE_GENERATION";
-	case RuntimeGenerationFailure::INVALID_LOCAL_PACKAGE:
-		return "DUCKDB_API_INVALID_LOCAL_PACKAGE";
-	case RuntimeGenerationFailure::CONNECTOR_ALREADY_ACTIVE:
-		return "DUCKDB_API_CONNECTOR_ALREADY_ACTIVE";
-	case RuntimeGenerationFailure::CONNECTOR_NOT_ACTIVE:
-		return "DUCKDB_API_CONNECTOR_NOT_ACTIVE";
-	case RuntimeGenerationFailure::RELOAD_DECISION_MISMATCH:
-		return "DUCKDB_API_RELOAD_DECISION_MISMATCH";
-	case RuntimeGenerationFailure::RELOAD_REJECTED:
-		return "DUCKDB_API_RELOAD_REJECTED";
-	}
-	return "DUCKDB_API_RUNTIME_GENERATION";
-}
-
 [[noreturn]] void ThrowRuntimeFailure(const RuntimeGenerationError &error) {
 	if (error.HasConnectorDiagnostic()) {
-		throw QueryStagingError(error.DiagnosticCode(), error.DiagnosticPhase(), "", "", error.what());
+		throw QueryStagingError(error.DiagnosticCode(), error.DiagnosticPhase(), "", 0, 0, "", error.what());
 	}
-	throw QueryStagingError(RuntimeFailureCode(error.Failure()), "runtime", "", "", error.what());
+	throw QueryStagingError("DUCKDB_API_PUBLICATION_CONFLICT", "publication", "", 0, 0, "",
+	                        "package generation publication conflicted with active state");
 }
 
 class ProductPackageStagingService final : public QueryPackageStagingService {
@@ -175,13 +157,13 @@ public:
 	                                  ExecutionControl &control) const override {
 		RequireOpen();
 		if (!active || active->Registration().Identity().ConnectorId() != connector_id) {
-			throw QueryStagingError("DUCKDB_API_PACKAGE_IDENTITY", "compatibility", "", "",
+			throw QueryStagingError("DUCKDB_API_PACKAGE_IDENTITY", "compatibility", "", 0, 0, "",
 			                        "reload does not match the active connector generation");
 		}
 		auto owner = std::dynamic_pointer_cast<const ProductGenerationOwner>(active->Owner());
 		if (!owner || !owner->RuntimeOwner()->Generation().OpaqueHandle().IsSameGeneration(
 		                  active->Registration().GenerationHandle())) {
-			throw QueryStagingError("DUCKDB_API_PACKAGE_IDENTITY", "compatibility", "", "",
+			throw QueryStagingError("DUCKDB_API_PACKAGE_IDENTITY", "compatibility", "", 0, 0, "",
 			                        "reload active generation ownership is invalid");
 		}
 		PackageCancellationAdapter cancellation(control);

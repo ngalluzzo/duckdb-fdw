@@ -10,6 +10,7 @@
 #include "duckdb_api/query_generation.hpp"
 
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -131,19 +132,19 @@ unique_ptr<GlobalTableFunctionState> InitManagement(ClientContext &, TableFuncti
 }
 
 [[noreturn]] void ThrowStagingError(const duckdb_api::QueryStagingError &error) {
-	if (!error.Source().empty() && !error.Field().empty()) {
-		throw InvalidInputException("[duckdb_api][%s] code=%s source=%s field=%s: %s", error.Phase(), error.Code(),
-		                            error.Source(), error.Field(), error.SafeDetail());
+	std::ostringstream rendered;
+	rendered << "[duckdb_api][" << error.Phase() << "] code=" << error.Code();
+	if (!error.File().empty()) {
+		rendered << " file=" << error.File();
 	}
-	if (!error.Source().empty()) {
-		throw InvalidInputException("[duckdb_api][%s] code=%s source=%s: %s", error.Phase(), error.Code(),
-		                            error.Source(), error.SafeDetail());
+	if (error.HasLineAndColumn()) {
+		rendered << " line=" << error.Line() << " column=" << error.Column();
 	}
-	if (!error.Field().empty()) {
-		throw InvalidInputException("[duckdb_api][%s] code=%s field=%s: %s", error.Phase(), error.Code(), error.Field(),
-		                            error.SafeDetail());
+	if (!error.YamlPath().empty()) {
+		rendered << " yaml_path=" << error.YamlPath();
 	}
-	throw InvalidInputException("[duckdb_api][%s] code=%s: %s", error.Phase(), error.Code(), error.SafeDetail());
+	rendered << ": " << error.SafeDetail();
+	throw InvalidInputException("%s", rendered.str());
 }
 
 void ValidateStaged(const ManagementBindData &data, const duckdb_api::QueryStagedGeneration &staged) {

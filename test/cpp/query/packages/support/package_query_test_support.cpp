@@ -263,7 +263,7 @@ duckdb_api::QueryStagedGeneration PackageQueryStagingService::StageLoad(const st
 		throw duckdb_api::ExecutionCancelled();
 	}
 	if (absolute_root != accepted_root) {
-		throw duckdb_api::QueryStagingError("package_root", "compile", "connector.yaml", "package_root",
+		throw duckdb_api::QueryStagingError("package_root", "compile", "connector.yaml", 1, 1, "$.package_root",
 		                                    "package root is not the controlled fixture");
 	}
 	return duckdb_api::QueryStagedGeneration(

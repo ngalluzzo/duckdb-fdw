@@ -4,6 +4,7 @@
 #include "duckdb_api/execution.hpp"
 #include "duckdb_api/scan_request.hpp"
 
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <string>
@@ -11,26 +12,32 @@
 namespace duckdb_api {
 
 // Redacted structured failure produced by lead composition while staging a
-// package. Source is package-relative and detail is bounded safe prose; Query
-// maps this once to DuckDB without seeing an absolute root, source scalar,
-// request data, or credential material.
+// package. File is package-relative; line and column are one-based and either
+// both present or both absent. YamlPath is already validated provider output,
+// never Query interpretation. Query maps this record once to DuckDB without
+// seeing an absolute root, source scalar, request data, or credential material.
 class QueryStagingError : public std::exception {
 public:
-	QueryStagingError(std::string code, std::string phase, std::string source, std::string field,
-	                  std::string safe_detail);
+	QueryStagingError(std::string code, std::string phase, std::string file, std::uint64_t line, std::uint64_t column,
+	                  std::string yaml_path, std::string safe_detail);
 
 	const char *what() const noexcept override;
 	const std::string &Code() const noexcept;
 	const std::string &Phase() const noexcept;
-	const std::string &Source() const noexcept;
-	const std::string &Field() const noexcept;
+	const std::string &File() const noexcept;
+	bool HasLineAndColumn() const noexcept;
+	std::uint64_t Line() const noexcept;
+	std::uint64_t Column() const noexcept;
+	const std::string &YamlPath() const noexcept;
 	const std::string &SafeDetail() const noexcept;
 
 private:
 	std::string code;
 	std::string phase;
-	std::string source;
-	std::string field;
+	std::string file;
+	std::uint64_t line;
+	std::uint64_t column;
+	std::string yaml_path;
 	std::string safe_detail;
 	std::string message;
 };

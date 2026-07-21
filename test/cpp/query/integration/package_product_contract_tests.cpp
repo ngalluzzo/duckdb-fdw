@@ -5,6 +5,7 @@
 #include "duckdb_api/package_generation_composition.hpp"
 #include "duckdb_api/scan_planner.hpp"
 #include "duckdb_api_extension.hpp"
+#include "connector/support/local_package_source_test_fixtures.hpp"
 #include "support/require.hpp"
 
 #include <atomic>
@@ -123,11 +124,21 @@ void TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(const std::strin
 	duckdb::RegisterDuckdbApiSecrets(loader);
 	duckdb::RegisterDuckdbApiPackageSurface(loader, duckdb_api::BuildPackageGenerationComposition(executor));
 	duckdb::Connection connection(database);
-	auto load = connection.Query("CALL system.main.duckdb_api_load_connector(package_root := '" + repository_root +
-	                             "/docs/rfcs/evidence/0013/github')");
+	const auto package_root = repository_root + "/docs/rfcs/evidence/0013/github";
+	auto load = connection.Query("CALL system.main.duckdb_api_load_connector(package_root := '" + package_root + "')");
 	Require(!load->HasError() && load->RowCount() == 1 && load->GetValue(4, 0).GetValue<std::uint64_t>() == 4 &&
 	            load->GetValue(5, 0).GetValue<bool>(),
 	        "actual DuckDB did not publish the real compiler generation through product composition");
+	auto duplicate =
+	    connection.Query("CALL system.main.duckdb_api_load_connector(package_root := '" + package_root + "')");
+	const auto duplicate_error = duplicate->GetError();
+	Require(duplicate->HasError() &&
+	            duplicate_error.find("[duckdb_api][publication] code=DUCKDB_API_PUBLICATION_CONFLICT:") !=
+	                std::string::npos &&
+	            duplicate_error.find("DUCKDB_API_CONNECTOR_ALREADY_ACTIVE") == std::string::npos &&
+	            duplicate_error.find("[duckdb_api][runtime]") == std::string::npos &&
+	            duplicate_error.find(package_root) == std::string::npos,
+	        "duplicate actual-DuckDB load did not expose only the public publication conflict");
 	for (const auto &name : {"github_authenticated_repositories", "github_authenticated_user",
 	                         "github_duckdb_login_search_page", "github_viewer_repository_metrics"}) {
 		auto found = connection.Query("SELECT count(*) FROM duckdb_functions() WHERE database_name = 'system' "
@@ -162,6 +173,19 @@ void TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(const std::strin
 	auto secret = connection.Query("CREATE TEMPORARY SECRET package_product "
 	                               "(TYPE duckdb_api, PROVIDER config, TOKEN 'package-product-token')");
 	Require(!secret->HasError(), "actual-DuckDB package product could not create its logical secret");
+	const auto malformed = duckdb_api_test::BuildRepositoryMalformedYamlPackageFixture(repository_root);
+	auto invalid =
+	    connection.Query("CALL system.main.duckdb_api_load_connector(package_root := '" + malformed.Root() + "')");
+	const auto invalid_error = invalid->GetError();
+	Require(invalid->HasError() &&
+	            invalid_error.find("[duckdb_api][syntax] code=DUCKDB_API_MALFORMED_YAML "
+	                               "file=relations/viewer_repository_metrics.yaml line=1 column=15 yaml_path=$:") !=
+	                std::string::npos &&
+	            invalid_error.find(malformed.Root()) == std::string::npos &&
+	            invalid_error.find(package_root) == std::string::npos &&
+	            invalid_error.find("package-product-token") == std::string::npos &&
+	            invalid_error.find("api_version") == std::string::npos,
+	        "invalid actual-DuckDB package did not preserve its safe compiler source coordinate");
 	auto authenticated = connection.Query(
 	    "SELECT id, login, site_admin FROM system.main.github_authenticated_user(secret := 'package_product')");
 	Require(!authenticated->HasError() && authenticated->RowCount() == 1 &&
@@ -174,6 +198,9 @@ void TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(const std::strin
 	auto reload = connection.Query("CALL system.main.duckdb_api_reload_connector(connector := 'github')");
 	Require(!reload->HasError() && reload->RowCount() == 1 && !reload->GetValue(5, 0).GetValue<bool>(),
 	        "byte-identical actual-DuckDB package reload was not changed=false");
+	auto final_inventory = connection.Query("SELECT count(*) FROM system.main.duckdb_api_loaded_relations()");
+	Require(!final_inventory->HasError() && final_inventory->GetValue(0, 0).GetValue<int64_t>() == 4,
+	        "rejected duplicate or invalid package changed the active DuckDB catalog generation");
 }
 
 } // namespace
