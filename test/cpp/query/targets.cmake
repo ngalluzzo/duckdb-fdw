@@ -145,6 +145,38 @@ target_link_libraries(
           duckdb_static
           Threads::Threads)
 
+# The lead-composition oracle exercises only public provider services and
+# proves that real compiler custody, Semantics planning, Runtime registry
+# admission, publication leases, no-op reload, and close form one generation.
+add_executable(
+  duckdb_api_package_generation_composition_tests
+  test/cpp/query/package_generation_composition_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_package_generation_composition_tests)
+target_include_directories(
+  duckdb_api_package_generation_composition_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_package_generation_composition_tests
+  PRIVATE duckdb_api_package_generation_composition_service)
+
+# Actual DuckDB composes the real compiler/planner/registry lifecycle with
+# Runtime's named public scenarios. Query sees only ScanExecutor and safe
+# observations; no provider-private source enters this consumer target.
+add_executable(
+  duckdb_api_package_product_contract_tests
+  test/cpp/query/integration/package_product_contract_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_package_product_contract_tests)
+target_include_directories(
+  duckdb_api_package_product_contract_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_package_product_contract_tests
+  PRIVATE duckdb_api_package_generation_composition_service
+          duckdb_api_query_package_catalog_service
+          dummy_static_extension_loader
+          duckdb_static
+          Threads::Threads)
+
 # RFC 0012 is accepted, but this opt-in executable remains bounded decision
 # evidence rather than product code or a release gate. Its sources stay outside
 # every production inventory.

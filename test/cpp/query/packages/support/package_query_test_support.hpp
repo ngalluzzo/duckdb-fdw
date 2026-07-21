@@ -31,6 +31,8 @@ struct PackageQueryProbe final {
 	std::atomic<std::uint64_t> generation_owners_destroyed;
 	std::atomic<std::uint64_t> publication_commits;
 	std::atomic<std::uint64_t> publication_discards;
+	std::atomic<std::uint64_t> closes;
+	std::atomic<bool> query_was_closing_at_close;
 };
 
 // Honest Query consumer double: executable cases supply complete immutable
@@ -53,8 +55,10 @@ public:
 	duckdb_api::QueryStagedGeneration
 	StageReload(const std::string &connector, const std::shared_ptr<const duckdb_api::QueryPublishedGeneration> &active,
 	            duckdb_api::ExecutionControl &control) const override;
+	void Close() const noexcept override;
 
 	void SetReloadChanged(bool changed) noexcept;
+	void ObserveQueryClose(std::weak_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator> coordinator);
 	std::weak_ptr<const duckdb_api::QueryPublishedGeneration> LastCandidate() const;
 
 private:
@@ -72,6 +76,7 @@ private:
 	mutable std::atomic<bool> reload_changed;
 	mutable std::mutex candidate_mutex;
 	mutable std::weak_ptr<const duckdb_api::QueryPublishedGeneration> last_candidate;
+	mutable std::weak_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator> close_observer;
 };
 
 std::shared_ptr<PackageQueryStagingService>

@@ -50,6 +50,11 @@ public:
 		throw std::logic_error("two-connector Query fixture received an unknown connector");
 	}
 
+	void Close() const noexcept override {
+		first->Close();
+		second->Close();
+	}
+
 private:
 	const std::string first_root;
 	const std::shared_ptr<PackageQueryStagingService> first;
@@ -122,6 +127,7 @@ void TestDatabaseLifetimeSentryReleasesCoordinatorAndGeneration() {
 		auto staging = BuildCompatibilityPackageQueryStaging(FIXTURE_ROOT, probe);
 		duckdb::DuckDB database(nullptr);
 		auto coordinator = RegisterPackageQuerySurface(database, staging);
+		staging->ObserveQueryClose(coordinator);
 		weak_coordinator = coordinator;
 		duckdb::Connection connection(database);
 		RequirePackageQuerySuccess(connection,
@@ -136,6 +142,9 @@ void TestDatabaseLifetimeSentryReleasesCoordinatorAndGeneration() {
 	Require(weak_generation.expired(), "database destruction retained a published Query generation");
 	Require(probe->generation_owners_destroyed.load(std::memory_order_relaxed) == 1,
 	        "database destruction did not release the opaque Runtime owner exactly once");
+	Require(probe->closes.load(std::memory_order_relaxed) == 1 &&
+	            probe->query_was_closing_at_close.load(std::memory_order_acquire),
+	        "database destruction did not close Query before the composed Runtime staging service");
 }
 
 void TestGeneratedRelationDoesNotRetainUnrelatedRetiredGeneration() {

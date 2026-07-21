@@ -183,7 +183,10 @@ run_build() {
         duckdb_api_adapter_tests \
         duckdb_api_graphql_query_contract_tests \
         duckdb_api_graphql_product_contract_tests \
-        duckdb_api_adapter_stream_contract_tests; do
+        duckdb_api_adapter_stream_contract_tests \
+        duckdb_api_package_generation_composition_tests \
+        duckdb_api_package_query_surface_tests \
+        duckdb_api_package_product_contract_tests; do
         python3 -I -B "${REPOSITORY_ROOT}/scripts/verify-native-dependencies.py" \
             linkage "${PINS_FILE}" curl-free "${NATIVE_TEST_ROOT}/${target}" >/dev/null
     done
@@ -288,6 +291,9 @@ run_tests() {
     "${NATIVE_TEST_ROOT}/duckdb_api_graphql_product_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_adapter_stream_contract_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_duckdb_secret_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_package_generation_composition_tests" "${REPOSITORY_ROOT}"
+    "${NATIVE_TEST_ROOT}/duckdb_api_package_query_surface_tests" "${REPOSITORY_ROOT}"
+    "${NATIVE_TEST_ROOT}/duckdb_api_package_product_contract_tests" "${REPOSITORY_ROOT}"
     (
         cd "${TEMPLATE_ROOT}"
         "./build/${PROFILE}/test/unittest" --require duckdb_api 'test/*'

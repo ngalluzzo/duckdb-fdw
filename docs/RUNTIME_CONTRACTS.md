@@ -590,11 +590,13 @@ acquisition. Once bounded catalog commit begins, the call either publishes and
 reports success or rolls back and reports failure; it cannot publish after
 reporting cancellation.
 
-The lifecycle sentry closes Runtime and Query publication admission, rejects
-future/queued publications, and lets a current lock owner drain. Registry
-generations and retained-root custody release only after their final
-catalog, transaction, prepared-plan, bind, or scan owner ends. Destructors
-contain exceptions. Dynamic DSO unload is not supported.
+The DatabaseInstance lifecycle sentry first closes Query publication admission
+and then calls the composed staging service's idempotent non-throwing close,
+which closes Runtime generation admission. This order prevents new Query work
+from entering while Runtime drains its current lease holder and rejects queued
+or future staging. Registry generations and retained-root custody release only
+after their final catalog, transaction, prepared-plan, bind, or scan owner
+ends. Destructors contain exceptions. Dynamic DSO unload is not supported.
 
 ## Error ownership and redaction
 

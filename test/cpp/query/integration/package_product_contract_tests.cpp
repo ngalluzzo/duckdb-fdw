@@ -1,0 +1,193 @@
+#include "duckdb/main/connection.hpp"
+#include "duckdb/main/database.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb_api/duckdb_secret.hpp"
+#include "duckdb_api/package_generation_composition.hpp"
+#include "duckdb_api/scan_planner.hpp"
+#include "duckdb_api_extension.hpp"
+#include "support/require.hpp"
+
+#include <atomic>
+#include <cstdlib>
+#include <iostream>
+#include <memory>
+#include <stdexcept>
+#include <string>
+
+namespace {
+
+using duckdb_api_test::Require;
+
+duckdb_api::ValueKind KindFor(const std::string &logical_type) {
+	if (logical_type == "BIGINT") {
+		return duckdb_api::ValueKind::BIGINT;
+	}
+	if (logical_type == "VARCHAR") {
+		return duckdb_api::ValueKind::VARCHAR;
+	}
+	if (logical_type == "BOOLEAN") {
+		return duckdb_api::ValueKind::BOOLEAN;
+	}
+	throw std::logic_error("package product fake received an unsupported output type");
+}
+
+class PlanEchoStream final : public duckdb_api::BatchStream {
+public:
+	explicit PlanEchoStream(duckdb_api::ScanPlan plan_p) : plan(std::move(plan_p)), emitted(false), closed(false) {
+	}
+
+	bool Next(duckdb_api::ExecutionControl &control, duckdb_api::TypedBatch &batch) override {
+		batch.Clear();
+		if (control.IsCancellationRequested()) {
+			throw duckdb_api::ExecutionCancelled();
+		}
+		if (emitted || closed) {
+			return false;
+		}
+		duckdb_api::TypedRow row;
+		for (const auto &column : plan.OutputColumns()) {
+			const auto kind = KindFor(column.logical_type);
+			batch.column_kinds.push_back(kind);
+			switch (kind) {
+			case duckdb_api::ValueKind::BIGINT:
+				row.values.push_back(duckdb_api::TypedValue::BigInt(11));
+				break;
+			case duckdb_api::ValueKind::VARCHAR:
+				row.values.push_back(duckdb_api::TypedValue::Varchar(plan.RelationName() + ":" + column.name));
+				break;
+			case duckdb_api::ValueKind::BOOLEAN:
+				row.values.push_back(duckdb_api::TypedValue::Boolean(false));
+				break;
+			}
+		}
+		batch.rows.push_back(std::move(row));
+		emitted = true;
+		return true;
+	}
+
+	void Cancel() noexcept override {
+		closed = true;
+	}
+
+	void Close() noexcept override {
+		closed = true;
+	}
+
+private:
+	const duckdb_api::ScanPlan plan;
+	bool emitted;
+	bool closed;
+};
+
+// Query's catalog-composition oracle intentionally does not simulate HTTP.
+// It validates the real Semantics plan and closed authorization alternative,
+// then returns one schema-aligned row through Runtime's public pull contract.
+class PlanEchoExecutor final : public duckdb_api::ScanExecutor {
+public:
+	PlanEchoExecutor() : anonymous_opens(0), authenticated_opens(0) {
+	}
+
+	std::unique_ptr<duckdb_api::BatchStream> Open(const duckdb_api::ScanPlan &,
+	                                              duckdb_api::ExecutionControl &) const override {
+		throw std::logic_error("package product fake received the legacy execution path");
+	}
+
+	mutable std::atomic<std::uint64_t> anonymous_opens;
+	mutable std::atomic<std::uint64_t> authenticated_opens;
+
+protected:
+	std::unique_ptr<duckdb_api::BatchStream>
+	OpenAuthorizationEnvelope(const duckdb_api::ScanPlan &plan, duckdb_api::ScanAuthorization authorization,
+	                          duckdb_api::ExecutionControl &control) const override {
+		if (control.IsCancellationRequested()) {
+			throw duckdb_api::ExecutionCancelled();
+		}
+		const auto alternative = AlternativeOf(authorization);
+		if (plan.Authentication() == duckdb_api::FeatureState::DISABLED &&
+		    alternative == AuthorizationAlternative::ANONYMOUS) {
+			anonymous_opens.fetch_add(1, std::memory_order_relaxed);
+		} else if (plan.Authentication() == duckdb_api::FeatureState::ENABLED &&
+		           alternative == AuthorizationAlternative::BEARER) {
+			authenticated_opens.fetch_add(1, std::memory_order_relaxed);
+		} else {
+			throw std::logic_error("package product fake received a mismatched authorization alternative");
+		}
+		return std::unique_ptr<duckdb_api::BatchStream>(new PlanEchoStream(plan));
+	}
+};
+
+void TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(const std::string &repository_root) {
+	auto executor = std::shared_ptr<PlanEchoExecutor>(new PlanEchoExecutor());
+	duckdb::DuckDB database(nullptr);
+	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_package_catalog_composition_test");
+	duckdb::RegisterDuckdbApiSecrets(loader);
+	duckdb::RegisterDuckdbApiPackageSurface(loader, duckdb_api::BuildPackageGenerationComposition(executor));
+	duckdb::Connection connection(database);
+	auto load = connection.Query("CALL system.main.duckdb_api_load_connector(package_root := '" + repository_root +
+	                             "/docs/rfcs/evidence/0013/github')");
+	Require(!load->HasError() && load->RowCount() == 1 && load->GetValue(4, 0).GetValue<std::uint64_t>() == 4 &&
+	            load->GetValue(5, 0).GetValue<bool>(),
+	        "actual DuckDB did not publish the real compiler generation through product composition");
+	for (const auto &name : {"github_authenticated_repositories", "github_authenticated_user",
+	                         "github_duckdb_login_search_page", "github_viewer_repository_metrics"}) {
+		auto found = connection.Query("SELECT count(*) FROM duckdb_functions() WHERE database_name = 'system' "
+		                              "AND schema_name = 'main' AND function_name = '" +
+		                              std::string(name) + "'");
+		Require(!found->HasError() && found->GetValue(0, 0).GetValue<int64_t>() == 1,
+		        "actual DuckDB is missing compiler-generated function " + std::string(name));
+	}
+	auto inventory =
+	    connection.Query("SELECT count(*), count(DISTINCT sql_name) FROM system.main.duckdb_api_loaded_relations()");
+	Require(!inventory->HasError() && inventory->GetValue(0, 0).GetValue<int64_t>() == 4 &&
+	            inventory->GetValue(1, 0).GetValue<int64_t>() == 4,
+	        "actual DuckDB package inventory did not contain four unique generated relations");
+	for (const auto &relation :
+	     {"github_authenticated_repositories(secret := 'package_product')",
+	      "github_authenticated_user(secret := 'package_product')", "github_duckdb_login_search_page()",
+	      "github_viewer_repository_metrics(secret := 'package_product')"}) {
+		auto described = connection.Query("DESCRIBE SELECT * FROM system.main." + std::string(relation));
+		Require(!described->HasError(),
+		        "compiler-generated relation failed offline DESCRIBE: " + std::string(relation));
+		auto explained = connection.Query("EXPLAIN SELECT * FROM system.main." + std::string(relation));
+		Require(!explained->HasError(), "compiler-generated relation failed offline EXPLAIN: " + std::string(relation));
+	}
+	Require(executor->anonymous_opens.load(std::memory_order_relaxed) == 0 &&
+	            executor->authenticated_opens.load(std::memory_order_relaxed) == 0,
+	        "compiler-generated DESCRIBE or EXPLAIN entered Runtime execution");
+	auto anonymous = connection.Query("SELECT id, login FROM system.main.github_duckdb_login_search_page()");
+	Require(!anonymous->HasError() && anonymous->RowCount() == 1 &&
+	            anonymous->GetValue(0, 0).GetValue<int64_t>() == 11 &&
+	            anonymous->GetValue(1, 0).ToString() == "duckdb_login_search_page:login",
+	        "anonymous compiler-generated relation did not execute its real Semantics plan");
+	auto secret = connection.Query("CREATE TEMPORARY SECRET package_product "
+	                               "(TYPE duckdb_api, PROVIDER config, TOKEN 'package-product-token')");
+	Require(!secret->HasError(), "actual-DuckDB package product could not create its logical secret");
+	auto authenticated = connection.Query(
+	    "SELECT id, login, site_admin FROM system.main.github_authenticated_user(secret := 'package_product')");
+	Require(!authenticated->HasError() && authenticated->RowCount() == 1 &&
+	            authenticated->GetValue(0, 0).GetValue<int64_t>() == 11 &&
+	            authenticated->GetValue(1, 0).ToString() == "authenticated_user:login" &&
+	            !authenticated->GetValue(2, 0).GetValue<bool>() &&
+	            executor->anonymous_opens.load(std::memory_order_relaxed) == 1 &&
+	            executor->authenticated_opens.load(std::memory_order_relaxed) == 1,
+	        "authenticated compiler-generated relation did not execute its real Semantics plan");
+	auto reload = connection.Query("CALL system.main.duckdb_api_reload_connector(connector := 'github')");
+	Require(!reload->HasError() && reload->RowCount() == 1 && !reload->GetValue(5, 0).GetValue<bool>(),
+	        "byte-identical actual-DuckDB package reload was not changed=false");
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+	try {
+		if (argc != 2 || argv[1][0] != '/') {
+			throw std::invalid_argument("usage: package_product_contract_tests ABSOLUTE_REPOSITORY_ROOT");
+		}
+		TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(argv[1]);
+		std::cout << "actual-DuckDB package product contract tests passed\n";
+		return EXIT_SUCCESS;
+	} catch (const std::exception &error) {
+		std::cerr << "actual-DuckDB package product contract tests failed: " << error.what() << '\n';
+		return EXIT_FAILURE;
+	}
+}

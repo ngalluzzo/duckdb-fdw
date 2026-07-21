@@ -44,3 +44,17 @@ target_link_libraries(
          duckdb_api_scan_plan_service
          duckdb_api_runtime_interface_service
          duckdb_static)
+
+# Lead product composition adapts bounded Connector, Semantics, and Runtime
+# generation services to Query's staging port. It owns no DuckDB catalog or
+# transport implementation and accepts only Runtime's ScanExecutor interface.
+add_library(
+  duckdb_api_package_generation_composition_service STATIC
+  ${QUERY_PACKAGE_GENERATION_COMPOSITION_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_package_generation_composition_service)
+target_link_libraries(
+  duckdb_api_package_generation_composition_service
+  PUBLIC duckdb_api_query_request_service
+         duckdb_api_package_compiler_service
+         duckdb_api_package_bound_planning_service
+         duckdb_api_runtime_generation_service)

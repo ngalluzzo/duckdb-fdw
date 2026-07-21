@@ -2,6 +2,7 @@
 
 #include "duckdb_api/connector.hpp"
 #include "duckdb_api/execution.hpp"
+#include "duckdb_api/query_generation.hpp"
 
 #include <memory>
 
@@ -13,6 +14,7 @@ namespace duckdb_api {
 struct ProductComposition {
 	CompiledConnector connector;
 	std::shared_ptr<const ScanExecutor> executor;
+	std::shared_ptr<const QueryPackageStagingService> package_staging;
 };
 
 // Builds the sole installed native composition. Connector supplies the
@@ -20,7 +22,9 @@ struct ProductComposition {
 // anonymous-or-bearer executor service; Query assembles them without mutating
 // either provider, inspecting a protocol alternative, or retaining credential
 // state. Runtime initialization is checked before DuckDB registers the
-// function, and this path has no authority or test-scenario override.
+// function, and this path has no authority or test-scenario override. The
+// package staging service consumes the same executor while retaining its own
+// database-scoped generation registry.
 ProductComposition BuildProductComposition();
 
 } // namespace duckdb_api

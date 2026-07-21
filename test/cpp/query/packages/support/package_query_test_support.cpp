@@ -1,5 +1,6 @@
 #include "query/packages/support/package_query_test_support.hpp"
 
+#include "catalog_generation_coordinator.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
@@ -199,7 +200,14 @@ private:
 
 PackageQueryProbe::PackageQueryProbe()
     : load_stages(0), reload_stages(0), plans(0), streams_opened(0), streams_closed(0), rows(0),
-      generation_owners_destroyed(0), publication_commits(0), publication_discards(0) {
+      generation_owners_destroyed(0), publication_commits(0), publication_discards(0), closes(0),
+      query_was_closing_at_close(false) {
+}
+
+void PackageQueryStagingService::Close() const noexcept {
+	probe->closes.fetch_add(1, std::memory_order_relaxed);
+	auto coordinator = close_observer.lock();
+	probe->query_was_closing_at_close.store(coordinator && coordinator->IsClosing(), std::memory_order_release);
 }
 
 PackageQueryStagingService::PackageQueryStagingService(
@@ -286,6 +294,11 @@ PackageQueryStagingService::StageReload(const std::string &connector,
 
 void PackageQueryStagingService::SetReloadChanged(bool changed) noexcept {
 	reload_changed.store(changed, std::memory_order_release);
+}
+
+void PackageQueryStagingService::ObserveQueryClose(
+    std::weak_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator> coordinator) {
+	close_observer = std::move(coordinator);
 }
 
 std::weak_ptr<const duckdb_api::QueryPublishedGeneration> PackageQueryStagingService::LastCandidate() const {

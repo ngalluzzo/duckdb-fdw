@@ -131,6 +131,13 @@ public:
 	virtual QueryStagedGeneration StageReload(const std::string &connector,
 	                                          const std::shared_ptr<const QueryPublishedGeneration> &active,
 	                                          ExecutionControl &control) const = 0;
+
+	// DatabaseInstance teardown calls this only after Query has rejected new
+	// catalog publication. Implementations close their provider-side admission
+	// service without invalidating immutable generations, plans, executors, or
+	// streams already retained by DuckDB state. Close is idempotent and must not
+	// throw; dynamic extension unload remains unsupported.
+	virtual void Close() const noexcept = 0;
 };
 
 } // namespace duckdb_api

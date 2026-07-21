@@ -4,7 +4,10 @@
 set(QUERY_REQUEST_SOURCES
     src/query/scan_request.cpp
     src/query/query_generation.cpp)
+set(QUERY_PACKAGE_GENERATION_COMPOSITION_SOURCES
+    src/query/package_generation_composition.cpp)
 set(QUERY_PRODUCT_COMPOSITION_SOURCES
+    ${QUERY_PACKAGE_GENERATION_COMPOSITION_SOURCES}
     src/query/product_composition.cpp)
 set(QUERY_DUCKDB_SECRET_SOURCES
     src/query/duckdb/secret_integration.cpp)

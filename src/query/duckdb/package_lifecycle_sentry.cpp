@@ -26,16 +26,22 @@ namespace {
 class PackageCatalogLifecycleSentry final : public ExtensionCallback {
 public:
 	explicit PackageCatalogLifecycleSentry(
-	    std::shared_ptr<duckdb_api_query_internal::CatalogGenerationCoordinator> coordinator_p)
-	    : coordinator(std::move(coordinator_p)) {
+	    std::shared_ptr<duckdb_api_query_internal::CatalogGenerationCoordinator> coordinator_p,
+	    std::shared_ptr<const duckdb_api::QueryPackageStagingService> staging_p)
+	    : coordinator(std::move(coordinator_p)), staging(std::move(staging_p)) {
 	}
 
 	~PackageCatalogLifecycleSentry() override {
+		// New Query publication is rejected before Runtime admission begins
+		// closing. Immutable owners retained by DuckDB remain valid after both
+		// service control planes have closed.
 		coordinator->BeginClose();
+		staging->Close();
 	}
 
 private:
 	std::shared_ptr<duckdb_api_query_internal::CatalogGenerationCoordinator> coordinator;
+	std::shared_ptr<const duckdb_api::QueryPackageStagingService> staging;
 };
 
 } // namespace
@@ -47,6 +53,7 @@ duckdb_api_query_internal::RegisterPackageSurfaceInternal(
 		throw InternalException("duckdb_api package registration requires a staging service");
 	}
 	auto coordinator = std::make_shared<duckdb_api_query_internal::CatalogGenerationCoordinator>(std::move(staging));
+	auto lifecycle_staging = coordinator->Staging();
 	auto snapshot = std::make_shared<const duckdb_api_query_internal::PackageCatalogSnapshot>();
 	loader.RegisterFunction(duckdb_api_query_internal::BuildLoadConnectorFunction(coordinator, snapshot));
 	loader.RegisterFunction(duckdb_api_query_internal::BuildReloadConnectorFunction(coordinator, snapshot));
@@ -54,7 +61,7 @@ duckdb_api_query_internal::RegisterPackageSurfaceInternal(
 	loader.RegisterFunction(duckdb_api_query_internal::BuildLoadedRelationsFunction(coordinator, snapshot));
 	loader.RegisterFunction(duckdb_api_query_internal::BuildRelationArgumentsFunction(coordinator, snapshot));
 	ExtensionCallback::Register(loader.GetDatabaseInstance().config,
-	                            make_shared_ptr<PackageCatalogLifecycleSentry>(coordinator));
+	                            make_shared_ptr<PackageCatalogLifecycleSentry>(coordinator, lifecycle_staging));
 	return coordinator;
 }
 
