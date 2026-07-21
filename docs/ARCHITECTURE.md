@@ -160,6 +160,16 @@ Compilation performs no network I/O and resolves no credential. Unsupported,
 unknown, unsafe, stale, or over-budget source produces bounded deterministic
 diagnostics and no candidate generation.
 
+Offline fixture `covers` keys are closed selectors for project-owned evidence
+variants, not author-defined mutation or lifecycle hooks. Connector derives
+the typed required coverage entries from the immutable generation before it
+opens `fixtures/`, then establishes complete index and payload identity before
+any case runs. Lead composition routes typed requests through Semantics and
+immutable plans through Runtime's controlled production executor. A claimed
+key counts only when its fixed compiler, planner, execution, cancellation,
+resource, or lifecycle variant was actually observed; claiming a spelling
+alone grants no coverage.
+
 The complete author syntax and resource ceilings are defined in
 [CONNECTOR_SPECIFICATIONS.md](CONNECTOR_SPECIFICATIONS.md).
 

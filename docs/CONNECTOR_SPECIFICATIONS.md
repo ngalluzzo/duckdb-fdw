@@ -421,13 +421,30 @@ one terminal resource record.
 
 `fixtures/index.yaml` is explicit author evidence, not package identity.
 Fixture tooling first compiles the same immutable package generation used by
-load, validates the index against its closed schema, derives required coverage
-independently, and only then opens indexed payload leaves.
+load and derives the typed required coverage entries from that generation
+before opening `fixtures/`. It then validates the index against its closed
+schema and package digest, requires exact claimed coverage and payload file-set
+agreement, verifies every payload digest and retained identity, and only then
+executes the first variant.
 
 Fixtures predict operation selection, exact request structure, response pages,
 typed rows, predicate occurrence laws, error stage, and safe explanation.
 They cannot grant network or credential authority and do not replace the host
 policy or Runtime admission checks.
+
+Each declared `covers` key selects a closed project-owned variant executor in
+addition to identifying its compiled scope. The case transcript and expected
+value describe the base execution; source mutation, diagnostics, planning
+failure, resource boundaries, cancellation, Runtime failure, reload, and
+publication variants are generated only by the project runner from the
+validated generation and identity-checked transcript. No author field can
+supply those mutations or hooks. Acceptance requires the runner's actually
+executed key set to equal the index's claimed set exactly; listing a key without
+executing its production-path variant leaves it uncovered.
+
+The coverage key is a stable display identity, not a dispatch encoding. The
+runner retains the mapping rule, scope, variant, and bound identifiers as
+typed derivation facts and never reconstructs them by splitting the key.
 
 For the repository GitHub package, the independently derived contract contains
 258 unique coverage keys. The checked-in RFC decision cases are examples; the

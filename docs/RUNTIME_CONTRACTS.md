@@ -638,6 +638,19 @@ Consumer tests link these services. They do not import private builders, compile
 provider sources directly, mutate plans, or parse snapshot text. End-to-end
 tests compose services only at explicit integration targets.
 
+The author-fixture integration provider interprets a closed coverage key as a
+project-owned variant selector, not author-supplied execution authority.
+Connector validates and identity-checks the complete transcript first;
+Semantics produces the immutable plan; Runtime receives only that plan, a
+closed anonymous/present-bearer/missing-bearer state, bounded verified response
+pages, and call-scoped execution control. Runtime returns typed rows or a
+stable stage/field plus exact redacted request observations and whether
+transport was reached. The integration provider reports a key as executed only
+after the key's fixed boundary, failure, cancellation, or lifecycle invariant
+has occurred through the production path. It dispatches from Connector's typed
+coverage entry rather than parsing the display key; Runtime receives neither
+form.
+
 The complete deterministic oracle includes package/native catalog, request,
 plan, request-body, result, failure, explanation, registration, reload,
 transaction, prepared-plan, cancellation, and lifecycle differentials. Live

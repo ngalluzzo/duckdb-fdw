@@ -867,6 +867,49 @@ selection, exact/superset counterexamples, and ambiguity. Author fixtures are
 not part of active generation identity and are never read by ordinary bind or
 execution.
 
+#### Delivery clarification: executing closed coverage variants
+
+The accepted coverage mapping names source-identity, diagnostic, cancellation,
+planning-failure, resource, reload, publication, and Runtime failure variants
+that are intentionally not author-scriptable in `fixture-index-v1`. A `covers`
+key therefore has two roles: it identifies the compiled scope and selects one
+project-owned closed variant executor. It does not add an implicit YAML field
+or grant an author an arbitrary mutation, failure, cancellation, or lifecycle
+hook.
+
+The case transcript and `expected` value describe the case's base execution.
+For every claimed key, the project fixture provider must additionally execute
+the named variant through the applicable production compiler, planner,
+admission, policy, pagination, decoder, stream, compatibility, or publication
+path and report that exact key only after its mapping-defined outcome occurs.
+The runner accepts the case only when the claimed and actually executed key
+sets are identical. Variant names ending in `_rejected`, `_missing`,
+`_failure`, `_one_over_rejected`, or a stable diagnostic code require the
+corresponding closed failure with no later authority or side effect; boundary,
+success, selection, identity, transition, termination, cancellation, and
+lifecycle variants require their exact positive or terminal invariant.
+
+Derivation retains each key together with its structured rule, scope, variant,
+and already validated bound identifiers. Dispatch uses that typed entry; no
+consumer splits or interprets the underscore-delimited display key, whose
+identifier boundaries are intentionally not recoverable from text.
+
+Project executors may derive only bounded deterministic values from the
+validated generation and already identity-checked transcript. Source and
+diagnostic variants operate on private no-follow copies of the retained source;
+planning variants use typed requests built from compiled inputs and selectors;
+Runtime variants use the immutable plan and verified controlled pages;
+cancellation variants use a deterministic checkpoint control; reload and
+publication variants use isolated generation coordinators. These executors
+cannot read an unindexed payload, contact a live service, expose a credential,
+change the author schema, or alter the active generation. A variant without a
+project executor remains uncovered even if its key appears in `covers`.
+
+This post-acceptance clarification records the execution meaning already
+required by the frozen mapping and the rule that every claimed variant run
+through the production path. It does not change the accepted package or fixture
+syntax, coverage set, key grammar, compatibility behavior, or product policy.
+
 ### Shared interfaces
 
 Connector Experience provides one immutable generation service. The exact C++
@@ -1229,6 +1272,24 @@ load obligation.
 | `connector_package_v1_runtime_review` | Remote Runtime | Approved | Final re-review confirmed canonical encoded Link preservation, response-role disjointness, two-page GraphQL body/cursor oracles, exact compiler/fixture ceilings, bounded cancelable directory enumeration, ordinary-load fixture isolation, and a 256-record diagnostic cap | Initial transport, oracle, and bounded-work objections resolved; boundary, one-over, cancellation, plan-admission, credential, and lifecycle oracles remain delivery evidence |
 | `connector_package_v1_semantics_review` | Relational Semantics | Approved | Final re-review confirmed explicit input states and candidate-local selection, paired occurrence-labelled implication/multiplicity proofs, retained DuckDB ownership for every predicate, and GraphQL `duckdb`/`unsupported` fixture agreement with the accepted native plan | Initial residual, NULL, selector, proof-domain, and GraphQL-vocabulary objections resolved; native/package plan differential remains the interaction exit |
 | `connector_package_v1_enablement_review` | Engineering Enablement | Approved | Independent re-review recomputed package, payload, generated-document, serialized-body, schema, and coverage identities and confirmed exact reload precedence, canonical package SemVer, independent coverage derivation, failsafe YAML rules, deterministic diagnostics, and one coherent source snapshot | Initial reload, compatibility, YAML, diagnostic, fixture-coverage, and snapshot objections resolved; facilitation exits when domain teams maintain their permanent gates |
+
+### Closed-variant delivery clarification review
+
+The post-acceptance clarification above was independently reviewed by every
+affected team on 2026-07-20. It closes how the already accepted coverage map is
+executed; it does not amend author syntax, public behavior, compatibility, or
+the frozen coverage set.
+
+| Team perspective | Result | Evidence | Delivery exit retained |
+| --- | --- | --- | --- |
+| Connector Experience | Approved | Typed entries preserve scope, variant, and bound identifiers without parsing display keys; required coverage is derived before fixture I/O; no-follow custody, exact payload identity, and exact required/claimed/executed equality prevent author claims from granting evidence | Complete the bounded runner, source and diagnostic variants, product-owned schema and coverage assets, full GitHub coverage, and the controlled second package |
+| Query Experience | Approved | Query still receives only structural registration metadata, typed requests, and an opaque generation handle; RFC 0012 remains authoritative for catalog transactions, publication leases, MVCC, prepared plans, and collision behavior | Exercise publication conflict and publication-wait cancellation through the actual isolated catalog coordinator; Query must not link a fixture parser or parse coverage keys |
+| Remote Runtime | Approved | Runtime receives only an immutable plan, closed authorization state, identity-verified controlled pages, and call-scoped control; it never receives package source, fixture schema, expected values, coverage keys, or credential bytes | Exercise every transport, decode, pagination, resource, failure, cancellation, and close variant through the controlled production executor |
+| Relational Semantics | Approved | Typed inputs and selectors reach the production generation-bound planner; DuckDB retains residual ownership, and occurrence-labelled predicate domains remain the exactness and multiplicity oracle | Exercise every selection failure through the planner, prove Runtime was not entered on planning failure, and complete the exact predicate-law matrix |
+| Engineering Enablement | Approved | Content-addressed schema and coverage assets, typed dispatch, isolated integration composition, and permanent ordinary/fresh targets make missing, echoed, or drifted evidence fail closed | Byte-lock the product assets, include all fixture sources and integration targets in the product graph, pin their identities, and pass both developer and fresh native gates |
+
+No reviewer requested an RFC amendment. Approval of the clarification does not
+close the implementation interactions recorded in the follow-on goal.
 
 ## Decision and rationale
 
