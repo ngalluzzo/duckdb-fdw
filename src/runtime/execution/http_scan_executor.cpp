@@ -386,14 +386,9 @@ private:
 } // namespace
 
 std::shared_ptr<const ScanExecutor> BuildHttpScanExecutor(std::unique_ptr<HttpTransport> transport) {
-	const HttpExecutionProfile public_profile {PlannedUrlScheme::HTTPS,
-	                                           "api.github.com",
-	                                           443,
-	                                           false,
-	                                           false,
-	                                           false,
-	                                           PAGINATION_MAX_EXECUTION_MILLISECONDS,
-	                                           V1_MAX_DECODED_RECORDS_PER_PAGE};
+	const HttpExecutionProfile public_profile {
+	    PlannedUrlScheme::HTTPS,        "", 0, false, false, false, PAGINATION_MAX_EXECUTION_MILLISECONDS,
+	    V1_MAX_DECODED_RECORDS_PER_PAGE};
 	return BuildHttpScanExecutorForProfile(std::move(transport), public_profile);
 }
 
@@ -402,9 +397,11 @@ std::shared_ptr<const ScanExecutor> BuildHttpScanExecutorForProfile(std::unique_
 	if (!transport) {
 		throw ExecutionError(ErrorStage::INTERNAL, "", "HTTP executor requires a transport");
 	}
-	if (profile.scheme != PlannedUrlScheme::HTTPS || !IsSafeDnsHost(profile.host) || profile.port == 0 ||
-	    profile.private_addresses_enabled || profile.link_local_addresses_enabled ||
-	    profile.loopback_addresses_enabled) {
+	const bool has_exact_destination = !profile.host.empty() && profile.port != 0;
+	const bool has_partial_destination = profile.host.empty() != (profile.port == 0);
+	if (profile.scheme != PlannedUrlScheme::HTTPS || has_partial_destination ||
+	    (has_exact_destination && !IsSafeDnsHost(profile.host)) || profile.private_addresses_enabled ||
+	    profile.link_local_addresses_enabled || profile.loopback_addresses_enabled) {
 		throw ExecutionError(ErrorStage::POLICY, "", "HTTP executor profile is invalid");
 	}
 	if (profile.max_wall_milliseconds == 0 || profile.max_wall_milliseconds > PAGINATION_MAX_EXECUTION_MILLISECONDS ||

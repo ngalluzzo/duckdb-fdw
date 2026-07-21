@@ -13,13 +13,7 @@ class CurlProcessLifetime;
 // Closed result of the installed transport's final request-policy check. This
 // is a Runtime-private inspection boundary used by the transport and focused
 // policy tests; it performs no allocation, DNS, credential lookup, or I/O.
-enum class InstalledHttpRequestKind : uint8_t {
-	UNSUPPORTED,
-	ANONYMOUS_SEARCH,
-	AUTHENTICATED_USER,
-	AUTHENTICATED_REPOSITORIES,
-	GRAPHQL_VIEWER_REPOSITORY_METRICS
-};
+enum class InstalledHttpRequestKind : uint8_t { UNSUPPORTED, REST_GET, GRAPHQL_POST };
 
 InstalledHttpRequestKind ClassifyInstalledHttpRequest(const HttpRequest &request) noexcept;
 
@@ -29,11 +23,12 @@ InstalledHttpRequestKind ClassifyInstalledHttpRequest(const HttpRequest &request
 // are never cleaned by service, extension, or atexit teardown.
 const CurlProcessLifetime *AcquireCurlProcessLifetime();
 
-// Constructs the production fixed-authority transport. It admits only the
-// installed GitHub profiles. Repository page targets are already canonical,
-// typed-state reconstructions; the transport revalidates them before joining
-// them to its fixed authority. The process-lifetime token proves initialization
-// completed before any easy handle can be built.
+// Constructs the production admitted-request transport. It accepts only safe
+// HTTPS DNS requests materialized by Runtime's immutable profiles, constructs
+// the exact typed authority without URL parsing, and checks every resolved
+// socket against the request's exact port and the public-address policy. The
+// process-lifetime token proves initialization completed before any easy handle
+// can be built.
 std::unique_ptr<HttpTransport> BuildCurlHttpTransport(const CurlProcessLifetime *lifetime);
 
 } // namespace internal

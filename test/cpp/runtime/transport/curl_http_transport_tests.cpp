@@ -55,22 +55,38 @@ void TestInstalledRepositoryRequestPolicy() {
 	using duckdb_api::internal::ClassifyInstalledHttpRequest;
 	using duckdb_api::internal::InstalledHttpRequestKind;
 	Require(ClassifyInstalledHttpRequest(InstalledRepositoryRequest("/user/repos?per_page=100&page=1")) ==
-	            InstalledHttpRequestKind::AUTHENTICATED_REPOSITORIES,
+	            InstalledHttpRequestKind::REST_GET,
 	        "installed transport rejected the admitted unselective target");
-	Require(ClassifyInstalledHttpRequest(
-	            InstalledRepositoryRequest("/user/repos?per_page=100&page=1&visibility=private")) ==
-	            InstalledHttpRequestKind::AUTHENTICATED_REPOSITORIES,
+	Require(ClassifyInstalledHttpRequest(InstalledRepositoryRequest(
+	            "/user/repos?per_page=100&page=1&visibility=private")) == InstalledHttpRequestKind::REST_GET,
 	        "installed transport rejected the admitted selective target");
-	const std::string denied[] = {"/user/repos?per_page=100&page=1&visibility=public",
-	                              "/user/repos?per_page=100&page=1&visibility=private&visibility=private",
-	                              "/user/repos?per_page=100&page=1&visibility=private&sort=id",
-	                              "/user/repos?per_page=100&page=1&sort=id",
-	                              "/user/repos?per_page=100&page=1&visibility=private2"};
+	auto non_github = InstalledRepositoryRequest("/v1/events?region=north&per_page=50&page=1");
+	non_github.host = "api.example.com";
+	non_github.port = 8443;
+	non_github.headers = {{"X-Client", "duckdb-api-test"}};
+	Require(ClassifyInstalledHttpRequest(non_github) == InstalledHttpRequestKind::REST_GET,
+	        "installed transport retained a GitHub host, port, target, header, or bearer classifier");
+
+	const std::string denied[] = {"/user/repos?per_page=100&page=1&visibility=private&visibility=private",
+	                              "/user/repos?per_page=100&page=1&&sort=id", "/user/repos?per_page=%31&page=1",
+	                              "/user/../repos?page=1", "/user/repos?page=1#fragment"};
 	for (const auto &target : denied) {
 		Require(ClassifyInstalledHttpRequest(InstalledRepositoryRequest(target)) ==
 		            InstalledHttpRequestKind::UNSUPPORTED,
 		        "installed transport accepted a target outside the admitted field set");
 	}
+	auto invalid_host = non_github;
+	invalid_host.host = "127.0.0.1";
+	Require(ClassifyInstalledHttpRequest(invalid_host) == InstalledHttpRequestKind::UNSUPPORTED,
+	        "installed transport accepted a non-DNS typed host");
+	auto invalid_port = non_github;
+	invalid_port.port = 0;
+	Require(ClassifyInstalledHttpRequest(invalid_port) == InstalledHttpRequestKind::UNSUPPORTED,
+	        "installed transport accepted a zero destination port");
+	auto reserved_header = non_github;
+	reserved_header.headers.push_back({"Host", "other.example"});
+	Require(ClassifyInstalledHttpRequest(reserved_header) == InstalledHttpRequestKind::UNSUPPORTED,
+	        "installed transport accepted author-controlled authority headers");
 	auto body = InstalledRepositoryRequest("/user/repos?per_page=100&page=1");
 	body.body = "request-body-canary";
 	body.content_type = "application/json";
@@ -86,7 +102,7 @@ void TestInstalledGraphqlRequestPolicy() {
 	using duckdb_api::internal::ClassifyInstalledHttpRequest;
 	using duckdb_api::internal::InstalledHttpRequestKind;
 	auto request = InstalledGraphqlRequest();
-	Require(ClassifyInstalledHttpRequest(request) == InstalledHttpRequestKind::GRAPHQL_VIEWER_REPOSITORY_METRICS,
+	Require(ClassifyInstalledHttpRequest(request) == InstalledHttpRequestKind::GRAPHQL_POST,
 	        "installed transport rejected the admitted GraphQL POST shape");
 	auto wrong_method = request;
 	wrong_method.method = "GET";
@@ -104,8 +120,15 @@ void TestInstalledGraphqlRequestPolicy() {
 	const auto document_byte = wrong_document.body.find("nameWithOwner");
 	Require(document_byte != std::string::npos, "canonical GraphQL body fixture lost its document identity");
 	wrong_document.body[document_byte] = 'N';
-	Require(ClassifyInstalledHttpRequest(wrong_document) == InstalledHttpRequestKind::UNSUPPORTED,
-	        "installed transport accepted changed GraphQL document bytes");
+	Require(ClassifyInstalledHttpRequest(wrong_document) == InstalledHttpRequestKind::GRAPHQL_POST,
+	        "transport reinterpreted GraphQL identity instead of consuming executor admission");
+	auto non_github = request;
+	non_github.host = "api.example.com";
+	non_github.port = 8443;
+	non_github.target = "/v1/graphql-events";
+	non_github.headers = {{"X-Client", "duckdb-api-test"}};
+	Require(ClassifyInstalledHttpRequest(non_github) == InstalledHttpRequestKind::GRAPHQL_POST,
+	        "installed transport retained the native GraphQL host, port, path, or header profile");
 }
 
 void TestExactGraphqlCurlPost() {

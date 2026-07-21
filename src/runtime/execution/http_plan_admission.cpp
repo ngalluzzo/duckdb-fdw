@@ -34,10 +34,8 @@ bool HasCommonRestPlan(const ScanPlan &plan, const HttpExecutionProfile &profile
 	const auto &operation = plan.Operation().Rest();
 	RestConditionalBindingAuthority conditional;
 	return operation.method == PlannedHttpMethod::GET && operation.replay_safety == PlannedReplaySafety::SAFE &&
-	       operation.origin.scheme == PlannedUrlScheme::HTTPS && operation.origin.scheme == profile.scheme &&
-	       operation.origin.host == profile.host && operation.origin.port == profile.port &&
-	       plan.Network().port == operation.origin.port && plan.Network().port == profile.port &&
-	       IsSafeDnsHost(operation.origin.host) && operation.origin.port != 0 &&
+	       IsOriginAllowedByExecutionProfile(operation.origin, profile) &&
+	       HasExactNetworkCapability(plan.Network(), operation.origin, profile) &&
 	       plan.Domain() == ExpectedRestDomain(operation, plan.Pagination().Strategy()) &&
 	       IsSafeRequestPath(operation.path) && TryAdmitRestRelationalEnvelope(plan, conditional) &&
 	       TryMaterializeRestRequest(plan, conditional, request) &&

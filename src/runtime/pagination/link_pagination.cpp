@@ -54,6 +54,11 @@ uint64_t ValidateNextTarget(const std::string &target, uint64_t current_page, co
 	const auto explicit_port = ":" + std::to_string(profile.Port());
 	if (target.compare(offset, explicit_port.size(), explicit_port) == 0) {
 		offset += explicit_port.size();
+	} else if (profile.Scheme() != "https" || profile.Port() != 443) {
+		// RFC 3986's omitted-port form denotes the scheme default. V1 is HTTPS
+		// only, so omission is equivalent to 443 and can never stand for a typed
+		// nondefault operation port.
+		ThrowPolicy();
 	}
 	const std::string path_and_query = profile.Path() + "?";
 	if (target.compare(offset, path_and_query.size(), path_and_query) != 0) {

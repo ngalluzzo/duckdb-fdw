@@ -77,6 +77,7 @@ private:
 	friend std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntime(uint64_t max_wall_milliseconds,
 	                                                                         uint64_t max_decoded_records);
 	friend std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntimeForHost(std::string host);
+	friend std::shared_ptr<ControlledHttpRuntime> BuildControlledPackageHttpRuntime();
 	ControlledHttpRuntime(std::shared_ptr<State> state, std::shared_ptr<const duckdb_api::ScanExecutor> executor);
 
 	std::shared_ptr<State> state;
@@ -90,5 +91,9 @@ BuildControlledHttpRuntime(uint64_t max_wall_milliseconds = duckdb_api::MAX_EXEC
 // per-generation construction boundary without granting a caller-selected
 // host through the installed product composition.
 std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntimeForHost(std::string host);
+
+// Uses the same destination-neutral execution ceilings as installed product
+// composition while retaining the programmable, non-installed transport.
+std::shared_ptr<ControlledHttpRuntime> BuildControlledPackageHttpRuntime();
 
 } // namespace duckdb_api_test

@@ -1,6 +1,7 @@
 #include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
 
 #include "duckdb_api/content_digest.hpp"
+#include "duckdb_api/internal/runtime/execution/graphql_recipe_admission.hpp"
 #include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 #include "duckdb_api/internal/runtime/policy/request_validation.hpp"
 
@@ -169,11 +170,18 @@ bool HasBudgets(const ScanPlan &plan, const HttpExecutionProfile &profile) {
 	const auto &operation = plan.Operation().Graphql();
 	const auto &page = plan.Pagination().PageBudgets();
 	const auto &scan = plan.Pagination().ScanBudgets();
+	const bool package_generated = operation.document_identity == PlannedGraphqlDocumentIdentity::PACKAGE_GENERATED_V1;
+	const auto expected_page_body =
+	    package_generated
+	        ? std::min(operation.max_serialized_request_body_bytes_per_request, HOST_MAX_SERIALIZED_REQUEST_BODY_BYTES)
+	        : operation.max_serialized_request_body_bytes_per_request;
+	const auto expected_scan_body = package_generated ? std::min(operation.max_serialized_request_body_bytes_per_scan,
+	                                                             PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN)
+	                                                  : operation.max_serialized_request_body_bytes_per_scan;
 	return page.IsWithinPaginatedPageBounds() && scan.IsWithinPaginatedScanBounds() &&
 	       SamePageBudgets(plan.Budgets(), page) && page.decoded_records <= profile.max_decoded_records &&
-	       page.serialized_request_body_bytes > 0 &&
-	       page.serialized_request_body_bytes == operation.max_serialized_request_body_bytes_per_request &&
-	       scan.serialized_request_body_bytes == operation.max_serialized_request_body_bytes_per_scan &&
+	       page.serialized_request_body_bytes > 0 && page.serialized_request_body_bytes == expected_page_body &&
+	       scan.serialized_request_body_bytes == expected_scan_body &&
 	       scan.pages == operation.cursor.max_pages_per_scan && scan.request_attempts == scan.pages &&
 	       scan.response_bytes >= page.response_bytes && scan.header_bytes >= page.header_bytes &&
 	       scan.decompressed_bytes >= page.decompressed_bytes && scan.decoded_records >= page.decoded_records &&
@@ -198,13 +206,65 @@ bool HasRelationalEnvelope(const ScanPlan &plan) {
 // are not request or relational authority, but Runtime still rejects unknown
 // values and mismatched native/package pairs so a newly introduced planner
 // profile cannot execute before its handoff is reviewed here.
+std::vector<std::string> DerivedRecipePath(const PlannedGraphqlGeneratorRecipe &recipe, const std::string &terminal) {
+	std::vector<std::string> result;
+	result.reserve(recipe.RootPath().size() + 2);
+	result.push_back("data");
+	result.insert(result.end(), recipe.RootPath().begin(), recipe.RootPath().end());
+	result.push_back(terminal);
+	return result;
+}
+
+bool HasPackageRecipeCorrelation(const PlannedGraphqlOperation &operation) {
+	if (!operation.generator_recipe) {
+		return false;
+	}
+	const auto &recipe = *operation.generator_recipe;
+	std::string rendered;
+	if (!TryRenderPackageGraphqlRecipe(recipe, operation.max_document_bytes, rendered) ||
+	    rendered != operation.document || recipe.Variables().size() != 2 || operation.variables.size() != 2 ||
+	    recipe.Variables()[0].Name() != operation.variables[0].name ||
+	    recipe.Variables()[0].Name() != operation.cursor.page_size_variable ||
+	    recipe.Variables()[0].Type() != PlannedGraphqlRecipeVariableType::INT_NON_NULL ||
+	    recipe.Variables()[0].Role() != PlannedGraphqlRecipeVariableRole::PAGE_SIZE ||
+	    recipe.Variables()[1].Name() != operation.variables[1].name ||
+	    recipe.Variables()[1].Name() != operation.cursor.cursor_variable ||
+	    recipe.Variables()[1].Type() != PlannedGraphqlRecipeVariableType::STRING_NULLABLE ||
+	    recipe.Variables()[1].Role() != PlannedGraphqlRecipeVariableRole::CURSOR ||
+	    recipe.Selections().size() != operation.result_columns.size()) {
+		return false;
+	}
+	const auto nodes = DerivedRecipePath(recipe, recipe.NodesField());
+	const auto page_info = DerivedRecipePath(recipe, recipe.PageInfoField());
+	if (operation.response.nodes.segments != nodes || operation.response.page_info.segments != page_info) {
+		return false;
+	}
+	auto has_next = page_info;
+	has_next.push_back(recipe.HasNextPageField());
+	auto end_cursor = page_info;
+	end_cursor.push_back(recipe.EndCursorField());
+	if (operation.cursor.has_next_page.segments != has_next || operation.cursor.end_cursor.segments != end_cursor) {
+		return false;
+	}
+	for (std::size_t index = 0; index < recipe.Selections().size(); index++) {
+		if (recipe.Selections()[index].ColumnName() != operation.result_columns[index].name ||
+		    recipe.Selections()[index].FieldPath() != operation.result_columns[index].response_path.segments) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool HasKnownExecutionProfile(const ScanPlan &plan) {
-	const auto identity = plan.Operation().Graphql().document_identity;
+	const auto &operation = plan.Operation().Graphql();
+	const auto identity = operation.document_identity;
 	switch (identity) {
 	case PlannedGraphqlDocumentIdentity::GITHUB_VIEWER_REPOSITORY_METRICS_V1:
-		return plan.Domain() == BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES;
+		return plan.Domain() == BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES && !operation.generator_recipe &&
+		       operation.document == CANONICAL_DOCUMENT;
 	case PlannedGraphqlDocumentIdentity::PACKAGE_GENERATED_V1:
-		return false;
+		return plan.Domain() == BaseDomain::GRAPHQL_RELAY_CONNECTION_NODE_OCCURRENCES &&
+		       HasPackageRecipeCorrelation(operation);
 	}
 	return false;
 }
@@ -229,14 +289,7 @@ bool HasAuthority(const ScanPlan &plan, const HttpExecutionProfile &profile, boo
 	requires_bearer = bearer;
 	return plan.Providers() == FeatureState::DISABLED && plan.Retry() == FeatureState::DISABLED &&
 	       plan.Cache() == FeatureState::DISABLED && (bearer || anonymous) &&
-	       operation.origin.scheme == PlannedUrlScheme::HTTPS && operation.origin.scheme == profile.scheme &&
-	       operation.origin.host == profile.host && operation.origin.port == profile.port &&
-	       network.allowed_schemes.size() == 1 && network.allowed_schemes[0] == "https" &&
-	       network.allowed_hosts.size() == 1 && network.allowed_hosts[0] == profile.host &&
-	       network.port == operation.origin.port && network.port == profile.port && !network.redirects_enabled &&
-	       network.private_addresses_enabled == profile.private_addresses_enabled &&
-	       network.link_local_addresses_enabled == profile.link_local_addresses_enabled &&
-	       network.loopback_addresses_enabled == profile.loopback_addresses_enabled;
+	       HasExactNetworkCapability(network, operation.origin, profile);
 }
 
 bool IsAdmissible(const ScanPlan &plan, const HttpExecutionProfile &profile, bool &requires_bearer) {
@@ -252,8 +305,8 @@ bool IsAdmissible(const ScanPlan &plan, const HttpExecutionProfile &profile, boo
 	    operation.max_document_bytes == 0 || operation.max_document_bytes > 64ULL * 1024ULL ||
 	    static_cast<uint64_t>(operation.document.size()) > operation.max_document_bytes ||
 	    !IsValidUtf8(operation.document) || ComputeSha256Hex(operation.document) != operation.document_digest ||
-	    operation.document != CANONICAL_DOCUMENT || !IsSafeDnsHost(operation.origin.host) ||
-	    operation.origin.port == 0 || !IsSafeRequestPath(operation.path) || !HasKnownExecutionProfile(plan) ||
+	    !IsSafeDnsHost(operation.origin.host) || operation.origin.port == 0 || !IsSafeRequestPath(operation.path) ||
+	    !HasKnownExecutionProfile(plan) ||
 	    !TryCopyFixedHeaders(operation.headers, true, plan.Pagination().PageBudgets().header_bytes, headers) ||
 	    !HasVariables(operation) || !HasColumns(operation, plan.OutputColumns()) || !HasCursor(operation.cursor) ||
 	    !SameCursor(operation.cursor, plan.Pagination().GraphqlCursor()) ||

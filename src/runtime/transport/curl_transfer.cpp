@@ -138,7 +138,7 @@ long RemainingMilliseconds(std::chrono::steady_clock::time_point deadline) {
 }
 
 void ValidateInputs(const CurlTransferProfile &profile, const HttpRequest &request, const HttpLimits &limits) {
-	if (!profile.url || !profile.protocols || !profile.socket_policy || request.headers.empty()) {
+	if (!profile.url || !profile.protocols || !profile.socket_policy) {
 		throw ExecutionError(ErrorStage::INTERNAL, "", "HTTP transport profile is invalid");
 	}
 	if (limits.max_header_bytes == 0 || limits.max_response_bytes == 0 || limits.max_decompressed_bytes == 0 ||

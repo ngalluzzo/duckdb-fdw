@@ -493,9 +493,12 @@ from those facts; callers cannot supply a raw document or arbitrary variable.
 The package planning profile is not admitted merely because a document and
 digest are present. Runtime admission must additionally validate the complete
 Semantics-owned generator recipe and its correlation with the planned
-operation. Until that separate Runtime checkpoint is accepted, the existing
-native `GITHUB_VIEWER_REPOSITORY_METRICS_V1` admission remains unchanged and a
-package-generated GraphQL plan fails closed before authorization or I/O.
+operation. Runtime validates the bounded recipe independently of Connector and
+Semantics, renders the canonical document with its own implementation, and
+requires exact agreement with the document, variables, cursor slot, response
+paths, and result columns in the plan. The native
+`GITHUB_VIEWER_REPOSITORY_METRICS_V1` operation remains a separate bounded
+compatibility profile.
 
 Any GraphQL `errors` member fails the page according to
 `fail_on_any_error`, including a response that also contains data. Error

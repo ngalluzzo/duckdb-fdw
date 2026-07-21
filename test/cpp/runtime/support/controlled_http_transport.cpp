@@ -367,4 +367,11 @@ std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntimeForHost(std::st
 	return std::shared_ptr<ControlledHttpRuntime>(new ControlledHttpRuntime(std::move(state), std::move(executor)));
 }
 
+std::shared_ptr<ControlledHttpRuntime> BuildControlledPackageHttpRuntime() {
+	auto state = std::make_shared<ControlledHttpRuntime::State>();
+	std::unique_ptr<duckdb_api::internal::HttpTransport> transport(new ControlledTransport(state));
+	auto executor = duckdb_api::internal::BuildHttpScanExecutor(std::move(transport));
+	return std::shared_ptr<ControlledHttpRuntime>(new ControlledHttpRuntime(std::move(state), std::move(executor)));
+}
+
 } // namespace duckdb_api_test

@@ -15,10 +15,13 @@ namespace internal {
 // shared only with independently owned streams opened by the executor.
 std::shared_ptr<const ScanExecutor> BuildHttpScanExecutor(std::unique_ptr<HttpTransport> transport);
 
-// Closed construction-time authority for a privately composed executor. The
-// installed factory above supplies only its fixed public HTTPS profile; test
-// support may link this private boundary to bind an exact controlled plan.
-// No SQL, setting, environment value, or per-scan input constructs a profile.
+// Closed construction-time host ceilings for a privately composed executor.
+// An empty host paired with port zero admits any exact safe DNS destination
+// carried by a fully validated plan; a non-empty host and nonzero port narrow
+// that authority to one origin for focused fixtures. The installed factory is
+// destination-neutral and always denies private, link-local, and loopback
+// addresses. No SQL, setting, environment value, or per-scan input constructs
+// or widens these ceilings.
 struct HttpExecutionProfile {
 	PlannedUrlScheme scheme;
 	std::string host;
@@ -31,6 +34,13 @@ struct HttpExecutionProfile {
 	// up to the v1 per-page ceiling; private fixtures may narrow this value.
 	uint64_t max_decoded_records;
 };
+
+// Shared origin/network intersection used by protocol-specific admission. It
+// validates the exact typed HTTPS destination and deny-only address policy;
+// provenance and reconstructed URL strings are deliberately absent.
+bool IsOriginAllowedByExecutionProfile(const PlannedHttpOrigin &origin, const HttpExecutionProfile &profile) noexcept;
+bool HasExactNetworkCapability(const NetworkCapability &network, const PlannedHttpOrigin &origin,
+                               const HttpExecutionProfile &profile) noexcept;
 
 std::shared_ptr<const ScanExecutor> BuildHttpScanExecutorForProfile(std::unique_ptr<HttpTransport> transport,
                                                                     const HttpExecutionProfile &profile);

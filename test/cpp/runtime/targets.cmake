@@ -114,6 +114,8 @@ add_executable(
   src/runtime/decoding/graphql_response_decoder.cpp
   src/runtime/decoding/strict_json_reader.cpp
   src/runtime/execution/graphql_plan_admission.cpp
+  src/runtime/execution/graphql_recipe_admission.cpp
+  src/runtime/execution/http_execution_profile.cpp
   src/runtime/policy/request_validation.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_graphql_response_decoder_tests)
 target_include_directories(duckdb_api_graphql_response_decoder_tests PRIVATE test/cpp)
@@ -213,6 +215,18 @@ target_link_libraries(
 add_duckdb_api_runtime_executor_test(
   duckdb_api_graphql_paginated_scan_tests
   test/cpp/runtime/execution/graphql_paginated_scan_tests.cpp)
+
+add_executable(
+  duckdb_api_package_http_execution_tests
+  test/cpp/runtime/execution/package_http_execution_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_package_http_execution_tests)
+target_include_directories(duckdb_api_package_http_execution_tests PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_package_http_execution_tests
+  PRIVATE duckdb_api_runtime_programmable_test_service
+          duckdb_api_semantics_fixture_service
+          duckdb_api_semantics_package_graphql_fixture_service
+          Threads::Threads)
 
 add_executable(
   duckdb_api_graphql_plan_admission_tests

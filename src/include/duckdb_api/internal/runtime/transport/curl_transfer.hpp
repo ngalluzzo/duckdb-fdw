@@ -17,9 +17,10 @@ typedef bool (*CurlSocketPolicy)(const sockaddr *address, socklen_t address_leng
 typedef void (*CurlOptionObserver)(CURLoption option, const char *normalized_value, void *context);
 #endif
 
-// Inputs fixed by a composition wrapper, never by SQL, settings, environment,
-// or a ScanPlan. The installed wrapper supplies only the public HTTPS profile;
-// a separately linked test-support wrapper supplies the loopback profile.
+// Inputs fixed by an admitted-request composition wrapper, never by SQL,
+// settings, environment, or raw source text. The installed wrapper constructs
+// exact HTTPS URL and socket authority from a validated immutable request; a
+// separately linked test-support wrapper supplies the loopback profile.
 struct CurlTransferProfile {
 	const char *url;
 	const char *protocols;

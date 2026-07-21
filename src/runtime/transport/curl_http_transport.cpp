@@ -1,31 +1,21 @@
 #include "duckdb_api/internal/runtime/transport/curl_http_transport.hpp"
 
 #include "duckdb_api/internal/runtime/policy/network_policy.hpp"
+#include "duckdb_api/internal/runtime/policy/request_validation.hpp"
 #include "duckdb_api/internal/runtime/transport/curl_transfer.hpp"
-#include "duckdb_api/internal/runtime/transport/graphql_request_body.hpp"
-
-#include <arpa/inet.h>
-#include <netinet/in.h>
+#include "duckdb_api/scan_plan.hpp"
 
 #include <memory>
-#include <limits>
+#include <set>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace duckdb_api {
 namespace internal {
 namespace {
 
-const char *const PUBLIC_SEARCH_URL = "https://api.github.com/search/users?q=duckdb+in%3Alogin&per_page=3";
-const char *const PUBLIC_AUTHENTICATED_USER_URL = "https://api.github.com/user";
-const char *const PUBLIC_GRAPHQL_URL = "https://api.github.com/graphql";
-
-bool HasFixedHeaders(const std::vector<HttpHeader> &headers, const char *user_agent) {
-	return headers.size() >= 3 && headers[0].name == "Accept" && headers[0].value == "application/vnd.github+json" &&
-	       headers[1].name == "User-Agent" && headers[1].value == user_agent &&
-	       headers[2].name == "X-GitHub-Api-Version" && headers[2].value == "2022-11-28";
-}
-
-bool IsVisibleAsciiBearer(const std::string &value) {
+bool IsVisibleAsciiBearer(const std::string &value) noexcept {
 	if (value.size() <= 7 || value.compare(0, 7, "Bearer ") != 0) {
 		return false;
 	}
@@ -38,95 +28,100 @@ bool IsVisibleAsciiBearer(const std::string &value) {
 	return true;
 }
 
-bool HasExpectedAnonymousRequest(const HttpRequest &request) {
-	return request.method == "GET" && request.body.empty() && request.content_type.empty() &&
-	       request.scheme == "https" && request.host == "api.github.com" && request.port == 443 &&
-	       request.target == "/search/users?q=duckdb+in%3Alogin&per_page=3" && request.headers.size() == 3 &&
-	       HasFixedHeaders(request.headers, "duckdb-api/0.6.0");
-}
-
-bool HasExpectedAuthenticatedRequest(const HttpRequest &request) {
-	return request.method == "GET" && request.body.empty() && request.content_type.empty() &&
-	       request.scheme == "https" && request.host == "api.github.com" && request.port == 443 &&
-	       request.target == "/user" && request.headers.size() == 4 &&
-	       HasFixedHeaders(request.headers, "duckdb-api/0.6.0") && request.headers[3].name == "Authorization" &&
-	       IsVisibleAsciiBearer(request.headers[3].value);
-}
-
-bool HasExpectedRepositoriesRequest(const HttpRequest &request) {
-	static const char prefix[] = "/user/repos?per_page=100&page=";
-	static const char selective_suffix[] = "&visibility=private";
-	const std::size_t prefix_size = sizeof(prefix) - 1;
-	const std::size_t selective_suffix_size = sizeof(selective_suffix) - 1;
-	if (request.method != "GET" || !request.body.empty() || !request.content_type.empty() ||
-	    request.scheme != "https" || request.host != "api.github.com" || request.port != 443 ||
-	    request.target.compare(0, prefix_size, prefix) != 0 || request.target.size() == prefix_size ||
-	    request.target[prefix_size] == '0' || request.headers.size() != 4 ||
-	    !HasFixedHeaders(request.headers, "duckdb-api/0.6.0") || request.headers[3].name != "Authorization" ||
-	    !IsVisibleAsciiBearer(request.headers[3].value)) {
+bool HasSafeRestTarget(const std::string &target) {
+	if (target.empty() || target.size() > 8192 || target.find('#') != std::string::npos) {
 		return false;
 	}
-	const auto page_end = request.target.size() >= selective_suffix_size &&
-	                              request.target.compare(request.target.size() - selective_suffix_size,
-	                                                     selective_suffix_size, selective_suffix) == 0
-	                          ? request.target.size() - selective_suffix_size
-	                          : request.target.size();
-	if (page_end == prefix_size) {
+	const auto query = target.find('?');
+	if (query == std::string::npos) {
+		return IsSafeRequestPath(target);
+	}
+	if (target.find('?', query + 1) != std::string::npos || query + 1 == target.size() ||
+	    !IsSafeRequestPath(target.substr(0, query))) {
 		return false;
 	}
-	uint64_t page = 0;
-	for (std::size_t index = prefix_size; index < page_end; index++) {
-		if (request.target[index] < '0' || request.target[index] > '9') {
+	std::set<std::string> names;
+	std::size_t offset = query + 1;
+	while (offset < target.size()) {
+		const auto separator = target.find('&', offset);
+		const auto end = separator == std::string::npos ? target.size() : separator;
+		const auto equals = target.find('=', offset);
+		if (end == offset || equals == std::string::npos || equals == offset || equals >= end ||
+		    target.find('=', equals + 1) < end) {
 			return false;
 		}
-		const auto digit = static_cast<uint64_t>(request.target[index] - '0');
-		if (page > (std::numeric_limits<uint64_t>::max() - digit) / 10) {
+		const auto name = target.substr(offset, equals - offset);
+		const auto value = target.substr(equals + 1, end - equals - 1);
+		if (!IsSafeEncodedQueryName(name) || !IsSafeEncodedQueryValue(value) || !names.insert(name).second) {
 			return false;
 		}
-		page = page * 10 + digit;
+		if (separator == std::string::npos) {
+			break;
+		}
+		offset = separator + 1;
 	}
-	return page > 0;
+	return true;
 }
 
-bool HasExpectedGraphqlRequest(const HttpRequest &request) {
-	return request.method == "POST" && request.scheme == "https" && request.host == "api.github.com" &&
-	       request.port == 443 && request.target == "/graphql" && request.content_type == "application/json" &&
-	       IsCanonicalAdmittedGraphqlBody(request.body) && request.headers.size() == 4 &&
-	       HasFixedHeaders(request.headers, "duckdb-api/0.7.0") && request.headers[3].name == "Authorization" &&
-	       IsVisibleAsciiBearer(request.headers[3].value);
+bool HasSafeHeaders(const HttpRequest &request, bool graphql) {
+	std::vector<PlannedHttpHeader> planned;
+	planned.reserve(request.headers.size() + (graphql ? 1 : 0));
+	bool bearer_seen = false;
+	for (std::size_t index = 0; index < request.headers.size(); index++) {
+		const auto &header = request.headers[index];
+		if (header.name == "Authorization") {
+			if (bearer_seen || index + 1 != request.headers.size() || !IsVisibleAsciiBearer(header.value)) {
+				return false;
+			}
+			bearer_seen = true;
+			continue;
+		}
+		planned.push_back({header.name, header.value});
+	}
+	if (graphql) {
+		planned.push_back({"Content-Type", "application/json"});
+	}
+	std::vector<HttpHeader> copied;
+	return TryCopyFixedHeaders(planned, graphql, HOST_MAX_HEADER_BYTES, copied) &&
+	       copied.size() + (bearer_seen ? 1 : 0) == request.headers.size();
 }
 
-bool IsPublicHttpsSocket(const sockaddr *address, socklen_t address_length, const void *) noexcept {
-	if (!address || !IsPublicSocketAddress(address, address_length)) {
-		return false;
+bool HasSafeCommonRequest(const HttpRequest &request) {
+	return request.scheme == "https" && IsSafeDnsHost(request.host) && request.port != 0;
+}
+
+std::string BuildExactHttpsUrl(const HttpRequest &request) {
+	std::string result = "https://" + request.host;
+	if (request.port != 443) {
+		result += ":" + std::to_string(request.port);
 	}
-	if (address->sa_family == AF_INET) {
-		return address_length >= sizeof(sockaddr_in) &&
-		       ntohs(reinterpret_cast<const sockaddr_in *>(address)->sin_port) == 443;
-	}
-	if (address->sa_family == AF_INET6) {
-		return address_length >= sizeof(sockaddr_in6) &&
-		       ntohs(reinterpret_cast<const sockaddr_in6 *>(address)->sin6_port) == 443;
-	}
-	return false;
+	result += request.target;
+	return result;
+}
+
+bool IsExactPublicSocket(const sockaddr *address, socklen_t address_length, const void *context) noexcept {
+	return context && IsPublicSocketAddressForPort(address, address_length, *static_cast<const uint16_t *>(context));
 }
 
 } // namespace
 
 InstalledHttpRequestKind ClassifyInstalledHttpRequest(const HttpRequest &request) noexcept {
-	if (HasExpectedAnonymousRequest(request)) {
-		return InstalledHttpRequestKind::ANONYMOUS_SEARCH;
+	try {
+		if (!HasSafeCommonRequest(request)) {
+			return InstalledHttpRequestKind::UNSUPPORTED;
+		}
+		if (request.method == "GET" && request.body.empty() && request.content_type.empty() &&
+		    HasSafeRestTarget(request.target) && HasSafeHeaders(request, false)) {
+			return InstalledHttpRequestKind::REST_GET;
+		}
+		if (request.method == "POST" && !request.body.empty() && request.content_type == "application/json" &&
+		    IsSafeRequestPath(request.target) && HasSafeHeaders(request, true)) {
+			return InstalledHttpRequestKind::GRAPHQL_POST;
+		}
+		return InstalledHttpRequestKind::UNSUPPORTED;
+	} catch (...) {
+		return InstalledHttpRequestKind::UNSUPPORTED;
 	}
-	if (HasExpectedAuthenticatedRequest(request)) {
-		return InstalledHttpRequestKind::AUTHENTICATED_USER;
-	}
-	if (HasExpectedRepositoriesRequest(request)) {
-		return InstalledHttpRequestKind::AUTHENTICATED_REPOSITORIES;
-	}
-	if (HasExpectedGraphqlRequest(request)) {
-		return InstalledHttpRequestKind::GRAPHQL_VIEWER_REPOSITORY_METRICS;
-	}
-	return InstalledHttpRequestKind::UNSUPPORTED;
 }
 
 namespace {
@@ -134,47 +129,27 @@ namespace {
 class CurlHttpTransport final : public HttpTransport {
 public:
 	HttpResponse Get(const HttpRequest &request, const HttpLimits &limits, ExecutionControl &control) const override {
-		const char *url = nullptr;
-		std::string repository_url;
-		switch (ClassifyInstalledHttpRequest(request)) {
-		case InstalledHttpRequestKind::ANONYMOUS_SEARCH:
-			url = PUBLIC_SEARCH_URL;
-			break;
-		case InstalledHttpRequestKind::AUTHENTICATED_USER:
-			url = PUBLIC_AUTHENTICATED_USER_URL;
-			break;
-		case InstalledHttpRequestKind::AUTHENTICATED_REPOSITORIES:
-			repository_url = std::string("https://api.github.com") + request.target;
-			url = repository_url.c_str();
-			break;
-		case InstalledHttpRequestKind::GRAPHQL_VIEWER_REPOSITORY_METRICS:
-			throw ExecutionError(ErrorStage::POLICY, "method", "GraphQL requests require HTTP POST");
-		case InstalledHttpRequestKind::UNSUPPORTED:
+		if (ClassifyInstalledHttpRequest(request) != InstalledHttpRequestKind::REST_GET) {
 			throw ExecutionError(ErrorStage::POLICY, "", "HTTP request is outside the installed execution profile");
 		}
-		const CurlTransferProfile profile {url,
-		                                   "https",
-		                                   IsPublicHttpsSocket,
-		                                   nullptr
-#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
-		                                   ,
-		                                   nullptr,
-		                                   nullptr,
-		                                   nullptr,
-		                                   nullptr
-#endif
-		};
-		return PerformCurlTransfer(profile, request, limits, control);
+		return Transfer(request, limits, control);
 	}
 
 	HttpResponse Post(const HttpRequest &request, const HttpLimits &limits, ExecutionControl &control) const override {
-		if (ClassifyInstalledHttpRequest(request) != InstalledHttpRequestKind::GRAPHQL_VIEWER_REPOSITORY_METRICS) {
+		if (ClassifyInstalledHttpRequest(request) != InstalledHttpRequestKind::GRAPHQL_POST) {
 			throw ExecutionError(ErrorStage::POLICY, "", "HTTP request is outside the installed execution profile");
 		}
-		const CurlTransferProfile profile {PUBLIC_GRAPHQL_URL,
+		return Transfer(request, limits, control);
+	}
+
+private:
+	static HttpResponse Transfer(const HttpRequest &request, const HttpLimits &limits, ExecutionControl &control) {
+		const auto url = BuildExactHttpsUrl(request);
+		const auto exact_port = request.port;
+		const CurlTransferProfile profile {url.c_str(),
 		                                   "https",
-		                                   IsPublicHttpsSocket,
-		                                   nullptr
+		                                   IsExactPublicSocket,
+		                                   &exact_port
 #ifdef DUCKDB_API_PRIVATE_CURL_TESTS
 		                                   ,
 		                                   nullptr,

@@ -6,17 +6,9 @@ namespace duckdb_api {
 namespace internal {
 namespace {
 
-bool HasExpectedNetwork(const NetworkCapability &network, const HttpExecutionProfile &profile) {
-	return profile.scheme == PlannedUrlScheme::HTTPS && network.allowed_schemes.size() == 1 &&
-	       network.allowed_schemes[0] == "https" && network.allowed_hosts.size() == 1 &&
-	       network.allowed_hosts[0] == profile.host && !network.redirects_enabled &&
-	       network.private_addresses_enabled == profile.private_addresses_enabled &&
-	       network.link_local_addresses_enabled == profile.link_local_addresses_enabled &&
-	       network.loopback_addresses_enabled == profile.loopback_addresses_enabled;
-}
-
-bool HasAuthentication(const ScanPlan &plan, const HttpExecutionProfile &profile, bool &requires_bearer) {
+bool HasAuthentication(const ScanPlan &plan, bool &requires_bearer) {
 	const auto &obligation = plan.AuthenticationObligation();
+	const auto &origin = plan.Operation().Rest().origin;
 	const auto *destination = obligation.Destination();
 	if (plan.Authentication() == FeatureState::DISABLED) {
 		requires_bearer = false;
@@ -31,14 +23,14 @@ bool HasAuthentication(const ScanPlan &plan, const HttpExecutionProfile &profile
 	return plan.SecretReference().IsPresent() && obligation.Requirement() == PlannedCredentialRequirement::REQUIRED &&
 	       obligation.LogicalCredential() == "token" && obligation.Authenticator() == PlannedAuthenticator::BEARER &&
 	       obligation.Placement() == PlannedCredentialPlacement::AUTHORIZATION_HEADER && destination != nullptr &&
-	       destination->scheme == profile.scheme && destination->host == profile.host &&
-	       destination->port == profile.port;
+	       destination->scheme == origin.scheme && destination->host == origin.host && destination->port == origin.port;
 }
 
 } // namespace
 
 bool HasSupportedRestAuthority(const ScanPlan &plan, const HttpExecutionProfile &profile, bool &requires_bearer) {
-	return HasExpectedNetwork(plan.Network(), profile) && HasAuthentication(plan, profile, requires_bearer);
+	return HasExactNetworkCapability(plan.Network(), plan.Operation().Rest().origin, profile) &&
+	       HasAuthentication(plan, requires_bearer);
 }
 
 } // namespace internal

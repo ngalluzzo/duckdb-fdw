@@ -179,6 +179,7 @@ run_build() {
         duckdb_api_http_scan_executor_policy_tests \
         duckdb_api_graphql_paginated_scan_tests \
         duckdb_api_graphql_plan_admission_tests \
+        duckdb_api_package_http_execution_tests \
         duckdb_api_duckdb_secret_tests \
         duckdb_api_adapter_tests \
         duckdb_api_graphql_query_contract_tests \
@@ -277,6 +278,7 @@ run_tests() {
     "${NATIVE_TEST_ROOT}/duckdb_api_http_scan_executor_policy_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_graphql_paginated_scan_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_graphql_plan_admission_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_package_http_execution_tests" "${REPOSITORY_ROOT}"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_transport_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_budget_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_curl_http_lifecycle_tests"

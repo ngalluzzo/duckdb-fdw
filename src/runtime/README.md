@@ -13,13 +13,14 @@ an immutable Runtime profile. Package REST plans consume only their ordered
 typed query bindings, structural records path, and typed result paths; the
 legacy query/extractor/output mirrors are ignored. Native `0.7` plans without
 those permanent fields retain the bounded legacy path. Paginated REST
-additionally owns the page slots and exact Link continuation contract. GraphQL
-admission currently accepts only the reviewed native canonical document;
-package-generated identity fails closed until a source-neutral renderer recipe
-can prove membership. Request construction, authentication placement,
-decoding, and pagination consume only admitted profiles or exact derived
-requests; they do not inspect connector, package, relation, classification,
-explanation, or source identity.
+additionally owns the page slots and exact Link continuation contract. Package
+GraphQL admission independently validates and renders the Semantics-owned
+closed recipe, then correlates the resulting document, variables, cursor slot,
+response paths, and columns with the rest of the plan. The native `0.7`
+canonical operation remains a separate compatibility profile. Request
+construction, authentication placement, decoding, and pagination consume only
+admitted profiles or exact derived requests; they do not inspect connector,
+package, relation, classification, explanation, or source identity.
 
 Admission exhaustively validates the relational authority present at that
 current boundary and the DuckDB-owned execution envelope, but does not
@@ -35,13 +36,16 @@ network I/O.
 
 GraphQL admission applies the same exhaustive check to the public Semantics
 handoff. It validates both cursor copies, ordered variables and columns,
-document integrity, fail-only envelope paths, authentication and network
+recipe/document identity, fail-only envelope paths, authentication and network
 authority, and every page/scan budget. The serializer emits a compact POST body
 whose only changing value is the scan-owned nullable cursor. The body is
 debited before optional bearer placement or I/O; anonymous and bearer plans are
 separate closed authorization alternatives. A strict lexical reader validates
 the complete JSON document; the GraphQL decoder maps the copied response paths
-and produces SQL NULL only for declared nullable columns.
+and produces SQL NULL only for declared nullable columns. The installed
+executor is destination-neutral: the admitted plan's exact HTTPS DNS origin
+and singleton network capability determine the request. Test-only executors
+may additionally restrict execution to one exact host and port.
 
 ## Directory guide
 
@@ -125,7 +129,7 @@ Tests mirror the production directories under `test/cpp/runtime/`:
 | Request, network, and resource policy | `duckdb_api_request_validation_tests`, `duckdb_api_network_policy_tests`, `duckdb_api_scan_resource_accounting_tests` |
 | URI and Link pagination | `duckdb_api_uri_reference_tests`, `duckdb_api_link_pagination_tests` |
 | JSON and decoded-page ownership | `duckdb_api_json_decoder_tests`, `duckdb_api_json_root_array_decoder_tests`, `duckdb_api_decoded_page_buffer_tests` |
-| GraphQL admission and request bytes | `duckdb_api_graphql_plan_admission_tests` |
+| GraphQL admission and request bytes | `duckdb_api_graphql_plan_admission_tests`, `duckdb_api_package_http_execution_tests` |
 | GraphQL envelope and cursor state | `duckdb_api_graphql_response_decoder_tests`, `duckdb_api_graphql_cursor_pagination_tests` |
 | GraphQL pull execution | `duckdb_api_graphql_paginated_scan_tests` |
 | Consumer-controlled named scenarios | `duckdb_api_runtime_controlled_service`, `duckdb_api_controlled_runtime_scenario_tests` (`runtime/service/controlled_runtime_scenario.hpp`) |

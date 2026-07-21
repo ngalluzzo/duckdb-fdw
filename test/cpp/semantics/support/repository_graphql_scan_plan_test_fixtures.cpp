@@ -23,6 +23,23 @@ duckdb_api::ScanPlan BuildRepositoryGithubPackageGraphqlPlan(const std::string &
 	return planning.Plan(registration.GenerationHandle(), request);
 }
 
+duckdb_api::ScanPlan BuildNonGithubPackageGraphqlPlan(const std::string &absolute_repository_root) {
+	const auto generation = CompileNonGithubGraphqlGenerationFixture(absolute_repository_root);
+	const duckdb_api::PackageBoundScanPlanningService planning(generation);
+	auto request = duckdb_api::BuildConservativeScanRequest(generation.Connector(), "regional_events",
+	                                                        duckdb_api::LogicalSecretReference());
+	request.explicit_inputs = duckdb_api::ExplicitInputs({duckdb_api::ExplicitInput::Varchar("region", "north")});
+	return planning.Plan(generation.QueryRegistration().GenerationHandle(), request);
+}
+
+duckdb_api::ScanPlan BuildNonGithubPackageRestPlan(const std::string &absolute_repository_root) {
+	const auto generation = CompileNonGithubGraphqlGenerationFixture(absolute_repository_root);
+	const duckdb_api::PackageBoundScanPlanningService planning(generation);
+	auto request = duckdb_api::BuildConservativeScanRequest(generation.Connector(), "regional_events",
+	                                                        duckdb_api::LogicalSecretReference());
+	return planning.Plan(generation.QueryRegistration().GenerationHandle(), request);
+}
+
 duckdb_api::ScanPlan
 ScanPlanTestAccess::PackageGraphqlRecipe(duckdb_api::ScanPlan plan,
                                          PackageGraphqlRuntimeRecipeCounterexample counterexample) {

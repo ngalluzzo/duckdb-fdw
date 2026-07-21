@@ -81,6 +81,34 @@ bool IsRuntimeOwnedHeader(const std::string &name) noexcept {
 	       ContainsAsciiIgnoreCase(name, "api-key") || ContainsAsciiIgnoreCase(name, "apikey");
 }
 
+bool IsIpv4Literal(const std::string &host) noexcept {
+	std::size_t begin = 0;
+	std::size_t components = 0;
+	while (begin <= host.size()) {
+		const auto end = host.find('.', begin);
+		const auto component_end = end == std::string::npos ? host.size() : end;
+		if (component_end == begin || component_end - begin > 3) {
+			return false;
+		}
+		unsigned int value = 0;
+		for (std::size_t index = begin; index < component_end; index++) {
+			if (host[index] < '0' || host[index] > '9') {
+				return false;
+			}
+			value = value * 10U + static_cast<unsigned int>(host[index] - '0');
+		}
+		if (value > 255U) {
+			return false;
+		}
+		components++;
+		if (end == std::string::npos) {
+			break;
+		}
+		begin = end + 1;
+	}
+	return components == 4;
+}
+
 } // namespace
 
 bool EqualsAsciiIgnoreCase(const std::string &left, const std::string &right) noexcept {
@@ -126,7 +154,7 @@ bool IsSafeRequestPath(const std::string &path) noexcept {
 }
 
 bool IsSafeDnsHost(const std::string &host) noexcept {
-	if (host.empty() || host.size() > 253 || host.back() == '.') {
+	if (host.empty() || host.size() > 253 || host.back() == '.' || IsIpv4Literal(host)) {
 		return false;
 	}
 	std::size_t label_start = 0;

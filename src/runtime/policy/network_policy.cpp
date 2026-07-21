@@ -97,5 +97,20 @@ bool IsPublicSocketAddress(const sockaddr *address, socklen_t address_length) no
 	return false;
 }
 
+bool IsPublicSocketAddressForPort(const sockaddr *address, socklen_t address_length, uint16_t port) noexcept {
+	if (port == 0 || !IsPublicSocketAddress(address, address_length)) {
+		return false;
+	}
+	if (address->sa_family == AF_INET) {
+		return address_length >= sizeof(sockaddr_in) &&
+		       ntohs(reinterpret_cast<const sockaddr_in *>(address)->sin_port) == port;
+	}
+	if (address->sa_family == AF_INET6) {
+		return address_length >= sizeof(sockaddr_in6) &&
+		       ntohs(reinterpret_cast<const sockaddr_in6 *>(address)->sin6_port) == port;
+	}
+	return false;
+}
+
 } // namespace internal
 } // namespace duckdb_api

@@ -21,6 +21,8 @@ set(REMOTE_RUNTIME_EXECUTOR_SOURCES
     src/runtime/decoding/strict_json_reader.cpp
     src/runtime/execution/graphql_paginated_scan.cpp
     src/runtime/execution/graphql_plan_admission.cpp
+    src/runtime/execution/graphql_recipe_admission.cpp
+    src/runtime/execution/http_execution_profile.cpp
     src/runtime/execution/http_plan_admission.cpp
     src/runtime/execution/http_paginated_scan.cpp
     src/runtime/execution/http_scan_executor.cpp
