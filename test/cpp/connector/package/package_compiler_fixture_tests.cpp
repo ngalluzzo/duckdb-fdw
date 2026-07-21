@@ -20,6 +20,13 @@ struct ExpectedColumn {
 	bool nullable;
 };
 
+class NeverCancel final : public duckdb_api::connector::PackageCancellation {
+public:
+	bool IsCancellationRequested() const noexcept override {
+		return false;
+	}
+};
+
 void RequireRelation(const CompiledRegistrationRelation &relation, const char *name,
                      CompiledRegistrationAuthentication authentication,
                      const std::vector<ExpectedColumn> &expected_columns) {
@@ -53,6 +60,23 @@ int main(int argc, char **argv) {
 		        "Connector compiler fixture did not expose the exact real package identity and generation");
 		Require(registration.Relations().size() == 4,
 		        "Connector compiler fixture did not expose the real four-relation registration view");
+		const auto github = duckdb_api_test::CompileRepositoryGithubLocalPackageFixture(argv[1]);
+		const auto distinct = duckdb_api_test::CompileRepositoryDistinctLocalPackageFixture(argv[1]);
+		Require(github.IsValid() && distinct.IsValid() &&
+		            distinct.Generation().Identity().ConnectorId() == "github_distinct" &&
+		            distinct.Generation().Identity().PackageVersion() == "1.0.0" &&
+		            distinct.Generation().Identity().PackageDigest() !=
+		                github.Generation().Identity().PackageDigest() &&
+		            distinct.MatchesGeneration(distinct.Generation().OpaqueHandle()) &&
+		            !distinct.MatchesGeneration(github.Generation().OpaqueHandle()),
+		        "distinct compiler-produced local-package fixture lost exact identity/custody");
+		NeverCancel cancellation;
+		const auto distinct_reload =
+		    duckdb_api::connector::RecompileLocalPackage(distinct, distinct.Generation().OpaqueHandle(), cancellation);
+		Require(distinct_reload.Succeeded() && distinct_reload.Package() != nullptr &&
+		            distinct_reload.Package()->MatchesGeneration(distinct_reload.Generation()->OpaqueHandle()) &&
+		            distinct_reload.Generation()->Identity().ConnectorId() == "github_distinct",
+		        "distinct local-package fixture did not retain its real source custody");
 
 		const auto anonymous = CompiledRegistrationAuthentication::ANONYMOUS;
 		const auto required = CompiledRegistrationAuthentication::LOGICAL_SECRET_REQUIRED;

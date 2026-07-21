@@ -25,9 +25,10 @@ target_link_libraries(
   duckdb_api_package_generation_fixture_service
   PUBLIC duckdb_api_connector_metadata_service)
 
-# Query consumers use the real repository package compiler through this
-# Connector-owned bounded fixture API. The public surface exposes only the
-# registration projection and its opaque generation handle.
+# Query and Runtime consumers use the real repository package compiler through
+# this Connector-owned bounded fixture API. It exposes structural registration
+# plus compiler-produced local-package/reload custody values, never YAML,
+# source paths, compiler construction access, or synthetic generations.
 add_library(
   duckdb_api_package_compiler_fixture_service STATIC
   ${CONNECTOR_PACKAGE_COMPILER_TEST_SERVICE_SOURCES})
@@ -88,6 +89,28 @@ target_include_directories(
   PRIVATE test/cpp)
 target_link_libraries(
   duckdb_api_package_compiler_fixture_tests
+  PRIVATE duckdb_api_package_compiler_fixture_service)
+
+add_executable(
+  duckdb_api_local_package_compiler_tests
+  test/cpp/connector/package/local_package_compiler_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_local_package_compiler_tests)
+target_include_directories(
+  duckdb_api_local_package_compiler_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_local_package_compiler_tests
+  PRIVATE duckdb_api_package_compiler_service)
+
+add_executable(
+  duckdb_api_local_package_reload_fixture_tests
+  test/cpp/connector/package/local_package_reload_fixture_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_local_package_reload_fixture_tests)
+target_include_directories(
+  duckdb_api_local_package_reload_fixture_tests
+  PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_local_package_reload_fixture_tests
   PRIVATE duckdb_api_package_compiler_fixture_service)
 
 add_executable(

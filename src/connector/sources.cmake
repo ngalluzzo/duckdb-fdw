@@ -20,6 +20,9 @@ set(CONNECTOR_PACKAGE_YAML_SOURCES
     src/connector/package/failsafe_yaml.cpp
     src/connector/package/failsafe_yaml_lexical.cpp
     src/connector/package/failsafe_yaml_parser.cpp)
+set(CONNECTOR_LOCAL_PACKAGE_CUSTODY_SOURCES
+    src/connector/package/compiled_local_package.cpp
+    src/connector/package/package_source_snapshot.cpp)
 set(CONNECTOR_PACKAGE_SOURCE_SOURCES
     src/connector/package/package_digest.cpp
     src/connector/package/package_source.cpp

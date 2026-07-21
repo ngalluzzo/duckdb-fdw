@@ -329,7 +329,9 @@ void TestCancellationAndMutationDetection() {
 	CountingCancellation counter;
 	(void)AcquirePackageSource(root, PackageSourceLimits::V1(), counter);
 	Require(counter.count > 4, "package source did not expose enough bounded cancellation checkpoints");
-	MutatingCancellation mutator(counter.count - 3, root + "/relations/viewer_repository_metrics.yaml");
+	const std::uint64_t digest_checkpoints = 6 * 5 + 2;
+	MutatingCancellation mutator(counter.count - digest_checkpoints - 3,
+	                             root + "/relations/viewer_repository_metrics.yaml");
 	RequireSourceFailure(PackageSourceErrorCode::IDENTITY_CHANGED,
 	                     [&]() { (void)AcquirePackageSource(root, PackageSourceLimits::V1(), mutator); });
 	Require(mutator.mutated, "mutation test did not change the source during the acquisition interval");
@@ -337,7 +339,8 @@ void TestCancellationAndMutationDetection() {
 	const auto second_root = CreateGithubPackage(tree.Path(), "entry-set");
 	CountingCancellation second_counter;
 	(void)AcquirePackageSource(second_root, PackageSourceLimits::V1(), second_counter);
-	EntryAddingCancellation entry_mutator(second_counter.count - 4, second_root + "/added-during-acquisition");
+	EntryAddingCancellation entry_mutator(second_counter.count - digest_checkpoints - 4,
+	                                      second_root + "/added-during-acquisition");
 	RequireSourceFailure(PackageSourceErrorCode::IDENTITY_CHANGED,
 	                     [&]() { (void)AcquirePackageSource(second_root, PackageSourceLimits::V1(), entry_mutator); });
 	Require(entry_mutator.mutated, "entry-set mutation test did not add a source during acquisition");

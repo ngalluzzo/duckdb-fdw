@@ -193,6 +193,8 @@ for target in \
     duckdb_api_failsafe_yaml_tests \
     duckdb_api_package_digest_tests \
     duckdb_api_package_source_tests \
+    duckdb_api_local_package_compiler_tests \
+    duckdb_api_local_package_reload_fixture_tests \
     duckdb_api_package_compatibility_tests \
     duckdb_api_package_compiler_contract_tests \
     duckdb_api_package_graphql_renderer_tests \
@@ -264,6 +266,8 @@ python3 -I -B "${PROJECT_SOURCE}/scripts/test-native-dependencies.py"
     "${NATIVE_TEST_ROOT}/duckdb_api_failsafe_yaml_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_package_digest_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_package_source_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_local_package_compiler_tests"
+    "${NATIVE_TEST_ROOT}/duckdb_api_local_package_reload_fixture_tests" "${PROJECT_SOURCE}"
     "${NATIVE_TEST_ROOT}/duckdb_api_compiled_package_generation_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_package_compatibility_tests"
     "${NATIVE_TEST_ROOT}/duckdb_api_package_compiler_contract_tests"

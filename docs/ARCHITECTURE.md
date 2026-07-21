@@ -66,6 +66,13 @@ Reload uses the active connector's retained canonical root:
 CALL duckdb_api_reload_connector(connector := 'github');
 ```
 
+Connector represents that authority as one immutable local-package value that
+contains the exact compiled generation and the already-open canonical root.
+The root has no path, descriptor, or byte-inspection API. Reload must present
+the exact active generation handle owned by that value before Connector
+reacquires source, so a registry generation and another package's custody
+cannot be cross-wired into filesystem authority.
+
 Load and reload return connector, package version, spec version, package
 digest, relation count, and whether publication changed. Three read-only table
 functions expose active connector, relation, and argument metadata without

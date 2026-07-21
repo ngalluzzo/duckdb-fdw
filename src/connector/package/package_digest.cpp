@@ -1,6 +1,7 @@
 #include "duckdb_api/internal/connector/package/package_digest.hpp"
 
 #include "duckdb_api/content_digest.hpp"
+#include "duckdb_api/internal/connector/package/package_cancellation.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -103,11 +104,19 @@ void AppendU64BigEndian(std::string &destination, std::uint64_t value) {
 
 } // namespace
 
-std::string ComputePackageDigest(const std::vector<SemanticSourceFile> &semantic_files) {
+std::string ComputeDigest(const std::string &framed) {
+	return "sha256." + ComputeSha256Hex(framed);
+}
+
+bool ComputePackageDigest(const std::vector<SemanticSourceFile> &semantic_files, PackageCancellation &cancellation,
+                          std::string &digest) {
 	std::vector<const SemanticSourceFile *> ordered;
 	std::set<std::string> folded_paths;
 	ordered.reserve(semantic_files.size());
 	for (const auto &file : semantic_files) {
+		if (cancellation.IsCancellationRequested()) {
+			return false;
+		}
 		if (!IsNormalizedRelativePath(file.path)) {
 			throw std::invalid_argument("semantic source path is not normalized relative POSIX UTF-8");
 		}
@@ -119,6 +128,9 @@ std::string ComputePackageDigest(const std::vector<SemanticSourceFile> &semantic
 			throw std::invalid_argument("semantic source paths are duplicate or case-colliding");
 		}
 		ordered.push_back(&file);
+		if (cancellation.IsCancellationRequested()) {
+			return false;
+		}
 	}
 	std::sort(ordered.begin(), ordered.end(),
 	          [](const SemanticSourceFile *left, const SemanticSourceFile *right) { return left->path < right->path; });
@@ -126,6 +138,9 @@ std::string ComputePackageDigest(const std::vector<SemanticSourceFile> &semantic
 	std::string framed;
 	std::size_t framed_size = 0;
 	for (const auto *file : ordered) {
+		if (cancellation.IsCancellationRequested()) {
+			return false;
+		}
 		const auto maximum = std::numeric_limits<std::size_t>::max();
 		if (file->path.size() > maximum - 16U) {
 			throw std::length_error("semantic source digest framing exceeds addressable memory");
@@ -139,15 +154,32 @@ std::string ComputePackageDigest(const std::vector<SemanticSourceFile> &semantic
 			throw std::length_error("semantic source digest framing exceeds addressable memory");
 		}
 		framed_size += framed_file_size;
+		if (cancellation.IsCancellationRequested()) {
+			return false;
+		}
 	}
 	framed.reserve(framed_size);
 	for (const auto *file : ordered) {
+		if (cancellation.IsCancellationRequested()) {
+			return false;
+		}
 		AppendU64BigEndian(framed, static_cast<std::uint64_t>(file->path.size()));
 		framed.append(file->path);
 		AppendU64BigEndian(framed, static_cast<std::uint64_t>(file->bytes.size()));
 		framed.append(file->bytes);
+		if (cancellation.IsCancellationRequested()) {
+			return false;
+		}
 	}
-	return "sha256." + ComputeSha256Hex(framed);
+	if (cancellation.IsCancellationRequested()) {
+		return false;
+	}
+	const auto computed = ComputeDigest(framed);
+	if (cancellation.IsCancellationRequested()) {
+		return false;
+	}
+	digest = computed;
+	return true;
 }
 
 } // namespace connector

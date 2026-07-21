@@ -15,7 +15,7 @@ namespace internal {
 
 bool DecodePackageSchema(const std::vector<std::pair<std::string, FailsafeYamlNode>> &documents,
                          const PackageSourceSnapshot &snapshot, PackageDiagnosticSink &diagnostics,
-                         PackageDeclaration &package);
+                         PackageDeclaration &package, PackageCancellation &cancellation);
 bool DecodeManifestSchema(const std::string &file, const FailsafeYamlNode &root, PackageDiagnosticSink &diagnostics,
                           ManifestDeclaration &manifest);
 bool DecodeRelationSchema(const std::string &file, const FailsafeYamlNode &root, PackageDiagnosticSink &diagnostics,

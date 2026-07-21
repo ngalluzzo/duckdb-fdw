@@ -196,16 +196,24 @@ PackageCompilerLimits PackageCompilerLimits::V1() {
 	return {FailsafeYamlLimits::V1(), 256};
 }
 
-PackageCompileResult::PackageCompileResult(std::shared_ptr<const CompiledPackageGeneration> generation_p,
+const char *PackageCompilationCancelled::what() const noexcept {
+	return "local package compilation was cancelled";
+}
+
+PackageCompileResult::PackageCompileResult(std::shared_ptr<const CompiledLocalPackage> package_p,
                                            std::vector<PackageDiagnostic> diagnostics_p)
-    : generation(std::move(generation_p)), diagnostics(std::move(diagnostics_p)) {
-	if ((generation != nullptr) == !diagnostics.empty()) {
+    : package(std::move(package_p)), diagnostics(std::move(diagnostics_p)) {
+	if ((package != nullptr) == !diagnostics.empty() || (package && !package->IsValid())) {
 		throw std::invalid_argument("package compile result must contain exactly one outcome");
 	}
 }
 
+const CompiledLocalPackage *PackageCompileResult::Package() const {
+	return package.get();
+}
+
 const CompiledPackageGeneration *PackageCompileResult::Generation() const {
-	return generation.get();
+	return package ? &package->Generation() : nullptr;
 }
 
 const std::vector<PackageDiagnostic> &PackageCompileResult::Diagnostics() const {
@@ -213,7 +221,7 @@ const std::vector<PackageDiagnostic> &PackageCompileResult::Diagnostics() const 
 }
 
 bool PackageCompileResult::Succeeded() const {
-	return generation != nullptr;
+	return package != nullptr;
 }
 
 namespace internal {

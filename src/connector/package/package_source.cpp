@@ -31,60 +31,6 @@ PackageSourceLimits PackageSourceLimits::V1() {
 	return {65, 4096, 1024, 5120, 1024 * 1024, 16 * 1024 * 1024, 255};
 }
 
-class PackageSourceSnapshot::State {
-public:
-	State(int root_fd_p, std::vector<SemanticSourceFile> files_p, std::vector<std::string> relation_ids_p,
-	      std::string digest_p)
-	    : root_fd(root_fd_p), files(std::move(files_p)), relation_ids(std::move(relation_ids_p)),
-	      digest(std::move(digest_p)) {
-	}
-
-	~State() noexcept {
-		if (root_fd >= 0) {
-			::close(root_fd);
-		}
-	}
-
-	State(const State &) = delete;
-	State &operator=(const State &) = delete;
-
-	int root_fd;
-	std::vector<SemanticSourceFile> files;
-	std::vector<std::string> relation_ids;
-	std::string digest;
-};
-
-PackageSourceSnapshot::PackageSourceSnapshot() {
-}
-
-PackageSourceSnapshot::PackageSourceSnapshot(std::shared_ptr<const State> state_p) : state(std::move(state_p)) {
-}
-
-const std::vector<SemanticSourceFile> &PackageSourceSnapshot::Files() const {
-	if (!state) {
-		throw std::logic_error("package source snapshot is empty");
-	}
-	return state->files;
-}
-
-const std::vector<std::string> &PackageSourceSnapshot::RelationIds() const {
-	if (!state) {
-		throw std::logic_error("package source snapshot is empty");
-	}
-	return state->relation_ids;
-}
-
-const std::string &PackageSourceSnapshot::Digest() const {
-	if (!state) {
-		throw std::logic_error("package source snapshot is empty");
-	}
-	return state->digest;
-}
-
-bool PackageSourceSnapshot::IsValid() const noexcept {
-	return static_cast<bool>(state);
-}
-
 namespace {
 
 bool IsIdentifier(const std::string &value) {
@@ -173,7 +119,10 @@ AcquiredPackageSource AcquireFromCustody(internal::PackageDirectoryCustody custo
 		files.push_back({"relations/" + id + ".yaml", custody.ReadRelation(id, cancellation)});
 	}
 	custody.VerifyUnchanged(cancellation);
-	auto digest = ComputePackageDigest(files);
+	std::string digest;
+	if (!ComputePackageDigest(files, cancellation, digest)) {
+		throw PackageSourceError(PackageSourceErrorCode::CANCELLED, "", "package source acquisition was cancelled");
+	}
 	AcquiredPackageSource acquired(-1, std::move(files), std::move(relation_ids), std::move(digest));
 	acquired.root_fd = custody.ReleaseRoot();
 	return acquired;
@@ -186,14 +135,8 @@ PackageSourceSnapshot AcquirePackageSource(const std::string &absolute_root, con
 	auto acquired = AcquireFromCustody(
 	    internal::PackageDirectoryCustody::OpenAbsolute(absolute_root, host_limits, cancellation), cancellation);
 	const int root_fd = acquired.ReleaseRoot();
-	try {
-		auto state = std::make_shared<PackageSourceSnapshot::State>(
-		    root_fd, std::move(acquired.files), std::move(acquired.relation_ids), std::move(acquired.digest));
-		return PackageSourceSnapshot(std::move(state));
-	} catch (...) {
-		::close(root_fd);
-		throw;
-	}
+	return PackageSourceSnapshot::Create(root_fd, std::move(acquired.files), std::move(acquired.relation_ids),
+	                                     std::move(acquired.digest));
 }
 
 PackageSourceSnapshot ReacquirePackageSource(const PackageSourceSnapshot &prior, const PackageSourceLimits &host_limits,
@@ -202,16 +145,11 @@ PackageSourceSnapshot ReacquirePackageSource(const PackageSourceSnapshot &prior,
 		throw PackageSourceError(PackageSourceErrorCode::INVALID_ROOT, "", "prior package source snapshot is empty");
 	}
 	auto acquired = AcquireFromCustody(
-	    internal::PackageDirectoryCustody::OpenRetained(prior.state->root_fd, host_limits, cancellation), cancellation);
+	    internal::PackageDirectoryCustody::OpenRetained(prior.RetainedRootFd(), host_limits, cancellation),
+	    cancellation);
 	const int root_fd = acquired.ReleaseRoot();
-	try {
-		auto state = std::make_shared<PackageSourceSnapshot::State>(
-		    root_fd, std::move(acquired.files), std::move(acquired.relation_ids), std::move(acquired.digest));
-		return PackageSourceSnapshot(std::move(state));
-	} catch (...) {
-		::close(root_fd);
-		throw;
-	}
+	return PackageSourceSnapshot::Create(root_fd, std::move(acquired.files), std::move(acquired.relation_ids),
+	                                     std::move(acquired.digest));
 }
 
 } // namespace connector

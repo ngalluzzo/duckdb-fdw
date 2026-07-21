@@ -4,4 +4,5 @@ set(CONNECTOR_TEST_SERVICE_SOURCES
 set(CONNECTOR_PACKAGE_TEST_SERVICE_SOURCES
     test/cpp/connector/support/package_generation_test_fixtures.cpp)
 set(CONNECTOR_PACKAGE_COMPILER_TEST_SERVICE_SOURCES
+    test/cpp/connector/support/local_package_reload_test_fixtures.cpp
     test/cpp/connector/support/package_compiler_test_fixtures.cpp)

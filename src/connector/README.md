@@ -22,6 +22,7 @@ residual ownership. Runtime receives only the resulting plan.
 | Change catalog values, relation/catalog validation, or lookup | `catalog_model.cpp`, `duckdb_api/connector_catalog.hpp` | `connector_catalog_contract_tests.cpp` |
 | Change structural relation inputs, package identity, generation ownership, or Query registration projection | `compiled_package_generation.cpp`, `duckdb_api/compiled_package_generation.hpp`, `duckdb_api/internal/connector/compiled_model_builder.hpp` | `compiled_package_generation_contract_tests.cpp` |
 | Change package SemVer or normalized reload compatibility | `package_semver.cpp`, `package_compatibility.cpp`, and their public headers | `package_compatibility_contract_tests.cpp` |
+| Change compiled generation / retained-root custody or canonical-root reload | `package/compiled_local_package.cpp`, `package/package_compiler.cpp`, and `duckdb_api/local_package_compiler.hpp` | `local_package_compiler_tests.cpp`; `local_package_reload_fixture_tests.cpp` |
 | Change local package acquisition, YAML decoding, schema validation, or compilation | `package/package_source*.cpp`, `package/failsafe_yaml*.cpp`, the responsibility-named `package/package_*_schema.cpp` and `package/package_*_compiler.cpp` units | `package_source_tests.cpp`, `failsafe_yaml_tests.cpp`, and the focused package schema/compiler suites |
 | Change the construction-closed GraphQL recipe or canonical rendering | `graphql_query_recipe.cpp`, `package/package_graphql_renderer.cpp`, and `duckdb_api/internal/connector/graphql_query_recipe.hpp` | `package_graphql_renderer_tests.cpp`; GraphQL catalog contract tests |
 | Change the REST/GraphQL operation sum, HTTP authority, canonical GraphQL document, typed result mapping, cursor, or safe protocol snapshot | `protocol_operation_declaration.cpp`, `graphql_operation_declaration.cpp`, `duckdb_api/compiled_protocol_operation.hpp` | `connector_graphql_contract_tests.cpp`; existing REST contract tests |
@@ -48,13 +49,19 @@ Semantics may consume its generalized immutable connector, while Query receives
 only the structural registration projection and an opaque shared-lifetime
 handle. Query cannot recover extractors, operation selection, predicates,
 network policy, source text, or credentials from that view. The
-internal [`package_compiler.hpp`](../include/duckdb_api/internal/connector/package/package_compiler.hpp)
-is Connector's production entry point for an absolute canonical local root. It
-acquires bounded source, compiles a complete immutable generation, and returns
-ordered safe diagnostics; it neither registers DuckDB objects nor stages
-Runtime work. Query tests that need a real package use the Connector-owned
-`package_compiler_test_fixtures.hpp` service and receive only the same public
-registration projection and opaque lifetime handle. The
+public [`local_package_compiler.hpp`](../include/duckdb_api/local_package_compiler.hpp)
+is Connector's bounded production service for an absolute canonical local
+root. Success returns one `CompiledLocalPackage` that inseparably owns the
+compiled generation and its already-open root custody. Copies pin both; the
+value exposes only its generation and exact-generation comparison, never an
+absolute path, descriptor, source byte, or mutable root. Reload consumes that
+value plus the exact active generation handle and fails before filesystem work
+when ownership is default, stale, or cross-wired. Both operations use the
+closed v1 ceilings, return ordered safe diagnostics or the public secret-free
+`PackageCompilationCancelled` error, and perform no DuckDB, Runtime, network,
+credential, or fixture work. Consumer tests that need real
+source generations use the Connector-owned `package_compiler_test_fixtures.hpp`
+service rather than private source or YAML APIs. The
 [`package_semver.hpp`](../include/duckdb_api/package_semver.hpp) and
 [`package_compatibility.hpp`](../include/duckdb_api/package_compatibility.hpp)
 services parse canonical package identity and compare normalized compiled
@@ -128,6 +135,11 @@ fixture uses together after Semantics consumes `RequiredInputReferences()`.
   service;
 - the focused package source, YAML, schema, compiler, GraphQL-renderer, and
   predicate-compiler executables for the author-to-generation boundary;
+- `duckdb_api_local_package_compiler_tests` for retained-root rename,
+  replacement, mutation, cancellation, mismatch, copy, and final-release
+  behavior;
+- `duckdb_api_local_package_reload_fixture_tests` for the real-source no-op,
+  compatible-patch, and incompatible-major consumer fixture variants;
 - `duckdb_api_package_compiler_fixture_tests` for the real repository GitHub
   package projected through the bounded Query-consumer fixture service;
 - `duckdb_api_connector_catalog_fixture_tests` for the bounded fixture API.

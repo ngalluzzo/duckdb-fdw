@@ -40,6 +40,14 @@ ReadSemanticSnapshot(root, manifest relation IDs, limits, cancellation)
 by reload. It never exposes an absolute root through SQL, diagnostics,
 explanation, fixtures, or digests.
 
+The production Connector handoff binds that root to its exact
+`CompiledPackageGeneration` as one immutable `CompiledLocalPackage`. Copies pin
+both lifetimes and expose only the generation plus exact opaque-generation
+comparison. Initial compilation returns the pair; reload consumes the pair and
+the exact active generation handle, rejects default or mismatched ownership
+before source work, and returns a new pair for a successful candidate. No
+consumer can extract or independently re-pair the root capability.
+
 `PackageSourceSnapshot` contains immutable raw bytes for `connector.yaml` and
 exactly the ordered listed relation files, their normalized relative paths,
 safe source identities, and the framed SHA-256 package digest. It contains no
@@ -51,7 +59,8 @@ The source service:
 - opens every component and leaf without following links;
 - rejects links, special files, unsafe paths, unlisted YAML, case collisions,
   identity changes, and exceeded limits;
-- checks cancellation before and after each bounded filesystem unit; and
+- checks cancellation before and after each bounded filesystem, semantic-file
+  digest-framing, and final hash unit; and
 - either returns one coherent snapshot or no value.
 
 No later planning or execution path reads package source.
@@ -75,16 +84,23 @@ profiles, compatibility descriptors, or relational reasoning.
 
 ```text
 CompilePackage(snapshot, compiler_limits, cancellation)
-    -> CompiledPackageCandidate
+    -> PackageCompileResult
 
-CompiledPackageCandidate
-├── optional shared immutable CompiledPackageGeneration
-└── ordered bounded PackageDiagnostic records
+PackageCompileResult
+├── success: CompiledLocalPackage
+│   ├── shared immutable CompiledPackageGeneration
+│   └── opaque retained-root custody
+└── failure: ordered bounded PackageDiagnostic records
 ```
 
 A generation exists only when lexical, schema, reference, semantic, policy,
 resource, protocol, and complete-model validation all pass. The compiler never
 returns a partially executable generation.
+
+Cancellation is checked before and after each bounded source document and
+schema/reference relation decode. Cancellation returns no package or retained
+candidate and crosses the public compiler boundary as
+`PackageCompilationCancelled`.
 
 Diagnostics have a closed code, compilation phase, safe relative coordinate,
 structural field, and bounded safe detail. Sorting, deduplication, redaction,

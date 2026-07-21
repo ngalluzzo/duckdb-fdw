@@ -15,6 +15,17 @@ target_link_libraries(
   duckdb_api_connector_metadata_service
   PUBLIC duckdb_api_content_digest_service)
 
+# Connector's narrow opaque custody provider. Runtime can retain and inspect a
+# CompiledLocalPackage through its public generation API without linking YAML,
+# source acquisition, schema decoding, or compiler implementation objects.
+add_library(
+  duckdb_api_local_package_custody_service STATIC
+  ${CONNECTOR_LOCAL_PACKAGE_CUSTODY_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_local_package_custody_service)
+target_link_libraries(
+  duckdb_api_local_package_custody_service
+  PUBLIC duckdb_api_connector_metadata_service)
+
 # Connector's source-custody service acquires and parses package bytes without
 # compiling or publishing a generation. Keeping it separate from metadata
 # makes the later compiler and Query publication boundaries explicit.
@@ -25,6 +36,7 @@ add_library(
 configure_duckdb_api_cpp_target(duckdb_api_package_source_service)
 target_link_libraries(
   duckdb_api_package_source_service
+  PUBLIC duckdb_api_local_package_custody_service
   PRIVATE duckdb_api_content_digest_service)
 
 # Connector's compiler consumes a complete source snapshot and publishes one

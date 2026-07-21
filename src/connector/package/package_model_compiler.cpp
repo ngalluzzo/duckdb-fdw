@@ -12,7 +12,15 @@ std::string OriginIdentity(const OriginDeclaration &origin) {
 	return origin.scheme.value + "\n" + origin.host.value + "\n" + origin.port.value;
 }
 
-void ValidateManifestPolicy(const PackageDeclaration &package, PackageDiagnosticSink &diagnostics) {
+void CheckCancellation(PackageCancellation &cancellation, const SourceMark &mark) {
+	if (cancellation.IsCancellationRequested()) {
+		throw FailsafeYamlError(FailsafeYamlErrorCode::CANCELLED, mark.file, mark.span,
+		                        "package compilation was cancelled");
+	}
+}
+
+void ValidateManifestPolicy(const PackageDeclaration &package, PackageDiagnosticSink &diagnostics,
+                            PackageCancellation &cancellation) {
 	std::set<std::string> allowed;
 	for (const auto &origin : package.manifest.network_policy.origins) {
 		allowed.insert(OriginIdentity(origin));
@@ -27,6 +35,7 @@ void ValidateManifestPolicy(const PackageDeclaration &package, PackageDiagnostic
 	}
 	const auto manifest_response_bytes = ParseUnsigned(package.manifest.network_policy.max_response_bytes);
 	for (const auto &relation : package.relations) {
+		CheckCancellation(cancellation, relation.mark);
 		if (ParseUnsigned(relation.resources.max_response_bytes_per_page) > manifest_response_bytes) {
 			diagnostics.Add(PackageDiagnosticCode::POLICY_WIDENING, PackageDiagnosticPhase::COMPILE,
 			                relation.resources.max_response_bytes_per_page.mark, package.manifest.id.value,
@@ -39,6 +48,7 @@ void ValidateManifestPolicy(const PackageDeclaration &package, PackageDiagnostic
 				                package.manifest.id.value, relation.id.value, operation.id.value);
 			}
 		}
+		CheckCancellation(cancellation, relation.mark);
 	}
 }
 
@@ -57,7 +67,7 @@ std::shared_ptr<const CompiledPackageGeneration> CompilePackageDeclaration(const
                                                                            const PackageSourceSnapshot &snapshot,
                                                                            PackageDiagnosticSink &diagnostics,
                                                                            PackageCancellation &cancellation) {
-	ValidateManifestPolicy(package, diagnostics);
+	ValidateManifestPolicy(package, diagnostics, cancellation);
 	std::vector<CompiledRelation> relations;
 	relations.reserve(package.relations.size());
 	for (const auto &source : package.relations) {
@@ -65,6 +75,7 @@ std::shared_ptr<const CompiledPackageGeneration> CompilePackageDeclaration(const
 		if (relation) {
 			relations.push_back(std::move(*relation));
 		}
+		CheckCancellation(cancellation, source.mark);
 	}
 	if (!diagnostics.Empty()) {
 		return nullptr;

@@ -70,6 +70,9 @@ public:
 private:
 	class State;
 	explicit PackageSourceSnapshot(std::shared_ptr<const State> state);
+	static PackageSourceSnapshot Create(int root_fd, std::vector<SemanticSourceFile> files,
+	                                    std::vector<std::string> relation_ids, std::string digest);
+	int RetainedRootFd() const;
 	std::shared_ptr<const State> state;
 
 	friend PackageSourceSnapshot AcquirePackageSource(const std::string &, const PackageSourceLimits &,

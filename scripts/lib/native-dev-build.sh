@@ -149,6 +149,8 @@ run_build() {
         duckdb_api_failsafe_yaml_tests \
         duckdb_api_package_digest_tests \
         duckdb_api_package_source_tests \
+        duckdb_api_local_package_compiler_tests \
+        duckdb_api_local_package_reload_fixture_tests \
         duckdb_api_scan_request_tests \
         duckdb_api_typed_value_adapter_tests \
         duckdb_api_scan_planner_tests \
@@ -231,6 +233,8 @@ run_tests() {
         "${NATIVE_TEST_ROOT}/duckdb_api_failsafe_yaml_tests"
         "${NATIVE_TEST_ROOT}/duckdb_api_package_digest_tests"
         "${NATIVE_TEST_ROOT}/duckdb_api_package_source_tests"
+        "${NATIVE_TEST_ROOT}/duckdb_api_local_package_compiler_tests"
+        "${NATIVE_TEST_ROOT}/duckdb_api_local_package_reload_fixture_tests" "${REPOSITORY_ROOT}"
         "${NATIVE_TEST_ROOT}/duckdb_api_compiled_package_generation_tests"
         "${NATIVE_TEST_ROOT}/duckdb_api_package_compatibility_tests"
         "${NATIVE_TEST_ROOT}/duckdb_api_package_compiler_contract_tests"
