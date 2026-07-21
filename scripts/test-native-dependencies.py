@@ -48,7 +48,7 @@ def fake_sdk(root: pathlib.Path) -> pathlib.Path:
 
 
 def fake_pins(sdk: pathlib.Path) -> dict:
-    pins = json.loads((ROOT / "release/0.7.0/pins.json").read_text())
+    pins = json.loads((ROOT / "release/0.8.0/pins.json").read_text())
     sdk_pins = pins["system_dependencies"]["macos_sdk"]
     sdk_pins["curl_headers_sha256"] = VERIFIER.tree_digest(
         sdk / sdk_pins["curl_header_root"]
@@ -84,6 +84,17 @@ class NativeDependencyTests(unittest.TestCase):
         values.update(observed)
         with self.assertRaisesRegex(AssertionError, message):
             VERIFIER.verify_inputs(pins, self.sdk, **values)
+
+    def test_project_identity_must_be_self_consistent(self) -> None:
+        for key, value in (
+            ("extension", "other"),
+            ("tag", "v0.7.0"),
+            ("version", "0.7.0"),
+        ):
+            with self.subTest(key=key):
+                pins = copy.deepcopy(self.pins)
+                pins["project"][key] = value
+                self.assert_rejected(pins, "inconsistent project identity")
 
     def test_fake_cell_passes_and_cli_emits_relocatable_observation(self) -> None:
         observed = verify_inputs(self.pins, self.sdk)

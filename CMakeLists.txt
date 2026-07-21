@@ -8,7 +8,7 @@ project(${TARGET_NAME})
 include(cmake/DuckDBApiProductSources.cmake)
 
 if(NOT APPLE)
-  message(FATAL_ERROR "duckdb_api 0.7.0 supports only the pinned macOS arm64 cell")
+  message(FATAL_ERROR "duckdb_api 0.8.0 supports only the pinned macOS arm64 cell")
 endif()
 
 find_program(DUCKDB_API_XCRUN xcrun REQUIRED)
@@ -31,7 +31,7 @@ if(DEFINED DUCKDB_API_VERIFIED_SDK_ROOT)
   endif()
 endif()
 
-# The 0.7.0 cell consumes only the verified SDK headers and text stub. Disabling
+# The 0.8.0 cell consumes only the verified SDK headers and text stub. Disabling
 # curl's config-package mode prevents an ambient Homebrew or package-manager
 # installation from replacing those inputs before FindCURL creates its target.
 set(CURL_NO_CURL_CMAKE ON CACHE BOOL "Disable ambient curl config packages" FORCE)
@@ -123,7 +123,7 @@ build_loadable_extension(${TARGET_NAME} " " ${PRODUCTION_SOURCES})
 # This private artifact is a deterministic product oracle, not an installable
 # extension. Its entry/composition replace the installed entry/composition and
 # are intentionally omitted from every install rule.
-set(DUCKDB_EXTENSION_DUCKDB_API_CONTROLLED_EXT_VERSION "0.7.0")
+set(DUCKDB_EXTENSION_DUCKDB_API_CONTROLLED_EXT_VERSION "0.8.0")
 build_loadable_extension(duckdb_api_controlled " " ${CONTROLLED_PRODUCT_SOURCES})
 
 function(configure_duckdb_api_cpp_target target)

@@ -102,6 +102,17 @@ HISTORICAL_RELEASES = {
             "580a33b94357b2a539489ff2c2ba69289b89be3ee2ed019efe29832230f1cecf"
         ),
     },
+    "0.7.0": {
+        "identities_canonical_json_sha256": (
+            "df4ce5ba4e2e6c173ba7a5b7bad0d223b4d6269f0a30cafbaaacd1d8a8902cce"
+        ),
+        "pins_canonical_json_sha256": (
+            "a7a79ad4540a9cb4f5f86b4ab977fe416dec84e1c1e59a0648ddcb01f1737cc6"
+        ),
+        "public_contract_sha256": (
+            "4f21ab8341ccda5c6880addd0febb35eeaa9d14b18d86ac5b3a9a5b9a49385ee"
+        ),
+    },
 }
 GIT_ID = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -115,6 +126,8 @@ EXTENSION_CONFIG = re.compile(
 )
 MAX_IDENTITY_FILE_BYTES = 16 * 1024 * 1024
 PATH_BOUND_SHA256 = "sha256-length-prefixed-path-and-bytes-v1"
+CURRENT_RELEASE = "0.8.0"
+REPOSITORY_CONNECTOR_PACKAGE_ROOT = "connectors/github"
 CONTROLLED_PRODUCT_SOURCE_PATHS = (
     "test/cpp/connector/support/catalog_test_access.hpp",
     "test/cpp/connector/support/connector_catalog_test_fixtures.cpp",
@@ -125,6 +138,17 @@ CONTROLLED_PRODUCT_SOURCE_PATHS = (
     "test/cpp/runtime/support/loopback_curl_runtime.cpp",
     "test/cpp/runtime/support/loopback_curl_runtime.hpp",
 )
+CONTROLLED_PUBLIC_EXCLUDED_UNITS = {
+    "src/query/duckdb/catalog_generation_coordinator.cpp",
+    "src/query/duckdb/extension_entrypoint.cpp",
+    "src/query/duckdb/generated_relation_adapter.cpp",
+    "src/query/duckdb/package_catalog_snapshot.cpp",
+    "src/query/duckdb/package_introspection_functions.cpp",
+    "src/query/duckdb/package_lifecycle_sentry.cpp",
+    "src/query/duckdb/package_management_functions.cpp",
+    "src/query/package_generation_composition.cpp",
+    "src/query/product_composition.cpp",
+}
 
 
 class RepositoryReader:
@@ -390,6 +414,7 @@ def validate_current_identities(
         "controlled_product_sources",
         "native_product_sources",
         "public_contract",
+        "repository_connector_package",
     }:
         raise AssertionError("current source identity pins are incomplete")
 
@@ -404,6 +429,16 @@ def validate_current_identities(
     )
     if controlled_paths != CONTROLLED_PRODUCT_SOURCE_PATHS:
         raise AssertionError("current controlled product source inventory is incomplete")
+
+    connector_package_paths = validate_source_set_identity(
+        identities["repository_connector_package"], "repository connector package"
+    )
+    if connector_package_paths != reader.list_regular_files(
+        REPOSITORY_CONNECTOR_PACKAGE_ROOT
+    ):
+        raise AssertionError(
+            "current repository connector package inventory is incomplete"
+        )
 
     build_graph = identities["build_graph"]
     if not isinstance(build_graph, dict) or set(build_graph) != {
@@ -421,12 +456,10 @@ def validate_current_identities(
     controlled_only_units = {path for path in controlled_paths if path.endswith(".cpp")}
     if set(public_units) != native_units:
         raise AssertionError("current public build graph omits a native translation unit")
+    if not CONTROLLED_PUBLIC_EXCLUDED_UNITS < native_units:
+        raise AssertionError("current controlled product exclusion inventory drifted")
     expected_controlled = (
-        native_units
-        - {
-            "src/query/duckdb/extension_entrypoint.cpp",
-            "src/query/product_composition.cpp",
-        }
+        native_units - CONTROLLED_PUBLIC_EXCLUDED_UNITS
     ) | controlled_only_units
     if set(controlled_units) != expected_controlled:
         raise AssertionError("current controlled build graph has the wrong composition")
@@ -490,8 +523,10 @@ def verify(root: pathlib.Path = ROOT) -> dict[str, str]:
 
     validate_historical_releases(reader)
 
-    if version != "0.7.0":
-        raise AssertionError("current source identity verifier supports only 0.7.0")
+    if version != CURRENT_RELEASE:
+        raise AssertionError(
+            f"current source identity verifier supports only {CURRENT_RELEASE}"
+        )
     identities = validate_current_identities(pins, reader, version)
     native_identity = identities["native_product_sources"]
     native_digest = path_bound_digest(reader, tuple(native_identity["paths"]))
@@ -501,6 +536,14 @@ def verify(root: pathlib.Path = ROOT) -> dict[str, str]:
     controlled_digest = path_bound_digest(reader, tuple(controlled_identity["paths"]))
     if controlled_digest != controlled_identity["sha256"]:
         raise AssertionError("controlled product source digest does not match the current release pin")
+    connector_package_identity = identities["repository_connector_package"]
+    connector_package_digest = path_bound_digest(
+        reader, tuple(connector_package_identity["paths"])
+    )
+    if connector_package_digest != connector_package_identity["sha256"]:
+        raise AssertionError(
+            "repository connector package digest does not match the current release pin"
+        )
     public_identity = identities["public_contract"]
     actual_public_contract = canonical_digest(public_contract)
     if actual_public_contract != public_identity["canonical_json_sha256"]:
@@ -511,6 +554,7 @@ def verify(root: pathlib.Path = ROOT) -> dict[str, str]:
         "controlled_product_sources_sha256": controlled_digest,
         "native_product_sources_sha256": native_digest,
         "public_contract_sha256": actual_public_contract,
+        "repository_connector_package_sha256": connector_package_digest,
         "version": version,
     }
 

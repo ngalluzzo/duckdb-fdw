@@ -145,7 +145,7 @@ import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1])
-pins = json.loads((root / "release/0.7.0/pins.json").read_text())
+pins = json.loads((root / "release/0.8.0/pins.json").read_text())
 scripts = "\n".join(
     path.read_text()
     for path in (
@@ -178,12 +178,14 @@ for path in (
 ):
     if path not in scripts:
         raise SystemExit(f"native developer script does not read required pin: {path}")
-if "release/0.7.0/pins.json" not in scripts:
-    raise SystemExit("native developer workflow does not select current 0.7 pins")
+if "release/0.8.0/pins.json" not in scripts:
+    raise SystemExit("native developer workflow does not select current 0.8 pins")
 if "release/0.1.0/pins.json" in scripts:
     raise SystemExit("native developer workflow reads historical 0.1 pins")
 if "release/0.4.0/pins.json" in scripts:
     raise SystemExit("native developer workflow reads historical 0.4 pins")
+if "release/0.7.0/pins.json" in scripts:
+    raise SystemExit("native developer workflow reads historical 0.7 pins")
 if "verify-native-dependencies.py" not in scripts:
     raise SystemExit("native developer workflow omits dependency verification")
 for required in (

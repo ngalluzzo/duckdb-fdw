@@ -14,7 +14,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.7.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.8.0", True, False, "NOT_INSTALLED")
 EXPECTED_BEARER_TOKEN_BYTES = 8 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_BYTES = 16 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_ACCOUNTING = 'name + ": " + value + "\\r\\n"'
@@ -58,6 +58,93 @@ EXPECTED_EXPLAIN_FIELDS = [
     "residual_predicate",
     "residual_owner",
     "classification",
+]
+EXPECTED_MANAGEMENT_FUNCTIONS = [
+    {
+        "name": "duckdb_api_load_connector",
+        "named_parameters": {"package_root": "VARCHAR"},
+        "result": [
+            ["connector", "VARCHAR"],
+            ["package_version", "VARCHAR"],
+            ["spec_version", "VARCHAR"],
+            ["package_digest", "VARCHAR"],
+            ["relation_count", "UBIGINT"],
+            ["changed", "BOOLEAN"],
+        ],
+    },
+    {
+        "name": "duckdb_api_reload_connector",
+        "named_parameters": {"connector": "VARCHAR"},
+        "result": [
+            ["connector", "VARCHAR"],
+            ["package_version", "VARCHAR"],
+            ["spec_version", "VARCHAR"],
+            ["package_digest", "VARCHAR"],
+            ["relation_count", "UBIGINT"],
+            ["changed", "BOOLEAN"],
+        ],
+    },
+    {
+        "name": "duckdb_api_loaded_connectors",
+        "named_parameters": {},
+        "result": [
+            ["connector", "VARCHAR"],
+            ["package_version", "VARCHAR"],
+            ["spec_version", "VARCHAR"],
+            ["package_digest", "VARCHAR"],
+            ["relation_count", "UBIGINT"],
+        ],
+    },
+    {
+        "name": "duckdb_api_loaded_relations",
+        "named_parameters": {},
+        "result": [
+            ["connector", "VARCHAR"],
+            ["relation", "VARCHAR"],
+            ["sql_name", "VARCHAR"],
+            ["package_version", "VARCHAR"],
+        ],
+    },
+    {
+        "name": "duckdb_api_relation_arguments",
+        "named_parameters": {},
+        "result": [
+            ["connector", "VARCHAR"],
+            ["relation", "VARCHAR"],
+            ["argument", "VARCHAR"],
+            ["duckdb_type", "VARCHAR"],
+            ["nullable", "BOOLEAN"],
+            ["has_default", "BOOLEAN"],
+            ["default_value", "VARCHAR"],
+            ["argument_origin", "VARCHAR"],
+        ],
+    },
+]
+EXPECTED_GENERATED_FUNCTIONS = [
+    {
+        "name": "github_authenticated_repositories",
+        "named_parameters": {"secret": "VARCHAR"},
+        "relation": "authenticated_repositories",
+        "schema": [list(column) for column in EXPECTED_REPOSITORY_SCHEMA],
+    },
+    {
+        "name": "github_authenticated_user",
+        "named_parameters": {"secret": "VARCHAR"},
+        "relation": "authenticated_user",
+        "schema": [list(column) for column in EXPECTED_SCHEMA],
+    },
+    {
+        "name": "github_duckdb_login_search_page",
+        "named_parameters": {},
+        "relation": "duckdb_login_search_page",
+        "schema": [list(column) for column in EXPECTED_SCHEMA],
+    },
+    {
+        "name": "github_viewer_repository_metrics",
+        "named_parameters": {"secret": "VARCHAR"},
+        "relation": "viewer_repository_metrics",
+        "schema": [list(column) for column in EXPECTED_GRAPHQL_SCHEMA],
+    },
 ]
 FORBIDDEN_ARTIFACT_MARKERS = (
     b"127.0.0.1",
@@ -151,7 +238,7 @@ def main() -> int:
 
     repository_root = pathlib.Path(__file__).resolve().parents[2]
     expected_behavior = json.loads(
-        (repository_root / "release/0.7.0/public_contract.json").read_text()
+        (repository_root / "release/0.8.0/public_contract.json").read_text()
     )
     source_artifact = pathlib.Path(sys.argv[1]).resolve(strict=True)
     artifact_bytes = source_artifact.read_bytes()
@@ -169,6 +256,8 @@ def main() -> int:
         isolated = pathlib.Path(directory)
         artifact = isolated / "duckdb_api.duckdb_extension"
         shutil.copyfile(source_artifact, artifact)
+        package_root = isolated / "github-package"
+        shutil.copytree(repository_root / "connectors/github", package_root)
         home = isolated / "home"
         home.mkdir()
         (home / ".curlrc").write_text(
@@ -233,7 +322,15 @@ def main() -> int:
                 "SELECT function_name, function_type FROM duckdb_functions()"
             ).fetchall()
         ) - before_functions
-        if added_functions != {("duckdb_api_scan", "table")}:
+        expected_initial_functions = {
+            ("duckdb_api_scan", "table"),
+            ("duckdb_api_load_connector", "table"),
+            ("duckdb_api_reload_connector", "table"),
+            ("duckdb_api_loaded_connectors", "table"),
+            ("duckdb_api_loaded_relations", "table"),
+            ("duckdb_api_relation_arguments", "table"),
+        }
+        if added_functions != expected_initial_functions:
             raise AssertionError(f"unexpected public function inventory: {added_functions!r}")
         functions = connection.execute(
             """
@@ -248,6 +345,67 @@ def main() -> int:
             ("secret", "VARCHAR"),
         }:
             raise AssertionError(f"unexpected named function signature: {functions!r}")
+
+        escaped_package_root = package_root.as_posix().replace("'", "''")
+        loaded = connection.execute(
+            "CALL system.main.duckdb_api_load_connector("
+            f"package_root := '{escaped_package_root}')"
+        ).fetchone()
+        expected_package_digest = (
+            "sha256.b286e6f7481b437b243dfe2ce017a59d601d909272b9d2b35788fb78753ff23b"
+        )
+        if loaded != (
+            "github",
+            "1.0.0",
+            "duckdb_api/v1",
+            expected_package_digest,
+            4,
+            True,
+        ):
+            raise AssertionError(f"repository connector package load drifted: {loaded!r}")
+        generated_inventory = set(
+            connection.execute(
+                "SELECT function_name, function_type FROM duckdb_functions() "
+                "WHERE database_name = 'system' AND schema_name = 'main' "
+                "AND function_name LIKE 'github_%'"
+            ).fetchall()
+        )
+        expected_generated_inventory = {
+            (entry["name"], "table") for entry in EXPECTED_GENERATED_FUNCTIONS
+        }
+        if generated_inventory != expected_generated_inventory:
+            raise AssertionError(
+                f"generated function inventory drifted: {generated_inventory!r}"
+            )
+        loaded_connector = connection.execute(
+            "SELECT connector, package_version, spec_version, package_digest, relation_count "
+            "FROM system.main.duckdb_api_loaded_connectors()"
+        ).fetchone()
+        if loaded_connector != loaded[:-1]:
+            raise AssertionError(
+                f"loaded connector introspection drifted: {loaded_connector!r}"
+            )
+        for generated in EXPECTED_GENERATED_FUNCTIONS:
+            arguments = generated["named_parameters"]
+            call = (
+                f"{generated['name']}(secret := 'not_resolved_during_bind')"
+                if arguments
+                else f"{generated['name']}()"
+            )
+            description = connection.execute(
+                f"DESCRIBE SELECT * FROM system.main.{call}"
+            ).fetchall()
+            observed_schema = [[row[0], row[1]] for row in description]
+            if observed_schema != generated["schema"]:
+                raise AssertionError(
+                    f"generated function schema drifted for {generated['name']}: "
+                    f"{observed_schema!r}"
+                )
+        reloaded = connection.execute(
+            "CALL system.main.duckdb_api_reload_connector(connector := 'github')"
+        ).fetchone()
+        if reloaded != loaded[:-1] + (False,):
+            raise AssertionError(f"byte-identical package reload drifted: {reloaded!r}")
 
         added_settings = set(
             connection.execute("SELECT name FROM duckdb_settings()").fetchall()
@@ -550,10 +708,22 @@ def main() -> int:
             "added_settings": [],
             "added_types": [],
             "authority_inputs": ["explicit_named_temporary_duckdb_secret"],
+            "connector_package": {
+                "api_version": "duckdb_api/v1",
+                "package_root": "explicit_absolute_local_directory",
+                "publication": "atomic_all_or_nothing",
+                "reload": "retained_canonical_root",
+                "repository_package": {
+                    "connector": "github",
+                    "package_digest": expected_package_digest,
+                    "package_version": "1.0.0",
+                    "relation_count": 4,
+                },
+            },
             "diagnostics": diagnostics,
             "duckdb": list(EXPECTED_DUCKDB[:2]),
             "explain_fields": EXPECTED_EXPLAIN_FIELDS,
-            "extension": ["duckdb_api", "0.7.0"],
+            "extension": ["duckdb_api", "0.8.0"],
             "function": {
                 "name": "duckdb_api_scan",
                 "named_parameters": {
@@ -562,6 +732,8 @@ def main() -> int:
                     "secret": "VARCHAR",
                 },
             },
+            "generated_functions": EXPECTED_GENERATED_FUNCTIONS,
+            "management_functions": EXPECTED_MANAGEMENT_FUNCTIONS,
             "relations": [
                 {
                     "cardinality": {"maximum": 3, "minimum": 0},
@@ -777,7 +949,7 @@ def main() -> int:
             },
         }
         if behavior != expected_behavior:
-            raise AssertionError("observed public inventory disagrees with the 0.7.0 contract")
+            raise AssertionError("observed public inventory disagrees with the 0.8.0 contract")
         print(
             json.dumps(
                 {

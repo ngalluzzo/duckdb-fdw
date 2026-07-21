@@ -100,12 +100,13 @@ def parse_int(value: str, label: str) -> int:
 
 def validate_pins(pins: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     project = required_object(pins, "project", "pins")
+    version = required_scalar(project, "version", str, "pins.project")
     if project != {
         "extension": "duckdb_api",
-        "tag": "v0.7.0",
-        "version": "0.7.0",
+        "tag": f"v{version}",
+        "version": version,
     }:
-        raise fail("native dependency pins do not name the 0.7.0 product")
+        raise fail("native dependency pins have an inconsistent project identity")
     cell = required_object(pins, "product_cell", "pins")
     system = required_object(pins, "system_dependencies", "pins")
     sdk = required_object(system, "macos_sdk", "pins.system_dependencies")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Verify that CMake's configured product graph matches the 0.7 release identity."""
+"""Verify that CMake's configured product graph matches its release identity."""
 
 from __future__ import annotations
 
@@ -33,12 +33,20 @@ def translation_units(value: object, label: str) -> list[str]:
 def verify(pins_path: pathlib.Path, observed_path: pathlib.Path) -> dict[str, int]:
     pins = load_object(pins_path, "release pins")
     observed = load_object(observed_path, "configured product source record")
-    if pins.get("project") != {
-        "extension": "duckdb_api",
-        "tag": "v0.7.0",
-        "version": "0.7.0",
-    }:
-        raise AssertionError("release pins do not name the 0.7.0 product")
+    project = pins.get("project")
+    if not isinstance(project, dict):
+        raise AssertionError("release pins omit the project identity")
+    version = project.get("version")
+    if (
+        not isinstance(version, str)
+        or project
+        != {
+            "extension": "duckdb_api",
+            "tag": f"v{version}",
+            "version": version,
+        }
+    ):
+        raise AssertionError("release pins have an inconsistent project identity")
     try:
         expected = pins["identities"]["build_graph"]
     except (KeyError, TypeError) as error:
