@@ -234,12 +234,14 @@ The complete bounded decision-evidence file set is indexed by
 digest
 `sha256.49407e412bd0863fd9d14d881e067e3653bd66dc39e901bf8cceb7f76888f128`.
 The manifest binds every evidence artifact and the repository verifier by
-SHA-256. Running
-`ruby scripts/verify-rfc-0013-evidence.rb` checks that closed file set, each
-content identity and RFC citation, both normative schemas against the failsafe
-decoded examples, semantic package and payload identities, GraphQL document
-and request-body vectors, the independently derived GitHub coverage golden,
-and every declared unsigned 64-bit resource envelope.
+SHA-256. `scripts/verify-rfc-0013-evidence.rb` checked that closed file set,
+each content identity and RFC citation, both normative schemas against the
+failsafe decoded examples, semantic package and payload identities, GraphQL
+document and request-body vectors, the independently derived GitHub coverage
+golden, and every declared unsigned 64-bit resource envelope. That verifier
+was retired during pre-`1.0.0` script hygiene once this RFC's evidence was
+closed and durably re-derivable from `evidence-manifest.json`'s own recorded
+digests; the manifest and evidence directory remain the permanent record.
 
 The semantic source set is `connector.yaml` plus exactly the listed relation
 files. Unlisted relation YAML fails rather than becoming stale shadow source.
@@ -1224,9 +1226,9 @@ path-independent identity.
   compatibility; and unsupported draft-field rejection.
 - **Quality gates:** Focused Connector, Query, Semantics, and Runtime targets;
   `make build`, `make test`, `make demo`; source and dependency identity gates;
-  a fresh native product cell; `ruby scripts/verify-rfc-0013-evidence.rb` for
-  the bounded RFC decision artifacts; agent-asset validation; and staged/
-  unstaged whitespace checks.
+  a fresh native product cell; `scripts/verify-rfc-0013-evidence.rb` (since
+  retired, see above) for the bounded RFC decision artifacts; agent-asset
+  validation; and staged/unstaged whitespace checks.
 - **Independent review:** Fresh Connector author-contract, Query type/catalog,
   Semantics relational-law, Runtime security/lifecycle, Enablement digest/gate,
   and adversarial compatibility/security/lifecycle reviewers.

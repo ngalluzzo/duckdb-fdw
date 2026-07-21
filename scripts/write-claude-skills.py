@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Mirror .agents/skills/*/SKILL.md into .claude/skills/ so Claude Code can
-discover the same repository skills that scripts/validate-agent-assets.rb
+discover the same repository skills that scripts/validate-agent-assets.py
 validates for Codex. .agents/skills/ remains the single source of truth;
 this script only regenerates the Claude-facing copy.
 

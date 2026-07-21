@@ -196,7 +196,7 @@ quota.
 Documentation and agent changes must pass:
 
 ```sh
-ruby scripts/validate-agent-assets.rb
+python3 -I -B scripts/validate-agent-assets.py
 python3 -I -B scripts/verify-public-surface-inventory.py
 python3 -I -B test/python/public_surface_inventory_tests.py
 python3 -I -B scripts/verify-contract-freeze.py
@@ -247,18 +247,10 @@ python3 -I -B test/python/community_installation/test_community_installation.py
 scripts/test-community-enablement.sh
 ```
 
-The authoritative `0.1.0` release and sanitizer commands are intentionally
-stricter:
-
-```sh
-scripts/run-0.1-release-gate.sh /absolute/new/build-root /absolute/new/evidence-root
-scripts/run-linux-sanitized-cell.sh "$PWD/.build/linux-amd64-sanitized"
-```
-
-The release command requires a clean worktree with `v0.1.0` equal to `HEAD`.
-The sanitizer launcher must run on native Linux amd64 and verifies the pinned
-container digest defined by `release/0.1.0/pins.json`; a direct inner-script or
-emulated run is not release evidence.
+The `0.1.0` release and Linux-sanitizer gates were tag-specific (they required
+a clean worktree with `v0.1.0` equal to `HEAD`, a state that cannot recur) and
+were retired during pre-`1.0.0` hygiene; see `docs/releases/0.1.0.md` for the
+historical record of what they verified.
 
 Run the cached-diff check after staging the intended commit so new files are
 included in the whitespace gate.
