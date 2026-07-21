@@ -20,7 +20,9 @@ using duckdb_api_test::variant_test::ManualControl;
 
 void RequireOutcome(const duckdb_api_test::RuntimeFixtureVariantObservation &result,
                     RuntimeFixtureVariantOutcome outcome) {
-	Require(result.outcome == outcome && result.execution.stream_close_invoked,
+	Require(result.outcome == outcome &&
+	            result.evidence_path == duckdb_api_test::RuntimeFixtureVariantEvidencePath::EXECUTOR &&
+	            result.accounting_observed_units == 0 && result.execution.stream_close_invoked,
 	        "column variant lost its typed outcome or stream-close evidence");
 }
 
@@ -80,7 +82,7 @@ void TestVarcharBudgetClosedVariants() {
 	const auto boundary = service.ExecuteColumnVariant(
 	    plan, transcript, {1, RuntimeFixtureColumnVariant::VARCHAR_STRING_BUDGET_BOUNDARY}, boundary_control);
 	RequireOutcome(boundary, RuntimeFixtureVariantOutcome::BOUNDARY_SUCCEEDED);
-	Require(boundary.observed_units == plan.Budgets().extracted_string_bytes &&
+	Require(boundary.executor_observed_units == plan.Budgets().extracted_string_bytes &&
 	            boundary.admitted_limit == plan.Budgets().extracted_string_bytes,
 	        "VARCHAR boundary did not report the exact admitted limit");
 
@@ -88,7 +90,7 @@ void TestVarcharBudgetClosedVariants() {
 	const auto rejected = service.ExecuteColumnVariant(
 	    plan, transcript, {1, RuntimeFixtureColumnVariant::VARCHAR_STRING_BUDGET_ONE_OVER_REJECTED}, rejected_control);
 	RequireOutcome(rejected, RuntimeFixtureVariantOutcome::ONE_OVER_REJECTED);
-	Require(rejected.observed_units == rejected.admitted_limit + 1,
+	Require(rejected.executor_observed_units == rejected.admitted_limit + 1,
 	        "VARCHAR one-over variant did not report the exact attempted byte count");
 }
 

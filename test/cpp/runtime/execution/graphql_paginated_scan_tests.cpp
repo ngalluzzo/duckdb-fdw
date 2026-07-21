@@ -381,9 +381,9 @@ void TestIntegratedThirtyTwoPageBoundary() {
 	const auto over_runtime = duckdb_api_test::BuildControlledHttpRuntime();
 	over_runtime->RespondSequence(std::move(over_pages));
 	auto over = Open(over_runtime, control, 815);
-	RequireTerminalFailure(*over, control, duckdb_api::ErrorStage::POLICY, "pagination.cursor");
+	RequireTerminalFailure(*over, control, duckdb_api::ErrorStage::RESOURCE, "pages");
 	Require(over_runtime->Observations().size() == 32 && over_runtime->ConsumeBearerExpectation(32),
-	        "page-33 denial performed another request or replayed its terminal failure");
+	        "common page-accounting denial performed another request or replayed its terminal failure");
 }
 
 } // namespace

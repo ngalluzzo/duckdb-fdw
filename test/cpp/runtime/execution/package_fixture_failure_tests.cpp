@@ -152,8 +152,8 @@ void TestGraphqlCursorFailuresAreTerminal() {
 	}
 	const auto exhausted = RuntimePackageFixtureExecutionService().ExecuteScenario(
 	    plan, {RuntimeFixtureAuthorizationState::BEARER_PRESENT, std::move(pages)},
-	    RuntimeFixtureScenario::Expect(RuntimeFixtureFailureExpectation::PAGINATION), control);
-	RequireFailure(exhausted, duckdb_api::ErrorStage::POLICY, "pagination.cursor", 32);
+	    RuntimeFixtureScenario::Expect(RuntimeFixtureFailureExpectation::RESOURCE), control);
+	RequireFailure(exhausted, duckdb_api::ErrorStage::RESOURCE, "pages", 32);
 }
 
 void TestResourceFailuresPreserveExactFields() {

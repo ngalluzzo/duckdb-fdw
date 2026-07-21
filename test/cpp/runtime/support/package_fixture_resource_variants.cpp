@@ -28,6 +28,13 @@ duckdb_api::internal::HttpExecutionProfile PublicFixtureProfile() {
 	        duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE};
 }
 
+uint64_t DerivedBodyLimit(const duckdb_api::ScanPlan &plan) {
+	const auto fixture_limit = plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED
+	                               ? duckdb_api::HOST_MAX_DECOMPRESSED_BYTES
+	                               : duckdb_api::PAGINATION_MAX_DECOMPRESSED_BYTES_PER_PAGE;
+	return std::min(fixture_limit, std::min(plan.Budgets().response_bytes, plan.Budgets().decompressed_bytes));
+}
+
 bool IsLink(const std::string &name) {
 	if (name.size() != 4) {
 		return false;
@@ -136,7 +143,8 @@ RuntimeFixtureTranscript BuildPageSequence(const duckdb_api::ScanPlan &plan, con
 	for (std::size_t index = 0; index < record_counts.size(); index++) {
 		auto page = base.pages[0];
 		if (shape.records_are_array) {
-			page.body = internal::RepeatFirstRuntimeFixtureRecord(page.body, shape, record_counts[index], control);
+			page.body = internal::RepeatFirstRuntimeFixtureRecord(page.body, shape, record_counts[index],
+			                                                      DerivedBodyLimit(plan), control);
 		}
 		if (index + 1 == record_counts.size()) {
 			page = SetTerminal(plan, std::move(page), control);
@@ -181,42 +189,126 @@ void RequireExecutionRejection(const RuntimeFixtureExecutionObservation &executi
 	}
 }
 
-RuntimeFixtureVariantObservation DirectRootObjectRecordVariant(const duckdb_api::ScanPlan &plan,
-                                                               RuntimeFixtureBoundaryVariant boundary) {
-	// A successful root-object response always has cardinality one, so no JSON
-	// transcript can carry the plan's synthetic cardinality boundary. Exercise
-	// the same production accounting primitive directly and keep this exception
-	// confined to Runtime's non-installed closed service.
+void ValidateResourceSelector(RuntimeFixtureRelationResourceField field, RuntimeFixtureBoundaryVariant boundary) {
+	switch (boundary) {
+	case RuntimeFixtureBoundaryVariant::BOUNDARY:
+	case RuntimeFixtureBoundaryVariant::ONE_OVER_REJECTED:
+		break;
+	default:
+		throw std::invalid_argument("unknown closed Runtime resource boundary variant");
+	}
+	switch (field) {
+	case RuntimeFixtureRelationResourceField::RESPONSE_BYTES_PER_PAGE:
+	case RuntimeFixtureRelationResourceField::RESPONSE_BYTES_PER_SCAN:
+	case RuntimeFixtureRelationResourceField::RECORDS_PER_PAGE:
+	case RuntimeFixtureRelationResourceField::RECORDS_PER_SCAN:
+	case RuntimeFixtureRelationResourceField::EXTRACTED_STRING_BYTES:
+		return;
+	default:
+		throw std::invalid_argument("unknown closed Runtime relation resource field");
+	}
+}
+
+RuntimeFixtureVariantEvidencePath AccountingEvidencePath(bool per_scan) {
+	return per_scan ? RuntimeFixtureVariantEvidencePath::EXECUTOR_PLUS_SCAN_ACCOUNTING
+	                : RuntimeFixtureVariantEvidencePath::EXECUTOR_PLUS_PAGE_ACCOUNTING;
+}
+
+void ProveRelationAccountingThreshold(const duckdb_api::ScanPlan &plan, bool response_bytes, bool per_scan,
+                                      uint64_t limit, bool one_over, duckdb_api::ExecutionControl &control) {
+	if (limit == std::numeric_limits<uint64_t>::max()) {
+		throw std::invalid_argument("relation resource limit cannot form an isolated one-over probe");
+	}
 	const auto &budget = plan.Budgets();
 	duckdb_api::internal::ScanResourceProfile profile {
 	    {1, budget.header_bytes, budget.response_bytes, budget.decompressed_bytes, budget.decoded_records,
 	     budget.decoded_memory_bytes, 1, 0},
 	    {1, 1, budget.header_bytes, budget.response_bytes, budget.decompressed_bytes, budget.decoded_records,
 	     budget.decoded_memory_bytes, budget.wall_milliseconds, 1, 0}};
+	if (response_bytes) {
+		profile.page.wire_response_bytes = per_scan ? limit + 1 : limit;
+		profile.scan.wire_response_bytes = per_scan ? limit : limit + 1;
+	} else {
+		profile.page.decoded_records = per_scan ? limit + 1 : limit;
+		profile.scan.decoded_records = per_scan ? limit : limit + 1;
+	}
+
 	duckdb_api::internal::ScanResourceAccounting accounting(profile);
-	accounting.BeginPage(std::chrono::steady_clock::now());
-	accounting.CommitTransport({0, 0, 0});
-	auto execution = internal::NewRuntimeFixtureObservation(plan, RuntimeFixtureCancellationPoint::NONE);
-	if (boundary == RuntimeFixtureBoundaryVariant::BOUNDARY) {
-		accounting.CommitDecodedPage({budget.decoded_records, 0});
-		accounting.CompletePage(false, std::chrono::steady_clock::now());
-		execution.succeeded = true;
-		return {std::move(execution), RuntimeFixtureVariantOutcome::BOUNDARY_SUCCEEDED, budget.decoded_records,
-		        budget.decoded_records};
+	if (control.IsCancellationRequested()) {
+		throw duckdb_api::ExecutionCancelled();
 	}
+	const auto now = std::chrono::steady_clock::now();
+	const auto allowance = accounting.BeginPage(now);
+	const auto selected_allowance = response_bytes ? allowance.wire_response_bytes : allowance.decoded_records;
+	if (selected_allowance != limit || accounting.Counters().pages != 1 ||
+	    accounting.Counters().request_attempts != 1 ||
+	    accounting.State() != duckdb_api::internal::ScanResourceState::REQUEST_ACTIVE) {
+		throw std::logic_error("relation resource accounting probe did not isolate the selected ledger scope");
+	}
+	const auto attempted = limit + static_cast<uint64_t>(one_over);
 	try {
-		accounting.CommitDecodedPage({budget.decoded_records + 1, 0});
-	} catch (const duckdb_api::internal::ScanResourceError &error) {
-		if (error.Field() != "decoded_records") {
-			throw;
+		accounting.CommitTransport({0, response_bytes ? attempted : 0, 0});
+		if (!response_bytes) {
+			accounting.CommitDecodedPage({attempted, 0});
 		}
-		execution.has_runtime_error = true;
-		execution.runtime_error_stage = duckdb_api::ErrorStage::RESOURCE;
-		execution.runtime_error_field = error.Field();
-		return {std::move(execution), RuntimeFixtureVariantOutcome::ONE_OVER_REJECTED, budget.decoded_records + 1,
-		        budget.decoded_records};
+	} catch (const duckdb_api::internal::ScanResourceError &error) {
+		const auto expected_field = response_bytes ? std::string("response_bytes") : std::string("decoded_records");
+		const auto selected_counter =
+		    response_bytes ? accounting.Counters().wire_response_bytes : accounting.Counters().decoded_records;
+		if (one_over && error.Field() == expected_field && selected_counter == 0 &&
+		    accounting.Counters().active_requests == 0 &&
+		    accounting.State() == duckdb_api::internal::ScanResourceState::FAILED) {
+			return;
+		}
+		throw;
 	}
-	throw std::logic_error("root-object record one-over variant did not fail authoritative accounting");
+	if (one_over) {
+		throw std::logic_error("relation resource one-over did not fail production scan accounting");
+	}
+	if (response_bytes) {
+		accounting.CommitDecodedPage({0, 0});
+	}
+	accounting.CompletePage(false, now);
+	const auto selected_counter =
+	    response_bytes ? accounting.Counters().wire_response_bytes : accounting.Counters().decoded_records;
+	if (selected_counter != limit || accounting.State() != duckdb_api::internal::ScanResourceState::EXHAUSTED) {
+		throw std::logic_error("relation resource boundary did not debit the exact selected ledger limit");
+	}
+}
+
+RuntimeFixtureVariantObservation RootObjectRecordVariant(const duckdb_api::ScanPlan &plan,
+                                                         const RuntimeFixtureTranscript &transcript, bool per_scan,
+                                                         RuntimeFixtureBoundaryVariant boundary,
+                                                         duckdb_api::ExecutionControl &control) {
+	const auto &budget = plan.Budgets();
+	if (budget.decoded_records != 1) {
+		throw std::logic_error("admitted root-object plan did not retain exactly-one record authority");
+	}
+	auto execution =
+	    internal::RunRuntimeFixtureScenario(plan, transcript, RuntimeFixtureScenario::Standard(), control, true);
+	RequireExecutionBoundary(execution, 1);
+	if (execution.rows.size() != 1) {
+		throw std::logic_error("root-object record boundary did not execute exactly one production row");
+	}
+	if (boundary == RuntimeFixtureBoundaryVariant::BOUNDARY) {
+		return {std::move(execution),
+		        RuntimeFixtureVariantOutcome::BOUNDARY_SUCCEEDED,
+		        RuntimeFixtureVariantEvidencePath::EXECUTOR,
+		        1,
+		        0,
+		        1};
+	}
+
+	// ROOT_OBJECT cardinality cannot encode a second record. Preserve the real
+	// executor baseline above, then prove the frozen one-over key through an
+	// isolated page or scan counter in the same production ledger.
+	ProveRelationAccountingThreshold(plan, false, per_scan, budget.decoded_records, true, control);
+	return {std::move(execution),
+	        RuntimeFixtureVariantOutcome::ONE_OVER_REJECTED,
+	        AccountingEvidencePath(per_scan),
+	        1,
+	        budget.decoded_records + 1,
+	        budget.decoded_records};
 }
 
 } // namespace
@@ -225,6 +317,7 @@ RuntimeFixtureVariantObservation RuntimePackageFixtureExecutionService::ExecuteR
     const duckdb_api::ScanPlan &plan, const RuntimeFixtureTranscript &transcript,
     RuntimeFixtureRelationResourceField field, RuntimeFixtureBoundaryVariant boundary,
     duckdb_api::ExecutionControl &control) const {
+	ValidateResourceSelector(field, boundary);
 	internal::ValidateRuntimeFixtureTranscript(transcript);
 	const auto shape = internal::AdmitRuntimeFixtureJsonShape(plan);
 	const bool one_over = boundary == RuntimeFixtureBoundaryVariant::ONE_OVER_REJECTED;
@@ -258,21 +351,32 @@ RuntimeFixtureVariantObservation RuntimePackageFixtureExecutionService::ExecuteR
 	                                             : (response_bytes ? page.response_bytes : page.decoded_records);
 	const auto per_page = response_bytes ? page.response_bytes : page.decoded_records;
 	if (!response_bytes && !shape.records_are_array) {
-		return DirectRootObjectRecordVariant(plan, boundary);
+		return RootObjectRecordVariant(plan, transcript, per_scan, boundary, control);
 	}
 
-	uint64_t attempted = limit + static_cast<uint64_t>(one_over);
-	auto units = per_scan ? SplitUnits(limit, per_page) : std::vector<uint64_t> {attempted};
-	if (per_scan && one_over) {
-		units.back()++;
+	if (limit == std::numeric_limits<uint64_t>::max()) {
+		throw std::invalid_argument("relation resource limit cannot form an exact one-over variant");
 	}
+	const uint64_t attempted = limit + static_cast<uint64_t>(one_over);
+	const auto max_pages = paginated ? plan.Pagination().ScanBudgets().pages : 1;
+	if (per_page > std::numeric_limits<uint64_t>::max() / max_pages) {
+		throw std::logic_error("admitted relation resource reachability product overflowed");
+	}
+	const auto reachable_product = per_page * max_pages;
+	const auto selected_scan_limit = paginated ? (response_bytes ? plan.Pagination().ScanBudgets().response_bytes
+	                                                             : plan.Pagination().ScanBudgets().decoded_records)
+	                                           : per_page;
+	const bool accounting_required = per_scan ? attempted > reachable_product : attempted > selected_scan_limit;
+	const auto executor_units =
+	    accounting_required ? (per_scan ? std::min(limit, reachable_product) : limit) : attempted;
+	auto units = per_scan ? SplitUnits(executor_units, per_page) : std::vector<uint64_t> {executor_units};
 	RuntimeFixtureTranscript derived;
 	internal::RuntimeFixtureResponseAccountingOverrides overrides;
 	if (response_bytes) {
 		std::vector<uint64_t> empty_counts(units.size(), 0);
 		derived = BuildPageSequence(plan, transcript, shape, empty_counts, control);
 		overrides.wire_response_bytes = units;
-		if (!per_scan && one_over) {
+		if (!per_scan && one_over && !accounting_required) {
 			overrides.wire_response_bytes[0] = attempted;
 		}
 	} else {
@@ -280,13 +384,17 @@ RuntimeFixtureVariantObservation RuntimePackageFixtureExecutionService::ExecuteR
 	}
 	auto execution = internal::RunRuntimeFixtureScenario(plan, derived, RuntimeFixtureScenario::Standard(), control,
 	                                                     true, response_bytes ? &overrides : nullptr);
-	if (!one_over) {
+	if (!one_over || accounting_required) {
 		RequireExecutionBoundary(execution, static_cast<uint64_t>(derived.pages.size()));
-		return {std::move(execution), outcome, limit, limit};
+		if (accounting_required) {
+			ProveRelationAccountingThreshold(plan, response_bytes, per_scan, limit, one_over, control);
+			return {std::move(execution), outcome, AccountingEvidencePath(per_scan), executor_units, attempted, limit};
+		}
+		return {std::move(execution), outcome, RuntimeFixtureVariantEvidencePath::EXECUTOR, limit, 0, limit};
 	}
 	const auto failure_field = response_bytes ? std::string("response_bytes") : RecordFailureField(plan, shape);
 	RequireExecutionRejection(execution, failure_field, static_cast<uint64_t>(derived.pages.size()));
-	return {std::move(execution), outcome, attempted, limit};
+	return {std::move(execution), outcome, RuntimeFixtureVariantEvidencePath::EXECUTOR, attempted, 0, limit};
 }
 
 } // namespace duckdb_api_test

@@ -40,19 +40,23 @@ void TestRepeatedCursorFailsTerminally() {
 	}
 }
 
-void TestAdvertisedThirtyThirdPageFails() {
+void TestLastAuthorizedPageRetainsContinuationForCommonAccounting() {
 	duckdb_api::internal::GraphqlCursorState state(32, 512);
 	for (uint64_t page = 1; page <= 31; page++) {
 		state.MarkRequestStarted();
 		state.Advance(true, "cursor-" + std::to_string(page));
 	}
 	state.MarkRequestStarted();
+	state.Advance(true, "cursor-32");
+	Require(!state.IsFailed() && state.RequestedPages() == 32 && state.CurrentCursor() &&
+	            *state.CurrentCursor() == "cursor-32",
+	        "last authorized response did not preserve its continuation for common accounting");
 	try {
-		state.Advance(true, "cursor-32");
-		throw std::runtime_error("advertised page 33 must fail");
+		state.MarkRequestStarted();
+		throw std::runtime_error("cursor state accepted a 33rd request without common accounting");
 	} catch (const duckdb_api::internal::GraphqlCursorError &) {
 		Require(state.IsFailed() && state.RequestedPages() == 32,
-		        "cursor state must reject a continuation after the 32nd requested page");
+		        "cursor state fallback must still deny a request after its page authority");
 	}
 }
 
@@ -80,7 +84,7 @@ int main() {
 	try {
 		TestNullFirstCursorAndTerminalExhaustion();
 		TestRepeatedCursorFailsTerminally();
-		TestAdvertisedThirtyThirdPageFails();
+		TestLastAuthorizedPageRetainsContinuationForCommonAccounting();
 		TestPersistentCursorMemoryAndByteBoundary();
 		std::cout << "GraphQL cursor pagination tests passed\n";
 		return EXIT_SUCCESS;

@@ -5,6 +5,7 @@
 #include "runtime/support/package_fixture_json_variant_internal.hpp"
 #include "runtime/support/package_fixture_observation_internal.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -21,6 +22,13 @@ duckdb_api::internal::HttpExecutionProfile PublicFixtureProfile() {
 	        false,
 	        duckdb_api::PAGINATION_MAX_EXECUTION_MILLISECONDS,
 	        duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE};
+}
+
+uint64_t DerivedBodyLimit(const duckdb_api::ScanPlan &plan) {
+	const auto fixture_limit = plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED
+	                               ? duckdb_api::HOST_MAX_DECOMPRESSED_BYTES
+	                               : duckdb_api::PAGINATION_MAX_DECOMPRESSED_BYTES_PER_PAGE;
+	return std::min(fixture_limit, std::min(plan.Budgets().response_bytes, plan.Budgets().decompressed_bytes));
 }
 
 bool IsLink(const std::string &name) {
@@ -110,7 +118,8 @@ RuntimeFixtureTranscript RestPaginationTranscript(const duckdb_api::ScanPlan &pl
 	if (variant != RuntimeFixturePaginationFailureVariant::REST_MAX_PAGES_EXHAUSTED) {
 		throw std::invalid_argument("GraphQL pagination variant cannot execute a REST plan");
 	}
-	const auto empty = internal::RepeatFirstRuntimeFixtureRecord(base.pages[0].body, shape, 0, control);
+	const auto empty =
+	    internal::RepeatFirstRuntimeFixtureRecord(base.pages[0].body, shape, 0, DerivedBodyLimit(plan), control);
 	result.pages.assign(static_cast<std::size_t>(profile->MaxPages()), base.pages[0]);
 	uint64_t current = profile->FirstPage();
 	for (auto &page : result.pages) {
@@ -135,7 +144,7 @@ RuntimeFixtureTranscript GraphqlPaginationTranscript(const duckdb_api::ScanPlan 
 	RuntimeFixtureTranscript result {base.authorization, {}};
 	auto page_with = [&](uint64_t ordinal, const std::string &cursor_value) {
 		auto page = base.pages[0];
-		page.body = internal::RepeatFirstRuntimeFixtureRecord(page.body, shape, 0, control);
+		page.body = internal::RepeatFirstRuntimeFixtureRecord(page.body, shape, 0, DerivedBodyLimit(plan), control);
 		page.body =
 		    internal::ReplaceRuntimeFixturePath(page.body, cursor.has_next_page.segments, "true", false, control);
 		page.body =
@@ -182,8 +191,11 @@ void ValidatePaginationFailure(const RuntimeFixtureExecutionObservation &executi
 		field = "pagination.end_cursor";
 		break;
 	case RuntimeFixturePaginationFailureVariant::GRAPHQL_REPEATED_CURSOR_REJECTED:
-	case RuntimeFixturePaginationFailureVariant::GRAPHQL_MAX_PAGES_EXHAUSTED:
 		field = "pagination.cursor";
+		break;
+	case RuntimeFixturePaginationFailureVariant::GRAPHQL_MAX_PAGES_EXHAUSTED:
+		stage = duckdb_api::ErrorStage::RESOURCE;
+		field = "pages";
 		break;
 	}
 	if (execution.succeeded || execution.cancellation_observed || !execution.has_runtime_error ||
@@ -207,7 +219,12 @@ RuntimeFixtureVariantObservation RuntimePackageFixtureExecutionService::ExecuteP
 	auto execution =
 	    internal::RunRuntimeFixtureScenario(plan, derived, RuntimeFixtureScenario::Standard(), control, true);
 	ValidatePaginationFailure(execution, variant, requests);
-	return {std::move(execution), RuntimeFixtureVariantOutcome::EXPECTED_REJECTION, 0, 0};
+	return {std::move(execution),
+	        RuntimeFixtureVariantOutcome::EXPECTED_REJECTION,
+	        RuntimeFixtureVariantEvidencePath::EXECUTOR,
+	        0,
+	        0,
+	        0};
 }
 
 } // namespace duckdb_api_test

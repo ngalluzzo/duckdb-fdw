@@ -529,7 +529,10 @@ fields or widen authority.
 
 An empty page with a valid continuation is not exhaustion. A continuation at a
 page, record, byte, or arithmetic ceiling is a terminal resource failure before
-another request.
+another request. GraphQL cursor validation preserves the last authorized
+continuation long enough for the common scan ledger to own this terminal
+`RESOURCE/pages` decision; the cursor state machine does not reclassify the
+same ceiling as a pagination-policy failure.
 
 ## Typed rows and DuckDB vectors
 
@@ -657,6 +660,25 @@ after the key's fixed boundary, failure, cancellation, or lifecycle invariant
 has occurred through the production path. It dispatches from Connector's typed
 coverage entry rather than parsing the display key; Runtime receives neither
 form.
+
+Closed Runtime variant selectors and boundary enums are validated before
+transcript inspection, cancellation polling, derivation, or execution. Derived
+collection pages retain only the immutable plan's selected response paths and
+preflight the complete repeated body against effective plan/host wire and
+decompressed ceilings with cancellation checks before materialization. The
+base transcript remains Connector-validated and bounded; Runtime does not
+receive Connector fixture-limit authority. Unselected remote members therefore
+cannot consume the synthetic boundary page's authority.
+
+When a protocol shape or canonical request serializer makes an exact resource
+threshold structurally unreachable, Runtime may return typed composite
+evidence only after a real production executor or serializer baseline proves
+request, transport, row, and close behavior. The production scan ledger then
+proves the exact threshold or one-over independently. Its evidence path names
+whether the isolated counter was PAGE or SCAN, asserts the selected allowance,
+counter, and terminal state, and keeps ledger units separate from actual
+request, response, and row observations. A coverage entry is executed only
+after both parts succeed; accounting evidence alone is never executor evidence.
 
 The complete deterministic oracle includes package/native catalog, request,
 plan, request-body, result, failure, explanation, registration, reload,

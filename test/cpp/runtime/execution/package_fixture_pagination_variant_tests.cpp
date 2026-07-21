@@ -22,7 +22,9 @@ using duckdb_api_test::variant_test::ManualControl;
 void RequireRejected(const duckdb_api_test::RuntimeFixtureVariantObservation &result) {
 	Require(result.outcome == RuntimeFixtureVariantOutcome::EXPECTED_REJECTION && !result.execution.succeeded &&
 	            result.execution.has_runtime_error && result.execution.rows.empty() &&
-	            result.execution.stream_close_invoked,
+	            result.execution.stream_close_invoked &&
+	            result.evidence_path == duckdb_api_test::RuntimeFixtureVariantEvidencePath::EXECUTOR &&
+	            result.executor_observed_units == 0 && result.accounting_observed_units == 0,
 	        "pagination variant lost its typed terminal rejection");
 }
 

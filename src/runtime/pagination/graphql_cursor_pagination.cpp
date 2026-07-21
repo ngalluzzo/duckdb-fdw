@@ -94,9 +94,6 @@ void GraphqlCursorState::Advance(bool has_next, std::string end_cursor) {
 	if (static_cast<uint64_t>(end_cursor.size()) > max_cursor_bytes) {
 		Reject("pagination.cursor", "GraphQL continuation cursor exceeded its byte budget");
 	}
-	if (requested_pages >= max_pages) {
-		Reject("pagination.cursor", "GraphQL cursor traversal exceeded its page authority");
-	}
 	if (std::find(seen.begin(), seen.end(), end_cursor) != seen.end()) {
 		Reject("pagination.cursor", "GraphQL continuation cursor repeated");
 	}

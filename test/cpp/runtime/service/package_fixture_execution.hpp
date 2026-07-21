@@ -84,6 +84,15 @@ enum class RuntimeFixturePaginationFailureVariant {
 // results are different alternatives rather than caller-interpreted booleans.
 enum class RuntimeFixtureVariantOutcome { VALUE_SUCCEEDED, BOUNDARY_SUCCEEDED, EXPECTED_REJECTION, ONE_OVER_REJECTED };
 
+// EXECUTOR means the selected variant was evidenced entirely by the real
+// production stream. The scoped accounting alternatives are reserved for a
+// structurally unreachable exact threshold: the real stream must first prove
+// its canonical baseline and lifecycle, after which the same production ledger
+// proves the declared page or scan boundary. The explicit scope prevents an
+// identically named public error field from masking a competing ceiling.
+// Accounting units are never reported as observed request or response bytes.
+enum class RuntimeFixtureVariantEvidencePath { EXECUTOR, EXECUTOR_PLUS_PAGE_ACCOUNTING, EXECUTOR_PLUS_SCAN_ACCOUNTING };
+
 class RuntimeFixtureScenario {
 public:
 	static RuntimeFixtureScenario Standard();
@@ -163,7 +172,15 @@ struct RuntimeFixtureExecutionObservation {
 struct RuntimeFixtureVariantObservation {
 	RuntimeFixtureExecutionObservation execution;
 	RuntimeFixtureVariantOutcome outcome;
-	uint64_t observed_units;
+	// Composite paths state which competing ceiling was widened only inside
+	// the production-ledger proof. EXECUTOR carries no separate ledger proof.
+	RuntimeFixtureVariantEvidencePath evidence_path;
+	// Units genuinely observed by `execution` (serialized body, accounted
+	// response, decoded rows, or selected column value as appropriate).
+	uint64_t executor_observed_units;
+	// Exact units debited or rejected only by the scoped production-ledger
+	// proof. Zero for EXECUTOR; never reinterpret these as execution bytes.
+	uint64_t accounting_observed_units;
 	uint64_t admitted_limit;
 };
 

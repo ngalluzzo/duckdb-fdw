@@ -32,7 +32,8 @@ std::string ReplaceFirstRuntimeFixtureColumn(const std::string &body, const Runt
                                              bool remove_member, duckdb_api::ExecutionControl &control);
 
 std::string RepeatFirstRuntimeFixtureRecord(const std::string &body, const RuntimeFixtureJsonShape &shape,
-                                            uint64_t record_count, duckdb_api::ExecutionControl &control);
+                                            uint64_t record_count, uint64_t max_derived_body_bytes,
+                                            duckdb_api::ExecutionControl &control);
 
 std::string ReplaceRuntimeFixturePath(const std::string &body, const std::vector<std::string> &path,
                                       const std::string &replacement, bool remove_member,

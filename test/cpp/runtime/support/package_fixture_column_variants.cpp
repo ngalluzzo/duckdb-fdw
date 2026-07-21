@@ -152,7 +152,12 @@ RuntimeFixtureVariantObservation RuntimePackageFixtureExecutionService::ExecuteC
 	auto execution =
 	    internal::RunRuntimeFixtureScenario(plan, derived, RuntimeFixtureScenario::Standard(), control, true);
 	ValidateColumnObservation(execution, column, scenario, mutation);
-	return {std::move(execution), mutation.outcome, mutation.observed_units, mutation.admitted_limit};
+	return {std::move(execution),
+	        mutation.outcome,
+	        RuntimeFixtureVariantEvidencePath::EXECUTOR,
+	        mutation.observed_units,
+	        0,
+	        mutation.admitted_limit};
 }
 
 } // namespace duckdb_api_test

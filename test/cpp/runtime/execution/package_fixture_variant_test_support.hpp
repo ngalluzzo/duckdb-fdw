@@ -20,6 +20,10 @@ public:
 		return cancelled.load(std::memory_order_acquire);
 	}
 
+	void Cancel() noexcept {
+		cancelled.store(true, std::memory_order_release);
+	}
+
 private:
 	std::atomic<bool> cancelled;
 };
