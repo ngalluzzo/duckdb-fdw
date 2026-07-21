@@ -367,7 +367,14 @@ them:
   entries independently before `0.9.0`.
 - Before `0.9.0`, an Engineering Enablement release-and-support-policy RFC with
   product-manager approval decides support windows and removals, deprecation,
-  migration, security response, maintenance, and backport policy.
+  migration, security response, maintenance, and backport policy. [RFC
+  0014](rfcs/0014-adopt-release-support-and-backport-policy.md) is Accepted
+  and satisfies this gate: best-effort, latest-release-only support, no LTS
+  or backports, breaking changes still require a project-SemVer MAJOR
+  increment with release-note migration guidance but no advance-notice
+  window, and security reports use public GitHub Issues with redaction
+  guidance plus GitHub private vulnerability reporting as a fallback for the
+  transport/credential/host surface. See `SECURITY.md`.
 - `0.9.0` derives the exact supported DuckDB/profile/platform/architecture/
   installation rows from passing evidence, including the latest stable DuckDB
   release at release time, and freezes the final inclusions and experimental
