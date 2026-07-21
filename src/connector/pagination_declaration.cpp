@@ -27,6 +27,8 @@ const char *PaginationStrategyName(CompiledPaginationStrategy strategy) {
 		return "disabled";
 	case CompiledPaginationStrategy::LINK_HEADER:
 		return "link_header";
+	case CompiledPaginationStrategy::RESPONSE_NEXT_URL:
+		return "response_next";
 	}
 	throw std::logic_error("compiled connector contains an unknown pagination strategy");
 }
@@ -87,9 +89,34 @@ CompiledPagination::CompiledPagination(std::string page_size_parameter_p, std::u
 	}
 }
 
-void CompiledPagination::RequireLinkHeader() const {
-	if (strategy != CompiledPaginationStrategy::LINK_HEADER) {
-		throw std::logic_error("disabled pagination has no Link declaration payload");
+CompiledPagination::CompiledPagination(std::string next_url_path_p, std::string page_size_parameter_p,
+                                       std::uint64_t page_size_p, std::string page_number_parameter_p,
+                                       std::uint64_t first_page_p, std::uint64_t page_increment_p,
+                                       std::uint64_t max_pages_per_scan_p)
+    : strategy(CompiledPaginationStrategy::RESPONSE_NEXT_URL), page_size_parameter(std::move(page_size_parameter_p)),
+      page_size(page_size_p), page_number_parameter(std::move(page_number_parameter_p)), first_page(first_page_p),
+      page_increment(page_increment_p), max_pages_per_scan(max_pages_per_scan_p),
+      next_url_path(std::move(next_url_path_p)) {
+	if (next_url_path.empty() || next_url_path[0] != '$' || next_url_path.find("[*]") != std::string::npos) {
+		throw std::invalid_argument("compiled response_next pagination requires a non-collection JSON path");
+	}
+	if (!internal::IsCompiledQueryName(page_size_parameter) || !internal::IsCompiledQueryName(page_number_parameter) ||
+	    page_size_parameter == page_number_parameter || page_size == 0 || first_page == 0 || page_increment == 0 ||
+	    max_pages_per_scan == 0 || !FitsBigintPageSequence(first_page, page_increment, max_pages_per_scan)) {
+		throw std::invalid_argument("compiled response_next pagination contains invalid typed page bindings");
+	}
+}
+
+void CompiledPagination::RequirePaginated() const {
+	if (strategy != CompiledPaginationStrategy::LINK_HEADER &&
+	    strategy != CompiledPaginationStrategy::RESPONSE_NEXT_URL) {
+		throw std::logic_error("pagination accessor invoked on a non-paginated strategy");
+	}
+}
+
+void CompiledPagination::RequireResponseNextUrl() const {
+	if (strategy != CompiledPaginationStrategy::RESPONSE_NEXT_URL) {
+		throw std::logic_error("next_url_path accessor invoked on a non-response_next strategy");
 	}
 }
 
@@ -98,22 +125,22 @@ CompiledPaginationStrategy CompiledPagination::Strategy() const {
 }
 
 CompiledPageDependency CompiledPagination::Dependency() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return CompiledPageDependency::SEQUENTIAL;
 }
 
 CompiledPageConsistency CompiledPagination::Consistency() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return CompiledPageConsistency::MUTABLE;
 }
 
 CompiledLinkRelation CompiledPagination::LinkRelation() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return CompiledLinkRelation::NEXT;
 }
 
 CompiledContinuationTargetScope CompiledPagination::TargetScope() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return CompiledContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH;
 }
 
@@ -126,33 +153,38 @@ bool CompiledPagination::SupportsResume() const {
 }
 
 const std::string &CompiledPagination::PageSizeParameter() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return page_size_parameter;
 }
 
 std::uint64_t CompiledPagination::PageSize() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return page_size;
 }
 
 const std::string &CompiledPagination::PageNumberParameter() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return page_number_parameter;
 }
 
 std::uint64_t CompiledPagination::FirstPage() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return first_page;
 }
 
 std::uint64_t CompiledPagination::PageIncrement() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return page_increment;
 }
 
 std::uint64_t CompiledPagination::MaxPagesPerScan() const {
-	RequireLinkHeader();
+	RequirePaginated();
 	return max_pages_per_scan;
+}
+
+const std::string &CompiledPagination::NextUrlPath() const {
+	RequireResponseNextUrl();
+	return next_url_path;
 }
 
 namespace internal {
@@ -172,8 +204,11 @@ void ValidatePagination(const CompiledOperation &operation) {
 		}
 		return;
 	}
-	if (pagination.Strategy() != CompiledPaginationStrategy::LINK_HEADER ||
-	    pagination.Dependency() != CompiledPageDependency::SEQUENTIAL ||
+	if (pagination.Strategy() != CompiledPaginationStrategy::LINK_HEADER &&
+	    pagination.Strategy() != CompiledPaginationStrategy::RESPONSE_NEXT_URL) {
+		throw std::invalid_argument("compiled pagination contains an unsupported capability profile");
+	}
+	if (pagination.Dependency() != CompiledPageDependency::SEQUENTIAL ||
 	    pagination.Consistency() != CompiledPageConsistency::MUTABLE ||
 	    pagination.LinkRelation() != CompiledLinkRelation::NEXT ||
 	    pagination.TargetScope() != CompiledContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH ||
@@ -183,7 +218,7 @@ void ValidatePagination(const CompiledOperation &operation) {
 	if (operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY ||
 	    (rest.response_source != CompiledResponseSource::JSON_PATH_MANY &&
 	     rest.response_source != CompiledResponseSource::ROOT_ARRAY)) {
-		throw std::invalid_argument("compiled Link pagination requires a many-row response source");
+		throw std::invalid_argument("compiled pagination requires a many-row response source");
 	}
 	if (!IsCompiledQueryName(pagination.PageSizeParameter()) ||
 	    !IsCompiledQueryName(pagination.PageNumberParameter()) ||
@@ -191,20 +226,25 @@ void ValidatePagination(const CompiledOperation &operation) {
 	    pagination.FirstPage() == 0 || pagination.PageIncrement() == 0 || pagination.MaxPagesPerScan() == 0 ||
 	    pagination.PageSize() > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
 	    !FitsBigintPageSequence(pagination.FirstPage(), pagination.PageIncrement(), pagination.MaxPagesPerScan())) {
-		throw std::invalid_argument("compiled Link pagination contains invalid typed page bindings");
+		throw std::invalid_argument("compiled pagination contains invalid typed page bindings");
+	}
+	if (pagination.Strategy() == CompiledPaginationStrategy::RESPONSE_NEXT_URL &&
+	    (pagination.NextUrlPath().empty() || pagination.NextUrlPath()[0] != '$' ||
+	     pagination.NextUrlPath().find("[*]") != std::string::npos)) {
+		throw std::invalid_argument("compiled response_next pagination requires a non-collection JSON path");
 	}
 	const CompiledQueryParameter *page_size = nullptr;
 	const CompiledQueryParameter *page_number = nullptr;
 	for (const auto &parameter : rest.request.query_parameters) {
 		if (parameter.source == CompiledQueryValueSource::PAGE_SIZE) {
 			if (page_size != nullptr) {
-				throw std::invalid_argument("compiled Link pagination contains multiple page-size sources");
+				throw std::invalid_argument("compiled pagination contains multiple page-size sources");
 			}
 			page_size = &parameter;
 		}
 		if (parameter.source == CompiledQueryValueSource::PAGE_NUMBER) {
 			if (page_number != nullptr) {
-				throw std::invalid_argument("compiled Link pagination contains multiple page-number sources");
+				throw std::invalid_argument("compiled pagination contains multiple page-number sources");
 			}
 			page_number = &parameter;
 		}
@@ -213,7 +253,7 @@ void ValidatePagination(const CompiledOperation &operation) {
 	    page_size->DecodedValue().Bigint() != static_cast<std::int64_t>(pagination.PageSize()) ||
 	    page_number->name != pagination.PageNumberParameter() ||
 	    page_number->DecodedValue().Bigint() != static_cast<std::int64_t>(pagination.FirstPage())) {
-		throw std::invalid_argument("compiled Link pagination disagrees with its structural initial request sources");
+		throw std::invalid_argument("compiled pagination disagrees with its structural initial request sources");
 	}
 }
 
@@ -231,7 +271,11 @@ void AppendPagination(std::ostream &result, const CompiledPagination &pagination
 	       << ",page_number:" << pagination.PageNumberParameter() << '=' << pagination.FirstPage()
 	       << ",increment:" << pagination.PageIncrement()
 	       << ",target:" << ContinuationTargetScopeName(pagination.TargetScope())
-	       << ",max_pages:" << pagination.MaxPagesPerScan() << ']';
+	       << ",max_pages:" << pagination.MaxPagesPerScan();
+	if (pagination.Strategy() == CompiledPaginationStrategy::RESPONSE_NEXT_URL) {
+		result << ",next_url_path:" << pagination.NextUrlPath();
+	}
+	result << ']';
 }
 
 } // namespace internal

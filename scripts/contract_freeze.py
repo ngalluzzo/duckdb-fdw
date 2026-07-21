@@ -77,11 +77,11 @@ REQUIRED_CANDIDATE_REVISION_KEYS = (
 # Candidate revisions accepted by RFC after the 0.9.0 freeze that must be
 # present in every candidate snapshot until they graduate into the schema-
 # closed set proper. Removing an entry before its graduation must fail closed.
-EXPECTED_CANDIDATE_REVISION_IDS = frozenset(
-    {
-        "response_next_rest_pagination",
-    }
-)
+# Empty today: the `response_next` candidate (RFC 0016) graduated into the
+# schema-closed set when its 0.10.0 implementation landed; subsequent
+# accepted RFCs that introduce new candidate revisions should add their ids
+# here and to release/1.0.0/freeze.json's accepted_candidate_revisions list.
+EXPECTED_CANDIDATE_REVISION_IDS = frozenset()
 
 MANDATORY_EXCLUSIONS = frozenset(
     {

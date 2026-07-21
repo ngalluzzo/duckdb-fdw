@@ -369,7 +369,13 @@ bool IsCanonicalGraphqlDocumentProfile(CompiledGraphqlDocumentIdentity identity,
                                        CompiledGraphqlDigestAlgorithm algorithm, const std::string &digest);
 
 // REST pagination is a closed source declaration, never executable page state.
-enum class CompiledPaginationStrategy { DISABLED, LINK_HEADER };
+// RESPONSE_NEXT_URL is architecturally identical to LINK_HEADER (sequential,
+// mutable, exact-operation-origin-and-path continuation) except the
+// continuation signal is read from a declared JSON body path (`next_url_path`)
+// rather than an HTTP `Link` header. Both share the same reconstruct-and-
+// verify safety model: the received URL is a verified signal compared against
+// a locally reconstructed expectation, never a dereferenced fetch target.
+enum class CompiledPaginationStrategy { DISABLED, LINK_HEADER, RESPONSE_NEXT_URL };
 enum class CompiledPageDependency { SEQUENTIAL };
 enum class CompiledPageConsistency { MUTABLE };
 enum class CompiledLinkRelation { NEXT };
@@ -395,6 +401,10 @@ public:
 	std::uint64_t FirstPage() const;
 	std::uint64_t PageIncrement() const;
 	std::uint64_t MaxPagesPerScan() const;
+	// RESPONSE_NEXT_URL only: the declared JSON path (under json_path_v1)
+	// from which Runtime reads the body-embedded continuation URL.
+	// Accessing this on a non-RESPONSE_NEXT_URL pagination is a logic error.
+	const std::string &NextUrlPath() const;
 
 private:
 	friend CompiledConnector BuildNativeGithubConnector();
@@ -406,7 +416,13 @@ private:
 	CompiledPagination();
 	CompiledPagination(std::string page_size_parameter, std::uint64_t page_size, std::string page_number_parameter,
 	                   std::uint64_t first_page, std::uint64_t page_increment, std::uint64_t max_pages_per_scan);
-	void RequireLinkHeader() const;
+	// RESPONSE_NEXT_URL constructor: identical to the LINK_HEADER constructor
+	// plus the declared body continuation path. Strategy is RESPONSE_NEXT_URL.
+	CompiledPagination(std::string next_url_path, std::string page_size_parameter, std::uint64_t page_size,
+	                   std::string page_number_parameter, std::uint64_t first_page, std::uint64_t page_increment,
+	                   std::uint64_t max_pages_per_scan);
+	void RequirePaginated() const;
+	void RequireResponseNextUrl() const;
 
 	CompiledPaginationStrategy strategy;
 	std::string page_size_parameter;
@@ -415,6 +431,7 @@ private:
 	std::uint64_t first_page;
 	std::uint64_t page_increment;
 	std::uint64_t max_pages_per_scan;
+	std::string next_url_path;
 };
 
 // REST retains its accepted 0.6 values as one alternative in the permanent

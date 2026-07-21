@@ -33,6 +33,12 @@ public:
 	static CompiledPagination LinkPagination(std::string page_size_parameter, std::uint64_t page_size,
 	                                         std::string page_number_parameter, std::uint64_t first_page,
 	                                         std::uint64_t page_increment, std::uint64_t max_pages_per_scan);
+	// RESPONSE_NEXT_URL pagination: identical page-number/page-size/ceiling
+	// fields to LinkPagination plus the declared body continuation path.
+	static CompiledPagination ResponseNextPagination(std::string next_url_path, std::string page_size_parameter,
+	                                                 std::uint64_t page_size, std::string page_number_parameter,
+	                                                 std::uint64_t first_page, std::uint64_t page_increment,
+	                                                 std::uint64_t max_pages_per_scan);
 	static CompiledQueryParameter FixedQueryParameter(std::string name, CompiledScalarValue decoded_value);
 	static CompiledQueryParameter RelationInputQueryParameter(std::string name, std::string input_id);
 	static CompiledQueryParameter ConditionalInputQueryParameter(std::string name, std::string conditional_id);

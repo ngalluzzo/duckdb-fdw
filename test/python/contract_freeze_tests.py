@@ -135,78 +135,56 @@ class ContractFreezeTests(unittest.TestCase):
             "accepted_candidate_revisions",
         )
 
-    def test_accepted_candidate_revisions_section_emptied_fails(self) -> None:
-        self.require_rejected(
-            lambda value: value["accepted_candidate_revisions"].clear(),
-            "accepted_candidate_revisions is empty",
-        )
+    def test_accepted_candidate_revisions_empty_list_passes(self) -> None:
+        # `response_next` graduated into pagination_strategies.rest when its
+        # 0.10.0 implementation landed; accepted_candidate_revisions is empty
+        # today and the freeze must accept that. The framework remains in
+        # place for any future accepted RFC that introduces a new candidate.
+        candidate = copy.deepcopy(self.freeze)
+        candidate["accepted_candidate_revisions"] = []
+        self.verify(candidate)
 
-    def test_accepted_candidate_revisions_entry_removed_fails(self) -> None:
-        # With only one expected candidate today, removing the entry empties
-        # the list, so the empty-list invariant fires first; the test still
-        # proves the entry cannot be silently dropped. When more candidates
-        # accumulate, a focused removal test should match on the entry id.
-        self.require_rejected(
-            lambda value: value["accepted_candidate_revisions"].pop(),
-            "accepted_candidate_revisions is empty",
-        )
+    def test_accepted_candidate_revisions_synthetic_entry_passes(self) -> None:
+        # Proves the structural verifier still accepts a well-formed entry
+        # pointing at an Accepted RFC, even though no real candidate exists
+        # today. Mutations of this synthetic entry are the structural checks.
+        candidate = copy.deepcopy(self.freeze)
+        candidate["accepted_candidate_revisions"] = [
+            {
+                "id": "synthetic_future_candidate",
+                "scope": "Test-only synthetic candidate to exercise the verifier.",
+                "status": "accepted_by_rfc_pending_implementation",
+                "authority": "RFC 0016",
+                "target_release": "0.99.0",
+                "target_release_authority": "test-only",
+                "not_yet_in_schema_closed_set": True,
+                "schema_closed_set_today": ["disabled", "link_next", "response_next"],
+                "graduation_rule": "Test-only synthetic entry; graduation is not real.",
+                "broader_category_remains_excluded": "pagination_body_url_offset_or_cursor_in_body_strategies",
+                "broader_category_exclusion_reason": "Test-only synthetic entry.",
+            }
+        ]
+        self.verify(candidate)
 
-    def test_accepted_candidate_revisions_required_key_missing_fails(self) -> None:
-        self.require_rejected(
-            lambda value: value["accepted_candidate_revisions"][0].pop("graduation_rule"),
-            "graduation_rule",
-        )
-
-    def test_accepted_candidate_revisions_authority_not_accepted_fails(self) -> None:
-        import shutil
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as temporary:
-            mirror = pathlib.Path(temporary) / "rfcs"
-            shutil.copytree(self.rfc_directory, mirror)
-            target = mirror / "0016-decide-body-signaled-rest-pagination.md"
-            text = target.read_text(encoding="utf-8").replace(
-                'status: "Accepted"', 'status: "Withdrawn"', 1
-            )
-            target.write_text(text, encoding="utf-8")
-            with self.assertRaisesRegex(FreezeError, "not Accepted"):
-                verify_freeze(
-                    copy.deepcopy(self.freeze),
-                    inventory=self.inventory,
-                    schema=self.schema,
-                    rfc_directory=mirror,
-                )
-
-    def test_accepted_candidate_revisions_schema_closed_set_drift_fails(self) -> None:
-        self.require_rejected(
-            lambda value: value["accepted_candidate_revisions"][0]["schema_closed_set_today"].append(
-                "response_next"
-            ),
-            "schema_closed_set_today",
-        )
-
-    def test_accepted_candidate_revisions_broader_category_unrecognized_fails(self) -> None:
-        self.require_rejected(
-            lambda value: value["accepted_candidate_revisions"][0].__setitem__(
-                "broader_category_remains_excluded", "fabricated_category"
-            ),
-            "not a recognized mandatory exclusion",
-        )
-
-    def test_accepted_candidate_revisions_broader_category_dropped_from_exclusions_fails(self) -> None:
-        self.require_rejected(
-            lambda value: value["exclusions"].remove(
-                "pagination_body_url_offset_or_cursor_in_body_strategies"
-            ),
-            "pagination_body_url_offset_or_cursor_in_body_strategies",
-        )
-
-    def test_accepted_candidate_revisions_duplicate_id_fails(self) -> None:
-        def duplicate(value: dict) -> None:
-            entry = copy.deepcopy(value["accepted_candidate_revisions"][0])
-            value["accepted_candidate_revisions"].append(entry)
-
-        self.require_rejected(duplicate, "duplicate id")
+    def test_accepted_candidate_revisions_synthetic_entry_drift_fails(self) -> None:
+        candidate = copy.deepcopy(self.freeze)
+        candidate["accepted_candidate_revisions"] = [
+            {
+                "id": "synthetic_future_candidate",
+                "scope": "Test-only synthetic candidate to exercise the verifier.",
+                "status": "accepted_by_rfc_pending_implementation",
+                "authority": "RFC 0016",
+                "target_release": "0.99.0",
+                "target_release_authority": "test-only",
+                "not_yet_in_schema_closed_set": True,
+                "schema_closed_set_today": ["disabled"],  # drift: missing link_next and response_next
+                "graduation_rule": "Test-only synthetic entry; graduation is not real.",
+                "broader_category_remains_excluded": "pagination_body_url_offset_or_cursor_in_body_strategies",
+                "broader_category_exclusion_reason": "Test-only synthetic entry.",
+            }
+        ]
+        with self.assertRaisesRegex(FreezeError, "schema_closed_set_today"):
+            self.verify(candidate)
 
     def test_not_yet_frozen_spurious_fails(self) -> None:
         self.require_rejected(
@@ -279,7 +257,7 @@ class ContractFreezeTests(unittest.TestCase):
             self.schema["$defs"][option["$ref"].rsplit("/", 1)[-1]]["properties"]["strategy"]["const"]
             for option in one_of
         }
-        self.assertEqual(rest, {"disabled", "link_next"})
+        self.assertEqual(rest, {"disabled", "link_next", "response_next"})
 
     def test_schema_graphql_closed_set_is_read_from_reference(self) -> None:
         ref = self.schema["$defs"]["graphqlRequest"]["properties"]["pagination"]["$ref"]

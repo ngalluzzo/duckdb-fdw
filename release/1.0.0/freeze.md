@@ -13,7 +13,11 @@ read either without inspecting product source.
 > until a later release graduates a candidate. The first such revision was
 > [RFC 0016](../docs/rfcs/0016-decide-body-signaled-rest-pagination.md)
 > (Accepted 2026-07-21), adding `response_next` REST pagination pending
-> `0.10.0` implementation.
+> `0.10.0` implementation. **The `response_next` candidate graduated into the
+> schema-closed set when its `0.10.0` implementation landed**: REST
+> pagination strategies are now `{disabled, link_next, response_next}` and
+> the `accepted_candidate_revisions` list is empty, ready for any future
+> accepted RFC that introduces a new candidate revision.
 
 The `1.0.0` contract is not a single document. It is a layered set in which
 each layer draws authority from the one above it:
@@ -155,17 +159,14 @@ rather than silently ignoring them.
   continuous streams; raw GraphQL documents; author remote projection, order,
   or limit pushdown declarations.
 - **Pagination strategies outside the closed sets:** response-body-embedded
-  next URLs (for example `info.next`), numeric offset or page-number
-  traversal, cursor-in-body strategies, and reverse or bidirectional
-  traversal. Admitting any such strategy requires a later accepted RFC and
-  pre-freeze evidence; the compiler rejects the declaration today as
-  `DUCKDB_API_UNSUPPORTED_DECLARATION` in the schema phase. **Carve-out
-  accepted by [RFC 0016](../docs/rfcs/0016-decide-body-signaled-rest-pagination.md):**
-  the narrow body-URL reconstruct-and-verify shape named `response_next` is
-  now an accepted candidate revision pending `0.10.0` implementation (see the
-  *Accepted candidate revisions pending implementation* section below). The
-  broader category — offset/page-number traversal, cursor-in-body strategies,
-  and reverse or bidirectional traversal — remains a permanent exclusion.
+  next URLs that do not match the accepted `response_next` reconstruct-and-
+  verify shape (for example an opaque body cursor that drives the next
+  request directly), numeric offset or page-number traversal, cursor-in-body
+  strategies, and reverse or bidirectional traversal. Admitting any such
+  strategy requires a later accepted RFC and pre-freeze evidence; the
+  compiler rejects the declaration today as `DUCKDB_API_UNSUPPORTED_DECLARATION`
+  in the schema phase. The narrow `response_next` reconstruct-and-verify
+  shape (RFC 0016) is now in the schema-closed set above, not an exclusion.
 - Compatibility with arbitrary upstream API drift.
 
 ## Known evidence limitations recorded during this freeze
@@ -202,40 +203,26 @@ schema-closed contract surface. It is distinct from the categories around it:
 `accepted_candidate_revisions`. The freeze gate
 (`scripts/verify-contract-freeze.py` plus `test/python/contract_freeze_tests.py`)
 asserts each entry has the required structure and fails closed if the section
-is removed, an entry is dropped, or the schema-closed set is widened without a
-graduation.
+is removed, an expected entry is dropped, or the schema-closed set is widened
+without a graduation.
 
-### `response_next` REST pagination (target: `0.10.0`)
+### `response_next` REST pagination — **graduated**
 
-Accepted [RFC 0016](../docs/rfcs/0016-decide-body-signaled-rest-pagination.md)
-(2026-07-21) adds a third REST pagination strategy, `response_next`,
-architecturally identical to `link_next` except its continuation signal is read
-from a declared JSON body path (`next_url_path`) rather than an HTTP `Link`
-header, reusing the same reconstruct-and-verify safety model. The product
-manager (Nic Galluzzo) directed this acceptance after re-prioritizing `1.0.0`
-to require ≥10 supported API providers (two exist as of `0.9.0`), dissolving
-the freeze-pressure rationale that originally deferred the design to a
-post-`1.0.0` `MINOR`. The five-team topology re-consultation produced five
-`Approved` dispositions.
+The first candidate revision, accepted by
+[RFC 0016](../docs/rfcs/0016-decide-body-signaled-rest-pagination.md)
+(2026-07-21), has graduated: `response_next` is now in the schema-closed
+`pagination_strategies.rest` set (`{disabled, link_next, response_next}`),
+the JSON schema's `oneOf` includes the corresponding branch, and the
+implementation is live across the Connector, Runtime, Relational Semantics,
+and Query surfaces. The candidate-revision entry is removed from
+`release/1.0.0/freeze.json` and the section is empty pending any future
+accepted RFC that introduces a new candidate.
 
-Until `0.10.0` ships:
-
-- `pagination_strategies.rest` stays at `{disabled, link_next}` (this is what
-  the JSON schema's closed `oneOf` actually enforces).
-- A package declaring `response_next` fails closed at the `SCHEMA` phase with
-  `DUCKDB_API_UNSUPPORTED_DECLARATION`, exactly as the freeze's
-  `rejected_diagnostic` advertises.
-- The broader exclusion `pagination_body_url_offset_or_cursor_in_body_strategies`
-  **remains mandatory** — only the body-URL reconstruct-and-verify shape is
-  accepted by RFC 0016. Numeric offset/page-number traversal, cursor-in-body
-  strategies, and reverse or bidirectional traversal still require their own
-  later accepted RFC.
-
-When `0.10.0` ships, the entry graduates: a new freeze snapshot for `0.10.0`'s
-release view moves `response_next` into `pagination_strategies.rest`, the
-schema's `oneOf` adds the corresponding branch with live decoder/IR/switch
-coverage, and the candidate-revision entry is removed because the strategy is
-now part of the closed set proper.
+The broader exclusion `pagination_body_url_offset_or_cursor_in_body_strategies`
+remains mandatory: only the body-URL reconstruct-and-verify shape is in the
+closed set. Numeric offset/page-number traversal, cursor-in-body strategies,
+and reverse or bidirectional traversal still require their own later accepted
+RFC.
 
 ## Not yet frozen
 

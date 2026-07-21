@@ -36,7 +36,7 @@ bool PredicateTargets(const RelationDeclaration &relation, const std::string &op
 }
 
 bool FitsBigintPageSequence(const RestPaginationDeclaration &pagination) {
-	if (pagination.strategy.value != "link_next") {
+	if (pagination.strategy.value != "link_next" && pagination.strategy.value != "response_next") {
 		return true;
 	}
 	const auto first = ParseUnsigned(pagination.first_page);
@@ -93,6 +93,12 @@ CompiledPagination CompilePagination(const RestPaginationDeclaration &source) {
 		    ParseUnsigned(source.first_page), ParseUnsigned(source.page_increment),
 		    ParseUnsigned(source.max_pages_per_scan));
 	}
+	if (source.strategy.value == "response_next") {
+		return duckdb_api::internal::CompiledModelBuilder::ResponseNextPagination(
+		    source.next_url_path.value, source.page_size_parameter.value, ParseUnsigned(source.page_size),
+		    source.page_number_parameter.value, ParseUnsigned(source.first_page), ParseUnsigned(source.page_increment),
+		    ParseUnsigned(source.max_pages_per_scan));
+	}
 	return duckdb_api::internal::CompiledModelBuilder::DisabledPagination();
 }
 
@@ -105,7 +111,10 @@ std::vector<CompiledQueryParameter> CompileQuery(const RelationDeclaration &rela
 	std::set<std::string> conditional_ids;
 	bool found_page_size = false;
 	bool found_page_number = false;
-	const bool link = pagination.strategy.value == "link_next";
+	// link_next and response_next share the same structural page-size and
+	// page-number query bindings; only the continuation signal's source
+	// (header vs body) differs.
+	const bool paginated = pagination.strategy.value == "link_next" || pagination.strategy.value == "response_next";
 	const auto page_size = ParseUnsigned(pagination.page_size);
 	const auto first_page = ParseUnsigned(pagination.first_page);
 	for (const auto &field : operation.rest.query) {
@@ -115,7 +124,7 @@ std::vector<CompiledQueryParameter> CompileQuery(const RelationDeclaration &rela
 		}
 		switch (field.kind) {
 		case QueryFieldKind::LITERAL:
-			if (link && field.name.value == pagination.page_size_parameter.value) {
+			if (paginated && field.name.value == pagination.page_size_parameter.value) {
 				found_page_size = true;
 				if (field.source.value != pagination.page_size.value ||
 				    page_size > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
@@ -125,7 +134,7 @@ std::vector<CompiledQueryParameter> CompileQuery(const RelationDeclaration &rela
 				}
 				result.push_back(
 				    duckdb_api::internal::CompiledModelBuilder::PageSizeQueryParameter(field.name.value, page_size));
-			} else if (link && field.name.value == pagination.page_number_parameter.value) {
+			} else if (paginated && field.name.value == pagination.page_number_parameter.value) {
 				found_page_number = true;
 				if (field.source.value != pagination.first_page.value ||
 				    first_page > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
@@ -166,8 +175,8 @@ std::vector<CompiledQueryParameter> CompileQuery(const RelationDeclaration &rela
 			break;
 		}
 	}
-	if (link && (pagination.page_size_parameter.value == pagination.page_number_parameter.value || !found_page_size ||
-	             !found_page_number)) {
+	if (paginated && (pagination.page_size_parameter.value == pagination.page_number_parameter.value ||
+	                  !found_page_size || !found_page_number)) {
 		diagnostics.Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::COMPILE,
 		                pagination.mark, "", relation.id.value, operation.id.value);
 	}

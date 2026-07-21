@@ -322,6 +322,16 @@ CompiledPagination CompiledModelBuilder::LinkPagination(std::string page_size_pa
 	                          page_increment, max_pages_per_scan);
 }
 
+CompiledPagination CompiledModelBuilder::ResponseNextPagination(std::string next_url_path,
+                                                                std::string page_size_parameter,
+                                                                std::uint64_t page_size,
+                                                                std::string page_number_parameter,
+                                                                std::uint64_t first_page, std::uint64_t page_increment,
+                                                                std::uint64_t max_pages_per_scan) {
+	return CompiledPagination(std::move(next_url_path), std::move(page_size_parameter), page_size,
+	                          std::move(page_number_parameter), first_page, page_increment, max_pages_per_scan);
+}
+
 CompiledQueryParameter CompiledModelBuilder::FixedQueryParameter(std::string name, CompiledScalarValue decoded_value) {
 	return CompiledQueryParameter(std::move(name), CompiledQueryValueSource::FIXED, std::move(decoded_value));
 }

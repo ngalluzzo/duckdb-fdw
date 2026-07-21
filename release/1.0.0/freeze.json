@@ -71,7 +71,8 @@
   "pagination_strategies": {
     "rest": [
       "disabled",
-      "link_next"
+      "link_next",
+      "response_next"
     ],
     "graphql": [
       "relay_forward"
@@ -138,21 +139,7 @@
       "authority": "docs/goals/public-connector-authoring-candidate.md completion record"
     }
   ],
-  "accepted_candidate_revisions": [
-    {
-      "id": "response_next_rest_pagination",
-      "scope": "REST pagination strategy `response_next`: identical to `link_next` except the continuation signal is read from a declared JSON body path (`next_url_path`) rather than an HTTP `Link` header, reusing the same reconstruct-and-verify safety model. Adds `RESPONSE_NEXT_URL` to `CompiledPaginationStrategy`, a `response_next` branch to the schema's REST pagination `oneOf`, and `RESPONSE_NEXT_URL` arms to the exhaustive switches in Connector (schema/decoder/IR), Relational Semantics (`PlanBaseDomain`, `ValidatePagination`, `PaginationStrategyName`), and Query (`EXPLAIN` rendering).",
-      "status": "accepted_by_rfc_pending_implementation",
-      "authority": "RFC 0016 (Accepted 2026-07-21)",
-      "target_release": "0.10.0",
-      "target_release_authority": "ROADMAP.md section '0.10.0 — body-signaled REST pagination'",
-      "not_yet_in_schema_closed_set": true,
-      "schema_closed_set_today": ["disabled", "link_next"],
-      "graduation_rule": "When 0.10.0 ships with the live schema/decoder/IR/switches/test-oracle evidence, this entry is removed and `response_next` is added to `pagination_strategies.rest` in a new freeze snapshot produced for 0.10.0's release view. Until then, `pagination_strategies.rest` stays at {disabled, link_next} and a package declaring `response_next` fails closed at the SCHEMA phase with `DUCKDB_API_UNSUPPORTED_DECLARATION` exactly as the freeze's `rejected_diagnostic` advertises.",
-      "broader_category_remains_excluded": "pagination_body_url_offset_or_cursor_in_body_strategies",
-      "broader_category_exclusion_reason": "Only the body-URL reconstruct-and-verify shape is accepted by RFC 0016. Numeric offset/page-number traversal, cursor-in-body strategies, and reverse or bidirectional traversal remain explicit 1.0.0 exclusions; admitting any of them still requires its own later accepted RFC and pre-freeze evidence."
-    }
-  ],
+  "accepted_candidate_revisions": [],
   "not_yet_frozen": [
     {
       "item": "supported_duckdb_profile_platform_architecture_installation_matrix_rows",

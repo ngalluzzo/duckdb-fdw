@@ -114,6 +114,10 @@ struct RestPaginationDeclaration {
 	LocatedText dependency;
 	LocatedText consistency;
 	LocatedText target_scope;
+	// response_next only: declared JSON path (under json_path_v1) from which
+	// Runtime extracts the body-embedded continuation URL. Empty for disabled
+	// and link_next strategies.
+	LocatedText next_url_path;
 	LocatedText page_size_parameter;
 	LocatedText page_size;
 	LocatedText page_number_parameter;

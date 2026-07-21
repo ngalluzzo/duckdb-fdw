@@ -125,13 +125,15 @@ RestResponseDeclaration DecodeRestResponseSchema(const SchemaReader &reader) {
 
 RestPaginationDeclaration DecodeRestPaginationSchema(const SchemaReader &reader) {
 	RestPaginationDeclaration pagination;
-	reader.RequireMapping({"strategy", "dependency", "consistency", "target_scope", "page_size_parameter", "page_size",
-	                       "page_number_parameter", "first_page", "page_increment", "max_pages_per_scan"},
+	reader.RequireMapping({"strategy", "dependency", "consistency", "target_scope", "next_url_path",
+	                       "page_size_parameter", "page_size", "page_number_parameter", "first_page", "page_increment",
+	                       "max_pages_per_scan"},
 	                      {"strategy"});
 	pagination.strategy = reader.Text("strategy");
 	pagination.dependency = reader.Text("dependency", false);
 	pagination.consistency = reader.Text("consistency", false);
 	pagination.target_scope = reader.Text("target_scope", false);
+	pagination.next_url_path = reader.Text("next_url_path", false);
 	pagination.page_size_parameter = reader.Text("page_size_parameter", false);
 	pagination.page_size = reader.Text("page_size", false);
 	pagination.page_number_parameter = reader.Text("page_number_parameter", false);
@@ -140,8 +142,9 @@ RestPaginationDeclaration DecodeRestPaginationSchema(const SchemaReader &reader)
 	pagination.max_pages_per_scan = reader.Text("max_pages_per_scan", false);
 	pagination.mark = reader.Mark();
 	if (pagination.strategy.value == "disabled") {
-		for (const auto *name : {"dependency", "consistency", "target_scope", "page_size_parameter", "page_size",
-		                         "page_number_parameter", "first_page", "page_increment", "max_pages_per_scan"}) {
+		for (const auto *name :
+		     {"dependency", "consistency", "target_scope", "next_url_path", "page_size_parameter", "page_size",
+		      "page_number_parameter", "first_page", "page_increment", "max_pages_per_scan"}) {
 			if (reader.Field(name) != nullptr) {
 				reader.Diagnostics().Add(PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
 				                         reader.FieldMark(name));
@@ -149,8 +152,30 @@ RestPaginationDeclaration DecodeRestPaginationSchema(const SchemaReader &reader)
 		}
 		return pagination;
 	}
-	RequireValue(pagination.strategy, "link_next", PackageDiagnosticCode::UNSUPPORTED_DECLARATION,
-	             PackageDiagnosticPhase::SCHEMA, reader.Diagnostics());
+	const bool response_next = pagination.strategy.value == "response_next";
+	if (!response_next) {
+		RequireValue(pagination.strategy, "link_next", PackageDiagnosticCode::UNSUPPORTED_DECLARATION,
+		             PackageDiagnosticPhase::SCHEMA, reader.Diagnostics());
+		// response_next authors who typed the strategy field correctly but
+		// omitted next_url_path would not reach this branch; the unsupported-
+		// declaration diagnostic above is the only fail-closed path for an
+		// unknown strategy value.
+		if (reader.Field("next_url_path") != nullptr) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
+			                         reader.FieldMark("next_url_path"));
+		}
+	} else {
+		// response_next requires next_url_path; absence is a missing-field
+		// diagnostic at the SCHEMA phase, mirroring how link_next treats its
+		// shared link-style fields below.
+		if (reader.Field("next_url_path") == nullptr) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::MISSING_FIELD, PackageDiagnosticPhase::SCHEMA,
+			                         reader.FieldMark("next_url_path"));
+		} else if (!IsExtractor(pagination.next_url_path.value, false, nullptr)) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::INVALID_TYPE, PackageDiagnosticPhase::SCHEMA,
+			                         pagination.next_url_path.mark);
+		}
+	}
 	for (const auto *name : {"dependency", "consistency", "target_scope", "page_size_parameter", "page_size",
 	                         "page_number_parameter", "first_page", "page_increment", "max_pages_per_scan"}) {
 		if (reader.Field(name) == nullptr) {
