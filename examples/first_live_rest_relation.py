@@ -10,17 +10,25 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.7.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.8.0", True, False, "NOT_INSTALLED")
 EXPECTED_SCHEMA = [
     ("id", "BIGINT"),
     ("login", "VARCHAR"),
     ("site_admin", "BOOLEAN"),
 ]
 MAXIMUM_ROWS = 3
+PACKAGE_ROOT_LITERAL = "'/absolute/path/to/duckdb-fdw/connectors/github'"
 
 
 def sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def example_sql(path: pathlib.Path, package_root: pathlib.Path) -> str:
+    source = path.read_text(encoding="utf-8")
+    if source.count(PACKAGE_ROOT_LITERAL) != 1:
+        raise SystemExit("example package-root placeholder drifted")
+    return source.replace(PACKAGE_ROOT_LITERAL, sql_literal(package_root.as_posix()))
 
 
 def require_equal(label: str, actual: object, expected: object) -> None:
@@ -70,7 +78,7 @@ def render_plain(summary: dict[str, object]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run the duckdb_api 0.7.0 fixed anonymous GitHub relation."
+        description="Load the GitHub package and run its anonymous REST relation."
     )
     parser.add_argument("artifact", help="path to duckdb_api.duckdb_extension")
     parser.add_argument(
@@ -81,20 +89,24 @@ def main() -> int:
     args = parser.parse_args()
 
     artifact = pathlib.Path(args.artifact).resolve(strict=True)
+    package_root = (pathlib.Path(__file__).resolve().parents[1] / "connectors/github").resolve(
+        strict=True
+    )
     sql_path = pathlib.Path(__file__).with_name("first-live-rest-relation.sql")
     connection = duckdb.connect(config={"allow_unsigned_extensions": "true"})
     try:
-        statements = connection.extract_statements(sql_path.read_text(encoding="utf-8"))
-        require_equal("example statement count", len(statements), 2)
+        statements = connection.extract_statements(example_sql(sql_path, package_root))
+        require_equal("example statement count", len(statements), 3)
 
         duckdb_identity = connection.execute("PRAGMA version").fetchone()
         require_equal("DuckDB host identity", duckdb_identity, EXPECTED_DUCKDB)
 
         connection.execute(f"LOAD {sql_literal(artifact.as_posix())}")
-        extension = connection.execute(statements[0]).fetchone()
+        connection.execute(statements[0])
+        extension = connection.execute(statements[1]).fetchone()
         require_equal("extension identity", extension, EXPECTED_EXTENSION)
 
-        query = connection.execute(statements[1])
+        query = connection.execute(statements[2])
         rows = query.fetchall()
         schema = [(column[0], str(column[1])) for column in query.description]
         require_equal("query schema", schema, EXPECTED_SCHEMA)

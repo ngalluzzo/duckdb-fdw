@@ -13,7 +13,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.7.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.8.0", True, False, "NOT_INSTALLED")
 EXPECTED_SCHEMA = [
     ("id", "BIGINT"),
     ("full_name", "VARCHAR"),
@@ -22,10 +22,18 @@ EXPECTED_SCHEMA = [
     ("archived", "BOOLEAN"),
     ("visibility", "VARCHAR"),
 ]
+PACKAGE_ROOT_LITERAL = "'/absolute/path/to/duckdb-fdw/connectors/github'"
 
 
 def sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def example_sql(path: pathlib.Path, package_root: pathlib.Path) -> str:
+    source = path.read_text(encoding="utf-8")
+    if source.count(PACKAGE_ROOT_LITERAL) != 1:
+        raise SystemExit("example package-root placeholder drifted")
+    return source.replace(PACKAGE_ROOT_LITERAL, sql_literal(package_root.as_posix()))
 
 
 def read_token() -> str:
@@ -46,6 +54,9 @@ def main() -> int:
     args = parser.parse_args()
 
     artifact = pathlib.Path(args.artifact).resolve(strict=True)
+    package_root = (pathlib.Path(__file__).resolve().parents[1] / "connectors/github").resolve(
+        strict=True
+    )
     sql_path = pathlib.Path(__file__).with_name("authenticated-repositories.sql")
     token = read_token()
     connection = duckdb.connect(config={"allow_unsigned_extensions": "true"})
@@ -61,7 +72,13 @@ def main() -> int:
             """
         ).fetchone()
         if extension != EXPECTED_EXTENSION:
-            raise SystemExit("extension identity is outside the 0.7.0 product cell")
+            raise SystemExit("extension identity is outside the 0.8.0 product cell")
+        statements = connection.extract_statements(
+            example_sql(sql_path, package_root)
+        )
+        if len(statements) != 4:
+            raise SystemExit("authenticated repository example statement count drifted")
+        connection.execute(statements[0])
         connection.execute(
             "CREATE TEMPORARY SECRET github_default "
             "(TYPE duckdb_api, PROVIDER config, TOKEN "
@@ -69,19 +86,14 @@ def main() -> int:
         )
         token = ""
 
-        statements = connection.extract_statements(
-            sql_path.read_text(encoding="utf-8")
-        )
-        if len(statements) != 3:
-            raise SystemExit("authenticated repository example statement count drifted")
-        described = connection.execute(statements[0]).fetchall()
+        described = connection.execute(statements[1]).fetchall()
         schema = [(row[0], row[1]) for row in described]
         if schema != EXPECTED_SCHEMA:
             raise SystemExit("authenticated repository schema drifted")
-        repository_count = connection.execute(statements[1]).fetchone()[0]
+        repository_count = connection.execute(statements[2]).fetchone()[0]
         if not isinstance(repository_count, int) or repository_count < 0:
             raise SystemExit("authenticated repository count drifted")
-        private_repository_count = connection.execute(statements[2]).fetchone()[0]
+        private_repository_count = connection.execute(statements[3]).fetchone()[0]
         if not isinstance(private_repository_count, int) or private_repository_count < 0:
             raise SystemExit("private repository count drifted")
     finally:

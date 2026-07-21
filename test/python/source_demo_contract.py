@@ -30,7 +30,7 @@ EXPECTED_STATIC_SUMMARY = {
         "installed": False,
         "loaded": True,
         "name": "duckdb_api",
-        "version": "0.7.0",
+        "version": "0.8.0",
     },
     "relation": {
         "connector": "github",
@@ -46,22 +46,19 @@ EXPECTED_STATIC_SUMMARY = {
 EXPECTED_FAILURE = "Binder Error: [duckdb_api][bind] unknown connector identifier"
 EXPECTED_REPOSITORY_SQL = " ".join(
     (
+        "CALL duckdb_api_load_connector(",
+        "package_root := '/absolute/path/to/duckdb-fdw/connectors/github'",
+        ");",
         "DESCRIBE SELECT id, full_name, private, fork, archived, visibility",
-        "FROM duckdb_api_scan(",
-        "connector := 'github',",
-        "relation := 'authenticated_repositories',",
+        "FROM github_authenticated_repositories(",
         "secret := 'github_default'",
         ");",
         "SELECT count(*) AS repository_count",
-        "FROM duckdb_api_scan(",
-        "connector := 'github',",
-        "relation := 'authenticated_repositories',",
+        "FROM github_authenticated_repositories(",
         "secret := 'github_default'",
         ");",
         "SELECT count(*) AS private_repository_count",
-        "FROM duckdb_api_scan(",
-        "connector := 'github',",
-        "relation := 'authenticated_repositories',",
+        "FROM github_authenticated_repositories(",
         "secret := 'github_default'",
         ")",
         "WHERE visibility = 'private';",
@@ -129,7 +126,7 @@ def validate_repository_runner_policy(source: str) -> None:
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "fetchall"
     ]
-    if len(fetch_all) != 1 or "statements[0]" not in ast.get_source_segment(
+    if len(fetch_all) != 1 or "statements[1]" not in ast.get_source_segment(
         source, fetch_all[0]
     ):
         raise AssertionError("repository runner can fetch row data outside DESCRIBE")
@@ -143,14 +140,14 @@ def validate_repository_runner_policy(source: str) -> None:
         and isinstance(node.func.value, ast.Name)
         and node.func.value.id == "connection"
     ]
-    if len(execute_calls) != 7:
+    if len(execute_calls) != 8:
         raise AssertionError("repository runner SQL execution inventory drifted")
     execute_sources = [ast.get_source_segment(source, node) or "" for node in execute_calls]
     statement_calls = [
         sum(f"statements[{index}]" in value for value in execute_sources)
-        for index in range(3)
+        for index in range(4)
     ]
-    if statement_calls != [1, 1, 1]:
+    if statement_calls != [1, 1, 1, 1]:
         raise AssertionError("repository runner no longer executes only accepted result SQL")
 
     prints = [
@@ -287,7 +284,9 @@ def main() -> int:
             raise AssertionError("authenticated example does not use only the interactive token path")
         accepted_sql = authenticated_sql.read_text(encoding="utf-8")
         for fragment in (
-            "relation := 'authenticated_user'",
+            "CALL duckdb_api_load_connector",
+            "/absolute/path/to/duckdb-fdw/connectors/github",
+            "github_authenticated_user(",
             "secret := 'github_default'",
             "SELECT id, login, site_admin",
         ):
@@ -317,7 +316,8 @@ def main() -> int:
             )
         for fragment in (
             "getpass.getpass",
-            'EXPECTED_EXTENSION = ("duckdb_api", "0.7.0"',
+            'EXPECTED_EXTENSION = ("duckdb_api", "0.8.0"',
+            '"connectors/github"',
             '"private_repository_count": private_repository_count',
             '"repository_count": repository_count',
             '"request_profile": {',

@@ -1,5 +1,9 @@
 -- Binding and explanation are offline: the logical secret name is retained,
 -- but no credential is resolved and no request is sent by either statement.
+CALL duckdb_api_load_connector(
+    package_root := '/absolute/path/to/duckdb-fdw/connectors/github'
+);
+
 DESCRIBE SELECT
     id,
     full_name,
@@ -9,16 +13,12 @@ DESCRIBE SELECT
     private,
     archived,
     updated_at
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'viewer_repository_metrics',
+FROM github_viewer_repository_metrics(
     secret := 'github_default'
 );
 
 EXPLAIN SELECT full_name, stars, primary_language, updated_at
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'viewer_repository_metrics',
+FROM github_viewer_repository_metrics(
     secret := 'github_default'
 )
 WHERE archived = FALSE
@@ -38,9 +38,7 @@ WITH selected AS (
         private,
         archived,
         updated_at
-    FROM duckdb_api_scan(
-        connector := 'github',
-        relation := 'viewer_repository_metrics',
+    FROM github_viewer_repository_metrics(
         secret := 'github_default'
     )
     WHERE archived = FALSE

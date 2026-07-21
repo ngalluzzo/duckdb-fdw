@@ -1,3 +1,9 @@
+-- The Python runner replaces this documented placeholder with the canonical
+-- absolute path of this repository's maintained GitHub package.
+CALL duckdb_api_load_connector(
+    package_root := '/absolute/path/to/duckdb-fdw/connectors/github'
+);
+
 SELECT extension_name, extension_version, loaded, installed, install_mode
 FROM duckdb_extensions()
 WHERE extension_name = 'duckdb_api';
@@ -6,8 +12,5 @@ WHERE extension_name = 'duckdb_api';
 -- response page. ORDER BY is evaluated by DuckDB; public row identity and
 -- service order are intentionally not part of the preview contract.
 SELECT id, login, site_admin
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'duckdb_login_search_page'
-)
+FROM github_duckdb_login_search_page()
 ORDER BY login, id;

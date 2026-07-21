@@ -6,71 +6,67 @@ This file records user-visible changes to duckdb-fdw.
 
 ### Added
 
-- The project is now distributed under the MIT License.
-- `github.viewer_repository_metrics`, a fixed authenticated GraphQL relation
-  with required repository identity, ownership, stars, privacy, archive, and
-  update values plus nullable `primary_language`.
-- Canonical query-only GraphQL execution through the existing immutable plan,
-  authorization capability, bounded HTTP transport, pull-based batch stream,
-  cancellation, and close boundaries. Sequential cursor traversal is limited
-  to 32 pages and 3,200 rows; complete serialized request bodies are limited to
-  8 KiB per page and 256 KiB per scan.
-- Strict GraphQL envelope and scalar validation. Every nonempty `errors` array
-  fails, including data-plus-errors; invalid required values and cursors fail
-  terminally; nullable language values become SQL `NULL`.
-- Offline bind, `DESCRIBE`, `EXPLAIN`, and `PREPARE` plus actual-DuckDB
-  filtering, ordering, limit, join, repeated-execution, controlled multi-page,
-  lifecycle, and privacy-safe live-compatibility evidence for the GraphQL
-  relation.
-- `visibility VARCHAR` as a required trailing column on
-  `github.authenticated_repositories`.
-- Predicate-selective repository traversal for the exact structured predicate
-  `visibility = 'private'`. Every page carries `visibility=private`, while
-  DuckDB retains and evaluates the original predicate.
-- Bounded typed translation of DuckDB equality, `AND`, `OR`, and `NOT`
-  structure into the protocol-neutral planner contract. Unsupported or
-  over-budget structure remains opaque and cannot select a partial remote
-  restriction.
-- `EXPLAIN` fields for the candidate, selected remote predicate and accuracy,
-  retained filter scope, projection closure, relational ownership and
-  delegation, adapter capabilities, and the structured classification reason.
-- Installed-path actual-DuckDB evidence compares identical optimized and
-  forced-local SQL for three-valued logic, duplicate-sensitive bags,
-  projection, total ordering, local limits and offsets, and conservative
-  fallback. Provider-backed planner laws separately prove Exact, Ambiguous,
-  and invalid outcomes that intentionally have no installed Runtime authority.
+- Explicit local package loading through
+  `duckdb_api_load_connector(package_root := ...)`. An accepted
+  `duckdb_api/v1` package is compiled into an immutable generation and
+  atomically publishes one typed table function per declared relation.
+- Generated relation names use `<connector_id>_<relation_id>`, with declared
+  relation inputs as named arguments and the reserved `secret VARCHAR`
+  argument on authenticated relations.
+- `duckdb_api_reload_connector(connector := ...)`, which recompiles the active
+  connector from its retained canonical root and publishes only a compatible
+  changed generation.
+- Read-only `duckdb_api_loaded_connectors()`,
+  `duckdb_api_loaded_relations()`, and `duckdb_api_relation_arguments()`
+  introspection without exposing package roots or credentials.
+- A maintained local package at `connectors/github` containing four generated
+  relations across anonymous REST, authenticated REST, bounded Link
+  pagination, conservative predicate restriction, and GraphQL cursor
+  pagination.
+- General source-neutral REST and GraphQL execution for compiler-produced
+  plans, including exact origin and port admission, bounded request
+  materialization, sequential pagination, cancellation, and close behavior.
+- Source-located package diagnostics and deterministic rejection of malformed,
+  incompatible, duplicate, unsafe, or canceled publication attempts without
+  changing the active catalog generation.
+- Product examples that load the permanent GitHub package before querying its
+  generated functions. Authenticated repository examples retain privacy-safe
+  output and interactive-only credential input.
 
 ### Changed
 
-- The working extension identity advances to the unreleased `0.7.0` line. The
-  published `0.5.0` source, contract, and release records remain immutable.
-- GraphQL remains in the intended v1 protocol set after one permanent relation
-  passed the same user-visible SQL, authority, resource, diagnostic,
-  cancellation, and lifecycle boundaries as REST. This does not activate the
-  declarative GraphQL authoring syntax described in the design documents.
-- Unsupported, ambiguous, unencodable, `NULL`, differently valued, and
-  capability-unavailable predicates use the complete repository traversal and
-  are evaluated by DuckDB. Invalid planning contracts fail before Runtime or
-  network entry.
-- DuckDB remains the owner of all filter, projection, ordering, limit, and
-  offset semantics, including when the existing visibility restriction is
-  selected as a remote superset optimization.
-- Base-operation selection evaluates candidate-scoped mapped inputs, ranks
-  eligible non-fallback operations by selector specificity and priority, uses
-  the sole fallback only after ineligibility, and rejects tied winners or
-  contradictory declarations before Runtime entry.
+- The working extension identity advances to the unreleased `0.8.0` line.
+- The primary developer workflow is now extension load, connector-package
+  load, then generated relation functions. Connector and relation identity are
+  captured by the registered function instead of supplied on every scan.
+- Package generations are retained across catalog publication and active
+  scans. Identical reloads report `changed = false`; rejected reloads preserve
+  the previous functions and generation.
+- REST and GraphQL requests are derived from compiled package declarations and
+  immutable relational plans. SQL cannot provide a URL, header, document,
+  destination, pagination cursor, or credential value.
+- DuckDB continues to own relational correctness. Unsupported or ambiguous
+  predicate translation falls back conservatively, and any required residual
+  remains DuckDB-owned.
+
+### Deprecated
+
+- `duckdb_api_scan(connector := ..., relation := ...)` remains available only
+  for migrating the four `0.7.0` built-in GitHub relations. It is not a loaded
+  package, does not appear in package introspection, and is scheduled for
+  removal before the public API candidate is frozen.
 
 ### Limitations
 
-- GraphQL is limited to the repository-owned
-  `viewer_repository_metrics` query profile. Callers cannot supply documents,
-  variables, endpoints, selections, introspection, mutations, pagination
-  values, or partial-data policy. All relational operators remain DuckDB-owned.
-- The only remote predicate optimization is
-  `github.authenticated_repositories.visibility = 'private'`. Projection,
-  ordering, limit, offset, and every other predicate remain local. The
-  controlled exact and ambiguous paths are semantic proof fixtures, not new
-  installed mappings or executable network authority.
+- Packages load only from an explicit absolute local directory. Discovery,
+  registries, remote installation, updates, signatures, and trust policy are
+  not included.
+- The extension remains an unsigned source build for the exact supported
+  DuckDB 1.5.4 macOS arm64 product cell.
+- Authentication remains limited to explicitly named temporary bearer secrets.
+  There are no persistent or environment-backed providers, OAuth, implicit
+  secret selection, retries, rate-limit waits, parallel page requests, resume
+  state, or caching.
 
 ## 0.5.0 — 2026-07-18
 

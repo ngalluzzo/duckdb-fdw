@@ -13,7 +13,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.7.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.8.0", True, False, "NOT_INSTALLED")
 EXPECTED_SCHEMA = [
     ("id", "VARCHAR"),
     ("full_name", "VARCHAR"),
@@ -38,8 +38,18 @@ EXPLAIN_MARKERS = (
     "mutable",
     "primary_language",
 )
+PACKAGE_ROOT_LITERAL = "'/absolute/path/to/duckdb-fdw/connectors/github'"
+
+
 def sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def example_sql(path: pathlib.Path, package_root: pathlib.Path) -> str:
+    source = path.read_text(encoding="utf-8")
+    if source.count(PACKAGE_ROOT_LITERAL) != 1:
+        raise SystemExit("example package-root placeholder drifted")
+    return source.replace(PACKAGE_ROOT_LITERAL, sql_literal(package_root.as_posix()))
 
 
 def read_token() -> str:
@@ -52,7 +62,7 @@ def read_token() -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate the duckdb_api 0.7.0 GraphQL repository relation while "
+            "Load and validate the GitHub GraphQL repository relation while "
             "emitting only schema and boolean completion evidence."
         )
     )
@@ -60,6 +70,9 @@ def main() -> int:
     args = parser.parse_args()
 
     artifact = pathlib.Path(args.artifact).resolve(strict=True)
+    package_root = (pathlib.Path(__file__).resolve().parents[1] / "connectors/github").resolve(
+        strict=True
+    )
     sql_path = pathlib.Path(__file__).with_name("viewer-repository-metrics.sql")
     token = ""
     extension: tuple[object, ...] | None = None
@@ -78,20 +91,21 @@ def main() -> int:
             """
         ).fetchone()
         if extension != EXPECTED_EXTENSION:
-            raise SystemExit("extension identity is outside the 0.7.0 product cell")
+            raise SystemExit("extension identity is outside the 0.8.0 product cell")
 
-        statements = connection.extract_statements(sql_path.read_text(encoding="utf-8"))
-        if len(statements) != 3:
+        statements = connection.extract_statements(example_sql(sql_path, package_root))
+        if len(statements) != 4:
             raise SystemExit("GraphQL repository example statement count drifted")
+        connection.execute(statements[0])
 
-        described = connection.execute(statements[0]).fetchall()
+        described = connection.execute(statements[1]).fetchall()
         schema = [(row[0], row[1]) for row in described]
         if schema != EXPECTED_SCHEMA:
             raise SystemExit("GraphQL repository schema drifted")
 
         explanation = "\n".join(
             str(value)
-            for row in connection.execute(statements[1]).fetchall()
+            for row in connection.execute(statements[2]).fetchall()
             for value in row
         )
         if any(marker not in explanation for marker in EXPLAIN_MARKERS):
@@ -108,7 +122,7 @@ def main() -> int:
             raise SystemExit("temporary secret creation failed") from None
         token = ""
 
-        result = connection.execute(statements[2])
+        result = connection.execute(statements[3])
         result_schema = [(column[0], str(column[1])) for column in result.description]
         completion = result.fetchone()
         if result_schema != EXPECTED_RESULT_SCHEMA or completion != (True, True, True):
@@ -133,7 +147,7 @@ def main() -> int:
                     "installed": False,
                     "loaded": True,
                     "name": "duckdb_api",
-                    "version": "0.7.0",
+                    "version": "0.8.0",
                 },
                 "relation": "github.viewer_repository_metrics",
                 "required_values_present": True,

@@ -1,179 +1,188 @@
 # duckdb-fdw
 
-`duckdb-fdw` is a DuckDB extension for querying well-structured HTTP APIs as
-typed, resource-bounded relations. It is FDW-like in purpose, but its public
+`duckdb-fdw` is a DuckDB extension that turns declarative HTTP and GraphQL
+connector packages into typed table functions. Package authors declare request,
+schema, authentication, pagination, and resource policy; users query the
+resulting relations with ordinary DuckDB SQL.
+
+The project is a source-built preview. It is FDW-like in purpose, but its public
 surface is DuckDB-native and it does not implement PostgreSQL's FDW API.
-
-The project is currently a source-built preview. It exposes four fixed GitHub
-relations across REST and GraphQL while the general connector-authoring and
-distribution surfaces are still under development.
-
-## What works today
-
-| Relation | Authentication | Result |
-| --- | --- | --- |
-| `github.duckdb_login_search_page` | None | Up to three public GitHub users with `id`, `login`, and `site_admin` |
-| `github.authenticated_user` | Explicit temporary DuckDB secret | The current GitHub identity with `id`, `login`, and `site_admin` |
-| `github.authenticated_repositories` | Explicit temporary DuckDB secret | A bounded page chain of repositories with `id`, `full_name`, `private`, `fork`, `archived`, and `visibility` |
-| `github.viewer_repository_metrics` | Explicit temporary DuckDB secret | A bounded GraphQL cursor traversal with repository identity, ownership, stars, nullable primary language, visibility state, and update time |
-
-The anonymous relation uses the current public SQL surface:
-
-```sql
-SELECT id, login, site_admin
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'duckdb_login_search_page'
-);
-```
-
-These relations use fixed HTTPS operations and strict schemas. Bind,
-`DESCRIBE`, `EXPLAIN`, and `PREPARE` do not perform network I/O. DuckDB owns all
-filters, projections, ordering, limits, and offsets. On the repository
-relation, the supported conjunct `visibility = 'private'` may also narrow every
-remote request with `visibility=private`; DuckDB retains and evaluates the
-complete predicate. Unsupported, `OR`, `NOT`, ambiguous, or unavailable
-optimization states use the complete traversal without changing the result.
-`EXPLAIN` reports the selected or fallback path, ownership, capabilities, and
-safe classification reason.
-
-Execution is bounded and fails the statement on malformed data, GraphQL
-errors, an invalid page transition, cancellation, or resource exhaustion; it
-does not return a complete-looking partial result. A nullable GraphQL primary
-language becomes SQL `NULL`. The [changelog](CHANGELOG.md) describes the
-current unreleased source. The [0.5.0 release notes](docs/releases/0.5.0-notes.md)
-remain the contract for the last published version; the
-[0.7.0 notes](docs/releases/0.7.0-notes.md) describe the current unreleased
-GraphQL product line.
 
 ## Quick start
 
-The supported source-build environment is deliberately narrow: Apple Silicon
-arm64, macOS 26.5.2 build `25F84`, and the pinned DuckDB 1.5.4 toolchain. The
-bootstrap rejects other hosts rather than implying compatibility that has not
-been tested. The first run downloads pinned, checksummed build dependencies.
-Before running it, install Python 3.14 and the Xcode Command Line Tools that
-provide the pinned Apple compiler, macOS SDK, `xcrun`, `make`, `git`, `nm`, and
-`strings`; the host must also provide `curl`, `rsync`, `shasum`, `tar`, and
-`unzip`. Bootstrap downloads project tools and dependencies, not these host
-prerequisites.
-
-From the repository root:
+The supported development cell is Apple Silicon arm64, macOS 26.5.2 build
+`25F84`, DuckDB 1.5.4, and Python 3.14. Install the Xcode Command Line Tools and
+Python 3.14, then run from the repository root:
 
 ```sh
 make bootstrap
 make demo
 ```
 
-`make demo` builds the extension, loads it directly into the pinned DuckDB
-Python host, and runs the anonymous GitHub example. It requires outbound HTTPS
-access to `api.github.com`; the public service is a compatibility demonstration,
-while the test suite uses controlled local services for correctness.
+The first run downloads pinned, checksummed build dependencies. `make demo`
+builds the unsigned extension, loads the maintained package at
+`connectors/github`, and runs its anonymous REST relation against GitHub. The
+live service is a compatibility demonstration; deterministic local services
+are the correctness oracle in the test suite.
 
-## Authenticated examples
-
-Build the artifact and print the pinned Python and extension paths:
+To use the extension directly, first print the exact artifact and pinned Python
+paths:
 
 ```sh
 make build
 make paths
 ```
 
-Use those paths with either example:
+Then load the extension and an absolute local package root before querying a
+generated function:
 
-```sh
-/absolute/pinned_python -I examples/authenticated_user.py \
-  /absolute/duckdb_api.duckdb_extension
+```sql
+LOAD '/absolute/path/to/duckdb_api.duckdb_extension';
 
-/absolute/pinned_python -I examples/authenticated_repositories.py \
-  /absolute/duckdb_api.duckdb_extension
+CALL duckdb_api_load_connector(
+    package_root := '/absolute/path/to/duckdb-fdw/connectors/github'
+);
+
+SELECT id, login, site_admin
+FROM github_duckdb_login_search_page()
+ORDER BY login, id;
 ```
 
-Both runners read a short-lived GitHub token from a hidden interactive prompt
-and create only a temporary DuckDB secret. They do not accept a token through
-an argument, environment variable, or file. The repository example prints its
-schema, aggregate count, extension and relation identity, and fixed request
-envelope, but never private repository rows or names.
+An accepted package publishes one table function per relation using the name
+`<connector_id>_<relation_id>`. Loading validates and compiles the complete
+package before publishing anything. The returned row reports the connector,
+package and spec versions, digest, relation count, and whether publication
+changed.
 
-The underlying SQL is in
-[`examples/authenticated-user.sql`](examples/authenticated-user.sql) and
-[`examples/authenticated-repositories.sql`](examples/authenticated-repositories.sql).
+## GitHub package
 
-The GraphQL analytics example uses the same secret contract and reports only
-schema and safe aggregate evidence:
+The maintained GitHub package demonstrates anonymous REST, bearer-authenticated
+REST, bounded sequential Link pagination, a conservative predicate mapping,
+and bounded GraphQL cursor pagination.
+
+| Function | Authentication | Result |
+| --- | --- | --- |
+| `github_duckdb_login_search_page()` | None | Up to three public users |
+| `github_authenticated_user(secret := ...)` | Temporary bearer secret | Current user identity |
+| `github_authenticated_repositories(secret := ...)` | Temporary bearer secret | A bounded repository page chain |
+| `github_viewer_repository_metrics(secret := ...)` | Temporary bearer secret | Bounded repository metrics through GraphQL |
+
+For authenticated relations, create an explicitly named temporary DuckDB
+secret. Do not put a token in a connector package or committed SQL:
+
+```sql
+CREATE TEMPORARY SECRET github_default (
+    TYPE duckdb_api,
+    PROVIDER config,
+    TOKEN '<short-lived-github-token>'
+);
+
+SELECT id, full_name, visibility
+FROM github_authenticated_repositories(secret := 'github_default')
+WHERE visibility = 'private' AND archived = FALSE
+ORDER BY id DESC
+LIMIT 10;
+```
+
+The extension resolves the secret only during execution and restricts it to
+the package-declared authenticator, placement, and destination. Bind,
+`DESCRIBE`, `EXPLAIN`, and `PREPARE` remain network-free.
+
+The example runners use a hidden interactive token prompt and create only a
+temporary secret. The repository examples emit schema and aggregate or boolean
+completion evidence without printing repository rows, names, cursors, request
+bodies, or credentials:
 
 ```sh
+/absolute/pinned_python -I examples/authenticated_repositories.py \
+  /absolute/duckdb_api.duckdb_extension
+
 /absolute/pinned_python -I examples/viewer_repository_metrics.py \
   /absolute/duckdb_api.duckdb_extension
 ```
 
-Its SQL is in
+The corresponding SQL is in
+[`examples/authenticated-repositories.sql`](examples/authenticated-repositories.sql)
+and
 [`examples/viewer-repository-metrics.sql`](examples/viewer-repository-metrics.sql).
+Each file contains the complete load-then-query workflow and a package-root
+placeholder for interactive use.
 
-After creating the temporary secret, the selective repository query is:
+## Package lifecycle and inspection
+
+Reload recompiles the active connector from its retained canonical root. A
+compatible changed generation is published atomically; an identical reload
+reports `changed = false`; a rejected reload leaves the active generation
+unchanged.
 
 ```sql
-SELECT full_name
-FROM duckdb_api_scan(
-    connector := 'github',
-    relation := 'authenticated_repositories',
-    secret := 'github_default'
-)
-WHERE visibility = 'private' AND archived = FALSE
-ORDER BY id DESC
-LIMIT 2;
+CALL duckdb_api_reload_connector(connector := 'github');
+
+SELECT * FROM duckdb_api_loaded_connectors();
+SELECT * FROM duckdb_api_loaded_relations();
+SELECT * FROM duckdb_api_relation_arguments();
 ```
+
+The [GitHub package guide](connectors/github/README.md) explains its relations
+and author validation. The
+[connector specification](docs/CONNECTOR_SPECIFICATIONS.md) defines the local
+package grammar, closed validation, diagnostics, and compatibility rules.
+
+## SQL semantics and safety
+
+DuckDB owns relational correctness. A remote restriction is used only when the
+compiled proof says it cannot remove a DuckDB-true row; DuckDB retains any
+required residual predicate. Filters, projections, ordering, limits, and
+offsets otherwise remain local.
+
+Execution is bounded, sequential unless independence is proven, cancelable,
+and closed under the package and host network policies. Malformed responses,
+GraphQL errors, invalid page transitions, unsafe destinations, cancellation,
+or resource exhaustion fail the statement instead of returning a
+complete-looking partial result. Plans and active package generations are
+immutable for the lifetime of a scan.
 
 ## Development
 
-The root Makefile is the supported development interface:
+The root Makefile is the supported interface:
 
 | Command | Purpose |
 | --- | --- |
-| `make help` | Show commands and supported overrides without building |
+| `make help` | Show commands and supported overrides |
 | `make bootstrap` | Prepare or repair the pinned developer environment |
 | `make build` | Incrementally build the debug extension |
-| `make test` | Run native, controlled-service, SQL, artifact, and direct-load tests |
-| `make demo` | Build as needed and run the anonymous live example |
+| `make test` | Run native, controlled-service, SQL, artifact, and demo contracts |
+| `make demo` | Run the anonymous generated GitHub relation |
 | `make paths` | Print the active build, Python, CLI, and extension paths |
 | `make verify` | Run the complete product suite from a fresh build root |
 
 Use `PROFILE=release` for a release-profile developer build or
-`DUCKDB_API_DEV_ROOT=/absolute/path` to isolate the reusable developer state.
-Developer builds and tests are not release evidence.
+`DUCKDB_API_DEV_ROOT=/absolute/path` to isolate reusable developer state. Start
+with the [source guide](src/README.md) before changing production code and
+[CONTRIBUTING.md](CONTRIBUTING.md) for repository practices.
 
-Start with the [source guide](src/README.md) before changing production code.
-Repository, Git, verification, and documentation practices are in
-[CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Project documentation
-
-- [Architecture](docs/ARCHITECTURE.md) explains the product model and
-  correctness invariants.
-- [Runtime contracts](docs/RUNTIME_CONTRACTS.md) define planning, execution,
-  security, resource, and lifecycle behavior.
-- [Connector specifications](docs/CONNECTOR_SPECIFICATIONS.md) describe the
-  proposed declarative connector format. It is not yet a stable authoring
-  contract.
-- [Changelog](CHANGELOG.md) records user-visible changes and limitations.
-- [Roadmap](ROADMAP.md) describes the intended progression toward `1.0.0`.
-- [Team topology](docs/TEAM_TOPOLOGY.md), [product delivery](docs/PRODUCT_DELIVERY.md),
-  and the [RFC process](docs/RFC_PROCESS.md) are contributor operating guides.
-
-## Current limitations
+## Compatibility and limitations
 
 - The extension is not published or signed and cannot be installed from the
   DuckDB Community repository.
-- Only the four compiled-in GitHub relations above are available. Arbitrary
-  URLs, headers, connector packages, GraphQL documents, variables, selections,
-  and endpoints are not supported.
-- Authentication supports one explicitly named temporary `duckdb_api/config`
+- `0.8.0` supports explicit local package loading only. Package discovery,
+  remote registries, installation, updates, signatures, and trust policy are
+  not distribution features yet.
+- Authentication supports an explicitly named temporary `duckdb_api/config`
   bearer secret. Persistent and environment-backed providers, implicit secret
   selection, and OAuth are not supported.
 - There are no retries, rate-limit waits, parallel page requests, resume state,
   or caching.
-- The supported platform and DuckDB version are limited to the exact source
-  build cell described above.
+- Compatibility is limited to the exact source-build cell above.
+- `duckdb_api_scan(...)` remains only as a deprecated migration surface for the
+  four `0.7.0` built-in GitHub relations. New code should load a package and use
+  its generated functions; the dispatcher is scheduled for removal before the
+  public API candidate is frozen.
+
+See the [0.8.0 release notes](docs/releases/0.8.0-notes.md) for the complete
+product contract and [CHANGELOG.md](CHANGELOG.md) for user-visible changes.
+Architecture and runtime details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+and [docs/RUNTIME_CONTRACTS.md](docs/RUNTIME_CONTRACTS.md).
 
 ## License
 

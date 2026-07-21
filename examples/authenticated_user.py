@@ -12,22 +12,30 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.7.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.8.0", True, False, "NOT_INSTALLED")
 EXPECTED_SCHEMA = [
     ("id", "BIGINT"),
     ("login", "VARCHAR"),
     ("site_admin", "BOOLEAN"),
 ]
+PACKAGE_ROOT_LITERAL = "'/absolute/path/to/duckdb-fdw/connectors/github'"
 
 
 def sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def example_sql(path: pathlib.Path, package_root: pathlib.Path) -> str:
+    source = path.read_text(encoding="utf-8")
+    if source.count(PACKAGE_ROOT_LITERAL) != 1:
+        raise SystemExit("example package-root placeholder drifted")
+    return source.replace(PACKAGE_ROOT_LITERAL, sql_literal(package_root.as_posix()))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Query the duckdb_api 0.7.0 authenticated GitHub relation. "
+            "Load the GitHub package and query its authenticated user relation. "
             "The credential is read from a hidden interactive prompt."
         )
     )
@@ -39,6 +47,9 @@ def main() -> int:
         raise SystemExit("a non-empty token is required")
 
     artifact = pathlib.Path(args.artifact).resolve(strict=True)
+    package_root = (pathlib.Path(__file__).resolve().parents[1] / "connectors/github").resolve(
+        strict=True
+    )
     query_path = pathlib.Path(__file__).with_name("authenticated-user.sql")
     connection = duckdb.connect(config={"allow_unsigned_extensions": "true"})
     try:
@@ -54,12 +65,16 @@ def main() -> int:
         ).fetchone()
         if extension != EXPECTED_EXTENSION:
             raise SystemExit(f"extension identity mismatch: {extension!r}")
+        statements = connection.extract_statements(example_sql(query_path, package_root))
+        if len(statements) != 2:
+            raise SystemExit("authenticated user example statement count drifted")
+        connection.execute(statements[0])
         connection.execute(
             "CREATE TEMPORARY SECRET github_default "
             "(TYPE duckdb_api, PROVIDER config, TOKEN "
             f"{sql_literal(token)})"
         )
-        result = connection.execute(query_path.read_text(encoding="utf-8"))
+        result = connection.execute(statements[1])
         rows = result.fetchall()
         schema = [(column[0], str(column[1])) for column in result.description]
         if schema != EXPECTED_SCHEMA or len(rows) != 1:

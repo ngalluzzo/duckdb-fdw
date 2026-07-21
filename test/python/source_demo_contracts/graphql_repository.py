@@ -30,7 +30,7 @@ EXPECTED_OUTPUT_EXPRESSIONS = {
     "completed": "True",
     "extension": (
         "{'install_mode': 'NOT_INSTALLED', 'installed': False, "
-        "'loaded': True, 'name': 'duckdb_api', 'version': '0.7.0'}"
+        "'loaded': True, 'name': 'duckdb_api', 'version': '0.8.0'}"
     ),
     "relation": "'github.viewer_repository_metrics'",
     "required_values_present": "True",
@@ -38,18 +38,22 @@ EXPECTED_OUTPUT_EXPRESSIONS = {
 }
 EXPECTED_ASSIGNMENT_EXPRESSIONS = {
     "artifact": "pathlib.Path(args.artifact).resolve(strict=True)",
+    "package_root": (
+        "(pathlib.Path(__file__).resolve().parents[1] / "
+        "'connectors/github').resolve(strict=True)"
+    ),
     "sql_path": "pathlib.Path(__file__).with_name('viewer-repository-metrics.sql')",
     "connection": "duckdb.connect(config={'allow_unsigned_extensions': 'true'})",
     "statements": (
-        "connection.extract_statements(sql_path.read_text(encoding='utf-8'))"
+        "connection.extract_statements(example_sql(sql_path, package_root))"
     ),
-    "described": "connection.execute(statements[0]).fetchall()",
+    "described": "connection.execute(statements[1]).fetchall()",
     "schema": "[(row[0], row[1]) for row in described]",
     "explanation": (
         "'\\n'.join(str(value) for row in "
-        "connection.execute(statements[1]).fetchall() for value in row)"
+        "connection.execute(statements[2]).fetchall() for value in row)"
     ),
-    "result": "connection.execute(statements[2])",
+    "result": "connection.execute(statements[3])",
     "result_schema": (
         "[(column[0], str(column[1])) for column in result.description]"
     ),
@@ -66,8 +70,11 @@ EXPECTED_NAME_STORE_COUNTS = {
     "EXPECTED_RESULT_SCHEMA": 1,
     "EXPECTED_SCHEMA": 1,
     "EXPLAIN_MARKERS": 1,
+    "PACKAGE_ROOT_LITERAL": 1,
+    "source": 1,
     "args": 1,
     "artifact": 1,
+    "package_root": 1,
     "column": 1,
     "completion": 2,
     "connection": 1,
@@ -87,18 +94,19 @@ EXPECTED_NAME_STORE_COUNTS = {
 }
 EXPECTED_FUNCTION_ARGUMENTS = {
     "sql_literal": ("value",),
+    "example_sql": ("path", "package_root"),
     "read_token": (),
     "main": (),
 }
 EXPECTED_RUNNER_AST_DIGEST = (
-    "a9717e55832f7e308666d5a38c692e7e6b9bf7a3ba3b8a2c1d14342774e5dbf2"
+    "7dc2ab2365a99461d582604b3680745ac5b771865d6fb8696ecf1c005b9a17ae"
 )
 EXPECTED_EXTENSION_QUERY = (
     "SELECT extension_name, extension_version, loaded, installed, install_mode "
     "FROM duckdb_extensions() WHERE extension_name = 'duckdb_api'"
 )
 EXPECTED_CONSTANTS = {
-    "EXPECTED_EXTENSION": ("duckdb_api", "0.7.0", True, False, "NOT_INSTALLED"),
+    "EXPECTED_EXTENSION": ("duckdb_api", "0.8.0", True, False, "NOT_INSTALLED"),
     "EXPECTED_SCHEMA": [
         ("id", "VARCHAR"),
         ("full_name", "VARCHAR"),
@@ -114,18 +122,19 @@ EXPECTED_CONSTANTS = {
         ("local_limit_respected", "BOOLEAN"),
         ("local_filter_respected", "BOOLEAN"),
     ],
+    "PACKAGE_ROOT_LITERAL": "'/absolute/path/to/duckdb-fdw/connectors/github'",
 }
 EXPECTED_CALL_NAMES = {
     "ArgumentParser": 1,
-    "Path": 2,
-    "SystemExit": 11,
+    "Path": 3,
+    "SystemExit": 12,
     "add_argument": 1,
     "any": 1,
-    "as_posix": 1,
+    "as_posix": 2,
     "close": 1,
     "connect": 1,
     "dumps": 1,
-    "execute": 7,
+    "execute": 8,
     "extract_statements": 1,
     "fetchall": 2,
     "fetchone": 3,
@@ -137,11 +146,13 @@ EXPECTED_CALL_NAMES = {
     "print": 1,
     "read_text": 1,
     "read_token": 1,
-    "replace": 1,
-    "resolve": 1,
-    "sql_literal": 2,
+    "replace": 2,
+    "resolve": 3,
+    "sql_literal": 3,
     "str": 2,
     "with_name": 1,
+    "count": 1,
+    "example_sql": 1,
 }
 EXPECTED_EXECUTE_EXPRESSIONS = (
     "connection.execute(f'LOAD {sql_literal(artifact.as_posix())}')",
@@ -155,11 +166,12 @@ EXPECTED_EXECUTE_EXPRESSIONS = (
     ),
     "connection.execute(statements[0])",
     "connection.execute(statements[1])",
+    "connection.execute(statements[2])",
     (
         "connection.execute(f'CREATE TEMPORARY SECRET github_default "
         "(TYPE duckdb_api, PROVIDER config, TOKEN {sql_literal(token)})')"
     ),
-    "connection.execute(statements[2])",
+    "connection.execute(statements[3])",
 )
 def _call_name(node: ast.Call) -> str:
     if isinstance(node.func, ast.Name):
@@ -332,7 +344,7 @@ def validate_runner_source(source: str) -> None:
         raise AssertionError("GraphQL example fetchall inventory drifted")
     fetchall_sources = [ast.get_source_segment(source, node) or "" for node in fetchalls]
     if not all(
-        f"statements[{index}]" in fetchall_sources[index] for index in range(2)
+        f"statements[{index + 1}]" in fetchall_sources[index] for index in range(2)
     ):
         raise AssertionError("GraphQL example can fetch live repository rows")
 
@@ -629,7 +641,7 @@ def validate_privacy_mutation_oracles(source: str) -> None:
         (
             "live result bypassing the fixed completion tuple",
             "completion = result.fetchone()",
-            "completion = connection.execute(statements[2]).fetchone()",
+            "completion = connection.execute(statements[3]).fetchone()",
         ),
     )
     for label, accepted, counterexample in mutations:
@@ -656,12 +668,14 @@ def validate_sql_source(source: str) -> None:
         normalized_lines.append(stripped)
     normalized = " ".join(normalized_lines)
     statements = [value.strip() for value in normalized.split(";") if value.strip()]
-    if len(statements) != 3:
+    if len(statements) != 4:
         raise AssertionError("GraphQL example SQL statement inventory drifted")
     required = (
+        "CALL duckdb_api_load_connector(",
+        "package_root := '/absolute/path/to/duckdb-fdw/connectors/github'",
         "DESCRIBE SELECT id, full_name, owner_login, stars, primary_language, private, archived, updated_at",
         "EXPLAIN SELECT full_name, stars, primary_language, updated_at",
-        "relation := 'viewer_repository_metrics'",
+        "github_viewer_repository_metrics(",
         "secret := 'github_default'",
         "WHERE archived = FALSE",
         "ORDER BY stars DESC, full_name",
@@ -672,7 +686,11 @@ def validate_sql_source(source: str) -> None:
     )
     if any(fragment not in normalized for fragment in required):
         raise AssertionError("GraphQL example SQL lost an accepted product fact")
-    if "SELECT *" in normalized or " AS repository_count" in normalized:
+    if (
+        "SELECT *" in normalized
+        or " AS repository_count" in normalized
+        or "duckdb_api_scan" in normalized
+    ):
         raise AssertionError("GraphQL live SQL exposes rows or a raw count")
 
 
