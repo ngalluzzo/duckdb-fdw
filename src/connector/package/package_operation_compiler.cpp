@@ -87,16 +87,18 @@ bool CompileSelector(const RelationDeclaration &relation, const OperationDeclara
 }
 
 CompiledPagination CompilePagination(const RestPaginationDeclaration &source) {
+	const bool has_page_size = !source.page_size_parameter.value.empty();
+	const auto page_size = has_page_size ? ParseUnsigned(source.page_size) : 0;
 	if (source.strategy.value == "link_next") {
 		return duckdb_api::internal::CompiledModelBuilder::LinkPagination(
-		    source.page_size_parameter.value, ParseUnsigned(source.page_size), source.page_number_parameter.value,
+		    source.page_size_parameter.value, page_size, source.page_number_parameter.value,
 		    ParseUnsigned(source.first_page), ParseUnsigned(source.page_increment),
 		    ParseUnsigned(source.max_pages_per_scan));
 	}
 	if (source.strategy.value == "response_next") {
 		return duckdb_api::internal::CompiledModelBuilder::ResponseNextPagination(
-		    source.next_url_path.value, source.page_size_parameter.value, ParseUnsigned(source.page_size),
-		    source.page_number_parameter.value, ParseUnsigned(source.first_page), ParseUnsigned(source.page_increment),
+		    source.next_url_path.value, source.page_size_parameter.value, page_size, source.page_number_parameter.value,
+		    ParseUnsigned(source.first_page), ParseUnsigned(source.page_increment),
 		    ParseUnsigned(source.max_pages_per_scan));
 	}
 	return duckdb_api::internal::CompiledModelBuilder::DisabledPagination();
@@ -109,7 +111,6 @@ std::vector<CompiledQueryParameter> CompileQuery(const RelationDeclaration &rela
 	std::vector<CompiledQueryParameter> result;
 	std::set<std::string> names;
 	std::set<std::string> conditional_ids;
-	bool found_page_size = false;
 	bool found_page_number = false;
 	// link_next and response_next share the same structural page-size and
 	// page-number query bindings; only the continuation signal's source
@@ -125,7 +126,6 @@ std::vector<CompiledQueryParameter> CompileQuery(const RelationDeclaration &rela
 		switch (field.kind) {
 		case QueryFieldKind::LITERAL:
 			if (paginated && field.name.value == pagination.page_size_parameter.value) {
-				found_page_size = true;
 				if (field.source.value != pagination.page_size.value ||
 				    page_size > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
 					diagnostics.Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::COMPILE,
@@ -175,8 +175,8 @@ std::vector<CompiledQueryParameter> CompileQuery(const RelationDeclaration &rela
 			break;
 		}
 	}
-	if (paginated && (pagination.page_size_parameter.value == pagination.page_number_parameter.value ||
-	                  !found_page_size || !found_page_number)) {
+	if (paginated &&
+	    (pagination.page_size_parameter.value == pagination.page_number_parameter.value || !found_page_number)) {
 		diagnostics.Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::COMPILE,
 		                pagination.mark, "", relation.id.value, operation.id.value);
 	}

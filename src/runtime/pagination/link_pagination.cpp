@@ -105,28 +105,14 @@ uint64_t ValidateNextTarget(const std::string &target, uint64_t current_page, co
 		ThrowPolicy();
 	}
 	const auto next_page = current_page + profile.PageIncrement();
-	std::vector<std::pair<std::string, std::string>> expected;
-	for (const auto &field : profile.QueryParameters()) {
-		expected.push_back({field.name, field.name == profile.PageNumberParameter() ? std::to_string(next_page)
-		                                                                            : field.encoded_value});
-	}
-	if (profile.ConditionalInput() == AdmittedPaginatedRestConditionalInput::LEGACY_VISIBILITY_PRIVATE) {
-		expected.push_back({"visibility", "private"});
-	}
-	if (received.size() != expected.size() || parsed_page != next_page) {
+	// RFC 0017: the continuation URL need only match the exact origin, path,
+	// and page-number progression. The full query-multiset comparison was
+	// dropped because Runtime reconstructs the actual request locally from
+	// the admitted profile's declared parameters — the continuation URL is a
+	// verified signal, never a dereferenced fetch target. Non-page-number
+	// query parameters in the URL are ignored.
+	if (parsed_page != next_page) {
 		ThrowPolicy();
-	}
-	for (const auto &field : expected) {
-		bool found = false;
-		for (const auto &candidate : received) {
-			if (candidate == field) {
-				found = true;
-				break;
-			}
-		}
-		if (!found) {
-			ThrowPolicy();
-		}
 	}
 	for (const auto seen_page : seen_pages) {
 		if (seen_page == parsed_page) {

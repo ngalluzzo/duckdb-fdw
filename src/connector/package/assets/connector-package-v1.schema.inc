@@ -313,7 +313,7 @@ R"DUCKDBAPIV1({
     "linkPagination": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["strategy", "dependency", "consistency", "target_scope", "page_size_parameter", "page_size", "page_number_parameter", "first_page", "page_increment", "max_pages_per_scan"],
+      "required": ["strategy", "dependency", "consistency", "target_scope", "page_number_parameter", "first_page", "page_increment", "max_pages_per_scan"],
       "properties": {
         "strategy": {"const": "link_next"},
         "dependency": {"const": "sequential"},
@@ -330,7 +330,7 @@ R"DUCKDBAPIV1({
     "responsePagination": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["strategy", "dependency", "consistency", "target_scope", "next_url_path", "page_size_parameter", "page_size", "page_number_parameter", "first_page", "page_increment", "max_pages_per_scan"],
+      "required": ["strategy", "dependency", "consistency", "target_scope", "next_url_path", "page_number_parameter", "first_page", "page_increment", "max_pages_per_scan"],
       "properties": {
         "strategy": {"const": "response_next"},
         "dependency": {"const": "sequential"},

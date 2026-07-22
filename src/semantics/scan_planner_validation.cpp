@@ -130,12 +130,14 @@ void ValidatePagination(const CompiledOperation &operation, const CompiledResour
 	     pagination.NextUrlPath().find("[*]") != std::string::npos)) {
 		throw std::logic_error("response_next pagination requires a non-collection JSON path");
 	}
-	if (pagination.PageSizeParameter().empty() || pagination.PageNumberParameter().empty() ||
-	    pagination.PageSizeParameter() == pagination.PageNumberParameter() || pagination.PageSize() == 0 ||
-	    pagination.PageSize() > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
-	    pagination.FirstPage() == 0 || pagination.PageIncrement() == 0 || pagination.MaxPagesPerScan() == 0 ||
-	    pagination.MaxPagesPerScan() > PAGINATION_MAX_PAGES_PER_SCAN ||
-	    !FitsBigintPageSequence(pagination.FirstPage(), pagination.PageIncrement(), pagination.MaxPagesPerScan())) {
+	// RFC 0017: page_size is optional. Skip its checks when not declared.
+	const bool has_page_size = !pagination.PageSizeParameter().empty();
+	if (pagination.PageNumberParameter().empty() || pagination.FirstPage() == 0 || pagination.PageIncrement() == 0 ||
+	    pagination.MaxPagesPerScan() == 0 || pagination.MaxPagesPerScan() > PAGINATION_MAX_PAGES_PER_SCAN ||
+	    !FitsBigintPageSequence(pagination.FirstPage(), pagination.PageIncrement(), pagination.MaxPagesPerScan()) ||
+	    (has_page_size &&
+	     (pagination.PageSizeParameter() == pagination.PageNumberParameter() || pagination.PageSize() == 0 ||
+	      pagination.PageSize() > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())))) {
 		throw std::logic_error("selected pagination contains an unsupported typed page transition");
 	}
 

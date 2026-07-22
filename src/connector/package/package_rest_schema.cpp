@@ -176,8 +176,10 @@ RestPaginationDeclaration DecodeRestPaginationSchema(const SchemaReader &reader)
 			                         pagination.next_url_path.mark);
 		}
 	}
-	for (const auto *name : {"dependency", "consistency", "target_scope", "page_size_parameter", "page_size",
-	                         "page_number_parameter", "first_page", "page_increment", "max_pages_per_scan"}) {
+	// RFC 0017: page_size_parameter and page_size are optional. Many APIs
+	// have a server-fixed page size and only declare page_number.
+	for (const auto *name : {"dependency", "consistency", "target_scope", "page_number_parameter", "first_page",
+	                         "page_increment", "max_pages_per_scan"}) {
 		if (reader.Field(name) == nullptr) {
 			reader.Diagnostics().Add(PackageDiagnosticCode::MISSING_FIELD, PackageDiagnosticPhase::SCHEMA,
 			                         reader.FieldMark(name));
@@ -189,12 +191,21 @@ RestPaginationDeclaration DecodeRestPaginationSchema(const SchemaReader &reader)
 	             PackageDiagnosticPhase::SCHEMA, reader.Diagnostics());
 	RequireValue(pagination.target_scope, "exact_operation_origin_and_path", PackageDiagnosticCode::POLICY_WIDENING,
 	             PackageDiagnosticPhase::COMPILE, reader.Diagnostics());
-	if (!IsQueryName(pagination.page_size_parameter.value) || !IsQueryName(pagination.page_number_parameter.value)) {
+	// page_size_parameter is optional (RFC 0017); validate only if declared.
+	if (!pagination.page_size_parameter.value.empty() && !IsQueryName(pagination.page_size_parameter.value)) {
+		reader.Diagnostics().Add(PackageDiagnosticCode::INVALID_TYPE, PackageDiagnosticPhase::SCHEMA,
+		                         pagination.page_size_parameter.mark);
+	}
+	if (!IsQueryName(pagination.page_number_parameter.value)) {
 		reader.Diagnostics().Add(PackageDiagnosticCode::INVALID_TYPE, PackageDiagnosticPhase::SCHEMA, pagination.mark);
 	}
 	std::uint64_t ignored = 0;
-	for (const auto *value :
-	     {&pagination.page_size, &pagination.first_page, &pagination.page_increment, &pagination.max_pages_per_scan}) {
+	// page_size is optional; validate only if declared.
+	if (!pagination.page_size.value.empty() && !IsCanonicalUnsigned(pagination.page_size, ignored)) {
+		reader.Diagnostics().Add(PackageDiagnosticCode::INVALID_TYPE, PackageDiagnosticPhase::SCHEMA,
+		                         pagination.page_size.mark);
+	}
+	for (const auto *value : {&pagination.first_page, &pagination.page_increment, &pagination.max_pages_per_scan}) {
 		if (!IsCanonicalUnsigned(*value, ignored)) {
 			reader.Diagnostics().Add(PackageDiagnosticCode::INVALID_TYPE, PackageDiagnosticPhase::SCHEMA, value->mark);
 		}

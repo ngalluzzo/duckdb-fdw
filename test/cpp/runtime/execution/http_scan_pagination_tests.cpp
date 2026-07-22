@@ -374,12 +374,33 @@ void RequireSelectiveLinkDenied(const std::string &link, uint64_t token_suffix) 
 }
 
 void TestSelectiveLinkMustPreserveConditionalInput() {
-	RequireSelectiveLinkDenied(NextLink(2), 721);
-	RequireSelectiveLinkDenied(SelectiveNextLink(2, "public"), 722);
+	// RFC 0017: the continuation URL need only match origin, path, and page
+	// number. Non-page-number parameters (visibility, sort, etc.) are no
+	// longer checked because Runtime reconstructs the request with its own
+	// declared parameters. Only structural URL anomalies (duplicate fields)
+	// are still rejected.
 	RequireSelectiveLinkDenied(
 	    "<https://api.github.com/user/repos?per_page=100&page=2&visibility=private&visibility=private>; rel=next", 723);
-	RequireSelectiveLinkDenied(
-	    "<https://api.github.com/user/repos?per_page=100&page=2&visibility=private&sort=id>; rel=next", 724);
+
+	// These URLs were denied under the old query-multiset check but are now
+	// correctly accepted under RFC 0017. Verify the first page succeeds and
+	// the scan proceeds to request page 2 with the declared visibility.
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({ControlledResponse(200, PrivateRepository(1, "private"),
+	                                             {"<https://api.github.com/user/repos?per_page=100&page=2>; rel=next"}),
+	                          ControlledResponse(200, "[]")});
+	ManualHttpExecutionControl control;
+	auto stream = OpenSelective(runtime, control, 725);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 1,
+	        "selective Link without visibility was denied (RFC 0017 regression)");
+	// Trigger the page 2 fetch to verify Runtime's request includes
+	// visibility=private from the declared profile (not the Link URL).
+	(void)stream->Next(control, batch);
+	Require(runtime->Observations().size() >= 2, "selective Link did not request page 2");
+	const auto observations = runtime->Observations();
+	Require(observations[1].target.find("visibility=private") != std::string::npos,
+	        "selective continuation lost its declared conditional input");
 }
 
 void TestSelectiveProfileDoesNotLeakAcrossStreamLifecycles() {

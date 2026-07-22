@@ -23,13 +23,9 @@ bool SamePageBudgets(const ResourceBudgets &left, const ResourceBudgets &right) 
 
 bool HasPageBindings(const ScanPlan &plan, const std::vector<AdmittedQueryParameter> &query) {
 	const auto &target = plan.Pagination().Target();
-	bool size_found = false;
 	bool page_found = false;
 	bool legacy_conditional_collision = false;
 	for (const auto &parameter : query) {
-		if (parameter.name == target.page_size_parameter) {
-			size_found = !size_found && parameter.encoded_value == std::to_string(target.page_size);
-		}
 		if (parameter.name == target.page_number_parameter) {
 			page_found = !page_found && parameter.encoded_value == std::to_string(target.first_page);
 		}
@@ -38,14 +34,8 @@ bool HasPageBindings(const ScanPlan &plan, const std::vector<AdmittedQueryParame
 		    (plan.ConditionalInput() == PlannedConditionalInput::VISIBILITY_PRIVATE && parameter.name == "visibility");
 	}
 	if (!plan.Operation().Rest().result_columns.empty()) {
-		size_found = false;
 		page_found = false;
 		for (const auto &binding : plan.Operation().Rest().query_bindings) {
-			if (binding.Source() == PlannedRestQueryValueSource::PAGINATION_PAGE_SIZE) {
-				size_found = !size_found && binding.Name() == target.page_size_parameter &&
-				             binding.Kind() == PlannedRestScalarKind::BIGINT && binding.BigintValue() > 0 &&
-				             static_cast<uint64_t>(binding.BigintValue()) == target.page_size;
-			}
 			if (binding.Source() == PlannedRestQueryValueSource::PAGINATION_PAGE_NUMBER) {
 				page_found = !page_found && binding.Name() == target.page_number_parameter &&
 				             binding.Kind() == PlannedRestScalarKind::BIGINT && binding.BigintValue() > 0 &&
@@ -53,7 +43,8 @@ bool HasPageBindings(const ScanPlan &plan, const std::vector<AdmittedQueryParame
 			}
 		}
 	}
-	return size_found && page_found && !legacy_conditional_collision;
+	// RFC 0017: page_size binding is optional; only page_number is required.
+	return page_found && !legacy_conditional_collision;
 }
 
 bool FitsEveryPageTarget(const ScanPlan &plan, const std::vector<AdmittedQueryParameter> &query) {
@@ -95,14 +86,16 @@ bool HasSupportedRestPagination(const ScanPlan &plan, const HttpExecutionProfile
 		return false;
 	}
 	const auto &target = pagination.Target();
+	const bool has_page_size = !target.page_size_parameter.empty();
 	if (target.origin.scheme != operation.origin.scheme || target.origin.host != operation.origin.host ||
 	    target.origin.port != operation.origin.port || target.path != operation.path ||
-	    !IsSafeEncodedQueryName(target.page_size_parameter) || !IsSafeEncodedQueryName(target.page_number_parameter) ||
-	    target.page_size_parameter == target.page_number_parameter || target.page_size == 0 || target.first_page == 0 ||
-	    target.page_increment == 0 || pagination.ScanBudgets().pages == 0 ||
-	    target.page_size > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+	    !IsSafeEncodedQueryName(target.page_number_parameter) || target.first_page == 0 || target.page_increment == 0 ||
+	    pagination.ScanBudgets().pages == 0 ||
 	    target.first_page > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
-	    !IsSignedBigintPageSequence(target.first_page, target.page_increment, pagination.ScanBudgets().pages)) {
+	    !IsSignedBigintPageSequence(target.first_page, target.page_increment, pagination.ScanBudgets().pages) ||
+	    (has_page_size && (!IsSafeEncodedQueryName(target.page_size_parameter) ||
+	                       target.page_size_parameter == target.page_number_parameter || target.page_size == 0 ||
+	                       target.page_size > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())))) {
 		return false;
 	}
 	return HasPageBindings(plan, query) && FitsEveryPageTarget(plan, query) &&

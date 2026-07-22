@@ -82,9 +82,14 @@ CompiledPagination::CompiledPagination(std::string page_size_parameter_p, std::u
     : strategy(CompiledPaginationStrategy::LINK_HEADER), page_size_parameter(std::move(page_size_parameter_p)),
       page_size(page_size_p), page_number_parameter(std::move(page_number_parameter_p)), first_page(first_page_p),
       page_increment(page_increment_p), max_pages_per_scan(max_pages_per_scan_p) {
-	if (!internal::IsCompiledQueryName(page_size_parameter) || !internal::IsCompiledQueryName(page_number_parameter) ||
-	    page_size_parameter == page_number_parameter || page_size == 0 || first_page == 0 || page_increment == 0 ||
-	    max_pages_per_scan == 0 || !FitsBigintPageSequence(first_page, page_increment, max_pages_per_scan)) {
+	// RFC 0017: page_size is optional — many APIs have a server-fixed page
+	// size and declare only page_number. page_size_parameter is empty when
+	// not declared; skip its validation in that case.
+	const bool has_page_size = !page_size_parameter.empty();
+	if (!internal::IsCompiledQueryName(page_number_parameter) || first_page == 0 || page_increment == 0 ||
+	    max_pages_per_scan == 0 || !FitsBigintPageSequence(first_page, page_increment, max_pages_per_scan) ||
+	    (has_page_size && (!internal::IsCompiledQueryName(page_size_parameter) ||
+	                       page_size_parameter == page_number_parameter || page_size == 0))) {
 		throw std::invalid_argument("compiled Link pagination contains invalid typed page bindings");
 	}
 }
@@ -100,9 +105,11 @@ CompiledPagination::CompiledPagination(std::string next_url_path_p, std::string 
 	if (next_url_path.empty() || next_url_path[0] != '$' || next_url_path.find("[*]") != std::string::npos) {
 		throw std::invalid_argument("compiled response_next pagination requires a non-collection JSON path");
 	}
-	if (!internal::IsCompiledQueryName(page_size_parameter) || !internal::IsCompiledQueryName(page_number_parameter) ||
-	    page_size_parameter == page_number_parameter || page_size == 0 || first_page == 0 || page_increment == 0 ||
-	    max_pages_per_scan == 0 || !FitsBigintPageSequence(first_page, page_increment, max_pages_per_scan)) {
+	const bool has_page_size = !page_size_parameter.empty();
+	if (!internal::IsCompiledQueryName(page_number_parameter) || first_page == 0 || page_increment == 0 ||
+	    max_pages_per_scan == 0 || !FitsBigintPageSequence(first_page, page_increment, max_pages_per_scan) ||
+	    (has_page_size && (!internal::IsCompiledQueryName(page_size_parameter) ||
+	                       page_size_parameter == page_number_parameter || page_size == 0))) {
 		throw std::invalid_argument("compiled response_next pagination contains invalid typed page bindings");
 	}
 }
@@ -220,12 +227,15 @@ void ValidatePagination(const CompiledOperation &operation) {
 	     rest.response_source != CompiledResponseSource::ROOT_ARRAY)) {
 		throw std::invalid_argument("compiled pagination requires a many-row response source");
 	}
-	if (!IsCompiledQueryName(pagination.PageSizeParameter()) ||
-	    !IsCompiledQueryName(pagination.PageNumberParameter()) ||
-	    pagination.PageSizeParameter() == pagination.PageNumberParameter() || pagination.PageSize() == 0 ||
-	    pagination.FirstPage() == 0 || pagination.PageIncrement() == 0 || pagination.MaxPagesPerScan() == 0 ||
-	    pagination.PageSize() > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
-	    !FitsBigintPageSequence(pagination.FirstPage(), pagination.PageIncrement(), pagination.MaxPagesPerScan())) {
+	// RFC 0017: page_size is optional. Skip its checks when not declared.
+	const bool has_page_size = !pagination.PageSizeParameter().empty();
+	if (!IsCompiledQueryName(pagination.PageNumberParameter()) || pagination.FirstPage() == 0 ||
+	    pagination.PageIncrement() == 0 || pagination.MaxPagesPerScan() == 0 ||
+	    !FitsBigintPageSequence(pagination.FirstPage(), pagination.PageIncrement(), pagination.MaxPagesPerScan()) ||
+	    (has_page_size &&
+	     (!IsCompiledQueryName(pagination.PageSizeParameter()) ||
+	      pagination.PageSizeParameter() == pagination.PageNumberParameter() || pagination.PageSize() == 0 ||
+	      pagination.PageSize() > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())))) {
 		throw std::invalid_argument("compiled pagination contains invalid typed page bindings");
 	}
 	if (pagination.Strategy() == CompiledPaginationStrategy::RESPONSE_NEXT_URL &&
@@ -249,11 +259,17 @@ void ValidatePagination(const CompiledOperation &operation) {
 			page_number = &parameter;
 		}
 	}
-	if (page_size == nullptr || page_number == nullptr || page_size->name != pagination.PageSizeParameter() ||
-	    page_size->DecodedValue().Bigint() != static_cast<std::int64_t>(pagination.PageSize()) ||
-	    page_number->name != pagination.PageNumberParameter() ||
+	if (page_number == nullptr || page_number->name != pagination.PageNumberParameter() ||
 	    page_number->DecodedValue().Bigint() != static_cast<std::int64_t>(pagination.FirstPage())) {
 		throw std::invalid_argument("compiled pagination disagrees with its structural initial request sources");
+	}
+	// RFC 0017: page_size query parameter is optional. If the pagination
+	// declares one, verify the structural binding matches; if not, skip.
+	if (!pagination.PageSizeParameter().empty()) {
+		if (page_size == nullptr || page_size->name != pagination.PageSizeParameter() ||
+		    page_size->DecodedValue().Bigint() != static_cast<std::int64_t>(pagination.PageSize())) {
+			throw std::invalid_argument("compiled pagination disagrees with its structural initial request sources");
+		}
 	}
 }
 
