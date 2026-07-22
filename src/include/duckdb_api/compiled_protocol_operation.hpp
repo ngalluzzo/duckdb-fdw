@@ -375,7 +375,13 @@ bool IsCanonicalGraphqlDocumentProfile(CompiledGraphqlDocumentIdentity identity,
 // rather than an HTTP `Link` header. Both share the same reconstruct-and-
 // verify safety model: the received URL is a verified signal compared against
 // a locally reconstructed expectation, never a dereferenced fetch target.
-enum class CompiledPaginationStrategy { DISABLED, LINK_HEADER, RESPONSE_NEXT_URL };
+// SHORT_PAGE (RFC 0019) reuses the identical local page-reconstruction model
+// but has no server-supplied continuation signal at all: exhaustion is
+// inferred purely from the just-decoded page containing fewer rows than the
+// declared `page_size` (or zero rows). `page_size_parameter`/`page_size` are
+// therefore required for SHORT_PAGE, unlike their RFC-0017-optional status
+// for LINK_HEADER/RESPONSE_NEXT_URL.
+enum class CompiledPaginationStrategy { DISABLED, LINK_HEADER, RESPONSE_NEXT_URL, SHORT_PAGE };
 enum class CompiledPageDependency { SEQUENTIAL };
 enum class CompiledPageConsistency { MUTABLE };
 enum class CompiledLinkRelation { NEXT };
@@ -413,6 +419,14 @@ private:
 	friend class duckdb_api_test::ConnectorCatalogTestAccess;
 
 	static CompiledPagination Disabled();
+	// SHORT_PAGE (RFC 0019): a named static factory rather than a fourth
+	// overloaded constructor, since its required-field set is otherwise
+	// identical to the LINK_HEADER constructor's parameter-type list, which
+	// C++ cannot overload on. Requires a non-empty page_size_parameter,
+	// unlike LINK_HEADER/RESPONSE_NEXT_URL's RFC-0017 optionality.
+	static CompiledPagination ShortPage(std::string page_size_parameter, std::uint64_t page_size,
+	                                    std::string page_number_parameter, std::uint64_t first_page,
+	                                    std::uint64_t page_increment, std::uint64_t max_pages_per_scan);
 	CompiledPagination();
 	CompiledPagination(std::string page_size_parameter, std::uint64_t page_size, std::string page_number_parameter,
 	                   std::uint64_t first_page, std::uint64_t page_increment, std::uint64_t max_pages_per_scan);
@@ -421,6 +435,12 @@ private:
 	CompiledPagination(std::string next_url_path, std::string page_size_parameter, std::uint64_t page_size,
 	                   std::string page_number_parameter, std::uint64_t first_page, std::uint64_t page_increment,
 	                   std::uint64_t max_pages_per_scan);
+	// SHORT_PAGE tagged constructor: identical fields to the LINK_HEADER
+	// constructor; the leading strategy tag disambiguates the overload
+	// (both would otherwise share an identical parameter-type list).
+	CompiledPagination(CompiledPaginationStrategy strategy_tag, std::string page_size_parameter,
+	                   std::uint64_t page_size, std::string page_number_parameter, std::uint64_t first_page,
+	                   std::uint64_t page_increment, std::uint64_t max_pages_per_scan);
 	void RequirePaginated() const;
 	void RequireResponseNextUrl() const;
 

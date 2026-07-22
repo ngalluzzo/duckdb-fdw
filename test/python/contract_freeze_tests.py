@@ -158,7 +158,7 @@ class ContractFreezeTests(unittest.TestCase):
                 "target_release": "0.99.0",
                 "target_release_authority": "test-only",
                 "not_yet_in_schema_closed_set": True,
-                "schema_closed_set_today": ["disabled", "link_next", "response_next"],
+                "schema_closed_set_today": ["disabled", "link_next", "response_next", "short_page"],
                 "graduation_rule": "Test-only synthetic entry; graduation is not real.",
                 "broader_category_remains_excluded": "pagination_body_url_offset_or_cursor_in_body_strategies",
                 "broader_category_exclusion_reason": "Test-only synthetic entry.",
@@ -177,7 +177,7 @@ class ContractFreezeTests(unittest.TestCase):
                 "target_release": "0.99.0",
                 "target_release_authority": "test-only",
                 "not_yet_in_schema_closed_set": True,
-                "schema_closed_set_today": ["disabled"],  # drift: missing link_next and response_next
+                "schema_closed_set_today": ["disabled"],  # drift: missing link_next, response_next, short_page
                 "graduation_rule": "Test-only synthetic entry; graduation is not real.",
                 "broader_category_remains_excluded": "pagination_body_url_offset_or_cursor_in_body_strategies",
                 "broader_category_exclusion_reason": "Test-only synthetic entry.",
@@ -257,7 +257,7 @@ class ContractFreezeTests(unittest.TestCase):
             self.schema["$defs"][option["$ref"].rsplit("/", 1)[-1]]["properties"]["strategy"]["const"]
             for option in one_of
         }
-        self.assertEqual(rest, {"disabled", "link_next", "response_next"})
+        self.assertEqual(rest, {"disabled", "link_next", "response_next", "short_page"})
 
     def test_schema_graphql_closed_set_is_read_from_reference(self) -> None:
         ref = self.schema["$defs"]["graphqlRequest"]["properties"]["pagination"]["$ref"]

@@ -390,6 +390,23 @@ R"DUCKDBAPIV1({
         "max_pages_per_scan": {"$ref": "#/$defs/positiveInteger"}
       }
     },
+    "shortPagePagination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "dependency", "consistency", "target_scope", "page_size_parameter", "page_size", "page_number_parameter", "first_page", "page_increment", "max_pages_per_scan"],
+      "properties": {
+        "strategy": {"const": "short_page"},
+        "dependency": {"const": "sequential"},
+        "consistency": {"const": "mutable"},
+        "target_scope": {"const": "exact_operation_origin_and_path"},
+        "page_size_parameter": {"type": "string", "pattern": "^[A-Za-z0-9._~-]{1,63}$"},
+        "page_size": {"$ref": "#/$defs/positiveInteger"},
+        "page_number_parameter": {"type": "string", "pattern": "^[A-Za-z0-9._~-]{1,63}$"},
+        "first_page": {"$ref": "#/$defs/positiveInteger"},
+        "page_increment": {"$ref": "#/$defs/positiveInteger"},
+        "max_pages_per_scan": {"$ref": "#/$defs/positiveInteger"}
+      }
+    },
 
     "restOperation": {
       "type": "object",
@@ -407,7 +424,8 @@ R"DUCKDBAPIV1({
           "oneOf": [
             {"$ref": "#/$defs/disabledPagination"},
             {"$ref": "#/$defs/linkPagination"},
-            {"$ref": "#/$defs/responsePagination"}
+            {"$ref": "#/$defs/responsePagination"},
+            {"$ref": "#/$defs/shortPagePagination"}
           ]
         }
       },

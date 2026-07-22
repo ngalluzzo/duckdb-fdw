@@ -439,6 +439,64 @@ void TestBodyDifferentialParity() {
 	}
 }
 
+AdmittedPaginatedRestRequestProfile ShortPageProfile() {
+	const duckdb_api::internal::HttpExecutionProfile execution_profile {duckdb_api::PlannedUrlScheme::HTTPS,
+	                                                                    "api.github.com",
+	                                                                    443,
+	                                                                    false,
+	                                                                    false,
+	                                                                    false,
+	                                                                    duckdb_api::MAX_EXECUTION_MILLISECONDS,
+	                                                                    100};
+	auto admitted = duckdb_api::internal::TryAdmitPaginatedRestPlan(
+	    duckdb_api_test::BuildValidShortPagePlanFixture("fixture_secret"), execution_profile);
+	Require(admitted != nullptr, "short_page fixture did not pass admission");
+	return *admitted;
+}
+
+// RFC 0019: AdvanceByCount has no external signal to validate, so its unit
+// tests directly exercise the count-comparison state machine rather than
+// header/body grammar. The fixture's declared page_size is 3.
+void TestCountAdvanceTerminatesOnShortPage() {
+	LinkPaginationState state(ShortPageProfile());
+	const auto transition = state.AdvanceByCount(2);
+	Require(!transition.has_next && transition.next_page == 0,
+	        "a page shorter than page_size did not exhaust short_page pagination");
+	Require(state.Exhausted() && !state.Failed(), "clean short-page exhaustion used a failure state");
+}
+
+void TestCountAdvanceTerminatesOnEmptyPage() {
+	LinkPaginationState state(ShortPageProfile());
+	const auto transition = state.AdvanceByCount(0);
+	Require(!transition.has_next && transition.next_page == 0, "an empty page did not exhaust short_page pagination");
+	Require(state.Exhausted() && !state.Failed(), "clean empty-page exhaustion used a failure state");
+}
+
+void TestCountAdvanceAcceptsFullPagesAndAdvances() {
+	LinkPaginationState state(ShortPageProfile());
+	const auto first = state.AdvanceByCount(3);
+	Require(first.has_next && first.next_page == 2, "a full first page did not advance short_page pagination");
+	Require(state.CurrentPage() == 2 && state.SeenPageCount() == 2 && !state.Exhausted() && !state.Failed(),
+	        "short_page transition left inconsistent state");
+	const auto second = state.AdvanceByCount(3);
+	Require(second.has_next && second.next_page == 3, "a second full page did not advance short_page pagination");
+	Require(state.CurrentPage() == 3 && state.SeenPageCount() == 3, "second short_page transition lost state");
+	const auto third = state.AdvanceByCount(1);
+	Require(!third.has_next && state.Exhausted(), "a short page after two full pages did not exhaust the source");
+}
+
+void TestCountAdvanceRejectsContinuationAfterExhaustion() {
+	LinkPaginationState state(ShortPageProfile());
+	state.AdvanceByCount(0);
+	bool terminal = false;
+	try {
+		state.AdvanceByCount(3);
+	} catch (const LinkPaginationError &error) {
+		terminal = error.Kind() == LinkPaginationErrorKind::STATE;
+	}
+	Require(terminal, "exhausted short_page pagination advanced again");
+}
+
 void TestBodyEncodingDivergenceRejected() {
 	// RFC 0016 identified a genuinely new correctness edge case for
 	// response_next: JSON \uXXXX unescaping can produce a body URL with
@@ -469,6 +527,10 @@ int main() {
 		TestBodyRepeatedTypedPageIsRejected();
 		TestBodyDifferentialParity();
 		TestBodyEncodingDivergenceRejected();
+		TestCountAdvanceTerminatesOnShortPage();
+		TestCountAdvanceTerminatesOnEmptyPage();
+		TestCountAdvanceAcceptsFullPagesAndAdvances();
+		TestCountAdvanceRejectsContinuationAfterExhaustion();
 		std::cout << "Link pagination tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

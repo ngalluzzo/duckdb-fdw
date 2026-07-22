@@ -348,6 +348,55 @@ actual third connector provider that exercises `api_key` is separate,
 PM-reserved work tracked as a follow-on, consistent with how Rick and Morty
 was chosen as provider #2.
 
+### `0.12.0` — count-terminated pagination
+
+A connector author can declare a fourth REST pagination strategy,
+`short_page`, that infers exhaustion purely from the just-decoded page
+containing fewer rows than the declared page size (or zero rows), with no
+server-supplied continuation signal at all — no `Link` header and no
+body-embedded next-page URL. This closes the pagination shape a fresh
+architecture-maturity re-assessment (run after `api_key` shipped) judged most
+likely to block connector providers #3–#10 among free/hobby-tier REST APIs:
+plain `?page=N&page_size=M` or `?offset=N&limit=M` pagination.
+
+Accepted [RFC 0019](rfcs/0019-add-short-page-pagination.md) decides the
+design and commits its implementation to this release. `short_page` reuses
+the identical local page-reconstruction model `link_next`/`response_next`
+already establish (`page_number_parameter`/`first_page`/`page_increment`),
+with one difference: `page_size_parameter`/`page_size` are required, not
+optional, since termination depends on a known page size. Unlike
+`link_next`/`response_next`, it performs no reconstruct-and-verify step at
+all — there is no external signal to validate, which review confirmed is a
+strictly narrower trust surface than the other two strategies (at the cost
+of losing their pagination-drift cross-check, an accepted, disclosed
+tradeoff). Review corrected three points before acceptance: the compiled-IR
+factory must be a named static method rather than a fourth overloaded
+constructor (its required-field set is otherwise identical to `link_next`'s,
+which C++ cannot overload on); the Query-owned acceptance criterion must
+name a concrete real-`EXPLAIN` test rather than repeat RFC 0016's
+`response_next` promise, which was never delivered; and the freeze-artifact
+plan must add `short_page` directly to the schema-closed set rather than
+edit the mandatory exclusion `pagination_body_url_offset_or_cursor_in_body_strategies`,
+which `scripts/contract_freeze.py` forbids removing or renaming.
+
+This release is a backward-compatible capability addition under the pre-1.0
+versioning model, so it is a `0.Y.0` minor rather than a patch. Implementation
+landed in the same change that accepted the RFC, so `short_page` graduates
+directly into the schema-closed `pagination_strategies.rest` set without a
+separate `accepted_candidate_revisions` interval, following `api_key`'s
+precedent.
+
+Release evidence includes the new schema/compiler/compiled-IR branch, the
+`PlanBaseDomain` classification decision (grouped with
+`link_next`/`response_next`, since domain depends only on response source,
+never on the termination mechanism), `LinkPaginationState::AdvanceByCount`
+reusing the existing pagination-state object with no new decode pass, the
+corrected fixture-coverage variant set (`termination_on_short_page` and
+`termination_on_empty_page` as distinct categories, plus
+`exact_multiple_page_boundary`), a real-`EXPLAIN` test asserting the literal
+`short_page` string in actual DuckDB output, and a compatibility fixture
+proving `connectors/github` and `connectors/rickandmorty` are unaffected.
+
 ### `1.0.0-rc.N` — compatibility rehearsal
 
 Each release candidate is an immutable build of the frozen `1.0.0` contract.

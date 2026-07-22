@@ -228,6 +228,8 @@ const char *PaginationStrategyName(PlannedPaginationStrategy strategy) {
 		return "response_next";
 	case PlannedPaginationStrategy::GRAPHQL_CURSOR:
 		return "graphql_cursor";
+	case PlannedPaginationStrategy::SHORT_PAGE:
+		return "short_page";
 	}
 	throw std::logic_error("scan plan contains an unknown pagination strategy");
 }

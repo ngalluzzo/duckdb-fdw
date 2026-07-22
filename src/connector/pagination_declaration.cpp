@@ -29,6 +29,8 @@ const char *PaginationStrategyName(CompiledPaginationStrategy strategy) {
 		return "link_header";
 	case CompiledPaginationStrategy::RESPONSE_NEXT_URL:
 		return "response_next";
+	case CompiledPaginationStrategy::SHORT_PAGE:
+		return "short_page";
 	}
 	throw std::logic_error("compiled connector contains an unknown pagination strategy");
 }
@@ -116,9 +118,39 @@ CompiledPagination::CompiledPagination(std::string next_url_path_p, std::string 
 	}
 }
 
+CompiledPagination CompiledPagination::ShortPage(std::string page_size_parameter_p, std::uint64_t page_size_p,
+                                                 std::string page_number_parameter_p, std::uint64_t first_page_p,
+                                                 std::uint64_t page_increment_p, std::uint64_t max_pages_per_scan_p) {
+	return CompiledPagination(CompiledPaginationStrategy::SHORT_PAGE, std::move(page_size_parameter_p), page_size_p,
+	                          std::move(page_number_parameter_p), first_page_p, page_increment_p, max_pages_per_scan_p);
+}
+
+CompiledPagination::CompiledPagination(CompiledPaginationStrategy strategy_tag_p, std::string page_size_parameter_p,
+                                       std::uint64_t page_size_p, std::string page_number_parameter_p,
+                                       std::uint64_t first_page_p, std::uint64_t page_increment_p,
+                                       std::uint64_t max_pages_per_scan_p)
+    : strategy(strategy_tag_p), page_size_parameter(std::move(page_size_parameter_p)), page_size(page_size_p),
+      page_number_parameter(std::move(page_number_parameter_p)), first_page(first_page_p),
+      page_increment(page_increment_p), max_pages_per_scan(max_pages_per_scan_p) {
+	if (strategy_tag_p != CompiledPaginationStrategy::SHORT_PAGE) {
+		throw std::logic_error("tagged pagination constructor invoked with an unsupported strategy");
+	}
+	// Unlike LINK_HEADER/RESPONSE_NEXT_URL (RFC 0017), page_size is required
+	// for SHORT_PAGE: termination is undefined without a known page size to
+	// compare the decoded row count against.
+	if (page_size_parameter.empty() || !internal::IsCompiledQueryName(page_size_parameter) ||
+	    !internal::IsCompiledQueryName(page_number_parameter) || page_size_parameter == page_number_parameter ||
+	    page_size == 0 || page_size > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
+	    first_page == 0 || page_increment == 0 || max_pages_per_scan == 0 ||
+	    !FitsBigintPageSequence(first_page, page_increment, max_pages_per_scan)) {
+		throw std::invalid_argument("compiled short_page pagination contains invalid typed page bindings");
+	}
+}
+
 void CompiledPagination::RequirePaginated() const {
 	if (strategy != CompiledPaginationStrategy::LINK_HEADER &&
-	    strategy != CompiledPaginationStrategy::RESPONSE_NEXT_URL) {
+	    strategy != CompiledPaginationStrategy::RESPONSE_NEXT_URL &&
+	    strategy != CompiledPaginationStrategy::SHORT_PAGE) {
 		throw std::logic_error("pagination accessor invoked on a non-paginated strategy");
 	}
 }
@@ -214,8 +246,14 @@ void ValidatePagination(const CompiledOperation &operation) {
 		return;
 	}
 	if (pagination.Strategy() != CompiledPaginationStrategy::LINK_HEADER &&
-	    pagination.Strategy() != CompiledPaginationStrategy::RESPONSE_NEXT_URL) {
+	    pagination.Strategy() != CompiledPaginationStrategy::RESPONSE_NEXT_URL &&
+	    pagination.Strategy() != CompiledPaginationStrategy::SHORT_PAGE) {
 		throw std::invalid_argument("compiled pagination contains an unsupported capability profile");
+	}
+	// SHORT_PAGE requires a declared page_size (enforced by its constructor);
+	// termination is undefined without a known size to compare against.
+	if (pagination.Strategy() == CompiledPaginationStrategy::SHORT_PAGE && pagination.PageSizeParameter().empty()) {
+		throw std::invalid_argument("compiled short_page pagination requires a declared page size");
 	}
 	if (pagination.Dependency() != CompiledPageDependency::SEQUENTIAL ||
 	    pagination.Consistency() != CompiledPageConsistency::MUTABLE ||

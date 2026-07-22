@@ -15,8 +15,13 @@ namespace internal {
 namespace {
 
 BaseDomain ExpectedRestDomain(const PlannedRestOperation &operation, PlannedPaginationStrategy pagination) {
+	// SHORT_PAGE (RFC 0019) shares this branch with LINK_HEADER/RESPONSE_NEXT_URL,
+	// matching Relational Semantics' PlanBaseDomain classification: the
+	// occurrence domain depends only on the response source, never on which
+	// mechanism signals continuation.
 	if (pagination == PlannedPaginationStrategy::LINK_HEADER ||
-	    pagination == PlannedPaginationStrategy::RESPONSE_NEXT_URL) {
+	    pagination == PlannedPaginationStrategy::RESPONSE_NEXT_URL ||
+	    pagination == PlannedPaginationStrategy::SHORT_PAGE) {
 		return operation.response_source == PlannedResponseSource::ROOT_ARRAY ? BaseDomain::PAGINATED_ROOT_ARRAY_RECORDS
 		                                                                      : BaseDomain::PAGINATED_JSON_PATH_RECORDS;
 	}

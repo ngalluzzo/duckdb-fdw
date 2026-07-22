@@ -19,6 +19,7 @@ using duckdb_api_test::BuildAmbiguousPredicateFallbackPlanFixture;
 using duckdb_api_test::BuildValidAuthenticatedRepositoriesPlanFixture;
 using duckdb_api_test::BuildValidPaginatedPlanFixture;
 using duckdb_api_test::BuildValidPermanentRestScanPlanFixture;
+using duckdb_api_test::BuildValidShortPagePlanFixture;
 using duckdb_api_test::BuildVisibilityPrivateCompleteResidualPlanFixture;
 using duckdb_api_test::BuildVisibilityPrivatePlanFixture;
 using duckdb_api_test::ControlledHttpResponse;
@@ -69,6 +70,23 @@ std::string GenericPage(uint64_t id, const std::string &label) {
 std::string GenericNextLink(uint64_t page) {
 	return std::string("<https://api.github.com/fixtures/linked-records?batch_size=3&cursor_page=") +
 	       std::to_string(page) + ">; rel=next";
+}
+
+std::string ShortPagePageOf(const std::vector<std::pair<uint64_t, std::string>> &rows) {
+	std::string result = "{\"records\":[";
+	for (std::size_t index = 0; index < rows.size(); index++) {
+		if (index != 0) {
+			result += ",";
+		}
+		result +=
+		    "{\"record_id\":" + std::to_string(rows[index].first) + ",\"record_label\":\"" + rows[index].second + "\"}";
+	}
+	result += "]}";
+	return result;
+}
+
+std::string ShortPageEmptyPage() {
+	return "{\"records\":[]}";
 }
 
 std::string PermanentRestPage(uint64_t id, const std::string &label_json) {
@@ -124,6 +142,16 @@ std::unique_ptr<duckdb_api::BatchStream>
 OpenGeneric(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime, ManualHttpExecutionControl &control,
             uint64_t token_suffix) {
 	const auto plan = BuildValidPaginatedPlanFixture("fixture_secret");
+	auto token = GeneratedHttpBearerToken(token_suffix);
+	runtime->ExpectBearer("Bearer " + token);
+	return runtime->Executor()->OpenWithAuthorization(
+	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+}
+
+std::unique_ptr<duckdb_api::BatchStream>
+OpenShortPage(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
+              ManualHttpExecutionControl &control, uint64_t token_suffix) {
+	const auto plan = BuildValidShortPagePlanFixture("fixture_secret");
 	auto token = GeneratedHttpBearerToken(token_suffix);
 	runtime->ExpectBearer("Bearer " + token);
 	return runtime->Executor()->OpenWithAuthorization(
@@ -208,6 +236,88 @@ void TestGenericPaginatedRestUsesCopiedExecutableFacts() {
 	            observations[0].headers.size() == 2 && observations[0].headers[0].first == "X-Connector-Fixture" &&
 	            observations[0].headers[1].first == "Authorization" && runtime->ConsumeBearerExpectation(2),
 	        "generic paginated REST execution drifted to the native repository identity");
+}
+
+// RFC 0019: short_page has no continuation signal at all — a page with fewer
+// rows than the declared page_size (3) terminates the scan. This is the
+// end-to-end demonstration the RFC's Acceptance and verification section
+// requires: real admission (OpenShortPage/TryAdmitPaginatedRestPlan), the
+// executor's AdvanceByCount dispatch branch, and row decoding all agree.
+void TestShortPageTerminatesOnShortPage() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({ControlledResponse(200, ShortPagePageOf({{1, "first"}, {2, "second"}, {3, "third"}})),
+	                          ControlledResponse(200, ShortPagePageOf({{4, "fourth"}}))});
+	ManualHttpExecutionControl control;
+	auto stream = OpenShortPage(runtime, control, 731);
+	Require(runtime->Observations().empty(), "short_page Open performed transport I/O");
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 3 && batch.rows[0].values[0].bigint_value == 1 &&
+	            batch.rows[2].values[0].bigint_value == 3,
+	        "short_page profile did not decode its full first page");
+	Require(stream->Next(control, batch) && batch.rows.size() == 1 && batch.rows[0].values[0].bigint_value == 4,
+	        "short_page profile did not request a second page after a full first page");
+	Require(!stream->Next(control, batch), "a page shorter than page_size did not terminate short_page pagination");
+	const auto observations = runtime->Observations();
+	Require(observations.size() == 2 &&
+	            observations[0].target == "/fixtures/short-page-records?batch_size=3&cursor_page=1" &&
+	            observations[1].target == "/fixtures/short-page-records?batch_size=3&cursor_page=2" &&
+	            runtime->ConsumeBearerExpectation(2),
+	        "short_page pagination requested the wrong page sequence");
+}
+
+// Empty-page and short-page termination are distinct decoder paths (an empty
+// JSON array vs. a partial one), per Engineering Enablement's review finding.
+void TestShortPageTerminatesOnEmptyPage() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({ControlledResponse(200, ShortPagePageOf({{1, "first"}, {2, "second"}, {3, "third"}})),
+	                          ControlledResponse(200, ShortPageEmptyPage())});
+	ManualHttpExecutionControl control;
+	auto stream = OpenShortPage(runtime, control, 732);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 3, "short_page profile did not decode its full page");
+	Require(!stream->Next(control, batch), "an empty page did not terminate short_page pagination");
+	Require(runtime->Observations().size() == 2, "short_page pagination made the wrong number of requests");
+}
+
+// A server whose row count is an exact multiple of page_size cannot be
+// distinguished from "more data exists" without one extra round trip; this
+// proves that round trip happens and correctly terminates rather than
+// looping or stopping early.
+void TestShortPageExactMultiplePageBoundary() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({ControlledResponse(200, ShortPagePageOf({{1, "a"}, {2, "b"}, {3, "c"}})),
+	                          ControlledResponse(200, ShortPagePageOf({{4, "d"}, {5, "e"}, {6, "f"}})),
+	                          ControlledResponse(200, ShortPageEmptyPage())});
+	ManualHttpExecutionControl control;
+	auto stream = OpenShortPage(runtime, control, 733);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 3, "first exact-multiple page did not decode");
+	Require(stream->Next(control, batch) && batch.rows.size() == 3, "second exact-multiple page did not decode");
+	Require(!stream->Next(control, batch), "an exact page-size multiple did not require a terminal empty request");
+	Require(runtime->Observations().size() == 3,
+	        "exact-multiple-page boundary did not make the expected extra round trip");
+}
+
+// max_pages_per_scan must remain a hard backstop even when short_page's own
+// termination signal (a short or empty page) never occurs.
+void TestShortPageMaxPagesExhaustedWithoutShortPage() {
+	std::vector<ControlledHttpResponse> pages;
+	for (uint64_t page = 0; page < 4; page++) {
+		pages.push_back(
+		    ControlledResponse(200, ShortPagePageOf({{page * 3 + 1, "x"}, {page * 3 + 2, "y"}, {page * 3 + 3, "z"}})));
+	}
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence(std::move(pages));
+	ManualHttpExecutionControl control;
+	auto stream = OpenShortPage(runtime, control, 734);
+	duckdb_api::TypedBatch batch;
+	for (int page = 0; page < 4; page++) {
+		Require(stream->Next(control, batch) && batch.rows.size() == 3,
+		        "short_page profile did not decode every page up to its ceiling");
+	}
+	RequireFailure([&]() { (void)stream->Next(control, batch); }, duckdb_api::ErrorStage::RESOURCE, "pages");
+	Require(runtime->Observations().size() == 4,
+	        "short_page pagination exceeded max_pages_per_scan before failing closed");
 }
 
 void TestPermanentRestPlanExecutesCopiedRelationalFacts() {
@@ -515,6 +625,10 @@ int main() {
 	try {
 		TestSequentialBackpressureAndEmptyMiddlePage();
 		TestGenericPaginatedRestUsesCopiedExecutableFacts();
+		TestShortPageTerminatesOnShortPage();
+		TestShortPageTerminatesOnEmptyPage();
+		TestShortPageExactMultiplePageBoundary();
+		TestShortPageMaxPagesExhaustedWithoutShortPage();
 		TestPermanentRestPlanExecutesCopiedRelationalFacts();
 		TestFullPageDrainsBeforeNextRequest();
 		TestTerminalEmptyPageAndAuthorityDenial();

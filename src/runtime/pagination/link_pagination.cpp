@@ -252,6 +252,38 @@ LinkPageTransition LinkPaginationState::AdvanceBody(const std::string &next_url)
 	}
 }
 
+LinkPageTransition LinkPaginationState::AdvanceByCount(std::size_t decoded_row_count) {
+	if (failed || exhausted) {
+		ThrowState();
+	}
+	try {
+		// There is no server-supplied signal to validate: exhaustion is
+		// inferred purely from the just-decoded page's row count against the
+		// admitted profile's declared page size.
+		if (decoded_row_count == 0 || decoded_row_count < profile.PageSize()) {
+			exhausted = true;
+			return {false, 0};
+		}
+		if (current_page > std::numeric_limits<uint64_t>::max() - profile.PageIncrement()) {
+			ThrowPolicy();
+		}
+		const auto next_page = current_page + profile.PageIncrement();
+		seen_pages.push_back(next_page);
+		current_page = next_page;
+		return {true, next_page};
+	} catch (const LinkPaginationError &) {
+		failed = true;
+		throw;
+	} catch (const std::bad_alloc &) {
+		failed = true;
+		throw LinkPaginationError(LinkPaginationErrorKind::STATE, PAGINATION_FIELD,
+		                          "Link pagination state exceeded available memory");
+	} catch (...) {
+		failed = true;
+		throw LinkPaginationError(LinkPaginationErrorKind::STATE, PAGINATION_FIELD, "Link pagination state failed");
+	}
+}
+
 uint64_t LinkPaginationState::CurrentPage() const noexcept {
 	return current_page;
 }

@@ -104,8 +104,13 @@ inline PlannedResponseSource PlanResponseSource(CompiledResponseSource source) {
 }
 
 inline BaseDomain PlanBaseDomain(CompiledResponseSource source, CompiledPaginationStrategy pagination) {
+	// SHORT_PAGE (RFC 0019) shares this branch with LINK_HEADER/RESPONSE_NEXT_URL:
+	// the domain classification depends only on the response source's
+	// duplicate-preserving-bag shape, never on which mechanism (header, body
+	// URL, or decoded row count) signals continuation.
 	if (pagination == CompiledPaginationStrategy::LINK_HEADER ||
-	    pagination == CompiledPaginationStrategy::RESPONSE_NEXT_URL) {
+	    pagination == CompiledPaginationStrategy::RESPONSE_NEXT_URL ||
+	    pagination == CompiledPaginationStrategy::SHORT_PAGE) {
 		switch (source) {
 		case CompiledResponseSource::JSON_PATH_MANY:
 			return BaseDomain::PAGINATED_JSON_PATH_RECORDS;
@@ -160,6 +165,24 @@ inline PlannedContinuationTargetScope PlanTargetScope(CompiledContinuationTarget
 		return PlannedContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH;
 	}
 	throw std::logic_error("compiled relation contains an unsupported pagination target scope");
+}
+
+// Maps a compiled REST pagination strategy to its planned counterpart.
+// GRAPHQL_CURSOR is a Planned-only value assigned directly by GraphQL
+// planning and is never produced from a compiled REST strategy, so it is
+// deliberately absent from this switch's domain.
+inline PlannedPaginationStrategy PlanPaginationStrategy(CompiledPaginationStrategy strategy) {
+	switch (strategy) {
+	case CompiledPaginationStrategy::DISABLED:
+		return PlannedPaginationStrategy::DISABLED;
+	case CompiledPaginationStrategy::LINK_HEADER:
+		return PlannedPaginationStrategy::LINK_HEADER;
+	case CompiledPaginationStrategy::RESPONSE_NEXT_URL:
+		return PlannedPaginationStrategy::RESPONSE_NEXT_URL;
+	case CompiledPaginationStrategy::SHORT_PAGE:
+		return PlannedPaginationStrategy::SHORT_PAGE;
+	}
+	throw std::logic_error("compiled relation contains an unsupported pagination strategy");
 }
 
 std::uint64_t BoundedProduct(std::uint64_t left, std::uint64_t right, std::uint64_t ceiling, const char *field);

@@ -243,6 +243,21 @@ void AddProtocolCoverage(CoverageBuilder &coverage, const CompiledConnector &con
 	}
 	for (const auto &relation : connector.Relations()) {
 		for (const auto &operation : relation.Operations()) {
+			if (operation.Protocol() == CompiledProtocol::REST &&
+			    operation.Rest().pagination.Strategy() == CompiledPaginationStrategy::SHORT_PAGE) {
+				// RFC 0019: short_page has no external continuation signal, so
+				// it correctly omits every target-validation variant
+				// (encoded_target/malformed_target_rejected/replayed_target_rejected)
+				// link_next and response_next require.
+				coverage.Variants("pagination_" + relation.Name() + "_" + operation.name + "_",
+				                  {"first_page", "multi_page", "termination_on_short_page", "termination_on_empty_page",
+				                   "exact_multiple_page_boundary", "max_pages_exhausted"},
+				                  PackageFixtureCoverageScope::PAGINATION, relation.Name(), operation.name);
+			}
+		}
+	}
+	for (const auto &relation : connector.Relations()) {
+		for (const auto &operation : relation.Operations()) {
 			if (operation.Protocol() == CompiledProtocol::GRAPHQL) {
 				coverage.Variants("pagination_" + relation.Name() + "_" + operation.name + "_",
 				                  {"first_page", "multi_page", "termination", "cursor_transition",

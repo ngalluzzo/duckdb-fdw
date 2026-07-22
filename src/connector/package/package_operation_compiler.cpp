@@ -36,7 +36,8 @@ bool PredicateTargets(const RelationDeclaration &relation, const std::string &op
 }
 
 bool FitsBigintPageSequence(const RestPaginationDeclaration &pagination) {
-	if (pagination.strategy.value != "link_next" && pagination.strategy.value != "response_next") {
+	if (pagination.strategy.value != "link_next" && pagination.strategy.value != "response_next" &&
+	    pagination.strategy.value != "short_page") {
 		return true;
 	}
 	const auto first = ParseUnsigned(pagination.first_page);
@@ -101,6 +102,12 @@ CompiledPagination CompilePagination(const RestPaginationDeclaration &source) {
 		    ParseUnsigned(source.first_page), ParseUnsigned(source.page_increment),
 		    ParseUnsigned(source.max_pages_per_scan));
 	}
+	if (source.strategy.value == "short_page") {
+		return duckdb_api::internal::CompiledModelBuilder::ShortPagePagination(
+		    source.page_size_parameter.value, page_size, source.page_number_parameter.value,
+		    ParseUnsigned(source.first_page), ParseUnsigned(source.page_increment),
+		    ParseUnsigned(source.max_pages_per_scan));
+	}
 	return duckdb_api::internal::CompiledModelBuilder::DisabledPagination();
 }
 
@@ -112,10 +119,11 @@ std::vector<CompiledQueryParameter> CompileQuery(const RelationDeclaration &rela
 	std::set<std::string> names;
 	std::set<std::string> conditional_ids;
 	bool found_page_number = false;
-	// link_next and response_next share the same structural page-size and
-	// page-number query bindings; only the continuation signal's source
-	// (header vs body) differs.
-	const bool paginated = pagination.strategy.value == "link_next" || pagination.strategy.value == "response_next";
+	// link_next, response_next, and short_page share the same structural
+	// page-size and page-number query bindings; only the continuation
+	// signal (header, body URL, or none at all) differs.
+	const bool paginated = pagination.strategy.value == "link_next" || pagination.strategy.value == "response_next" ||
+	                       pagination.strategy.value == "short_page";
 	const auto page_size = ParseUnsigned(pagination.page_size);
 	const auto first_page = ParseUnsigned(pagination.first_page);
 	for (const auto &field : operation.rest.query) {

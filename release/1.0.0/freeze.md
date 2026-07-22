@@ -20,9 +20,16 @@ read either without inspecting product source.
 > (Accepted 2026-07-22), added a static `api_key` credential kind (header or
 > query placement) alongside `bearer`; its implementation landed in the same
 > change that accepted the RFC, so it graduated directly into the closed
-> credential-kind set without a separate pending-implementation interval. The
-> `accepted_candidate_revisions` list is therefore empty, ready for any
-> future accepted RFC that introduces a new candidate revision.
+> credential-kind set without a separate pending-implementation interval. A
+> third revision, [RFC 0019](../docs/rfcs/0019-add-short-page-pagination.md)
+> (Accepted 2026-07-22), added `short_page` REST pagination — termination
+> inferred purely from a short or empty page, with no server-supplied
+> continuation signal at all; its implementation also landed in the same
+> change that accepted the RFC, graduating directly into the schema-closed
+> set: REST pagination strategies are now `{disabled, link_next,
+> response_next, short_page}`. The `accepted_candidate_revisions` list is
+> therefore empty, ready for any future accepted RFC that introduces a new
+> candidate revision.
 
 The `1.0.0` contract is not a single document. It is a layered set in which
 each layer draws authority from the one above it:
@@ -109,7 +116,7 @@ because the project reaches `1.0.0`.
   static api_key (header- or query-placed) authentication; deny-only network
   policy; positive resource ceilings; reload compatibility rules; offline
   fixture identity; the closed pagination strategy sets (REST `{disabled,
-  link_next}`, GraphQL `{relay_forward}`).
+  link_next, response_next, short_page}`, GraphQL `{relay_forward}`).
 - Authority: `docs/CONNECTOR_SPECIFICATIONS.md`; RFC 0013.
 - Machine oracle: `src/connector/package/assets/connector-package-v1.schema.json`;
   `release/<version>/pins.json` `identities.repository_connector_package`.
@@ -164,15 +171,18 @@ rather than silently ignoring them.
   anonymous, capability-scoped bearer, and static api_key (RFC 0018); dynamic
   schemas; write-back, transactions, continuous streams; raw GraphQL
   documents; author remote projection, order, or limit pushdown declarations.
-- **Pagination strategies outside the closed sets:** response-body-embedded
-  next URLs that do not match the accepted `response_next` reconstruct-and-
-  verify shape (for example an opaque body cursor that drives the next
-  request directly), numeric offset or page-number traversal, cursor-in-body
-  strategies, and reverse or bidirectional traversal. Admitting any such
+- **Pagination strategies outside the closed sets:** an opaque body-embedded
+  cursor that drives the next request directly rather than being verified
+  against a locally reconstructed expectation (the trust model RFC 0016 and
+  RFC 0019 deliberately declined to adopt — see both RFCs' Alternatives
+  sections), and reverse or bidirectional traversal. Admitting any such
   strategy requires a later accepted RFC and pre-freeze evidence; the
   compiler rejects the declaration today as `DUCKDB_API_UNSUPPORTED_DECLARATION`
   in the schema phase. The narrow `response_next` reconstruct-and-verify
-  shape (RFC 0016) is now in the schema-closed set above, not an exclusion.
+  shape (RFC 0016) and `short_page`'s count-terminated shape (RFC 0019, no
+  external signal at all) are now in the schema-closed set above, not an
+  exclusion — numeric offset/page-number traversal with no continuation
+  signal is exactly what `short_page` decided.
 - Compatibility with arbitrary upstream API drift.
 
 ## Known evidence limitations recorded during this freeze
@@ -217,18 +227,34 @@ without a graduation.
 The first candidate revision, accepted by
 [RFC 0016](../docs/rfcs/0016-decide-body-signaled-rest-pagination.md)
 (2026-07-21), has graduated: `response_next` is now in the schema-closed
-`pagination_strategies.rest` set (`{disabled, link_next, response_next}`),
-the JSON schema's `oneOf` includes the corresponding branch, and the
+`pagination_strategies.rest` set (`{disabled, link_next, response_next,
+short_page}`), the JSON schema's `oneOf` includes the corresponding branch,
+and the implementation is live across the Connector, Runtime, Relational
+Semantics, and Query surfaces. The candidate-revision entry is removed from
+`release/1.0.0/freeze.json`.
+
+### `short_page` REST pagination — **graduated**
+
+A third candidate revision, accepted by
+[RFC 0019](../docs/rfcs/0019-add-short-page-pagination.md) (2026-07-22), has
+graduated in the same change that accepted it (no separate
+pending-implementation interval, following RFC 0018's precedent):
+`short_page` is now in the schema-closed `pagination_strategies.rest` set.
+Unlike `link_next`/`response_next`, it has no external continuation signal at
+all — exhaustion is inferred purely from the just-decoded page containing
+fewer rows than the declared page size, reusing the identical local
+page-reconstruction model `link_next` already established. The
 implementation is live across the Connector, Runtime, Relational Semantics,
-and Query surfaces. The candidate-revision entry is removed from
-`release/1.0.0/freeze.json` and the section is empty pending any future
-accepted RFC that introduces a new candidate.
+and Query surfaces. The `accepted_candidate_revisions` list is empty pending
+any future accepted RFC that introduces a new candidate.
 
 The broader exclusion `pagination_body_url_offset_or_cursor_in_body_strategies`
-remains mandatory: only the body-URL reconstruct-and-verify shape is in the
-closed set. Numeric offset/page-number traversal, cursor-in-body strategies,
-and reverse or bidirectional traversal still require their own later accepted
-RFC.
+remains mandatory: only the reconstruct-and-verify shapes above (header
+signal, body-URL signal, or no signal at all with count-based termination)
+are in the closed set. A true opaque body-embedded cursor that drives the
+next request directly (the trust model both RFC 0016 and RFC 0019
+deliberately declined — see their Alternatives sections), and reverse or
+bidirectional traversal, still require their own later accepted RFC.
 
 ## Not yet frozen
 

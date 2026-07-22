@@ -206,6 +206,8 @@ const char *PaginationStrategyName(duckdb_api::PlannedPaginationStrategy strateg
 		return "response_next";
 	case duckdb_api::PlannedPaginationStrategy::GRAPHQL_CURSOR:
 		return "graphql_cursor";
+	case duckdb_api::PlannedPaginationStrategy::SHORT_PAGE:
+		return "short_page";
 	}
 	throw InternalException("duckdb_api scan plan contains an unknown pagination strategy");
 }
@@ -273,14 +275,15 @@ void AddPaginationFacts(InsertionOrderPreservingMap<string> &result, const duckd
 		return;
 	}
 	if (strategy == duckdb_api::PlannedPaginationStrategy::LINK_HEADER ||
-	    strategy == duckdb_api::PlannedPaginationStrategy::RESPONSE_NEXT_URL) {
+	    strategy == duckdb_api::PlannedPaginationStrategy::RESPONSE_NEXT_URL ||
+	    strategy == duckdb_api::PlannedPaginationStrategy::SHORT_PAGE) {
 		result["Page Dependency"] = PageDependencyName(plan.Pagination().Dependency());
 		result["Page Consistency"] = PageConsistencyName(plan.Pagination().Consistency());
 		result["Page Size"] = std::to_string(plan.Pagination().Target().page_size);
 		result["Maximum Pages"] = std::to_string(plan.Pagination().ScanBudgets().pages);
 		result["Total Support"] = plan.Pagination().SupportsTotal() ? "available" : "unavailable";
 		result["Resume Support"] = plan.Pagination().SupportsResume() ? "available" : "unavailable";
-	} else {
+	} else if (strategy == duckdb_api::PlannedPaginationStrategy::GRAPHQL_CURSOR) {
 		const auto &cursor = plan.Pagination().GraphqlCursor();
 		result["Page Dependency"] = GraphqlDependencyName(cursor.dependency);
 		result["Page Consistency"] = GraphqlConsistencyName(cursor.consistency);
@@ -288,6 +291,8 @@ void AddPaginationFacts(InsertionOrderPreservingMap<string> &result, const duckd
 		result["Maximum Pages"] = std::to_string(cursor.max_pages_per_scan);
 		result["Total Support"] = cursor.supports_total ? "available" : "unavailable";
 		result["Resume Support"] = cursor.supports_resume ? "available" : "unavailable";
+	} else {
+		throw InternalException("duckdb_api scan plan contains an unhandled pagination strategy");
 	}
 	result["Page Body Bytes"] = std::to_string(plan.Pagination().PageBudgets().serialized_request_body_bytes);
 	result["Scan Body Bytes"] = std::to_string(plan.Pagination().ScanBudgets().serialized_request_body_bytes);

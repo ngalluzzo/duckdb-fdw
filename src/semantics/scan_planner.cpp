@@ -138,9 +138,7 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	} else if (operation.Protocol() == CompiledProtocol::REST) {
 		const auto &rest = operation.Rest();
 		const auto &compiled_pagination = rest.pagination;
-		result.pagination.strategy = compiled_pagination.Strategy() == CompiledPaginationStrategy::RESPONSE_NEXT_URL
-		                                 ? PlannedPaginationStrategy::RESPONSE_NEXT_URL
-		                                 : PlannedPaginationStrategy::LINK_HEADER;
+		result.pagination.strategy = PlanPaginationStrategy(compiled_pagination.Strategy());
 		result.pagination.dependency = PlanPageDependency(compiled_pagination.Dependency());
 		result.pagination.consistency = PlanPageConsistency(compiled_pagination.Consistency());
 		result.pagination.link_relation = PlanLinkRelation(compiled_pagination.LinkRelation());

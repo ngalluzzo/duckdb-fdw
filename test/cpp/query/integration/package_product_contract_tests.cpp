@@ -222,6 +222,43 @@ void TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(const std::strin
 	        "rejected duplicate or invalid package changed the active DuckDB catalog generation");
 }
 
+// RFC 0019, Query Experience review: RFC 0016 promised a real-EXPLAIN test for
+// response_next and never delivered one (only "graphql_cursor" was ever
+// asserted against actual EXPLAIN output anywhere in the repository). This
+// test closes that gap for short_page: it loads a byte-identical copy of
+// connectors/github with authenticated_repositories.yaml declaring
+// `strategy: short_page`, then asserts the literal string appears in real
+// DuckDB EXPLAIN output, not merely in an internal function call.
+void TestShortPageReachesRealExplainOutput(const std::string &repository_root) {
+	auto executor = std::shared_ptr<PlanEchoExecutor>(new PlanEchoExecutor());
+	duckdb::DuckDB database(nullptr);
+	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_short_page_explain_test");
+	duckdb::RegisterDuckdbApiSecrets(loader);
+	duckdb::RegisterDuckdbApiPackageSurface(loader, duckdb_api::BuildPackageGenerationComposition(executor));
+	duckdb::Connection connection(database);
+	const auto package = duckdb_api_test::BuildRepositoryShortPagePackageFixture(repository_root);
+	auto load =
+	    connection.Query("CALL system.main.duckdb_api_load_connector(package_root := '" + package.Root() + "')");
+	Require(!load->HasError() && load->RowCount() == 1, "short_page package fixture failed to load");
+	auto explained = connection.Query(
+	    "EXPLAIN SELECT * FROM system.main.github_authenticated_repositories(secret := 'short_page_explain')");
+	if (explained->HasError()) {
+		throw std::runtime_error("short_page relation failed offline EXPLAIN: " + explained->GetError());
+	}
+	std::string explanation;
+	for (duckdb::idx_t row = 0; row < explained->RowCount(); row++) {
+		for (duckdb::idx_t column = 0; column < explained->ColumnCount(); column++) {
+			explanation += explained->GetValue(column, row).ToString();
+			explanation.push_back('\n');
+		}
+	}
+	Require(explanation.find("short_page") != std::string::npos,
+	        "real EXPLAIN output for a short_page relation omitted the literal pagination strategy");
+	Require(executor->anonymous_opens.load(std::memory_order_relaxed) == 0 &&
+	            executor->authenticated_opens.load(std::memory_order_relaxed) == 0,
+	        "offline EXPLAIN of a short_page relation entered Runtime");
+}
+
 // This is the whole-graph product oracle. Runtime owns the response programs;
 // Query sees only a ScanExecutor and safe counters while the permanent package
 // supplies the declarations consumed by Connector and Semantics.
@@ -281,6 +318,7 @@ int main(int argc, char **argv) {
 			throw std::invalid_argument("usage: package_product_contract_tests ABSOLUTE_REPOSITORY_ROOT");
 		}
 		TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(argv[1]);
+		TestShortPageReachesRealExplainOutput(argv[1]);
 		TestGeneratedRelationsExecuteThroughRuntime(argv[1]);
 		std::cout << "actual-DuckDB package product contract tests passed\n";
 		return EXIT_SUCCESS;

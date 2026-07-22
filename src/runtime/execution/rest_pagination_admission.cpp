@@ -68,7 +68,8 @@ bool HasSupportedRestPagination(const ScanPlan &plan, const HttpExecutionProfile
 	    (operation.response_source != PlannedResponseSource::ROOT_ARRAY &&
 	     operation.response_source != PlannedResponseSource::JSON_PATH_MANY) ||
 	    (plan.Pagination().Strategy() != PlannedPaginationStrategy::LINK_HEADER &&
-	     plan.Pagination().Strategy() != PlannedPaginationStrategy::RESPONSE_NEXT_URL)) {
+	     plan.Pagination().Strategy() != PlannedPaginationStrategy::RESPONSE_NEXT_URL &&
+	     plan.Pagination().Strategy() != PlannedPaginationStrategy::SHORT_PAGE)) {
 		return false;
 	}
 	const auto &pagination = plan.Pagination();
@@ -87,6 +88,12 @@ bool HasSupportedRestPagination(const ScanPlan &plan, const HttpExecutionProfile
 	}
 	const auto &target = pagination.Target();
 	const bool has_page_size = !target.page_size_parameter.empty();
+	// short_page has no external continuation signal; termination depends on
+	// comparing the decoded row count against a declared page size, so it
+	// cannot be admitted without one.
+	if (pagination.Strategy() == PlannedPaginationStrategy::SHORT_PAGE && !has_page_size) {
+		return false;
+	}
 	if (target.origin.scheme != operation.origin.scheme || target.origin.host != operation.origin.host ||
 	    target.origin.port != operation.origin.port || target.path != operation.path ||
 	    !IsSafeEncodedQueryName(target.page_number_parameter) || target.first_page == 0 || target.page_increment == 0 ||

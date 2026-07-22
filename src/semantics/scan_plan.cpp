@@ -181,7 +181,7 @@ PaginationPlan::PaginationPlan()
 
 void PaginationPlan::RequirePaginated() const {
 	if (strategy != PlannedPaginationStrategy::LINK_HEADER &&
-	    strategy != PlannedPaginationStrategy::RESPONSE_NEXT_URL) {
+	    strategy != PlannedPaginationStrategy::RESPONSE_NEXT_URL && strategy != PlannedPaginationStrategy::SHORT_PAGE) {
 		throw std::logic_error("pagination accessor invoked on a non-paginated strategy");
 	}
 }

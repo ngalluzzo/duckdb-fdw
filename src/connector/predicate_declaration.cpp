@@ -386,9 +386,14 @@ void ValidatePredicateMappings(const std::string &relation_name, const std::vect
 		// to the emitted wire key retained by that source's request binding.
 		const auto &remote_query_name = package_mapping ? conditional_binding->name : mapping.RemoteInputName();
 		const auto &pagination = operation->Rest().pagination;
-		const bool collides_with_pagination = pagination.Strategy() == CompiledPaginationStrategy::LINK_HEADER &&
-		                                      (remote_query_name == pagination.PageSizeParameter() ||
-		                                       remote_query_name == pagination.PageNumberParameter());
+		// link_next, response_next, and short_page all share the same
+		// structural page-size/page-number query bindings; a predicate must
+		// not collide with any of them, not just link_next's.
+		const bool paginated = pagination.Strategy() == CompiledPaginationStrategy::LINK_HEADER ||
+		                       pagination.Strategy() == CompiledPaginationStrategy::RESPONSE_NEXT_URL ||
+		                       pagination.Strategy() == CompiledPaginationStrategy::SHORT_PAGE;
+		const bool collides_with_pagination = paginated && (remote_query_name == pagination.PageSizeParameter() ||
+		                                                    remote_query_name == pagination.PageNumberParameter());
 		if (HasFixedQueryField(*operation, remote_query_name) || collides_with_pagination) {
 			throw std::invalid_argument("compiled predicate mapping conflicts with a fixed or pagination query field");
 		}

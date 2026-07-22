@@ -102,4 +102,59 @@ MalformedYamlPackageFixture BuildRepositoryMalformedYamlPackageFixture(const std
 	}
 }
 
+class ShortPagePackageFixture::State {
+public:
+	explicit State(std::string root_p) : root(std::move(root_p)) {
+	}
+
+	~State() noexcept {
+		(void)::nftw(root.c_str(), RemoveEntry, 32, FTW_DEPTH | FTW_PHYS);
+	}
+
+	std::string root;
+};
+
+ShortPagePackageFixture::ShortPagePackageFixture(std::shared_ptr<const State> state_p) : state(std::move(state_p)) {
+	if (!state) {
+		throw std::invalid_argument("short_page package fixture state cannot be empty");
+	}
+}
+
+const std::string &ShortPagePackageFixture::Root() const noexcept {
+	return state->root;
+}
+
+ShortPagePackageFixture BuildRepositoryShortPagePackageFixture(const std::string &absolute_repository_root) {
+	char pattern[] = "/private/tmp/duckdb-api-short-page-package-XXXXXX";
+	const auto *created = ::mkdtemp(pattern);
+	if (!created) {
+		throw std::runtime_error("could not create short_page package fixture root");
+	}
+	const std::string root = created;
+	try {
+		if (::mkdir((root + "/relations").c_str(), 0700) != 0) {
+			throw std::runtime_error("could not create short_page package fixture relations");
+		}
+		const std::string package_source = absolute_repository_root + "/connectors/github/";
+		WriteFile(root + "/connector.yaml", ReadFile(package_source + "connector.yaml"));
+		for (const auto &relation : {"authenticated_user", "duckdb_login_search_page", "viewer_repository_metrics"}) {
+			WriteFile(root + "/relations/" + std::string(relation) + ".yaml",
+			          ReadFile(package_source + "relations/" + std::string(relation) + ".yaml"));
+		}
+		auto repositories = ReadFile(package_source + "relations/authenticated_repositories.yaml");
+		const std::string needle = "strategy: link_next";
+		const auto position = repositories.find(needle);
+		if (position == std::string::npos) {
+			throw std::runtime_error("short_page package fixture source no longer declares link_next");
+		}
+		repositories.replace(position, needle.size(), "strategy: short_page");
+		WriteFile(root + "/relations/authenticated_repositories.yaml", repositories);
+		return ShortPagePackageFixture(
+		    std::shared_ptr<const ShortPagePackageFixture::State>(new ShortPagePackageFixture::State(root)));
+	} catch (...) {
+		(void)::nftw(root.c_str(), RemoveEntry, 32, FTW_DEPTH | FTW_PHYS);
+		throw;
+	}
+}
+
 } // namespace duckdb_api_test

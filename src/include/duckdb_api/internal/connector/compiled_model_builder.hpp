@@ -39,6 +39,13 @@ public:
 	                                                 std::uint64_t page_size, std::string page_number_parameter,
 	                                                 std::uint64_t first_page, std::uint64_t page_increment,
 	                                                 std::uint64_t max_pages_per_scan);
+	// SHORT_PAGE pagination (RFC 0019): identical field set to LinkPagination;
+	// page_size_parameter/page_size are required (not optional) since
+	// termination is inferred from comparing the decoded row count against
+	// the declared page size, with no external continuation signal.
+	static CompiledPagination ShortPagePagination(std::string page_size_parameter, std::uint64_t page_size,
+	                                              std::string page_number_parameter, std::uint64_t first_page,
+	                                              std::uint64_t page_increment, std::uint64_t max_pages_per_scan);
 	static CompiledQueryParameter FixedQueryParameter(std::string name, CompiledScalarValue decoded_value);
 	static CompiledQueryParameter RelationInputQueryParameter(std::string name, std::string input_id);
 	static CompiledQueryParameter ConditionalInputQueryParameter(std::string name, std::string conditional_id);

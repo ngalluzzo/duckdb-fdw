@@ -366,38 +366,50 @@ encoding. Fixed headers are non-sensitive structural values. `Authorization`,
 `Proxy-Authorization`, `Cookie`, and other credential-bearing placements are
 not fixed author metadata.
 
-Pagination is either disabled or sequential mutable `Link: rel=next`. An
-accepted continuation must remain on the exact operation origin and path.
-Pagination is pull-driven, one page at a time, bounded by positive page and
-scan ceilings, and does not grant ordering, snapshot, parallelism, resume,
-deduplication, retry, or cache guarantees.
+Pagination is `disabled`, sequential mutable `Link: rel=next` (`link_next`),
+a body-embedded next-page URL (`response_next`), or count-terminated with no
+continuation signal at all (`short_page`). An accepted continuation must
+remain on the exact operation origin and path. Pagination is pull-driven, one
+page at a time, bounded by positive page and scan ceilings, and does not
+grant ordering, snapshot, parallelism, resume, deduplication, retry, or cache
+guarantees.
 
-The REST pagination strategy set is closed at `{disabled, link_next}`. Common
-real-world shapes outside this set are rejected by the closed schema rather
-than silently reinterpreted: response-body-embedded next URLs (for example an
-`info.next` absolute link in the JSON body), numeric offset or page-number
-traversal, cursor-in-body strategies, and reverse or bidirectional traversal.
-GraphQL REST-like body pagination is likewise outside the structured GraphQL
-profile below. A later accepted contract and pre-freeze evidence would be
-required to admit any such strategy; the compiler rejects the declaration
-today (verified as `DUCKDB_API_UNSUPPORTED_DECLARATION` in the schema phase).
+The REST pagination strategy set is closed at `{disabled, link_next,
+response_next, short_page}`. Common real-world shapes outside this set are
+rejected by the closed schema rather than silently reinterpreted: an opaque
+body-embedded cursor that drives the next request directly rather than being
+verified against a locally reconstructed expectation, and reverse or
+bidirectional traversal. GraphQL REST-like body pagination is likewise
+outside the structured GraphQL profile below. A later accepted contract and
+pre-freeze evidence would be required to admit any such strategy; the
+compiler rejects the declaration today (verified as
+`DUCKDB_API_UNSUPPORTED_DECLARATION` in the schema phase).
 
-**Candidate revision accepted by [RFC 0016](rfcs/0016-decide-body-signaled-rest-pagination.md),
-pending `0.10.0` implementation.** The narrow body-URL reconstruct-and-verify
-shape named `response_next` — architecturally identical to `link_next` except
-the continuation signal is read from a new required `next_url_path` JSON path
-field (under the existing `json_path_v1` extractor grammar) rather than an
-HTTP `Link` header, reusing the exact reconstruct-and-verify target-validation
-rule — has been accepted by RFC 0016 (Accepted 2026-07-21, product-manager
-approval recorded) and committed for the `0.10.0` release. Until `0.10.0`
-ships, the closed set remains `{disabled, link_next}` as enforced by the
-schema: a package declaring `response_next` fails closed at the `SCHEMA` phase
-with `DUCKDB_API_UNSUPPORTED_DECLARATION`, exactly as the unmodified closed
-schema requires. The `1.0.0` candidate freeze records this as an
-`accepted_candidate_revision` (see `release/1.0.0/freeze.md`). The broader
-category — numeric offset/page-number traversal, cursor-in-body strategies,
-and reverse or bidirectional traversal — remains a permanent exclusion;
-admitting any of those still requires its own later accepted RFC.
+`response_next` (accepted by [RFC 0016](rfcs/0016-decide-body-signaled-rest-pagination.md),
+shipped in `0.10.0`) is architecturally identical to `link_next` except the
+continuation signal is read from a required `next_url_path` JSON path field
+(under the `json_path_v1` extractor grammar) rather than an HTTP `Link`
+header, reusing the exact reconstruct-and-verify target-validation rule.
+
+`short_page` (accepted and shipped by [RFC 0019](rfcs/0019-add-short-page-pagination.md))
+reuses the identical `page_size_parameter`/`page_size`/`page_number_parameter`/
+`first_page`/`page_increment`/`max_pages_per_scan` fields `link_next` already
+requires, with one difference: `page_size_parameter`/`page_size` are
+**required**, not optional, since termination depends on comparing the
+just-decoded page's row count against a known page size. Unlike
+`link_next`/`response_next`, there is no external continuation signal to
+validate at all — a page with fewer rows than the declared page size (or an
+empty page) exhausts the scan; `max_pages_per_scan` remains the hard backstop
+if a server never returns a short page. This covers plain `?page=N&page_size=M`
+or `?offset=N&limit=M` REST APIs that signal exhaustion only by page size,
+without a `Link` header or a body-embedded next-page URL.
+
+The broader exclusion covering an opaque body-embedded cursor used directly
+to build the next request (a materially different, less conservative trust
+flow than every accepted strategy's reconstruct-and-verify model — see RFC
+0016's and RFC 0019's Alternatives sections) and reverse or bidirectional
+traversal remains permanent; admitting either still requires its own later
+accepted RFC.
 
 ## Structured GraphQL operations
 
@@ -574,17 +586,19 @@ schemas. It does not contain author-chosen SQL names, automatic discovery,
 URLs as package roots, OpenAPI or GraphQL introspection import, raw GraphQL
 documents, dynamic schemas, write operations, connection profiles,
 partitions, providers, enrichment, retries, caching, rate-limit waiting,
-remote projection/order/limit declarations, response-body-URL,
-offset/page-number, or cursor-in-body pagination strategies, custom native
-code, WASM, or a public C++ ABI.
+remote projection/order/limit declarations, an opaque body-embedded cursor
+used directly to build the next request, reverse or bidirectional traversal,
+custom native code, WASM, or a public C++ ABI.
 
 Adding any such capability requires a later accepted contract. An
 implementation must reject the declaration rather than accept and ignore it.
 
-> **Accepted candidate revision pending implementation.** The
-> response-body-URL reconstruct-and-verify shape (`response_next`) is
-> accepted by [RFC 0016](rfcs/0016-decide-body-signaled-rest-pagination.md)
-> for the `0.10.0` release; see the REST pagination section above for the
-> full status. Numeric offset/page-number traversal, cursor-in-body
-> strategies, and reverse or bidirectional traversal remain permanent
-> exclusions of this boundary.
+The REST pagination strategy set is `{disabled, link_next, response_next,
+short_page}`: `response_next` (the response-body-URL reconstruct-and-verify
+shape) was accepted by [RFC 0016](rfcs/0016-decide-body-signaled-rest-pagination.md)
+and shipped in `0.10.0`; `short_page` (count-terminated, no external
+continuation signal) was accepted and shipped by
+[RFC 0019](rfcs/0019-add-short-page-pagination.md). See the REST pagination
+section above for both strategies' full grammar. An opaque body-embedded
+cursor used directly to build the next request, and reverse or bidirectional
+traversal, remain permanent exclusions of this boundary.

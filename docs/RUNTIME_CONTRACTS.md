@@ -596,6 +596,41 @@ continuation long enough for the common scan ledger to own this terminal
 `RESOURCE/pages` decision; the cursor state machine does not reclassify the
 same ceiling as a pagination-policy failure.
 
+### Count-terminated REST pagination (`short_page`)
+
+`short_page` reuses the identical local page-reconstruction model
+`link_next`/`response_next` already establish (same
+`page_number_parameter`/`first_page`/`page_increment`-driven request
+sequence) but has **no server-supplied continuation signal at all**:
+exhaustion is inferred purely from comparing the just-decoded page's row
+count against the relation's declared `page_size` (required for this
+strategy, unlike its optional status for `link_next`/`response_next`). A page
+with fewer rows than `page_size`, or zero rows, exhausts the scan; otherwise
+the next page is `current_page + page_increment`, bounded as always by
+`max_pages_per_scan`.
+
+`LinkPaginationState::AdvanceByCount` (`src/runtime/pagination/link_pagination.cpp`)
+is a third entry point alongside `Advance` (header-sourced) and `AdvanceBody`
+(body-sourced), reusing the same `current_page`/`seen_pages`/`exhausted`/
+`failed` sequence bookkeeping — none of those fields store a validated target
+string, so no parallel state object is needed. Because there is no external
+signal, `AdvanceByCount` performs no reconstruct-and-verify step at all: it
+is strictly narrower than the other two entry points, with no replay,
+malformed-target, or cross-origin failure category (none of those apply when
+nothing received is ever compared against anything). The decoded row count
+it consumes (`page.rows.size()`, from `DecodeJsonPage` in
+`src/runtime/execution/http_paginated_scan.cpp`) is already computed by the
+same single decode pass that produces relation rows on every strategy, so
+`short_page` introduces no new decode pass and no new resource cost.
+
+`max_pages_per_scan` remains the sole backstop against a server that never
+returns a short page — a legitimate but resource-bounded outcome
+(`RESOURCE/pages`), not a hang. `short_page` trades away one correctness
+signal the other two strategies have: their reconstruct-and-verify model
+detects server-side pagination drift (an off-sequence Link header or body
+URL) as a typed `POLICY` failure; `short_page` has no equivalent cross-check,
+since there is no external signal to compare against.
+
 ## Typed rows and DuckDB vectors
 
 Runtime yields schema-aligned rows of structural typed values. Each value has a

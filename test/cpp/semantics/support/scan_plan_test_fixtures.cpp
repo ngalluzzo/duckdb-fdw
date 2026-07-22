@@ -72,6 +72,10 @@ public:
 	                                       duckdb_api::PredicateDecisionCategory predicate_category,
 	                                       bool complete_residual);
 	static duckdb_api::ScanPlan GenericPagination(const std::string &secret_name);
+	// RFC 0019: a short_page-paginated variant of GenericPagination, otherwise
+	// identical (same relation shape, same fixed destination), for exercising
+	// LinkPaginationState::AdvanceByCount directly.
+	static duckdb_api::ScanPlan ShortPagePagination(const std::string &secret_name);
 	static duckdb_api::ScanPlan DistinctRestQueryPath(const std::string &secret_name);
 	static duckdb_api::ScanPlan Graphql(const std::string *secret_name, GraphqlLocalResidualProfile profile);
 	static bool RejectsRestQueryBinding(RestQueryBindingConstructionCounterexample counterexample);
@@ -83,9 +87,9 @@ private:
 	static void RequireBearer(duckdb_api::ScanPlan &plan, const std::string &secret_name);
 	static void RequireApiKey(duckdb_api::ScanPlan &plan, const std::string &secret_name,
 	                          duckdb_api::PlannedCredentialPlacement placement, std::string placement_name);
-	static void EnablePagination(duckdb_api::ScanPlan &plan, std::string page_size_parameter, uint64_t page_size,
-	                             std::string page_number_parameter, uint64_t max_pages,
-	                             uint64_t response_bytes_per_page, uint64_t response_bytes_per_scan,
+	static void EnablePagination(duckdb_api::ScanPlan &plan, duckdb_api::PlannedPaginationStrategy strategy,
+	                             std::string page_size_parameter, uint64_t page_size, std::string page_number_parameter,
+	                             uint64_t max_pages, uint64_t response_bytes_per_page, uint64_t response_bytes_per_scan,
 	                             uint64_t records_per_page, uint64_t records_per_scan, uint64_t extracted_string_bytes);
 	static void SetRestOperation(duckdb_api::ScanPlan &plan, duckdb_api::PlannedRestOperation operation);
 };
@@ -152,12 +156,14 @@ void ScanPlanFixtureBuilder::RequireApiKey(duckdb_api::ScanPlan &plan, const std
 	plan.authentication_obligation.destination = {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443};
 }
 
-void ScanPlanFixtureBuilder::EnablePagination(duckdb_api::ScanPlan &plan, std::string page_size_parameter,
-                                              uint64_t page_size, std::string page_number_parameter, uint64_t max_pages,
+void ScanPlanFixtureBuilder::EnablePagination(duckdb_api::ScanPlan &plan,
+                                              duckdb_api::PlannedPaginationStrategy strategy,
+                                              std::string page_size_parameter, uint64_t page_size,
+                                              std::string page_number_parameter, uint64_t max_pages,
                                               uint64_t response_bytes_per_page, uint64_t response_bytes_per_scan,
                                               uint64_t records_per_page, uint64_t records_per_scan,
                                               uint64_t extracted_string_bytes) {
-	plan.pagination.strategy = duckdb_api::PlannedPaginationStrategy::LINK_HEADER;
+	plan.pagination.strategy = strategy;
 	plan.pagination.dependency = duckdb_api::PlannedPageDependency::SEQUENTIAL;
 	plan.pagination.consistency = duckdb_api::PlannedPageConsistency::MUTABLE;
 	plan.pagination.link_relation = duckdb_api::PlannedLinkRelation::NEXT;
@@ -294,7 +300,8 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Repository(const std::string &secre
 	                       {"fork", "BOOLEAN", false, "$.fork"},
 	                       {"archived", "BOOLEAN", false, "$.archived"},
 	                       {"visibility", "VARCHAR", false, "$.visibility"}};
-	EnablePagination(plan, "per_page", 100, "page", 32, 8 * 1024 * 1024, 64 * 1024 * 1024, 100, 3200, 512);
+	EnablePagination(plan, duckdb_api::PlannedPaginationStrategy::LINK_HEADER, "per_page", 100, "page", 32,
+	                 8 * 1024 * 1024, 64 * 1024 * 1024, 100, 3200, 512);
 	RequireBearer(plan, secret_name);
 	if (predicate_category == duckdb_api::PredicateDecisionCategory::SUPERSET) {
 		plan.remote_predicate = duckdb_api::PlannedPredicate::VISIBILITY_EQUALS_PRIVATE;
@@ -330,7 +337,30 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::GenericPagination(const std::string
 	                        "$.records[*]"});
 	plan.output_columns = {{"record_id", "BIGINT", false, "$.record_id"},
 	                       {"record_label", "VARCHAR", false, "$.record_label"}};
-	EnablePagination(plan, "batch_size", 3, "cursor_page", 4, 1024, 4096, 3, 12, 96);
+	EnablePagination(plan, duckdb_api::PlannedPaginationStrategy::LINK_HEADER, "batch_size", 3, "cursor_page", 4, 1024,
+	                 4096, 3, 12, 96);
+	RequireBearer(plan, secret_name);
+	return plan;
+}
+
+duckdb_api::ScanPlan ScanPlanFixtureBuilder::ShortPagePagination(const std::string &secret_name) {
+	auto plan =
+	    Common("fixture_pagination_catalog", "test-1", "fixture_short_page_records", "fixture:short-page-records");
+	plan.domain = duckdb_api::BaseDomain::PAGINATED_JSON_PATH_RECORDS;
+	SetRestOperation(plan, {"fixture_short_page_records",
+	                        duckdb_api::PlannedHttpMethod::GET,
+	                        duckdb_api::PlannedCardinality::ZERO_TO_MANY,
+	                        duckdb_api::PlannedReplaySafety::SAFE,
+	                        {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
+	                        "/fixtures/short-page-records",
+	                        {{"batch_size", "3"}, {"cursor_page", "1"}},
+	                        {{"X-Connector-Fixture", "short-page-shape"}},
+	                        duckdb_api::PlannedResponseSource::JSON_PATH_MANY,
+	                        "$.records[*]"});
+	plan.output_columns = {{"record_id", "BIGINT", false, "$.record_id"},
+	                       {"record_label", "VARCHAR", false, "$.record_label"}};
+	EnablePagination(plan, duckdb_api::PlannedPaginationStrategy::SHORT_PAGE, "batch_size", 3, "cursor_page", 4, 1024,
+	                 4096, 3, 12, 96);
 	RequireBearer(plan, secret_name);
 	return plan;
 }
@@ -389,7 +419,8 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::DistinctRestQueryPath(const std::st
 	plan.output_columns = {{"record_id", "compat-bigint", false, "compat-record-id-path"},
 	                       {"label", "compat-varchar", true, "compat-label-path"},
 	                       {"active", "compat-boolean", false, "compat-active-path"}};
-	EnablePagination(plan, "page_size", 25, "page", 4, 1024, 4096, 25, 100, 128);
+	EnablePagination(plan, duckdb_api::PlannedPaginationStrategy::LINK_HEADER, "page_size", 25, "page", 4, 1024, 4096,
+	                 25, 100, 128);
 	RequireBearer(plan, secret_name);
 	plan.remote_predicate = duckdb_api::PlannedPredicate::TYPED_EQUALITY;
 	plan.remote_accuracy = duckdb_api::RemotePredicateAccuracy::SUPERSET;
@@ -711,6 +742,10 @@ duckdb_api::ScanPlan BuildValidApiKeyPlanFixture(const std::string &exact_logica
 
 duckdb_api::ScanPlan BuildValidPaginatedPlanFixture(const std::string &exact_logical_secret_name) {
 	return ScanPlanFixtureBuilder::GenericPagination(exact_logical_secret_name);
+}
+
+duckdb_api::ScanPlan BuildValidShortPagePlanFixture(const std::string &exact_logical_secret_name) {
+	return ScanPlanFixtureBuilder::ShortPagePagination(exact_logical_secret_name);
 }
 
 duckdb_api::ScanPlan BuildDistinctRestQueryPathScanPlanFixture(const std::string &exact_logical_secret_name) {

@@ -263,7 +263,7 @@ struct ScanResourceBudgets {
 	bool IsWithinPaginatedScanBounds() const;
 };
 
-enum class PlannedPaginationStrategy { DISABLED, LINK_HEADER, RESPONSE_NEXT_URL, GRAPHQL_CURSOR };
+enum class PlannedPaginationStrategy { DISABLED, LINK_HEADER, RESPONSE_NEXT_URL, GRAPHQL_CURSOR, SHORT_PAGE };
 enum class PlannedPageDependency { SEQUENTIAL };
 enum class PlannedPageConsistency { MUTABLE };
 enum class PlannedLinkRelation { NEXT };

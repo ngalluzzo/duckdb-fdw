@@ -258,6 +258,59 @@ void TestUnsupportedPaginationStrategyRejected() {
 	                       "a response-body URL pagination strategy escaped the closed v1 pagination set");
 }
 
+// RFC 0019: authenticated_repositories.yaml already declares page_size_parameter/
+// page_size (link_next's RFC 0017 optionality does not remove them here), so a
+// short_page relation reusing this exact shape needs only its strategy changed.
+void TestShortPagePaginationCompiles() {
+	TemporaryPackage package;
+	duckdb_api_test::WriteGithubPackage(package);
+	package.Write("relations/authenticated_repositories.yaml",
+	              duckdb_api_test::ReplaceOnce(GithubRelation("authenticated_repositories"), "strategy: link_next",
+	                                           "strategy: short_page"));
+	NeverCancel cancellation;
+	const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
+	Require(result.Succeeded() && result.Generation() != nullptr && result.Diagnostics().empty(),
+	        "a short_page relation with a complete link_next-shaped declaration was rejected");
+}
+
+void TestShortPageMissingPageSizeRejected() {
+	TemporaryPackage package;
+	duckdb_api_test::WriteGithubPackage(package);
+	auto source = duckdb_api_test::ReplaceOnce(GithubRelation("authenticated_repositories"), "strategy: link_next",
+	                                           "strategy: short_page");
+	source = duckdb_api_test::ReplaceOnce(source, "      page_size_parameter: per_page\n      page_size: 100\n", "");
+	package.Write("relations/authenticated_repositories.yaml", source);
+	NeverCancel cancellation;
+	RequireFirstDiagnostic(duckdb_api_test::CompileRoot(package.Root(), cancellation),
+	                       PackageDiagnosticCode::MISSING_FIELD, PackageDiagnosticPhase::SCHEMA,
+	                       "short_page compiled without a declared page size, unlike link_next's RFC 0017 optionality");
+}
+
+void TestShortPagePageSizeNameCollisionRejected() {
+	TemporaryPackage package;
+	duckdb_api_test::WriteGithubPackage(package);
+	auto source = duckdb_api_test::ReplaceOnce(GithubRelation("authenticated_repositories"), "strategy: link_next",
+	                                           "strategy: short_page");
+	source = duckdb_api_test::ReplaceOnce(source, "page_size_parameter: per_page", "page_size_parameter: page");
+	package.Write("relations/authenticated_repositories.yaml", source);
+	NeverCancel cancellation;
+	const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
+	Require(!result.Succeeded() && !result.Diagnostics().empty(),
+	        "short_page accepted a page-size parameter colliding with its page-number parameter");
+}
+
+void TestShortPageNonPositiveIncrementRejected() {
+	TemporaryPackage package;
+	duckdb_api_test::WriteGithubPackage(package);
+	auto source = duckdb_api_test::ReplaceOnce(GithubRelation("authenticated_repositories"), "strategy: link_next",
+	                                           "strategy: short_page");
+	source = duckdb_api_test::ReplaceOnce(source, "page_increment: 1", "page_increment: 0");
+	package.Write("relations/authenticated_repositories.yaml", source);
+	NeverCancel cancellation;
+	const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
+	Require(!result.Succeeded() && !result.Diagnostics().empty(), "short_page accepted a non-positive page_increment");
+}
+
 void TestDiagnosticCodePhaseContract() {
 	{
 		TemporaryPackage package;
@@ -296,6 +349,10 @@ int main() {
 		TestInvalidIdentifiersStayDiagnosticOnly();
 		TestDiagnosticCodePhaseContract();
 		TestUnsupportedPaginationStrategyRejected();
+		TestShortPagePaginationCompiles();
+		TestShortPageMissingPageSizeRejected();
+		TestShortPagePageSizeNameCollisionRejected();
+		TestShortPageNonPositiveIncrementRejected();
 		std::cout << "package schema contract tests passed" << std::endl;
 		return 0;
 	} catch (const std::exception &error) {

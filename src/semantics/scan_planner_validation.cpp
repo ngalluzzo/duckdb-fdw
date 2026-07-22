@@ -114,7 +114,8 @@ void ValidatePagination(const CompiledOperation &operation, const CompiledResour
 		return;
 	}
 	if ((pagination.Strategy() != CompiledPaginationStrategy::LINK_HEADER &&
-	     pagination.Strategy() != CompiledPaginationStrategy::RESPONSE_NEXT_URL) ||
+	     pagination.Strategy() != CompiledPaginationStrategy::RESPONSE_NEXT_URL &&
+	     pagination.Strategy() != CompiledPaginationStrategy::SHORT_PAGE) ||
 	    PlanPageDependency(pagination.Dependency()) != PlannedPageDependency::SEQUENTIAL ||
 	    PlanPageConsistency(pagination.Consistency()) != PlannedPageConsistency::MUTABLE ||
 	    PlanLinkRelation(pagination.LinkRelation()) != PlannedLinkRelation::NEXT ||
@@ -130,7 +131,14 @@ void ValidatePagination(const CompiledOperation &operation, const CompiledResour
 	     pagination.NextUrlPath().find("[*]") != std::string::npos)) {
 		throw std::logic_error("response_next pagination requires a non-collection JSON path");
 	}
-	// RFC 0017: page_size is optional. Skip its checks when not declared.
+	// RFC 0019: short_page has no external continuation signal, so it must
+	// declare a page size to compare the decoded row count against.
+	if (pagination.Strategy() == CompiledPaginationStrategy::SHORT_PAGE && pagination.PageSizeParameter().empty()) {
+		throw std::logic_error("short_page pagination requires a declared page size");
+	}
+	// RFC 0017: page_size is optional for link_next/response_next. Skip its
+	// checks when not declared; short_page's compiled constructor already
+	// guarantees it is always declared, so has_page_size is always true there.
 	const bool has_page_size = !pagination.PageSizeParameter().empty();
 	if (pagination.PageNumberParameter().empty() || pagination.FirstPage() == 0 || pagination.PageIncrement() == 0 ||
 	    pagination.MaxPagesPerScan() == 0 || pagination.MaxPagesPerScan() > PAGINATION_MAX_PAGES_PER_SCAN ||

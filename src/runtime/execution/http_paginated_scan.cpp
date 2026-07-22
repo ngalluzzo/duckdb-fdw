@@ -289,11 +289,19 @@ private:
 		                           control);
 		CheckState(control, allowance.deadline);
 		// response_next reads the continuation signal from the decoded body
-		// (page.next_url); link_next reads it from response headers. Both
-		// share the same reconstruct-and-verify state machine.
-		const auto transition = admitted_profile->PaginationStrategy() == PlannedPaginationStrategy::RESPONSE_NEXT_URL
-		                            ? pagination.AdvanceBody(page.next_url)
-		                            : pagination.Advance(response.metadata.link_field_values);
+		// (page.next_url); link_next reads it from response headers; both
+		// share the same reconstruct-and-verify state machine. short_page
+		// (RFC 0019) has no external signal at all — exhaustion is inferred
+		// purely from the just-decoded row count against the declared page
+		// size, using a value already computed for row production below.
+		LinkPageTransition transition;
+		if (admitted_profile->PaginationStrategy() == PlannedPaginationStrategy::RESPONSE_NEXT_URL) {
+			transition = pagination.AdvanceBody(page.next_url);
+		} else if (admitted_profile->PaginationStrategy() == PlannedPaginationStrategy::SHORT_PAGE) {
+			transition = pagination.AdvanceByCount(page.rows.size());
+		} else {
+			transition = pagination.Advance(response.metadata.link_field_values);
+		}
 		const auto retained_memory = page.retained_memory_bytes + response.metadata.retained_bytes;
 		accounting.CommitDecodedPage({static_cast<uint64_t>(page.rows.size()), retained_memory});
 		decoded.Install(std::move(page.rows));

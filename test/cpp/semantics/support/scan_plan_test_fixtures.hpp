@@ -195,6 +195,10 @@ duckdb_api::ScanPlan BuildValidApiKeyPlanFixture(const std::string &exact_logica
                                                  duckdb_api::PlannedCredentialPlacement placement,
                                                  std::string placement_name);
 duckdb_api::ScanPlan BuildValidPaginatedPlanFixture(const std::string &exact_logical_secret_name);
+// RFC 0019: a short_page-paginated variant of BuildValidPaginatedPlanFixture,
+// otherwise identical (same relation shape, same fixed destination), for
+// exercising LinkPaginationState::AdvanceByCount directly.
+duckdb_api::ScanPlan BuildValidShortPagePlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::string &exact_logical_secret_name);
 // Bounded package-like REST query/path provider for Runtime consumer tests. It
 // contains fixed, relation-input, conditional-input, page-size, and page-number

@@ -351,6 +351,33 @@ void TestResponseNextBaseDomainEquivalence() {
 	        "response_next or link_next failed to reject root_object as a paginated response source");
 }
 
+// RFC 0019 review resolved short_page's BaseDomain classification directly
+// from PlanBaseDomain's logic: it groups with LINK_HEADER/RESPONSE_NEXT_URL
+// because the domain depends only on the response source, never on which
+// mechanism (header, body URL, or decoded row count) signals continuation.
+// This test pins that resolved decision.
+void TestShortPageBaseDomainEquivalence() {
+	using duckdb_api::CompiledPaginationStrategy;
+	using duckdb_api::CompiledResponseSource;
+	const std::vector<std::pair<CompiledResponseSource, const char *>> sources = {
+	    {CompiledResponseSource::JSON_PATH_MANY, "terminal_collection"},
+	    {CompiledResponseSource::ROOT_ARRAY, "root_array"},
+	};
+	for (const auto &source : sources) {
+		const auto link_domain = PlanBaseDomain(source.first, CompiledPaginationStrategy::LINK_HEADER);
+		const auto short_page_domain = PlanBaseDomain(source.first, CompiledPaginationStrategy::SHORT_PAGE);
+		Require(link_domain == short_page_domain,
+		        std::string("short_page BaseDomain diverged from link_next for ") + source.second);
+	}
+	bool threw = false;
+	try {
+		(void)PlanBaseDomain(CompiledResponseSource::ROOT_OBJECT, CompiledPaginationStrategy::SHORT_PAGE);
+	} catch (const std::logic_error &) {
+		threw = true;
+	}
+	Require(threw, "short_page failed to reject root_object as a paginated response source");
+}
+
 } // namespace
 
 int main() {
@@ -359,6 +386,7 @@ int main() {
 		TestAuthenticatedRepositoriesProfile();
 		TestPaginationCounterexamplesAreIsolated();
 		TestResponseNextBaseDomainEquivalence();
+		TestShortPageBaseDomainEquivalence();
 		std::cout << "scan plan pagination contract tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

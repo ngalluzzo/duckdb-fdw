@@ -72,7 +72,8 @@
     "rest": [
       "disabled",
       "link_next",
-      "response_next"
+      "response_next",
+      "short_page"
     ],
     "graphql": [
       "relay_forward"

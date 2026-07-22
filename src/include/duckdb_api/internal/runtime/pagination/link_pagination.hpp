@@ -61,6 +61,13 @@ public:
 	// exhausted). A non-empty URL is validated against the same
 	// reconstruct-and-verify rule as a Link header target.
 	LinkPageTransition AdvanceBody(const std::string &next_url);
+	// RFC 0019: count-terminated continuation for short_page. There is no
+	// external signal to validate — exhaustion is inferred purely from
+	// comparing decoded_row_count against the admitted profile's declared
+	// page size. Reuses this class's existing sequence bookkeeping; no
+	// parallel state object is needed since no field here stores a
+	// validated target string.
+	LinkPageTransition AdvanceByCount(std::size_t decoded_row_count);
 
 	uint64_t CurrentPage() const noexcept;
 	bool Exhausted() const noexcept;

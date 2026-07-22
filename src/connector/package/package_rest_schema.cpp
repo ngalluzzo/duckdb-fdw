@@ -153,18 +153,8 @@ RestPaginationDeclaration DecodeRestPaginationSchema(const SchemaReader &reader)
 		return pagination;
 	}
 	const bool response_next = pagination.strategy.value == "response_next";
-	if (!response_next) {
-		RequireValue(pagination.strategy, "link_next", PackageDiagnosticCode::UNSUPPORTED_DECLARATION,
-		             PackageDiagnosticPhase::SCHEMA, reader.Diagnostics());
-		// response_next authors who typed the strategy field correctly but
-		// omitted next_url_path would not reach this branch; the unsupported-
-		// declaration diagnostic above is the only fail-closed path for an
-		// unknown strategy value.
-		if (reader.Field("next_url_path") != nullptr) {
-			reader.Diagnostics().Add(PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
-			                         reader.FieldMark("next_url_path"));
-		}
-	} else {
+	const bool short_page = pagination.strategy.value == "short_page";
+	if (response_next) {
 		// response_next requires next_url_path; absence is a missing-field
 		// diagnostic at the SCHEMA phase, mirroring how link_next treats its
 		// shared link-style fields below.
@@ -175,14 +165,42 @@ RestPaginationDeclaration DecodeRestPaginationSchema(const SchemaReader &reader)
 			reader.Diagnostics().Add(PackageDiagnosticCode::INVALID_TYPE, PackageDiagnosticPhase::SCHEMA,
 			                         pagination.next_url_path.mark);
 		}
+	} else if (short_page) {
+		// short_page (RFC 0019) has no body-embedded continuation signal.
+		if (reader.Field("next_url_path") != nullptr) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
+			                         reader.FieldMark("next_url_path"));
+		}
+	} else {
+		RequireValue(pagination.strategy, "link_next", PackageDiagnosticCode::UNSUPPORTED_DECLARATION,
+		             PackageDiagnosticPhase::SCHEMA, reader.Diagnostics());
+		// response_next/short_page authors who typed the strategy field
+		// correctly but hit one of the branches above would not reach here;
+		// the unsupported-declaration diagnostic above is the only
+		// fail-closed path for an unknown strategy value.
+		if (reader.Field("next_url_path") != nullptr) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
+			                         reader.FieldMark("next_url_path"));
+		}
 	}
-	// RFC 0017: page_size_parameter and page_size are optional. Many APIs
-	// have a server-fixed page size and only declare page_number.
+	// RFC 0017: page_size_parameter and page_size are optional for link_next
+	// and response_next — many APIs have a server-fixed page size and only
+	// declare page_number. RFC 0019's short_page requires both: termination
+	// is undefined without a known page size to compare the decoded row
+	// count against.
 	for (const auto *name : {"dependency", "consistency", "target_scope", "page_number_parameter", "first_page",
 	                         "page_increment", "max_pages_per_scan"}) {
 		if (reader.Field(name) == nullptr) {
 			reader.Diagnostics().Add(PackageDiagnosticCode::MISSING_FIELD, PackageDiagnosticPhase::SCHEMA,
 			                         reader.FieldMark(name));
+		}
+	}
+	if (short_page) {
+		for (const auto *name : {"page_size_parameter", "page_size"}) {
+			if (reader.Field(name) == nullptr) {
+				reader.Diagnostics().Add(PackageDiagnosticCode::MISSING_FIELD, PackageDiagnosticPhase::SCHEMA,
+				                         reader.FieldMark(name));
+			}
 		}
 	}
 	RequireValue(pagination.dependency, "sequential", PackageDiagnosticCode::UNSUPPORTED_DECLARATION,
