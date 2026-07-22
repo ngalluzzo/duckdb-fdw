@@ -35,9 +35,9 @@ auth:
 
 resources:
   max_response_bytes_per_page: 65536
-  max_response_bytes_per_scan: 65536
+  max_response_bytes_per_scan: 2752512
   max_records_per_page: 20
-  max_records_per_scan: 20
+  max_records_per_scan: 840
   max_extracted_string_bytes: 256
 
 operations:
@@ -59,9 +59,20 @@ operations:
           encoding: form_urlencoded
           omit_when_unbound: true
           omit_when_null: true
+        - name: page
+          literal: "1"
+          encoding: form_urlencoded
       headers: []
     response:
       source: terminal_collection
       records: $.results[*]
     pagination:
-      strategy: disabled
+      strategy: response_next
+      dependency: sequential
+      consistency: mutable
+      target_scope: exact_operation_origin_and_path
+      next_url_path: $.info.next
+      page_number_parameter: page
+      first_page: 1
+      page_increment: 1
+      max_pages_per_scan: 42

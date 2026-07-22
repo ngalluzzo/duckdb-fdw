@@ -1,6 +1,6 @@
 api_version: duckdb_api/v1
 kind: fixture_index
-package_digest: sha256.f645e62793bcea089475657a68b0e6bd5a76d041bfb23bf4459102a0c5cbe08d
+package_digest: sha256.0855ea7441bc7f521175c8c21166ddc6277034f1e357a582e474732a8d62ca62
 
 cases:
   - id: rickandmorty_pilot_episode_base
@@ -154,7 +154,14 @@ cases:
       - column_character_search_origin_name_null_rejected
       - column_character_search_origin_name_string_budget_boundary
       - column_character_search_origin_name_string_budget_one_over_rejected
-      - pagination_character_search_search_characters_single_page_termination
+      - pagination_character_search_search_characters_first_page
+      - pagination_character_search_search_characters_multi_page
+      - pagination_character_search_search_characters_termination
+      - pagination_character_search_search_characters_encoded_target
+      - pagination_character_search_search_characters_malformed_target_rejected
+      - pagination_character_search_search_characters_replayed_target_rejected
+      - pagination_character_search_search_characters_max_pages_exhausted
+      - pagination_character_search_search_characters_next_field_wrong_type_rejected
       - resource_character_search_max_response_bytes_per_page_boundary
       - resource_character_search_max_response_bytes_per_page_one_over_rejected
       - resource_character_search_max_response_bytes_per_scan_boundary
@@ -183,6 +190,7 @@ cases:
             path: /api/character
             query:
               - {name: status, encoded_value: Alive}
+              - {name: page, encoded_value: "1"}
             authorization: none
           response:
             status: 200
@@ -195,7 +203,7 @@ cases:
       rows:
         - {id: 1, name: Rick Sanchez, status: Alive, species: Human, origin_name: "Earth (C-137)"}
         - {id: 3, name: Summer Smith, status: Alive, species: Human, origin_name: "Earth (Replacement Dimension)"}
-      explain: {protocol: rest, pagination: disabled, auth: anonymous}
+      explain: {protocol: rest, pagination: response_next, auth: anonymous}
 
   - id: rickandmorty_character_search_status_unbound
     relation: character_search
@@ -211,7 +219,8 @@ cases:
             method: GET
             origin: {scheme: https, host: rickandmortyapi.com, port: 443}
             path: /api/character
-            query: []
+            query:
+              - {name: page, encoded_value: "1"}
             authorization: none
           response:
             status: 200
@@ -224,7 +233,7 @@ cases:
       rows:
         - {id: 1, name: Rick Sanchez, status: Alive, species: Human, origin_name: "Earth (C-137)"}
         - {id: 2, name: Morty Smith, status: unknown, species: Human, origin_name: unknown}
-      explain: {protocol: rest, pagination: disabled, auth: anonymous}
+      explain: {protocol: rest, pagination: response_next, auth: anonymous}
 
   - id: rickandmorty_character_search_status_bound_null
     relation: character_search
@@ -241,7 +250,8 @@ cases:
             method: GET
             origin: {scheme: https, host: rickandmortyapi.com, port: 443}
             path: /api/character
-            query: []
+            query:
+              - {name: page, encoded_value: "1"}
             authorization: none
           response:
             status: 200
@@ -254,4 +264,4 @@ cases:
       rows:
         - {id: 1, name: Rick Sanchez, status: Alive, species: Human, origin_name: "Earth (C-137)"}
         - {id: 2, name: Morty Smith, status: unknown, species: Human, origin_name: unknown}
-      explain: {protocol: rest, pagination: disabled, auth: anonymous}
+      explain: {protocol: rest, pagination: response_next, auth: anonymous}

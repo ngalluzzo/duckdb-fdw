@@ -208,8 +208,8 @@ void TestEquivalentInputsCompileToEquivalentOutput(const std::string &repository
 	            rickandmorty_generation.Identity().SpecIdentifier() == github_generation.Identity().SpecIdentifier(),
 	        "migration envelopes lost their shared spec identifier");
 	Require(github_generation.Identity().PackageVersion() == "1.0.0" &&
-	            rickandmorty_generation.Identity().PackageVersion() == github_generation.Identity().PackageVersion(),
-	        "migration envelopes lost their shared package version");
+	            rickandmorty_generation.Identity().PackageVersion() == "1.1.0",
+	        "migration envelopes lost their real package versions");
 	Require(github_generation.Identity().ConnectorId() == "github_migration" &&
 	            rickandmorty_generation.Identity().ConnectorId() == "rickandmorty_migration",
 	        "migration envelopes lost their distinct connector identities");

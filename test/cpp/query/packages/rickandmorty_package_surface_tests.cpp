@@ -28,7 +28,7 @@ void TestCompiledRickAndMortyPackageIsThePublishedSqlSurface(const std::string &
 	                                  "FROM system.main.duckdb_api_loaded_connectors()");
 	Require(!connector->HasError() && connector->RowCount() == 1 &&
 	            connector->GetValue(0, 0).ToString() == "rickandmorty" &&
-	            connector->GetValue(1, 0).ToString() == "1.0.0" &&
+	            connector->GetValue(1, 0).ToString() == "1.1.0" &&
 	            connector->GetValue(2, 0).ToString() == "duckdb_api/v1" &&
 	            connector->GetValue(3, 0).GetValue<std::uint64_t>() == 2,
 	        "published Rick and Morty connector identity did not come from the compiled repository package");

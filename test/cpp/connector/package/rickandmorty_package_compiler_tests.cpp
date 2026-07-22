@@ -101,11 +101,11 @@ void TestRickAndMortyCoverageMatchesDerivedMapping(const std::string &repository
 	const auto generation =
 	    duckdb_api_test::CompileRepositoryRickAndMortyLocalPackageFixture(repository_root).Generation();
 	const auto coverage = duckdb_api::connector::DerivePackageFixtureCoverage(generation);
-	Require(coverage.RequiredKeys().size() == 139,
-	        "Rick and Morty package did not derive its complete 139-key fixture-coverage matrix");
+	Require(coverage.RequiredKeys().size() == 146,
+	        "Rick and Morty package did not derive its complete 146-key fixture-coverage matrix");
 	Require(coverage.Entries().size() == coverage.RequiredKeys().size(),
 	        "Rick and Morty typed coverage registry does not align one-for-one with rendered keys");
-	Require(coverage.OrderedDigest() == "sha256.39ff7f3316747f7e9290a6697ccb78dfb1590f584a6f510c29e4d7be1c608294",
+	Require(coverage.OrderedDigest() == "sha256.3d9a944860beb0026a4d40e080b4949231e854806903ef46190dd2360b09fc60",
 	        "Rick and Morty coverage ordering drifted from the authored fixture corpus");
 }
 
@@ -140,9 +140,9 @@ int main(int argc, char **argv) {
 		const auto registration = duckdb_api_test::CompileRepositoryRickAndMortyRegistrationFixture(argv[1]);
 		const auto &identity = registration.Identity();
 		Require(identity.SpecIdentifier() == "duckdb_api/v1" && identity.ConnectorId() == "rickandmorty" &&
-		            identity.PackageVersion() == "1.0.0" &&
+		            identity.PackageVersion() == "1.1.0" &&
 		            identity.PackageDigest() ==
-		                "sha256.f645e62793bcea089475657a68b0e6bd5a76d041bfb23bf4459102a0c5cbe08d" &&
+		                "sha256.0855ea7441bc7f521175c8c21166ddc6277034f1e357a582e474732a8d62ca62" &&
 		            registration.GenerationHandle().IsValid(),
 		        "Connector compiler fixture did not expose the exact real Rick and Morty package identity");
 		Require(registration.Relations().size() == 2,
