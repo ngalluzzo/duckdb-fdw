@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "baseline_release": "0.7.0",
-  "candidate_release": "0.9.0",
-  "planned_through": "0.9.0",
+  "candidate_release": "0.10.0",
+  "planned_through": "0.10.0",
   "shapes": [
     {
       "id": "sha256.e0e84cef5207281843665c44cd319d3da1c35671f615b12606e50f15a0c74bbe",
@@ -828,7 +828,7 @@
       "removed": []
     },
     {
-      "release": "0.9.0",
+      "release": "0.10.0",
       "status": "candidate",
       "active": [
         "sql.table_function.system.main.github_duckdb_login_search_page",

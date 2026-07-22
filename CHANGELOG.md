@@ -4,6 +4,28 @@ This file records user-visible changes to duckdb-fdw.
 
 ## Unreleased
 
+## 0.10.0 — 2026-07-21
+
+### Added
+
+- REST pagination strategy `response_next` (RFC 0016): a connector author
+  can declare a `next_url_path` JSON path (for example `$.info.next`) that
+  Runtime reads from the decoded response body, reusing the same
+  reconstruct-and-verify safety model `link_next` already enforces. The
+  continuation URL is a verified signal compared against the exact
+  operation origin, path, and query-parameter multiset, never a
+  dereferenced fetch target. `EXPLAIN` reports the new `response_next`
+  value alongside `disabled`, `link_header`, and `graphql_cursor`. See the
+  [0.10.0 release notes](docs/releases/0.10.0-notes.md).
+
+### Changed
+
+- `release/1.0.0/freeze.json` graduates `response_next` from
+  `accepted_candidate_revisions` into the schema-closed
+  `pagination_strategies.rest` set (now `{disabled, link_next,
+  response_next}`). The `1.0.0` candidate freeze no longer treats
+  `response_next` as a pending candidate revision.
+
 ## 0.9.0 — 2026-07-21
 
 ### Removed

@@ -3,8 +3,8 @@
   "owner": "query-experience",
   "decision": "RFC 0012",
   "baseline_release": "0.7.0",
-  "candidate_release": "0.9.0",
-  "planned_through": "0.9.0",
+  "candidate_release": "0.10.0",
+  "planned_through": "0.10.0",
   "entries": {
     "sql.table_function.system.main.duckdb_api_scan": {
       "name": "duckdb_api_scan",
@@ -158,7 +158,7 @@
       ],
       "removed": []
     },
-    "0.9.0": {
+    "0.10.0": {
       "active": [
         "sql.table_function.system.main.github_duckdb_login_search_page",
         "sql.table_function.system.main.github_authenticated_user",

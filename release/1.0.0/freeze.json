@@ -52,7 +52,7 @@
     "authority": "release/public-surface/inventory.json",
     "contract_authority": "release/public-surface/query-contract.json",
     "decision": "RFC 0012",
-    "release_view": "0.9.0",
+    "release_view": "0.10.0",
     "active": [
       "sql.table_function.system.main.github_duckdb_login_search_page",
       "sql.table_function.system.main.github_authenticated_user",

@@ -8,7 +8,7 @@ project(${TARGET_NAME})
 include(cmake/DuckDBApiProductSources.cmake)
 
 if(NOT APPLE)
-  message(FATAL_ERROR "duckdb_api 0.9.0 supports only the pinned macOS arm64 cell")
+  message(FATAL_ERROR "duckdb_api 0.10.0 supports only the pinned macOS arm64 cell")
 endif()
 
 find_program(DUCKDB_API_XCRUN xcrun REQUIRED)
@@ -127,7 +127,7 @@ build_loadable_extension(${TARGET_NAME} " " ${PRODUCTION_SOURCES})
 # This private artifact is a deterministic product oracle, not an installable
 # extension. Its entry/composition replace the installed entry/composition and
 # are intentionally omitted from every install rule.
-set(DUCKDB_EXTENSION_DUCKDB_API_CONTROLLED_EXT_VERSION "0.9.0")
+set(DUCKDB_EXTENSION_DUCKDB_API_CONTROLLED_EXT_VERSION "0.10.0")
 build_loadable_extension(duckdb_api_controlled " " ${CONTROLLED_PRODUCT_SOURCES})
 
 function(configure_duckdb_api_cpp_target target)

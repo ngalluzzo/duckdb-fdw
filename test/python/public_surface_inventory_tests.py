@@ -186,7 +186,7 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         extra["name"] = "unapproved_extra"
         candidate["entries"].append(extra)
         for view in candidate["release_views"]:
-            if view["release"] == "0.9.0":
+            if view["release"] == "0.10.0":
                 view["active"].append(extra["id"])
         verify_inventory(candidate, self.schema)
         with self.assertRaisesRegex(InventoryError, "Query contract entry omission/extra"):

@@ -12,7 +12,7 @@ source "${REPOSITORY_ROOT}/scripts/lib/release-common.sh"
 source "${REPOSITORY_ROOT}/scripts/lib/native-test-suite.sh"
 readonly BUILD_ROOT="$(release_resolve_path "$1")"
 readonly BUILD_PROFILE="${2:-debug}"
-readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.9.0/pins.json"
+readonly PINS_FILE="${REPOSITORY_ROOT}/release/0.10.0/pins.json"
 current_pin() {
     python3 -I "${REPOSITORY_ROOT}/scripts/read-release-pin.py" "${PINS_FILE}" "$@"
 }
