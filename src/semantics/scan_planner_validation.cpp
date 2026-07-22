@@ -161,12 +161,21 @@ void ValidatePagination(const CompiledOperation &operation, const CompiledResour
 			page_number = &field;
 		}
 	}
-	if (page_size == nullptr || page_number == nullptr || !page_size->HasDecodedValue() ||
-	    !page_number->HasDecodedValue() || page_size->DecodedValue().Type() != CompiledScalarType::BIGINT ||
-	    page_number->DecodedValue().Type() != CompiledScalarType::BIGINT || page_size->DecodedValue().IsNull() ||
-	    page_number->DecodedValue().IsNull() || page_size->name != pagination.PageSizeParameter() ||
-	    page_size->DecodedValue().Bigint() != static_cast<std::int64_t>(pagination.PageSize()) ||
-	    page_size->encoded_value != std::to_string(pagination.PageSize()) ||
+	// RFC 0017: page_size is optional, matching the has_page_size gate above.
+	// No PAGE_SIZE-sourced binding is compiled when page_size_parameter is
+	// absent, so page_size legitimately stays null in that case.
+	if (has_page_size && (page_size == nullptr || !page_size->HasDecodedValue() ||
+	                      page_size->DecodedValue().Type() != CompiledScalarType::BIGINT ||
+	                      page_size->DecodedValue().IsNull() || page_size->name != pagination.PageSizeParameter() ||
+	                      page_size->DecodedValue().Bigint() != static_cast<std::int64_t>(pagination.PageSize()) ||
+	                      page_size->encoded_value != std::to_string(pagination.PageSize()))) {
+		throw std::logic_error("selected pagination disagrees with its structural initial request");
+	}
+	if (!has_page_size && page_size != nullptr) {
+		throw std::logic_error("selected pagination contains a page-size binding without a declared parameter");
+	}
+	if (page_number == nullptr || !page_number->HasDecodedValue() ||
+	    page_number->DecodedValue().Type() != CompiledScalarType::BIGINT || page_number->DecodedValue().IsNull() ||
 	    page_number->name != pagination.PageNumberParameter() ||
 	    page_number->DecodedValue().Bigint() != static_cast<std::int64_t>(pagination.FirstPage()) ||
 	    page_number->encoded_value != std::to_string(pagination.FirstPage())) {

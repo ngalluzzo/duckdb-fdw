@@ -89,7 +89,8 @@ CompiledPagination::CompiledPagination(std::string page_size_parameter_p, std::u
 	if (!internal::IsCompiledQueryName(page_number_parameter) || first_page == 0 || page_increment == 0 ||
 	    max_pages_per_scan == 0 || !FitsBigintPageSequence(first_page, page_increment, max_pages_per_scan) ||
 	    (has_page_size && (!internal::IsCompiledQueryName(page_size_parameter) ||
-	                       page_size_parameter == page_number_parameter || page_size == 0))) {
+	                       page_size_parameter == page_number_parameter || page_size == 0)) ||
+	    (!has_page_size && page_size != 0)) {
 		throw std::invalid_argument("compiled Link pagination contains invalid typed page bindings");
 	}
 }
@@ -109,7 +110,8 @@ CompiledPagination::CompiledPagination(std::string next_url_path_p, std::string 
 	if (!internal::IsCompiledQueryName(page_number_parameter) || first_page == 0 || page_increment == 0 ||
 	    max_pages_per_scan == 0 || !FitsBigintPageSequence(first_page, page_increment, max_pages_per_scan) ||
 	    (has_page_size && (!internal::IsCompiledQueryName(page_size_parameter) ||
-	                       page_size_parameter == page_number_parameter || page_size == 0))) {
+	                       page_size_parameter == page_number_parameter || page_size == 0)) ||
+	    (!has_page_size && page_size != 0)) {
 		throw std::invalid_argument("compiled response_next pagination contains invalid typed page bindings");
 	}
 }

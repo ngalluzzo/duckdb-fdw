@@ -30,7 +30,7 @@ EXPECTED_STATIC_SUMMARY = {
         "installed": False,
         "loaded": True,
         "name": "duckdb_api",
-        "version": "0.9.0",
+        "version": "0.10.0",
     },
     "relation": {
         "connector": "github",
@@ -319,7 +319,7 @@ def main() -> int:
             )
         for fragment in (
             "getpass.getpass",
-            'EXPECTED_EXTENSION = ("duckdb_api", "0.9.0"',
+            'EXPECTED_EXTENSION = ("duckdb_api", "0.10.0"',
             '"connectors/github"',
             '"private_repository_count": private_repository_count',
             '"repository_count": repository_count',

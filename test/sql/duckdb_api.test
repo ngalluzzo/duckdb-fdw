@@ -1,5 +1,5 @@
 # name: test/sql/duckdb_api.test
-# description: static public SQL and secret contract for 0.9.0
+# description: static public SQL and secret contract for 0.10.0
 # group: [duckdb_api]
 
 statement error
@@ -14,7 +14,7 @@ SELECT extension_version
 FROM duckdb_extensions()
 WHERE extension_name = 'duckdb_api';
 ----
-0.9.0
+0.10.0
 
 # Accepted RFC 0012 removed the generic dispatcher before the 0.9.0 API
 # candidate froze. It must remain absent from the installed product; every
