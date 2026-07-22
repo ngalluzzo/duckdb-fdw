@@ -165,7 +165,7 @@ add_executable(
 configure_duckdb_api_cpp_target(duckdb_api_scan_plan_pagination_contract_tests)
 target_include_directories(
   duckdb_api_scan_plan_pagination_contract_tests
-  PRIVATE test/cpp)
+  PRIVATE test/cpp src/semantics)
 target_link_libraries(
   duckdb_api_scan_plan_pagination_contract_tests
   PRIVATE duckdb_api_semantics_fixture_service

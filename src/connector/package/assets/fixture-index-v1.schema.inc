@@ -293,7 +293,7 @@ R"DAPI_INDEX({
       "additionalProperties": false,
       "properties": {
         "protocol": {"enum": ["rest", "graphql"]},
-        "pagination": {"enum": ["disabled", "link_next", "relay_forward"]},
+        "pagination": {"enum": ["disabled", "link_next", "response_next", "relay_forward"]},
         "conditional_input": {"$ref": "#/$defs/id"},
         "predicate_owner": {"const": "duckdb"},
         "relation": {"$ref": "#/$defs/id"},

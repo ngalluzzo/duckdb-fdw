@@ -327,6 +327,25 @@
         "max_pages_per_scan": {"$ref": "#/$defs/positiveInteger"}
       }
     },
+    "responsePagination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "dependency", "consistency", "target_scope", "next_url_path", "page_size_parameter", "page_size", "page_number_parameter", "first_page", "page_increment", "max_pages_per_scan"],
+      "properties": {
+        "strategy": {"const": "response_next"},
+        "dependency": {"const": "sequential"},
+        "consistency": {"const": "mutable"},
+        "target_scope": {"const": "exact_operation_origin_and_path"},
+        "next_url_path": {"$ref": "#/$defs/extractPath"},
+        "page_size_parameter": {"type": "string", "pattern": "^[A-Za-z0-9._~-]{1,63}$"},
+        "page_size": {"$ref": "#/$defs/positiveInteger"},
+        "page_number_parameter": {"type": "string", "pattern": "^[A-Za-z0-9._~-]{1,63}$"},
+        "first_page": {"$ref": "#/$defs/positiveInteger"},
+        "page_increment": {"$ref": "#/$defs/positiveInteger"},
+        "max_pages_per_scan": {"$ref": "#/$defs/positiveInteger"}
+      }
+    },
+
     "restOperation": {
       "type": "object",
       "additionalProperties": false,
@@ -342,7 +361,8 @@
         "pagination": {
           "oneOf": [
             {"$ref": "#/$defs/disabledPagination"},
-            {"$ref": "#/$defs/linkPagination"}
+            {"$ref": "#/$defs/linkPagination"},
+            {"$ref": "#/$defs/responsePagination"}
           ]
         }
       },

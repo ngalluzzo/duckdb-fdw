@@ -3,6 +3,7 @@
 #include "connector/support/connector_catalog_test_fixtures.hpp"
 #include "query/support/live_scan_request.hpp"
 #include "support/require.hpp"
+#include "scan_planner_internal.hpp"
 #include "semantics/support/scan_plan_contract_test_support.hpp"
 #include "semantics/support/scan_plan_test_fixtures.hpp"
 
@@ -15,6 +16,7 @@
 
 namespace {
 
+using duckdb_api::scan_planner_internal::PlanBaseDomain;
 using duckdb_api_test::BuildAuthenticatedScanRequest;
 using duckdb_api_test::PaginationPlanCounterexample;
 using duckdb_api_test::Require;
@@ -309,6 +311,46 @@ void TestPaginationCounterexamplesAreIsolated() {
 	    "pagination fixture accepted an unknown counterexample");
 }
 
+// RFC 0016 requires a Relational Semantics property test proving response_next's
+// BaseDomain classification behaves identically to link_next's under the same
+// response source. PlanBaseDomain is the function that decides the base
+// occurrence domain; both paginated strategies share the same classification
+// because both produce the same row occurrence shape over the same response
+// source (terminal_collection or root_array). This test pins the equivalence
+// directly: for every many-row response source, both strategies map to the
+// same BaseDomain.
+void TestResponseNextBaseDomainEquivalence() {
+	using duckdb_api::CompiledPaginationStrategy;
+	using duckdb_api::CompiledResponseSource;
+	const std::vector<std::pair<CompiledResponseSource, const char *>> sources = {
+	    {CompiledResponseSource::JSON_PATH_MANY, "terminal_collection"},
+	    {CompiledResponseSource::ROOT_ARRAY, "root_array"},
+	};
+	for (const auto &source : sources) {
+		const auto link_domain = PlanBaseDomain(source.first, CompiledPaginationStrategy::LINK_HEADER);
+		const auto response_domain = PlanBaseDomain(source.first, CompiledPaginationStrategy::RESPONSE_NEXT_URL);
+		Require(link_domain == response_domain,
+		        std::string("response_next BaseDomain diverged from link_next for ") + source.second);
+	}
+	// ROOT_OBJECT must throw for both (paginated strategies require a many-row
+	// response source). Both throw std::logic_error; the equivalence is that
+	// neither silently produces a wrong classification.
+	bool link_threw = false;
+	bool response_threw = false;
+	try {
+		(void)PlanBaseDomain(CompiledResponseSource::ROOT_OBJECT, CompiledPaginationStrategy::LINK_HEADER);
+	} catch (const std::logic_error &) {
+		link_threw = true;
+	}
+	try {
+		(void)PlanBaseDomain(CompiledResponseSource::ROOT_OBJECT, CompiledPaginationStrategy::RESPONSE_NEXT_URL);
+	} catch (const std::logic_error &) {
+		response_threw = true;
+	}
+	Require(link_threw && response_threw,
+	        "response_next or link_next failed to reject root_object as a paginated response source");
+}
+
 } // namespace
 
 int main() {
@@ -316,6 +358,7 @@ int main() {
 		TestExplicitMetadataDefinesOneBag();
 		TestAuthenticatedRepositoriesProfile();
 		TestPaginationCounterexamplesAreIsolated();
+		TestResponseNextBaseDomainEquivalence();
 		std::cout << "scan plan pagination contract tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

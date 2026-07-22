@@ -13,6 +13,7 @@
 namespace {
 
 using duckdb_api::internal::AdmittedPaginatedRestRequestProfile;
+using duckdb_api::internal::LinkPageTransition;
 using duckdb_api::internal::LinkPaginationError;
 using duckdb_api::internal::LinkPaginationErrorKind;
 using duckdb_api::internal::LinkPaginationState;
@@ -307,6 +308,146 @@ void TestSelectiveTargetFieldSet() {
 	}
 }
 
+// --- response_next (body-sourced continuation) tests ---
+//
+// AdvanceBody applies the same ValidateNextTarget reconstruct-and-verify rule
+// as Advance, but reads the candidate URL from a decoded JSON body path rather
+// than parsing it from Link header field values. These tests prove the two
+// entry points produce identical transitions and rejections for the same
+// underlying target URL, and that the body path handles its unique failure
+// mode (empty/absent continuation = clean exhaustion).
+
+const std::string EXPECTED_NEXT_URL = "https://api.github.com/user/repos?per_page=100&page=2";
+const std::string EXPECTED_NEXT_URL_PAGE_3 = "https://api.github.com/user/repos?per_page=100&page=3";
+
+void RequireBodyRejected(const std::string &body_url, LinkPaginationErrorKind expected_kind, const std::string &label) {
+	LinkPaginationState state(BaseProfile());
+	bool rejected = false;
+	try {
+		state.AdvanceBody(body_url);
+	} catch (const LinkPaginationError &error) {
+		rejected = true;
+		Require(error.Kind() == expected_kind, label + " used the wrong error kind");
+		Require(error.Field() == "pagination.next", label + " used the wrong policy field");
+		Require(!error.SafeMessage().empty() && error.SafeMessage().size() <= 128,
+		        label + " produced an empty or unbounded diagnostic");
+		Require(error.SafeMessage().find(CANARY) == std::string::npos, label + " exposed received body data");
+		Require(error.SafeMessage().find("api.github.com") == std::string::npos,
+		        label + " exposed a received destination");
+	}
+	Require(rejected, label + " was accepted");
+	Require(state.Failed(), label + " did not make pagination terminal");
+}
+
+void TestBodyExhaustionEmpty() {
+	// An empty body URL is the normal terminal signal for response_next (the
+	// JSON path was absent or the value was null). It must produce clean
+	// exhaustion, not a failure.
+	LinkPaginationState state(BaseProfile());
+	const auto transition = state.AdvanceBody("");
+	Require(!transition.has_next && transition.next_page == 0, "an empty body continuation did not exhaust the source");
+	Require(state.Exhausted() && !state.Failed(), "clean body exhaustion used a failure state");
+}
+
+void TestBodyAcceptedTransition() {
+	LinkPaginationState state(BaseProfile());
+	const auto transition = state.AdvanceBody(EXPECTED_NEXT_URL);
+	Require(transition.has_next && transition.next_page == 2,
+	        "a valid body continuation did not advance to the expected page");
+	Require(state.CurrentPage() == 2 && state.SeenPageCount() == 2 && !state.Exhausted() && !state.Failed(),
+	        "body transition left inconsistent state");
+
+	// Multi-page progression: page 2 → page 3
+	const auto next_transition = state.AdvanceBody(EXPECTED_NEXT_URL_PAGE_3);
+	Require(next_transition.has_next && next_transition.next_page == 3,
+	        "a second body continuation did not advance to the expected page");
+	Require(state.CurrentPage() == 3 && state.SeenPageCount() == 3, "second body transition left inconsistent state");
+}
+
+void TestBodyDeniedTargets() {
+	const std::vector<std::pair<std::string, std::string>> cases = {
+	    {"https://evil.example.test/user/repos?per_page=100&page=2", "wrong origin"},
+	    {"https://api.github.com/user/repos?per_page=100", "missing page query"},
+	    {"https://api.github.com/user/repos?per_page=100&page=1", "non-incrementing page number"},
+	    {"https://api.github.com/user/repos?per_page=100&page=3", "skipped page number"},
+	    {"https://api.github.com/other/path?per_page=100&page=2", "wrong path"},
+	    {"https://api.github.com/user/repos?per_page=100&page=2&extra=field", "extra query field"},
+	    {"https://api.github.com/user/repos?per_page=50&page=2", "changed page size"},
+	};
+	for (const auto &test_case : cases) {
+		RequireBodyRejected(test_case.first, LinkPaginationErrorKind::POLICY, test_case.second);
+	}
+}
+
+void TestBodyRepeatedTypedPageIsRejected() {
+	LinkPaginationState state(BaseProfile());
+	state.AdvanceBody(EXPECTED_NEXT_URL);
+	bool rejected = false;
+	try {
+		state.AdvanceBody(EXPECTED_NEXT_URL);
+	} catch (const LinkPaginationError &error) {
+		rejected = error.Kind() == LinkPaginationErrorKind::POLICY && error.Field() == "pagination.next";
+	}
+	Require(rejected && state.Failed(), "a repeated body continuation was not a terminal policy error");
+	Require(state.CurrentPage() == 2 && state.SeenPageCount() == 2,
+	        "repeated body continuation mutated accepted state");
+}
+
+void TestBodyDifferentialParity() {
+	// The differential test RFC 0016 requires: for the same underlying page
+	// sequence, header-sourced and body-sourced targets produce identical
+	// transitions. Advance parses the URL from a Link header value;
+	// AdvanceBody receives the URL directly. Both feed into the same
+	// ValidateNextTarget. This test proves the parity holds for accepted
+	// transitions, clean exhaustion, and every policy rejection.
+	const std::vector<std::pair<std::string, std::string>> targets = {
+	    {EXPECTED_NEXT_URL, "valid next-page target"},
+	    {"https://api.github.com/user/repos?per_page=100&page=3", "skip-page target"},
+	    {"https://evil.example.test/user/repos?per_page=100&page=2", "wrong-origin target"},
+	    {"https://api.github.com/other/path?per_page=100&page=2", "wrong-path target"},
+	    {"https://api.github.com/user/repos?per_page=50&page=2", "wrong-page-size target"},
+	};
+	for (const auto &target : targets) {
+		LinkPaginationState header_state(BaseProfile());
+		LinkPaginationState body_state(BaseProfile());
+		bool header_rejected = false;
+		bool body_rejected = false;
+		LinkPageTransition header_transition {false, 0};
+		LinkPageTransition body_transition {false, 0};
+		try {
+			header_transition = header_state.Advance({"<" + target.first + ">; rel=next"});
+		} catch (const LinkPaginationError &) {
+			header_rejected = true;
+		}
+		try {
+			body_transition = body_state.AdvanceBody(target.first);
+		} catch (const LinkPaginationError &) {
+			body_rejected = true;
+		}
+		Require(header_rejected == body_rejected, target.second + ": header and body paths disagreed on acceptance");
+		Require(header_transition.has_next == body_transition.has_next &&
+		            header_transition.next_page == body_transition.next_page,
+		        target.second + ": header and body paths produced different transitions");
+		Require(header_state.Failed() == body_state.Failed(),
+		        target.second + ": header and body paths left different failure states");
+		Require(header_state.Exhausted() == body_state.Exhausted(),
+		        target.second + ": header and body paths left different exhaustion states");
+	}
+}
+
+void TestBodyEncodingDivergenceRejected() {
+	// RFC 0016 identified a genuinely new correctness edge case for
+	// response_next: JSON \uXXXX unescaping can produce a body URL with
+	// non-ASCII bytes where a Link header would have percent-encoded ASCII.
+	// The scoping-spike decision is strict byte comparison: no normalization
+	// is applied, and a non-canonical body URL fails closed at the POLICY
+	// phase. The body URL contains a UTF-8 é (0xC3 0xA9) where the
+	// reconstructed expectation has the ASCII path /user/repos. ValidateNextTarget
+	// compares byte-for-byte and rejects.
+	const std::string non_ascii_host = "https://api.github.com\xc3\xa9/user/repos?per_page=100&page=2";
+	RequireBodyRejected(non_ascii_host, LinkPaginationErrorKind::POLICY, "non-ASCII body URL (encoding divergence)");
+}
+
 } // namespace
 
 int main() {
@@ -318,6 +459,12 @@ int main() {
 		TestDeniedNextTargets();
 		TestRepeatedTypedPageIsRejected();
 		TestSelectiveTargetFieldSet();
+		TestBodyExhaustionEmpty();
+		TestBodyAcceptedTransition();
+		TestBodyDeniedTargets();
+		TestBodyRepeatedTypedPageIsRejected();
+		TestBodyDifferentialParity();
+		TestBodyEncodingDivergenceRejected();
 		std::cout << "Link pagination tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {
