@@ -95,8 +95,9 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		result.authentication = FeatureState::ENABLED;
 		result.authentication_obligation.requirement = PlannedCredentialRequirement::REQUIRED;
 		result.authentication_obligation.logical_credential = authentication.LogicalCredential();
-		result.authentication_obligation.authenticator = PlannedAuthenticator::BEARER;
-		result.authentication_obligation.placement = PlannedCredentialPlacement::AUTHORIZATION_HEADER;
+		result.authentication_obligation.authenticator = PlanAuthenticator(authentication.Authenticator());
+		result.authentication_obligation.placement = PlanCredentialPlacement(authentication.Placement());
+		result.authentication_obligation.placement_name = authentication.PlacementName();
 		result.authentication_obligation.has_destination = true;
 		const auto &destination = *authentication.Destination();
 		result.authentication_obligation.destination = {PlanUrlScheme(destination.scheme), destination.host.Value(),

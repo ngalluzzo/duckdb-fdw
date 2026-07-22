@@ -156,7 +156,7 @@ One compiled relation owns:
 - exact relation ID;
 - ordered columns and structural extractors;
 - ordered relation inputs and typed defaults;
-- anonymous or required-bearer authentication policy;
+- anonymous or required (bearer or api_key) authentication policy;
 - one or more complete base operations and selectors;
 - zero or more proved equality predicate mappings;
 - relation resource ceilings; and
@@ -436,18 +436,38 @@ and their opaque canonical-root custody remain valid.
 `ScanAuthorization` is a move-only opaque capability:
 
 ```text
-anonymous | approved bearer token state
+anonymous | approved bearer token state | approved kind-neutral credential state
 ```
 
-Only the Query Secret Manager integration may create the accepted bearer
-alternative from a resolved logical reference. Only Runtime may consume it.
-Its value is not copyable, renderable, or accessible to Semantics, Connector,
-fixtures, plans, diagnostics, or registry metadata.
+Only the Query Secret Manager integration may create the accepted bearer or
+credential alternative from a resolved logical reference. Only Runtime may
+consume it. Its value is not copyable, renderable, or accessible to
+Semantics, Connector, fixtures, plans, diagnostics, or registry metadata.
+
+**Accepted by [RFC 0018](../rfcs/0018-add-static-api-key-credential.md).**
+Query's Secret Manager integration resolves only a logical secret name; it
+has no access to which credential kind (bearer or api_key) the target
+relation declared, so it always constructs the kind-neutral credential
+alternative for every authenticated v1 package relation, not a
+kind-specific one. This alternative is additive: the existing bearer
+alternative and its direct-construction call sites are unchanged. Runtime
+alone decides, from the admitted plan's own `PlannedAuthenticator`/
+`PlannedCredentialPlacement` facts — never from which alternative the
+capability was constructed as — whether to decorate a request as a bearer
+header, a named header, or a named query parameter. A bearer-alternative and
+a credential-alternative capability are therefore both accepted wherever a
+plan requires bearer; only the credential alternative is accepted where a
+plan requires api_key, since no legitimate caller constructs the bearer
+alternative intending api_key placement.
 
 Runtime validates the complete plan before authorizing a request. Destination
-and placement are exact. Failed admission consumes or decorates no bearer
-state. Destruction and terminal paths erase and release capability state
-without throwing.
+and placement are exact. Failed admission consumes or decorates no
+credential state. Destruction and terminal paths erase and release
+capability state without throwing. For api_key query placement, the
+declared parameter's name and value are appended directly to the admitted
+request target at authorization time and never enter the plan's regular
+query-binding facts, so no diagnostic or explanation code path can render
+them.
 
 ## Executor and admitted profiles
 

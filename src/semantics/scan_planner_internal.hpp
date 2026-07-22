@@ -29,6 +29,32 @@ inline PlannedUrlScheme PlanUrlScheme(CompiledUrlScheme scheme) {
 	throw std::logic_error("compiled connector contains an unknown URL scheme");
 }
 
+inline PlannedAuthenticator PlanAuthenticator(CompiledAuthenticator authenticator) {
+	switch (authenticator) {
+	case CompiledAuthenticator::NONE:
+		return PlannedAuthenticator::NONE;
+	case CompiledAuthenticator::BEARER:
+		return PlannedAuthenticator::BEARER;
+	case CompiledAuthenticator::API_KEY:
+		return PlannedAuthenticator::API_KEY;
+	}
+	throw std::logic_error("compiled connector contains an unknown authenticator");
+}
+
+inline PlannedCredentialPlacement PlanCredentialPlacement(CompiledCredentialPlacement placement) {
+	switch (placement) {
+	case CompiledCredentialPlacement::NONE:
+		return PlannedCredentialPlacement::NONE;
+	case CompiledCredentialPlacement::AUTHORIZATION_HEADER:
+		return PlannedCredentialPlacement::AUTHORIZATION_HEADER;
+	case CompiledCredentialPlacement::HEADER_NAMED:
+		return PlannedCredentialPlacement::HEADER_NAMED;
+	case CompiledCredentialPlacement::QUERY_NAMED:
+		return PlannedCredentialPlacement::QUERY_NAMED;
+	}
+	throw std::logic_error("compiled connector contains an unknown credential placement");
+}
+
 inline PlannedProtocol PlanProtocol(CompiledProtocol protocol) {
 	switch (protocol) {
 	case CompiledProtocol::REST:

@@ -255,7 +255,7 @@ const ScanResourceBudgets &PaginationPlan::ScanBudgets() const {
 
 PlannedAuthenticationObligation::PlannedAuthenticationObligation()
     : requirement(PlannedCredentialRequirement::NONE), logical_credential(), authenticator(PlannedAuthenticator::NONE),
-      placement(PlannedCredentialPlacement::NONE), has_destination(false),
+      placement(PlannedCredentialPlacement::NONE), placement_name(), has_destination(false),
       destination {PlannedUrlScheme::HTTPS, "", 0} {
 }
 
@@ -273,6 +273,10 @@ PlannedAuthenticator PlannedAuthenticationObligation::Authenticator() const {
 
 PlannedCredentialPlacement PlannedAuthenticationObligation::Placement() const {
 	return placement;
+}
+
+const std::string &PlannedAuthenticationObligation::PlacementName() const {
+	return placement_name;
 }
 
 const PlannedRestOrigin *PlannedAuthenticationObligation::Destination() const {

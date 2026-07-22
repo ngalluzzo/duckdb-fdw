@@ -188,6 +188,12 @@ enum class PackagePredicatePlanCounterexample {
 
 duckdb_api::ScanPlan BuildValidAnonymousPlanFixture();
 duckdb_api::ScanPlan BuildValidAuthenticatedPlanFixture(const std::string &exact_logical_secret_name);
+// RFC 0018: an api_key-authenticated variant of BuildValidAuthenticatedPlanFixture,
+// otherwise identical (same relation shape, same fixed destination), for
+// exercising ApiKeyAuthenticator's header/query placement directly.
+duckdb_api::ScanPlan BuildValidApiKeyPlanFixture(const std::string &exact_logical_secret_name,
+                                                 duckdb_api::PlannedCredentialPlacement placement,
+                                                 std::string placement_name);
 duckdb_api::ScanPlan BuildValidPaginatedPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::string &exact_logical_secret_name);
 // Bounded package-like REST query/path provider for Runtime consumer tests. It

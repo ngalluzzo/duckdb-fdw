@@ -47,16 +47,25 @@ const char *AuthenticatorName(CompiledAuthenticator authenticator) {
 		return "none";
 	case CompiledAuthenticator::BEARER:
 		return "bearer";
+	case CompiledAuthenticator::API_KEY:
+		return "api_key";
 	}
 	throw std::logic_error("compiled connector contains an unknown authenticator");
 }
 
-const char *PlacementName(CompiledCredentialPlacement placement) {
+// HEADER_NAMED/QUERY_NAMED render the declared header or query-parameter
+// name (structural fact, never the credential value) alongside the
+// placement kind.
+std::string PlacementName(CompiledCredentialPlacement placement, const std::string &placement_name) {
 	switch (placement) {
 	case CompiledCredentialPlacement::NONE:
 		return "none";
 	case CompiledCredentialPlacement::AUTHORIZATION_HEADER:
 		return "Authorization";
+	case CompiledCredentialPlacement::HEADER_NAMED:
+		return "header:" + placement_name;
+	case CompiledCredentialPlacement::QUERY_NAMED:
+		return "query:" + placement_name;
 	}
 	throw std::logic_error("compiled connector contains an unknown credential placement");
 }
@@ -113,7 +122,7 @@ void AppendAuthentication(std::ostringstream &result, const CompiledAuthenticati
 	} else {
 		AppendOrigin(result, *destination);
 	}
-	result << ",placement:" << PlacementName(authentication.Placement());
+	result << ",placement:" << PlacementName(authentication.Placement(), authentication.PlacementName());
 	if (authentication.Destinations().size() > 1) {
 		result << ",destinations:[";
 		for (std::size_t index = 0; index < authentication.Destinations().size(); index++) {

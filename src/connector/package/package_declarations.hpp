@@ -23,6 +23,11 @@ struct CredentialDeclaration {
 	LocatedText kind;
 	LocatedText secret_field;
 	LocatedText placement;
+	// Present only for kind: api_key. header_name is required when
+	// placement: header; query_param is required when placement: query. Each
+	// is empty/absent for the other placement and for kind: bearer.
+	LocatedText header_name;
+	LocatedText query_param;
 	std::vector<OriginDeclaration> destinations;
 	SourceMark mark;
 };

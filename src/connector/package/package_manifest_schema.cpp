@@ -64,21 +64,67 @@ std::vector<OriginDeclaration> DecodeOrigins(const SchemaReader &reader, const s
 
 CredentialDeclaration DecodeCredential(const SchemaReader &reader) {
 	CredentialDeclaration credential;
-	reader.RequireMapping({"id", "kind", "secret_field", "placement", "destinations"},
+	reader.RequireMapping({"id", "kind", "secret_field", "placement", "header_name", "query_param", "destinations"},
 	                      {"id", "kind", "secret_field", "placement", "destinations"});
 	credential.id = reader.Text("id");
 	credential.kind = reader.Text("kind");
 	credential.secret_field = reader.Text("secret_field");
 	credential.placement = reader.Text("placement");
+	credential.header_name = reader.Text("header_name", false);
+	credential.query_param = reader.Text("query_param", false);
 	credential.destinations = DecodeOrigins(reader, "destinations", 1);
 	credential.mark = reader.Mark();
 	RequireIdentifier(credential.id, reader.Diagnostics());
-	RequireValue(credential.kind, "bearer", PackageDiagnosticCode::UNSUPPORTED_DECLARATION,
-	             PackageDiagnosticPhase::SCHEMA, reader.Diagnostics());
 	RequireValue(credential.secret_field, "token", PackageDiagnosticCode::UNSUPPORTED_DECLARATION,
 	             PackageDiagnosticPhase::SCHEMA, reader.Diagnostics());
-	RequireValue(credential.placement, "authorization_header", PackageDiagnosticCode::UNSUPPORTED_DECLARATION,
-	             PackageDiagnosticPhase::SCHEMA, reader.Diagnostics());
+	if (credential.kind.value == "bearer") {
+		RequireValue(credential.placement, "authorization_header", PackageDiagnosticCode::UNSUPPORTED_DECLARATION,
+		             PackageDiagnosticPhase::SCHEMA, reader.Diagnostics());
+		for (const auto *name : {"header_name", "query_param"}) {
+			if (reader.Field(name) != nullptr) {
+				reader.Diagnostics().Add(PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
+				                         reader.FieldMark(name));
+			}
+		}
+	} else if (credential.kind.value == "api_key") {
+		if (credential.placement.value == "header") {
+			if (reader.Field("header_name") == nullptr) {
+				reader.Diagnostics().Add(PackageDiagnosticCode::MISSING_FIELD, PackageDiagnosticPhase::SCHEMA,
+				                         reader.FieldMark("header_name"));
+			} else if (!IsHeaderName(credential.header_name.value)) {
+				reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+				                         credential.header_name.mark);
+			}
+			if (reader.Field("query_param") != nullptr) {
+				reader.Diagnostics().Add(PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
+				                         reader.FieldMark("query_param"));
+			}
+		} else if (credential.placement.value == "query") {
+			if (reader.Field("query_param") == nullptr) {
+				reader.Diagnostics().Add(PackageDiagnosticCode::MISSING_FIELD, PackageDiagnosticPhase::SCHEMA,
+				                         reader.FieldMark("query_param"));
+			} else if (!IsQueryName(credential.query_param.value)) {
+				reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+				                         credential.query_param.mark);
+			}
+			if (reader.Field("header_name") != nullptr) {
+				reader.Diagnostics().Add(PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
+				                         reader.FieldMark("header_name"));
+			}
+		} else {
+			reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+			                         credential.placement.mark);
+			for (const auto *name : {"header_name", "query_param"}) {
+				if (reader.Field(name) != nullptr) {
+					reader.Diagnostics().Add(PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
+					                         reader.FieldMark(name));
+				}
+			}
+		}
+	} else {
+		reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+		                         credential.kind.mark);
+	}
 	return credential;
 }
 

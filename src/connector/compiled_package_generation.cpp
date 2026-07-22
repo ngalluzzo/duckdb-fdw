@@ -385,6 +385,14 @@ CompiledAuthenticationPolicy CompiledModelBuilder::BearerAuthentication(std::str
 	return CompiledAuthenticationPolicy::RequiredBearer(std::move(logical_credential), std::move(destinations));
 }
 
+CompiledAuthenticationPolicy CompiledModelBuilder::ApiKeyAuthentication(std::string logical_credential,
+                                                                        CompiledCredentialPlacement placement,
+                                                                        std::string placement_name,
+                                                                        std::vector<CompiledHttpOrigin> destinations) {
+	return CompiledAuthenticationPolicy::RequiredApiKey(std::move(logical_credential), placement,
+	                                                    std::move(placement_name), std::move(destinations));
+}
+
 CompiledResourceCeilings CompiledModelBuilder::Resources(std::uint64_t max_response_bytes_per_page,
                                                          std::uint64_t max_response_bytes_per_scan,
                                                          std::uint64_t max_records_per_page,

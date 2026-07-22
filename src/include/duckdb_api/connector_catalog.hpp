@@ -112,11 +112,14 @@ private:
 
 enum class CompiledCredentialRequirement { NONE, REQUIRED };
 
-enum class CompiledAuthenticator { NONE, BEARER };
+enum class CompiledAuthenticator { NONE, BEARER, API_KEY };
 
-// The native metadata exposes one closed placement, not a caller-supplied
-// header name. Runtime owns construction of the eventual header and value.
-enum class CompiledCredentialPlacement { NONE, AUTHORIZATION_HEADER };
+// AUTHORIZATION_HEADER is a fixed closed placement with no associated name.
+// HEADER_NAMED and QUERY_NAMED carry the author-declared header or query
+// parameter name as compiled plan data (CompiledAuthenticationPolicy::
+// PlacementName()); Runtime owns construction of the eventual header/query
+// field and value, never a caller-supplied placement.
+enum class CompiledCredentialPlacement { NONE, AUTHORIZATION_HEADER, HEADER_NAMED, QUERY_NAMED };
 
 // One output column. The extractor is evaluated relative to one object selected
 // by the response source. A non-nullable declaration makes missing or JSON-null
@@ -356,6 +359,9 @@ public:
 	const std::string &LogicalCredential() const;
 	CompiledAuthenticator Authenticator() const;
 	CompiledCredentialPlacement Placement() const;
+	// Empty for NONE and AUTHORIZATION_HEADER; the author-declared header or
+	// query-parameter name for HEADER_NAMED/QUERY_NAMED.
+	const std::string &PlacementName() const;
 	const CompiledHttpOrigin *Destination() const;
 	const std::vector<CompiledHttpOrigin> &Destinations() const;
 
@@ -368,15 +374,20 @@ private:
 	static CompiledAuthenticationPolicy RequiredBearer();
 	static CompiledAuthenticationPolicy RequiredBearer(std::string logical_credential,
 	                                                   std::vector<CompiledHttpOrigin> destinations);
+	static CompiledAuthenticationPolicy RequiredApiKey(std::string logical_credential,
+	                                                   CompiledCredentialPlacement placement,
+	                                                   std::string placement_name,
+	                                                   std::vector<CompiledHttpOrigin> destinations);
 
 	CompiledAuthenticationPolicy(CompiledCredentialRequirement requirement, std::string logical_credential,
 	                             CompiledAuthenticator authenticator, CompiledCredentialPlacement placement,
-	                             std::vector<CompiledHttpOrigin> destinations);
+	                             std::string placement_name, std::vector<CompiledHttpOrigin> destinations);
 
 	CompiledCredentialRequirement requirement;
 	std::string logical_credential;
 	CompiledAuthenticator authenticator;
 	CompiledCredentialPlacement placement;
+	std::string placement_name;
 	std::vector<CompiledHttpOrigin> destinations;
 };
 

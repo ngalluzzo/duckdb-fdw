@@ -9,13 +9,13 @@ namespace duckdb_api {
 namespace internal {
 
 AdmittedRestRequestProfile::AdmittedRestRequestProfile(const ScanPlan &plan, MaterializedRestRequest &&request,
-                                                       bool requires_bearer_p)
+                                                       RequiredCredential credential_p)
     : method("GET"), scheme(RestSchemeName(plan.Operation().Rest().origin.scheme)),
       host(plan.Operation().Rest().origin.host), port(plan.Operation().Rest().origin.port),
       path(plan.Operation().Rest().path), query_parameters(std::move(request.query)),
       headers(std::move(request.headers)), columns(std::move(request.columns)),
       response_source(plan.Operation().Rest().response_source), records_path(std::move(request.records_path)),
-      requires_bearer(requires_bearer_p), budgets(plan.Budgets()) {
+      credential(std::move(credential_p)), budgets(plan.Budgets()) {
 }
 
 const std::string &AdmittedRestRequestProfile::Method() const {
@@ -49,7 +49,16 @@ const std::vector<std::string> &AdmittedRestRequestProfile::RecordsPath() const 
 	return records_path;
 }
 bool AdmittedRestRequestProfile::RequiresBearer() const {
-	return requires_bearer;
+	return credential.bearer;
+}
+bool AdmittedRestRequestProfile::RequiresApiKey() const {
+	return credential.api_key;
+}
+bool AdmittedRestRequestProfile::ApiKeyHeaderPlacement() const {
+	return credential.header_placement;
+}
+const std::string &AdmittedRestRequestProfile::ApiKeyPlacementName() const {
+	return credential.placement_name;
 }
 const ResourceBudgets &AdmittedRestRequestProfile::Budgets() const {
 	return budgets;
@@ -57,7 +66,7 @@ const ResourceBudgets &AdmittedRestRequestProfile::Budgets() const {
 
 AdmittedPaginatedRestRequestProfile::AdmittedPaginatedRestRequestProfile(const ScanPlan &plan,
                                                                          MaterializedRestRequest &&request,
-                                                                         bool requires_bearer_p)
+                                                                         RequiredCredential credential_p)
     : method("GET"), scheme(RestSchemeName(plan.Operation().Rest().origin.scheme)),
       host(plan.Operation().Rest().origin.host), port(plan.Operation().Rest().origin.port),
       path(plan.Operation().Rest().path), query_parameters(std::move(request.query)),
@@ -71,7 +80,7 @@ AdmittedPaginatedRestRequestProfile::AdmittedPaginatedRestRequestProfile(const S
       next_url_path(plan.Pagination().Strategy() == PlannedPaginationStrategy::RESPONSE_NEXT_URL
                         ? plan.Pagination().NextUrlPath()
                         : std::string()),
-      requires_bearer(requires_bearer_p),
+      credential(std::move(credential_p)),
       conditional_input(plan.ConditionalInput() == PlannedConditionalInput::VISIBILITY_PRIVATE
                             ? AdmittedPaginatedRestConditionalInput::LEGACY_VISIBILITY_PRIVATE
                             : AdmittedPaginatedRestConditionalInput::NONE),
@@ -133,7 +142,16 @@ const std::string &AdmittedPaginatedRestRequestProfile::NextUrlPath() const {
 	return next_url_path;
 }
 bool AdmittedPaginatedRestRequestProfile::RequiresBearer() const {
-	return requires_bearer;
+	return credential.bearer;
+}
+bool AdmittedPaginatedRestRequestProfile::RequiresApiKey() const {
+	return credential.api_key;
+}
+bool AdmittedPaginatedRestRequestProfile::ApiKeyHeaderPlacement() const {
+	return credential.header_placement;
+}
+const std::string &AdmittedPaginatedRestRequestProfile::ApiKeyPlacementName() const {
+	return credential.placement_name;
 }
 AdmittedPaginatedRestConditionalInput AdmittedPaginatedRestRequestProfile::ConditionalInput() const {
 	return conditional_input;

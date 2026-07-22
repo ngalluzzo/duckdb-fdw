@@ -306,16 +306,25 @@ const char *AuthenticatorName(PlannedAuthenticator authenticator) {
 		return "none";
 	case PlannedAuthenticator::BEARER:
 		return "bearer";
+	case PlannedAuthenticator::API_KEY:
+		return "api_key";
 	}
 	throw std::logic_error("scan plan contains an unknown authenticator");
 }
 
-const char *PlacementName(PlannedCredentialPlacement placement) {
+// HEADER_NAMED/QUERY_NAMED render the declared header or query-parameter
+// name (structural fact, never the credential value) alongside the
+// placement kind.
+std::string PlacementName(PlannedCredentialPlacement placement, const std::string &placement_name) {
 	switch (placement) {
 	case PlannedCredentialPlacement::NONE:
 		return "none";
 	case PlannedCredentialPlacement::AUTHORIZATION_HEADER:
 		return "Authorization";
+	case PlannedCredentialPlacement::HEADER_NAMED:
+		return "header:" + placement_name;
+	case PlannedCredentialPlacement::QUERY_NAMED:
+		return "query:" + placement_name;
 	}
 	throw std::logic_error("scan plan contains an unknown credential placement");
 }
@@ -498,8 +507,9 @@ std::string ScanPlan::Snapshot() const {
 	       << ",logical_credential:"
 	       << (authentication_obligation.LogicalCredential().empty() ? "none"
 	                                                                 : authentication_obligation.LogicalCredential())
-	       << ",authenticator:" << AuthenticatorName(authentication_obligation.Authenticator())
-	       << ",placement:" << PlacementName(authentication_obligation.Placement()) << ",destination:";
+	       << ",authenticator:" << AuthenticatorName(authentication_obligation.Authenticator()) << ",placement:"
+	       << PlacementName(authentication_obligation.Placement(), authentication_obligation.PlacementName())
+	       << ",destination:";
 	if (authentication_obligation.Destination() == nullptr) {
 		result << "none";
 	} else {

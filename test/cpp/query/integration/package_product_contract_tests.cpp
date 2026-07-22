@@ -118,11 +118,16 @@ protected:
 			throw duckdb_api::ExecutionCancelled();
 		}
 		const auto alternative = AlternativeOf(authorization);
+		// Query's ResolveDuckdbApiSecret supplies the kind-neutral CREDENTIAL
+		// alternative for every authenticated relation (it cannot know the
+		// target relation's bearer-vs-api_key credential kind at resolution
+		// time), so either non-anonymous alternative is a valid authenticated
+		// open here, not BEARER specifically.
 		if (plan.Authentication() == duckdb_api::FeatureState::DISABLED &&
 		    alternative == AuthorizationAlternative::ANONYMOUS) {
 			anonymous_opens.fetch_add(1, std::memory_order_relaxed);
 		} else if (plan.Authentication() == duckdb_api::FeatureState::ENABLED &&
-		           alternative == AuthorizationAlternative::BEARER) {
+		           alternative != AuthorizationAlternative::ANONYMOUS) {
 			authenticated_opens.fetch_add(1, std::memory_order_relaxed);
 		} else {
 			throw std::logic_error("package product fake received a mismatched authorization alternative");

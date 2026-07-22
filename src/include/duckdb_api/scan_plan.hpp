@@ -165,8 +165,11 @@ private:
 };
 
 enum class PlannedCredentialRequirement { NONE, REQUIRED };
-enum class PlannedAuthenticator { NONE, BEARER };
-enum class PlannedCredentialPlacement { NONE, AUTHORIZATION_HEADER };
+enum class PlannedAuthenticator { NONE, BEARER, API_KEY };
+// AUTHORIZATION_HEADER carries no associated name. HEADER_NAMED and
+// QUERY_NAMED carry the author-declared header or query-parameter name as
+// plan data (PlannedAuthenticationObligation::PlacementName()).
+enum class PlannedCredentialPlacement { NONE, AUTHORIZATION_HEADER, HEADER_NAMED, QUERY_NAMED };
 
 // Protocol-neutral output-column scalar vocabulary: PlannedColumn describes a
 // relation's declared output schema uniformly for both REST and GraphQL
@@ -348,6 +351,9 @@ public:
 	const std::string &LogicalCredential() const;
 	PlannedAuthenticator Authenticator() const;
 	PlannedCredentialPlacement Placement() const;
+	// Empty for NONE and AUTHORIZATION_HEADER; the author-declared header or
+	// query-parameter name for HEADER_NAMED/QUERY_NAMED.
+	const std::string &PlacementName() const;
 	const PlannedRestOrigin *Destination() const;
 
 private:
@@ -362,6 +368,7 @@ private:
 	std::string logical_credential;
 	PlannedAuthenticator authenticator;
 	PlannedCredentialPlacement placement;
+	std::string placement_name;
 	bool has_destination;
 	PlannedRestOrigin destination;
 };

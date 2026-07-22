@@ -126,27 +126,6 @@ bool TryCopyPermanentColumns(const std::vector<PlannedRestResultColumn> &planned
 	return true;
 }
 
-std::string FormUrlEncode(const std::string &value) {
-	static const char HEX[] = "0123456789ABCDEF";
-	std::string result;
-	for (const auto character : value) {
-		const auto byte = static_cast<unsigned char>(character);
-		const bool unreserved = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
-		                        (byte >= '0' && byte <= '9') || byte == '-' || byte == '.' || byte == '_' ||
-		                        byte == '~';
-		if (unreserved) {
-			result.push_back(character);
-		} else if (byte == 0x20) {
-			result.push_back('+');
-		} else {
-			result.push_back('%');
-			result.push_back(HEX[(byte >> 4U) & 0x0FU]);
-			result.push_back(HEX[byte & 0x0FU]);
-		}
-	}
-	return result;
-}
-
 bool MatchesConditionalAuthority(const PlannedRestQueryBinding &binding,
                                  const RestConditionalBindingAuthority &authority) {
 	if (!authority.enabled || binding.SourceId() != authority.source_id || binding.Kind() != authority.kind) {
@@ -252,6 +231,27 @@ bool TryCopyLegacyQuery(const std::vector<PlannedQueryParameter> &planned, std::
 
 } // namespace
 
+std::string FormUrlEncode(const std::string &value) {
+	static const char HEX[] = "0123456789ABCDEF";
+	std::string result;
+	for (const auto character : value) {
+		const auto byte = static_cast<unsigned char>(character);
+		const bool unreserved = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
+		                        (byte >= '0' && byte <= '9') || byte == '-' || byte == '.' || byte == '_' ||
+		                        byte == '~';
+		if (unreserved) {
+			result.push_back(character);
+		} else if (byte == 0x20) {
+			result.push_back('+');
+		} else {
+			result.push_back('%');
+			result.push_back(HEX[(byte >> 4U) & 0x0FU]);
+			result.push_back(HEX[byte & 0x0FU]);
+		}
+	}
+	return result;
+}
+
 bool TryMaterializeRestRequest(const ScanPlan &plan, const RestConditionalBindingAuthority &conditional,
                                MaterializedRestRequest &request) {
 	if (plan.Operation().Protocol() != PlannedProtocol::REST) {
@@ -278,8 +278,40 @@ bool TryMaterializeRestRequest(const ScanPlan &plan, const RestConditionalBindin
 			request.records_path.assign(1, std::move(legacy_records_field));
 		}
 	}
-	return FitsRestRequestTarget(operation.path, request.query) &&
-	       TryCopyFixedHeaders(operation.headers, false, plan.Budgets().header_bytes, request.headers);
+	if (!FitsRestRequestTarget(operation.path, request.query) ||
+	    !TryCopyFixedHeaders(operation.headers, false, plan.Budgets().header_bytes, request.headers)) {
+		return false;
+	}
+	// An api_key credential's declared header or query-parameter name must
+	// never collide with an already-declared field on the same operation, so
+	// the value ApiKeyAuthenticator places at authorization time can never
+	// silently shadow (or be shadowed by) a fixed header or another query
+	// field. The credential's own name/value are never added to
+	// request.headers/request.query themselves (they must stay out of
+	// AdmittedRestRequestProfile::Headers()/QueryParameters()/EXPLAIN's
+	// rendered facts) — ApiKeyAuthenticator places them directly into the
+	// materialized request at authorization time, and its own authorization-
+	// time checks (not an admission-time byte reservation, which cannot
+	// account for the credential's eventual form_urlencoded expansion) bound
+	// the resulting header or target size.
+	const auto &authentication = plan.AuthenticationObligation();
+	if (authentication.Requirement() == PlannedCredentialRequirement::REQUIRED &&
+	    authentication.Authenticator() == PlannedAuthenticator::API_KEY) {
+		if (authentication.Placement() == PlannedCredentialPlacement::HEADER_NAMED) {
+			for (const auto &header : request.headers) {
+				if (EqualsAsciiIgnoreCase(header.name, authentication.PlacementName())) {
+					return false;
+				}
+			}
+		} else if (authentication.Placement() == PlannedCredentialPlacement::QUERY_NAMED) {
+			for (const auto &parameter : request.query) {
+				if (parameter.name == authentication.PlacementName()) {
+					return false;
+				}
+			}
+		}
+	}
+	return true;
 }
 
 bool FitsRestRequestTarget(const std::string &path, const std::vector<AdmittedQueryParameter> &query,

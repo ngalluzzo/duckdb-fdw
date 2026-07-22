@@ -123,7 +123,11 @@ extractors, and implementation-specific coercions are invalid.
 
 ### Credentials
 
-V1 admits bearer credentials only:
+V1 admits two static credential kinds: bearer and api_key. Both resolve
+their value from exactly one named DuckDB secret at execution; neither
+supports token acquisition, refresh, expiry, or any other dynamic behavior.
+
+Bearer places the resolved value in the fixed `Authorization` header:
 
 ```yaml
 credentials:
@@ -137,9 +141,47 @@ credentials:
         port: 443
 ```
 
+**Accepted by [RFC 0018](rfcs/0018-add-static-api-key-credential.md).**
+API-key credentials place the resolved value as an author-declared fixed
+HTTP header or URL query parameter instead of `Authorization`:
+
+```yaml
+credentials:
+  - id: service_api_key_header
+    kind: api_key
+    secret_field: token
+    placement: header
+    header_name: X-Api-Key
+    destinations:
+      - scheme: https
+        host: api.example.com
+        port: 443
+  - id: service_api_key_query
+    kind: api_key
+    secret_field: token
+    placement: query
+    query_param: api_key
+    destinations:
+      - scheme: https
+        host: api.example.com
+        port: 443
+```
+
+`header_name` is required and validated exactly when `placement: header`;
+`query_param` is required and validated exactly when `placement: query`;
+each is rejected as an unknown field for the other placement and for
+`kind: bearer`. A declared `header_name` or `query_param` that collides with
+another declared field on the same operation (a fixed header, or a fixed,
+input-bound, or conditional query field) is rejected — the credential value
+can never silently shadow or be shadowed by another declared field.
+
 `secret_field` is a logical field name, not a DuckDB secret name or a secret
-value. The runtime materializes an approved bearer capability only during
-execution and only for an exact declared destination.
+value. The runtime materializes an approved credential capability only
+during execution and only for an exact declared destination. The credential
+value never enters package source, compiled explanation, `ScanPlan`,
+diagnostics, fixtures, digests, or catalog introspection for either kind;
+`EXPLAIN` renders the credential kind and the declared placement name (e.g.
+`authenticator:api_key,placement:header:X-Api-Key`) but never the value.
 
 ### Network policy
 
@@ -236,7 +278,7 @@ auth:
   mode: anonymous
 ```
 
-or references one manifest bearer declaration:
+or references one manifest credential declaration (bearer or api_key):
 
 ```yaml
 auth:

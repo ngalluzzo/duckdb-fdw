@@ -100,6 +100,25 @@ CompiledAuthenticationPolicy CompileAuthentication(const ManifestDeclaration &ma
 			diagnostics.Add(PackageDiagnosticCode::POLICY_WIDENING, PackageDiagnosticPhase::COMPILE, origin.mark,
 			                manifest.id.value, relation.id.value, operation.id.value);
 		}
+		// api_key credentials place their value in a header or query
+		// parameter Remote Runtime's GraphQL admission does not construct
+		// (GraphQL requests are a fixed JSON POST body with no author-facing
+		// query-parameter surface, and header placement is not yet
+		// implemented for GraphQL). Rejecting this combination here, rather
+		// than only failing at execution with a generic policy diagnostic,
+		// gives the author a precise compile-time signal.
+		if (credential->kind.value == "api_key" && operation.graphql) {
+			diagnostics.Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::COMPILE,
+			                operation.mark, manifest.id.value, relation.id.value, operation.id.value);
+		}
+	}
+	if (credential->kind.value == "api_key") {
+		const bool header_placement = credential->placement.value == "header";
+		const auto placement =
+		    header_placement ? CompiledCredentialPlacement::HEADER_NAMED : CompiledCredentialPlacement::QUERY_NAMED;
+		const auto &placement_name = header_placement ? credential->header_name.value : credential->query_param.value;
+		return duckdb_api::internal::CompiledModelBuilder::ApiKeyAuthentication(
+		    credential->secret_field.value, placement, placement_name, std::move(destinations));
 	}
 	return duckdb_api::internal::CompiledModelBuilder::BearerAuthentication(credential->secret_field.value,
 	                                                                        std::move(destinations));

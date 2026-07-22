@@ -183,8 +183,12 @@ protected:
 			throw duckdb_api::ExecutionCancelled();
 		}
 		const auto alternative = AlternativeOf(authorization);
+		// ResolveDuckdbApiSecret supplies the kind-neutral CREDENTIAL
+		// alternative for every authenticated relation, not BEARER/
+		// GITHUB_USER_BEARER specifically, so any non-anonymous alternative
+		// is valid here.
 		if ((plan.Authentication() == duckdb_api::FeatureState::ENABLED) !=
-		    (alternative == AuthorizationAlternative::GITHUB_USER_BEARER)) {
+		    (alternative != AuthorizationAlternative::ANONYMOUS)) {
 			throw std::logic_error("Query package test executor received the wrong authorization alternative");
 		}
 		probe->streams_opened.fetch_add(1, std::memory_order_relaxed);

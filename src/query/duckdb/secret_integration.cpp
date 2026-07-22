@@ -57,7 +57,7 @@ unique_ptr<BaseSecret> CreateDuckdbApiSecret(ClientContext &, CreateSecretInput 
 	if (token_text.empty()) {
 		ThrowCreationError("TOKEN must be a non-empty VARCHAR");
 	}
-	if (token_text.size() > duckdb_api::ScanAuthorization::GithubUserBearerTokenByteLimit()) {
+	if (token_text.size() > duckdb_api::ScanAuthorization::CredentialByteLimit()) {
 		ThrowCreationHeaderBudgetError();
 	}
 
@@ -129,7 +129,7 @@ std::string ResolveToken(ClientContext &context, const std::string &logical_name
 	if (token_snapshot.empty()) {
 		ThrowResolutionError("named duckdb_api secret has no usable token");
 	}
-	if (token_snapshot.size() > duckdb_api::ScanAuthorization::GithubUserBearerTokenByteLimit()) {
+	if (token_snapshot.size() > duckdb_api::ScanAuthorization::CredentialByteLimit()) {
 		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "header_bytes",
 		                                 "bearer token exceeds the 8192-byte request-header limit");
 	}
@@ -155,10 +155,15 @@ void RegisterDuckdbApiSecrets(ExtensionLoader &loader) {
 
 duckdb_api::ScanAuthorization ResolveDuckdbApiSecret(ClientContext &context, const std::string &logical_name) {
 	// ResolveToken owns and destroys DuckDB's cloned SecretEntry before Runtime
-	// receives the only Query-created plaintext snapshot.
+	// receives the only Query-created plaintext snapshot. Query resolves only
+	// the secret name here; it has no access to which credential kind (bearer
+	// or api_key) the target relation declared, so it always constructs the
+	// kind-neutral Credential() capability. Remote Runtime alone decides
+	// bearer-header, named-header, or named-query placement from the admitted
+	// plan (RUNTIME_CONTRACTS.md's authorization-capability contract).
 	try {
 		auto token = ResolveToken(context, logical_name);
-		return duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token));
+		return duckdb_api::ScanAuthorization::Credential(std::move(token));
 	} catch (const std::bad_alloc &) {
 		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "authorization",
 		                                 "authorization capability could not be allocated within its memory budget");

@@ -28,7 +28,7 @@ BaseDomain ExpectedRestDomain(const PlannedRestOperation &operation, PlannedPagi
 }
 
 bool HasCommonRestPlan(const ScanPlan &plan, const HttpExecutionProfile &profile, MaterializedRestRequest &request,
-                       bool &requires_bearer) {
+                       RequiredCredential &credential) {
 	if (plan.Operation().Protocol() != PlannedProtocol::REST) {
 		return false;
 	}
@@ -40,13 +40,13 @@ bool HasCommonRestPlan(const ScanPlan &plan, const HttpExecutionProfile &profile
 	       plan.Domain() == ExpectedRestDomain(operation, plan.Pagination().Strategy()) &&
 	       IsSafeRequestPath(operation.path) && TryAdmitRestRelationalEnvelope(plan, conditional) &&
 	       TryMaterializeRestRequest(plan, conditional, request) &&
-	       HasSupportedRestAuthority(plan, profile, requires_bearer) && plan.Providers() == FeatureState::DISABLED &&
+	       HasSupportedRestAuthority(plan, profile, credential) && plan.Providers() == FeatureState::DISABLED &&
 	       plan.Retry() == FeatureState::DISABLED && plan.Cache() == FeatureState::DISABLED;
 }
 
 bool HasSingleResponseShape(const ScanPlan &plan, const HttpExecutionProfile &profile, MaterializedRestRequest &request,
-                            bool &requires_bearer) {
-	if (!HasCommonRestPlan(plan, profile, request, requires_bearer) ||
+                            RequiredCredential &credential) {
+	if (!HasCommonRestPlan(plan, profile, request, credential) ||
 	    plan.Pagination().Strategy() != PlannedPaginationStrategy::DISABLED ||
 	    !plan.Budgets().IsWithinLiveRestBounds() || plan.Budgets().decoded_records > profile.max_decoded_records ||
 	    plan.ConditionalInput() == PlannedConditionalInput::VISIBILITY_PRIVATE) {
@@ -61,8 +61,8 @@ bool HasSingleResponseShape(const ScanPlan &plan, const HttpExecutionProfile &pr
 }
 
 bool HasPaginatedShape(const ScanPlan &plan, const HttpExecutionProfile &profile, MaterializedRestRequest &request,
-                       bool &requires_bearer) {
-	return HasCommonRestPlan(plan, profile, request, requires_bearer) &&
+                       RequiredCredential &credential) {
+	return HasCommonRestPlan(plan, profile, request, credential) &&
 	       HasSupportedRestPagination(plan, profile, request.query);
 }
 
@@ -72,12 +72,12 @@ std::unique_ptr<const AdmittedRestRequestProfile> TryAdmitSingleResponseHttpPlan
                                                                                  const HttpExecutionProfile &profile) {
 	try {
 		MaterializedRestRequest request;
-		bool requires_bearer = false;
-		if (!HasSingleResponseShape(plan, profile, request, requires_bearer)) {
+		RequiredCredential credential;
+		if (!HasSingleResponseShape(plan, profile, request, credential)) {
 			return {};
 		}
 		return std::unique_ptr<const AdmittedRestRequestProfile>(
-		    new AdmittedRestRequestProfile(plan, std::move(request), requires_bearer));
+		    new AdmittedRestRequestProfile(plan, std::move(request), credential));
 	} catch (const std::bad_alloc &) {
 		throw ExecutionError(ErrorStage::RESOURCE, "request_profile",
 		                     "REST request profile could not be allocated within its memory budget");
@@ -92,12 +92,12 @@ std::unique_ptr<const AdmittedPaginatedRestRequestProfile>
 TryAdmitPaginatedRestPlan(const ScanPlan &plan, const HttpExecutionProfile &profile) {
 	try {
 		MaterializedRestRequest request;
-		bool requires_bearer = false;
-		if (!HasPaginatedShape(plan, profile, request, requires_bearer)) {
+		RequiredCredential credential;
+		if (!HasPaginatedShape(plan, profile, request, credential)) {
 			return {};
 		}
 		return std::unique_ptr<const AdmittedPaginatedRestRequestProfile>(
-		    new AdmittedPaginatedRestRequestProfile(plan, std::move(request), requires_bearer));
+		    new AdmittedPaginatedRestRequestProfile(plan, std::move(request), credential));
 	} catch (const std::bad_alloc &) {
 		throw ExecutionError(ErrorStage::RESOURCE, "request_profile",
 		                     "paginated REST request profile could not be allocated within its memory budget");

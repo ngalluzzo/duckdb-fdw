@@ -15,6 +15,7 @@ set(REMOTE_RUNTIME_PAGINATION_SOURCES
     src/runtime/policy/scan_resource_accounting.cpp)
 set(REMOTE_RUNTIME_EXECUTOR_SOURCES
     ${REMOTE_RUNTIME_PAGINATION_SOURCES}
+    src/runtime/authentication/api_key_authenticator.cpp
     src/runtime/authentication/bearer_authenticator.cpp
     src/runtime/decoding/graphql_response_decoder.cpp
     src/runtime/decoding/json_decoder.cpp

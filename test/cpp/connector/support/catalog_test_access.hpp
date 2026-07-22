@@ -101,7 +101,17 @@ public:
 		return duckdb_api::CompiledAuthenticationPolicy(
 		    duckdb_api::CompiledCredentialRequirement::REQUIRED, std::move(logical_credential),
 		    duckdb_api::CompiledAuthenticator::BEARER, duckdb_api::CompiledCredentialPlacement::AUTHORIZATION_HEADER,
-		    std::move(destinations));
+		    "", std::move(destinations));
+	}
+
+	static duckdb_api::CompiledAuthenticationPolicy
+	ValidateRequiredApiKey(std::string logical_credential, duckdb_api::CompiledCredentialPlacement placement,
+	                       std::string placement_name, duckdb_api::CompiledRestOrigin destination) {
+		std::vector<duckdb_api::CompiledRestOrigin> destinations;
+		destinations.push_back(std::move(destination));
+		return duckdb_api::CompiledAuthenticationPolicy(
+		    duckdb_api::CompiledCredentialRequirement::REQUIRED, std::move(logical_credential),
+		    duckdb_api::CompiledAuthenticator::API_KEY, placement, std::move(placement_name), std::move(destinations));
 	}
 
 	static duckdb_api::CompiledPredicateMapping

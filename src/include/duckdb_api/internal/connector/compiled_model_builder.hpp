@@ -53,6 +53,12 @@ public:
 	static CompiledAuthenticationPolicy AnonymousAuthentication();
 	static CompiledAuthenticationPolicy BearerAuthentication(std::string logical_credential,
 	                                                         std::vector<CompiledHttpOrigin> destinations);
+	// placement must be HEADER_NAMED or QUERY_NAMED; placement_name is the
+	// author-declared header or query-parameter name.
+	static CompiledAuthenticationPolicy ApiKeyAuthentication(std::string logical_credential,
+	                                                         CompiledCredentialPlacement placement,
+	                                                         std::string placement_name,
+	                                                         std::vector<CompiledHttpOrigin> destinations);
 	static CompiledResourceCeilings Resources(std::uint64_t max_response_bytes_per_page,
 	                                          std::uint64_t max_response_bytes_per_scan,
 	                                          std::uint64_t max_records_per_page, std::uint64_t max_records_per_scan,

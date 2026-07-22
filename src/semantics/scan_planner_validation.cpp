@@ -363,10 +363,17 @@ void ValidateAuthentication(const CompiledRelation &relation, const CompiledOper
 		}
 		return;
 	}
+	const bool bearer = authentication.Authenticator() == CompiledAuthenticator::BEARER &&
+	                    authentication.Placement() == CompiledCredentialPlacement::AUTHORIZATION_HEADER &&
+	                    authentication.PlacementName().empty();
+	const bool api_key_header = authentication.Authenticator() == CompiledAuthenticator::API_KEY &&
+	                            authentication.Placement() == CompiledCredentialPlacement::HEADER_NAMED &&
+	                            !authentication.PlacementName().empty();
+	const bool api_key_query = authentication.Authenticator() == CompiledAuthenticator::API_KEY &&
+	                           authentication.Placement() == CompiledCredentialPlacement::QUERY_NAMED &&
+	                           !authentication.PlacementName().empty();
 	if (requirement != CompiledCredentialRequirement::REQUIRED || authentication.LogicalCredential().empty() ||
-	    authentication.Authenticator() != CompiledAuthenticator::BEARER ||
-	    authentication.Placement() != CompiledCredentialPlacement::AUTHORIZATION_HEADER ||
-	    authentication.Destination() == nullptr) {
+	    (!bearer && !api_key_header && !api_key_query) || authentication.Destination() == nullptr) {
 		throw std::logic_error("authenticated relation contains a contradictory authentication policy");
 	}
 	const auto &origin = operation.Protocol() == CompiledProtocol::REST ? operation.Rest().request.origin

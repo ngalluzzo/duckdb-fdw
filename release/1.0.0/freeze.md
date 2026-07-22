@@ -15,9 +15,14 @@ read either without inspecting product source.
 > (Accepted 2026-07-21), adding `response_next` REST pagination pending
 > `0.10.0` implementation. **The `response_next` candidate graduated into the
 > schema-closed set when its `0.10.0` implementation landed**: REST
-> pagination strategies are now `{disabled, link_next, response_next}` and
-> the `accepted_candidate_revisions` list is empty, ready for any future
-> accepted RFC that introduces a new candidate revision.
+> pagination strategies are now `{disabled, link_next, response_next}`. A
+> second revision, [RFC 0018](../docs/rfcs/0018-add-static-api-key-credential.md)
+> (Accepted 2026-07-22), added a static `api_key` credential kind (header or
+> query placement) alongside `bearer`; its implementation landed in the same
+> change that accepted the RFC, so it graduated directly into the closed
+> credential-kind set without a separate pending-implementation interval. The
+> `accepted_candidate_revisions` list is therefore empty, ready for any
+> future accepted RFC that introduces a new candidate revision.
 
 The `1.0.0` contract is not a single document. It is a layered set in which
 each layer draws authority from the one above it:
@@ -100,10 +105,11 @@ because the project reaches `1.0.0`.
 - Frozen: identifier `duckdb_api/v1`; the closed failsafe YAML subset and
   byte-copied JSON schemas; static `BOOLEAN`/`BIGINT`/`VARCHAR` typing; the
   `sha256-length-prefixed-path-and-bytes-v1` package digest; REST `GET` and
-  structured GraphQL Relay profiles; anonymous and capability-scoped bearer
-  authentication; deny-only network policy; positive resource ceilings;
-  reload compatibility rules; offline fixture identity; the closed pagination
-  strategy sets (REST `{disabled, link_next}`, GraphQL `{relay_forward}`).
+  structured GraphQL Relay profiles; anonymous, capability-scoped bearer, and
+  static api_key (header- or query-placed) authentication; deny-only network
+  policy; positive resource ceilings; reload compatibility rules; offline
+  fixture identity; the closed pagination strategy sets (REST `{disabled,
+  link_next}`, GraphQL `{relay_forward}`).
 - Authority: `docs/CONNECTOR_SPECIFICATIONS.md`; RFC 0013.
 - Machine oracle: `src/connector/package/assets/connector-package-v1.schema.json`;
   `release/<version>/pins.json` `identities.repository_connector_package`.
@@ -154,10 +160,10 @@ rather than silently ignoring them.
 - Tier 2 JQ-compatible transforms; Tier 3 native or WASM custom code; column
   providers; partitions; automatic retry or rate-limit waiting;
   author-configurable cache or single-flight behavior.
-- OpenAPI or GraphQL introspection importers; authenticators beyond anonymous
-  and capability-scoped bearer; dynamic schemas; write-back, transactions,
-  continuous streams; raw GraphQL documents; author remote projection, order,
-  or limit pushdown declarations.
+- OpenAPI or GraphQL introspection importers; authenticators beyond
+  anonymous, capability-scoped bearer, and static api_key (RFC 0018); dynamic
+  schemas; write-back, transactions, continuous streams; raw GraphQL
+  documents; author remote projection, order, or limit pushdown declarations.
 - **Pagination strategies outside the closed sets:** response-body-embedded
   next URLs that do not match the accepted `response_next` reconstruct-and-
   verify shape (for example an opaque body cursor that drives the next

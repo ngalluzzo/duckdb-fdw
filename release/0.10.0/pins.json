@@ -97,6 +97,7 @@
         "src/runtime/pagination/link_pagination.cpp",
         "src/runtime/policy/request_validation.cpp",
         "src/runtime/policy/scan_resource_accounting.cpp",
+        "src/runtime/authentication/api_key_authenticator.cpp",
         "src/runtime/authentication/bearer_authenticator.cpp",
         "src/runtime/decoding/graphql_response_decoder.cpp",
         "src/runtime/decoding/json_decoder.cpp",
@@ -218,6 +219,7 @@
         "src/runtime/pagination/link_pagination.cpp",
         "src/runtime/policy/request_validation.cpp",
         "src/runtime/policy/scan_resource_accounting.cpp",
+        "src/runtime/authentication/api_key_authenticator.cpp",
         "src/runtime/authentication/bearer_authenticator.cpp",
         "src/runtime/decoding/graphql_response_decoder.cpp",
         "src/runtime/decoding/json_decoder.cpp",
@@ -272,7 +274,7 @@
         "test/cpp/runtime/support/loopback_curl_runtime.cpp",
         "test/cpp/runtime/support/loopback_curl_runtime.hpp"
       ],
-      "sha256": "099e03a72d1f0dc8308fc95485ea9398fd517d97f8dcbe750361f6cd2e45f823"
+      "sha256": "b6ad0624be38f2e688a053178c8b2af03901924f550d707e086f7f0503880aad"
     },
     "native_product_sources": {
       "algorithm": "sha256-length-prefixed-path-and-bytes-v1",
@@ -376,6 +378,7 @@
         "src/include/duckdb_api/internal/connector/predicate_proof_profile.hpp",
         "src/include/duckdb_api/internal/connector/protocol_operation_declaration.hpp",
         "src/include/duckdb_api/internal/connector/resource_ceiling_declaration.hpp",
+        "src/include/duckdb_api/internal/runtime/authentication/api_key_authenticator.hpp",
         "src/include/duckdb_api/internal/runtime/authentication/bearer_authenticator.hpp",
         "src/include/duckdb_api/internal/runtime/decoding/decoded_page_buffer.hpp",
         "src/include/duckdb_api/internal/runtime/decoding/graphql_response_decoder.hpp",
@@ -458,6 +461,7 @@
         "src/runtime/README.md",
         "src/runtime/api/authorization.cpp",
         "src/runtime/api/execution_error.cpp",
+        "src/runtime/authentication/api_key_authenticator.cpp",
         "src/runtime/authentication/bearer_authenticator.cpp",
         "src/runtime/decoding/graphql_response_decoder.cpp",
         "src/runtime/decoding/json_decoder.cpp",
@@ -519,7 +523,7 @@
         "src/semantics/sources.cmake",
         "src/semantics/targets.cmake"
       ],
-      "sha256": "fbbd5b4bbfea1ae6b2924f547c4c8cfd7b5635ab60a6157d58c3a40b0f4b5d4f"
+      "sha256": "aa97ae655d2b10c398b0a56a06206b6a706183d6818f103f757ec6505a59479f"
     },
     "public_contract": {
       "canonical_json_sha256": "2a4990a7c12d34ad9283401af83a58d6f4f728145e2e39414c1a867467c3e5b8",

@@ -353,19 +353,28 @@ CompiledAuthenticationPolicy::CompiledAuthenticationPolicy(CompiledCredentialReq
                                                            std::string logical_credential_p,
                                                            CompiledAuthenticator authenticator_p,
                                                            CompiledCredentialPlacement placement_p,
+                                                           std::string placement_name_p,
                                                            std::vector<CompiledHttpOrigin> destinations_p)
     : requirement(requirement_p), logical_credential(std::move(logical_credential_p)), authenticator(authenticator_p),
-      placement(placement_p), destinations(std::move(destinations_p)) {
+      placement(placement_p), placement_name(std::move(placement_name_p)), destinations(std::move(destinations_p)) {
 	if (requirement == CompiledCredentialRequirement::NONE) {
 		if (!logical_credential.empty() || authenticator != CompiledAuthenticator::NONE ||
-		    placement != CompiledCredentialPlacement::NONE || !destinations.empty()) {
+		    placement != CompiledCredentialPlacement::NONE || !placement_name.empty() || !destinations.empty()) {
 			throw std::invalid_argument("anonymous relation contains contradictory credential policy");
 		}
 		return;
 	}
 	if (requirement != CompiledCredentialRequirement::REQUIRED || logical_credential != "token" ||
-	    authenticator != CompiledAuthenticator::BEARER ||
-	    placement != CompiledCredentialPlacement::AUTHORIZATION_HEADER || destinations.empty()) {
+	    destinations.empty()) {
+		throw std::invalid_argument("required relation contains an unsupported credential policy");
+	}
+	const bool bearer = authenticator == CompiledAuthenticator::BEARER &&
+	                    placement == CompiledCredentialPlacement::AUTHORIZATION_HEADER && placement_name.empty();
+	const bool api_key_header = authenticator == CompiledAuthenticator::API_KEY &&
+	                            placement == CompiledCredentialPlacement::HEADER_NAMED && !placement_name.empty();
+	const bool api_key_query = authenticator == CompiledAuthenticator::API_KEY &&
+	                           placement == CompiledCredentialPlacement::QUERY_NAMED && !placement_name.empty();
+	if (!bearer && !api_key_header && !api_key_query) {
 		throw std::invalid_argument("required relation contains an unsupported credential policy");
 	}
 	for (std::size_t index = 0; index < destinations.size(); index++) {
@@ -382,14 +391,14 @@ CompiledAuthenticationPolicy::CompiledAuthenticationPolicy(CompiledCredentialReq
 
 CompiledAuthenticationPolicy CompiledAuthenticationPolicy::Anonymous() {
 	return CompiledAuthenticationPolicy(CompiledCredentialRequirement::NONE, "", CompiledAuthenticator::NONE,
-	                                    CompiledCredentialPlacement::NONE, {});
+	                                    CompiledCredentialPlacement::NONE, "", {});
 }
 
 CompiledAuthenticationPolicy CompiledAuthenticationPolicy::RequiredBearer() {
 	std::vector<CompiledHttpOrigin> destinations;
 	destinations.push_back({CompiledUrlScheme::HTTPS, CompiledHttpHost("api.github.com"), 443});
 	return CompiledAuthenticationPolicy(CompiledCredentialRequirement::REQUIRED, "token", CompiledAuthenticator::BEARER,
-	                                    CompiledCredentialPlacement::AUTHORIZATION_HEADER, std::move(destinations));
+	                                    CompiledCredentialPlacement::AUTHORIZATION_HEADER, "", std::move(destinations));
 }
 
 CompiledAuthenticationPolicy
@@ -397,7 +406,15 @@ CompiledAuthenticationPolicy::RequiredBearer(std::string logical_credential,
                                              std::vector<CompiledHttpOrigin> destinations) {
 	return CompiledAuthenticationPolicy(CompiledCredentialRequirement::REQUIRED, std::move(logical_credential),
 	                                    CompiledAuthenticator::BEARER,
-	                                    CompiledCredentialPlacement::AUTHORIZATION_HEADER, std::move(destinations));
+	                                    CompiledCredentialPlacement::AUTHORIZATION_HEADER, "", std::move(destinations));
+}
+
+CompiledAuthenticationPolicy
+CompiledAuthenticationPolicy::RequiredApiKey(std::string logical_credential, CompiledCredentialPlacement placement,
+                                             std::string placement_name, std::vector<CompiledHttpOrigin> destinations) {
+	return CompiledAuthenticationPolicy(CompiledCredentialRequirement::REQUIRED, std::move(logical_credential),
+	                                    CompiledAuthenticator::API_KEY, placement, std::move(placement_name),
+	                                    std::move(destinations));
 }
 
 CompiledCredentialRequirement CompiledAuthenticationPolicy::Requirement() const {
@@ -414,6 +431,10 @@ CompiledAuthenticator CompiledAuthenticationPolicy::Authenticator() const {
 
 CompiledCredentialPlacement CompiledAuthenticationPolicy::Placement() const {
 	return placement;
+}
+
+const std::string &CompiledAuthenticationPolicy::PlacementName() const {
+	return placement_name;
 }
 
 const CompiledHttpOrigin *CompiledAuthenticationPolicy::Destination() const {

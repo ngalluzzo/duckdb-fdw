@@ -223,7 +223,12 @@ protected:
 	                          duckdb_api::ExecutionControl &control) const override {
 		probe->authorization_open_calls.fetch_add(1, std::memory_order_relaxed);
 		const auto alternative = AlternativeOf(authorization);
-		const bool authenticated = alternative == AuthorizationAlternative::GITHUB_USER_BEARER;
+		// Query's ResolveDuckdbApiSecret now supplies the kind-neutral CREDENTIAL
+		// alternative for every authenticated relation (bearer or api_key); it
+		// cannot know the target relation's credential kind at resolution time.
+		// GITHUB_USER_BEARER (aliasing BEARER) remains valid for any direct
+		// legacy construction, so either non-anonymous alternative is authenticated.
+		const bool authenticated = alternative != AuthorizationAlternative::ANONYMOUS;
 		if (!authenticated) {
 			probe->anonymous_authorizations.fetch_add(1, std::memory_order_relaxed);
 		} else {

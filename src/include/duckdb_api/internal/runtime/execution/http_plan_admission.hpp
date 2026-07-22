@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb_api/execution.hpp"
+#include "duckdb_api/internal/runtime/execution/rest_authority_admission.hpp"
 #include "duckdb_api/internal/runtime/transport/http_transport.hpp"
 
 #include <cstdint>
@@ -52,12 +53,18 @@ public:
 	PlannedResponseSource ResponseSource() const;
 	const std::vector<std::string> &RecordsPath() const;
 	bool RequiresBearer() const;
+	bool RequiresApiKey() const;
+	// Valid only when RequiresApiKey() is true: true = header, false = query.
+	bool ApiKeyHeaderPlacement() const;
+	// Valid only when RequiresApiKey() is true: the author-declared header or
+	// query-parameter name. Never the credential value.
+	const std::string &ApiKeyPlacementName() const;
 	const ResourceBudgets &Budgets() const;
 
 private:
 	friend std::unique_ptr<const AdmittedRestRequestProfile>
 	TryAdmitSingleResponseHttpPlan(const ScanPlan &, const HttpExecutionProfile &);
-	AdmittedRestRequestProfile(const ScanPlan &plan, MaterializedRestRequest &&request, bool requires_bearer);
+	AdmittedRestRequestProfile(const ScanPlan &plan, MaterializedRestRequest &&request, RequiredCredential credential);
 
 	std::string method;
 	std::string scheme;
@@ -69,7 +76,7 @@ private:
 	std::vector<AdmittedRestColumn> columns;
 	PlannedResponseSource response_source;
 	std::vector<std::string> records_path;
-	bool requires_bearer;
+	RequiredCredential credential;
 	ResourceBudgets budgets;
 };
 
@@ -105,6 +112,12 @@ public:
 	// declared JSON body path the decoder uses to extract the continuation.
 	const std::string &NextUrlPath() const;
 	bool RequiresBearer() const;
+	bool RequiresApiKey() const;
+	// Valid only when RequiresApiKey() is true: true = header, false = query.
+	bool ApiKeyHeaderPlacement() const;
+	// Valid only when RequiresApiKey() is true: the author-declared header or
+	// query-parameter name. Never the credential value.
+	const std::string &ApiKeyPlacementName() const;
 	AdmittedPaginatedRestConditionalInput ConditionalInput() const;
 	const ResourceBudgets &PageBudgets() const;
 	const ScanResourceBudgets &ScanBudgets() const;
@@ -112,7 +125,8 @@ public:
 private:
 	friend std::unique_ptr<const AdmittedPaginatedRestRequestProfile>
 	TryAdmitPaginatedRestPlan(const ScanPlan &, const HttpExecutionProfile &);
-	AdmittedPaginatedRestRequestProfile(const ScanPlan &plan, MaterializedRestRequest &&request, bool requires_bearer);
+	AdmittedPaginatedRestRequestProfile(const ScanPlan &plan, MaterializedRestRequest &&request,
+	                                    RequiredCredential credential);
 
 	std::string method;
 	std::string scheme;
@@ -132,7 +146,7 @@ private:
 	uint64_t max_pages;
 	PlannedPaginationStrategy pagination_strategy;
 	std::string next_url_path;
-	bool requires_bearer;
+	RequiredCredential credential;
 	AdmittedPaginatedRestConditionalInput conditional_input;
 	ResourceBudgets page_budgets;
 	ScanResourceBudgets scan_budgets;

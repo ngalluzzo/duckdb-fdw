@@ -66,6 +66,8 @@ class ScanPlanFixtureBuilder {
 public:
 	static duckdb_api::ScanPlan Anonymous();
 	static duckdb_api::ScanPlan Authenticated(const std::string &secret_name);
+	static duckdb_api::ScanPlan ApiKey(const std::string &secret_name, duckdb_api::PlannedCredentialPlacement placement,
+	                                   std::string placement_name);
 	static duckdb_api::ScanPlan Repository(const std::string &secret_name,
 	                                       duckdb_api::PredicateDecisionCategory predicate_category,
 	                                       bool complete_residual);
@@ -79,6 +81,8 @@ private:
 	static duckdb_api::ScanPlan Common(std::string connector, std::string version, std::string relation,
 	                                   std::string source_snapshot);
 	static void RequireBearer(duckdb_api::ScanPlan &plan, const std::string &secret_name);
+	static void RequireApiKey(duckdb_api::ScanPlan &plan, const std::string &secret_name,
+	                          duckdb_api::PlannedCredentialPlacement placement, std::string placement_name);
 	static void EnablePagination(duckdb_api::ScanPlan &plan, std::string page_size_parameter, uint64_t page_size,
 	                             std::string page_number_parameter, uint64_t max_pages,
 	                             uint64_t response_bytes_per_page, uint64_t response_bytes_per_scan,
@@ -130,6 +134,20 @@ void ScanPlanFixtureBuilder::RequireBearer(duckdb_api::ScanPlan &plan, const std
 	plan.authentication_obligation.logical_credential = "token";
 	plan.authentication_obligation.authenticator = duckdb_api::PlannedAuthenticator::BEARER;
 	plan.authentication_obligation.placement = duckdb_api::PlannedCredentialPlacement::AUTHORIZATION_HEADER;
+	plan.authentication_obligation.has_destination = true;
+	plan.authentication_obligation.destination = {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443};
+}
+
+void ScanPlanFixtureBuilder::RequireApiKey(duckdb_api::ScanPlan &plan, const std::string &secret_name,
+                                           duckdb_api::PlannedCredentialPlacement placement,
+                                           std::string placement_name) {
+	plan.authentication = duckdb_api::FeatureState::ENABLED;
+	plan.secret_reference = duckdb_api::PlannedSecretReference(secret_name);
+	plan.authentication_obligation.requirement = duckdb_api::PlannedCredentialRequirement::REQUIRED;
+	plan.authentication_obligation.logical_credential = "token";
+	plan.authentication_obligation.authenticator = duckdb_api::PlannedAuthenticator::API_KEY;
+	plan.authentication_obligation.placement = placement;
+	plan.authentication_obligation.placement_name = std::move(placement_name);
 	plan.authentication_obligation.has_destination = true;
 	plan.authentication_obligation.destination = {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443};
 }
@@ -225,6 +243,31 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Authenticated(const std::string &se
 	                       {"site_admin", "BOOLEAN", false, "$.site_admin"}};
 	plan.budgets = {1, 65536, 16384, 65536, 1, 256, 16, 131072, 2, 5000, 1, 0};
 	RequireBearer(plan, secret_name);
+	return plan;
+}
+
+duckdb_api::ScanPlan ScanPlanFixtureBuilder::ApiKey(const std::string &secret_name,
+                                                    duckdb_api::PlannedCredentialPlacement placement,
+                                                    std::string placement_name) {
+	auto plan = Common("github", "0.7.0", "authenticated_user", AUTHENTICATED_SOURCE_SNAPSHOT);
+	plan.domain = duckdb_api::BaseDomain::SUCCESSFUL_ROOT_OBJECT;
+	SetRestOperation(plan, {"github_authenticated_user",
+	                        duckdb_api::PlannedHttpMethod::GET,
+	                        duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS,
+	                        duckdb_api::PlannedReplaySafety::SAFE,
+	                        {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
+	                        "/user",
+	                        {},
+	                        {{"Accept", "application/vnd.github+json"},
+	                         {"User-Agent", "duckdb-api/0.6.0"},
+	                         {"X-GitHub-Api-Version", "2022-11-28"}},
+	                        duckdb_api::PlannedResponseSource::ROOT_OBJECT,
+	                        "$"});
+	plan.output_columns = {{"id", "BIGINT", false, "$.id"},
+	                       {"login", "VARCHAR", false, "$.login"},
+	                       {"site_admin", "BOOLEAN", false, "$.site_admin"}};
+	plan.budgets = {1, 65536, 16384, 65536, 1, 256, 16, 131072, 2, 5000, 1, 0};
+	RequireApiKey(plan, secret_name, placement, std::move(placement_name));
 	return plan;
 }
 
@@ -658,6 +701,12 @@ duckdb_api::ScanPlan BuildValidAnonymousPlanFixture() {
 
 duckdb_api::ScanPlan BuildValidAuthenticatedPlanFixture(const std::string &exact_logical_secret_name) {
 	return ScanPlanFixtureBuilder::Authenticated(exact_logical_secret_name);
+}
+
+duckdb_api::ScanPlan BuildValidApiKeyPlanFixture(const std::string &exact_logical_secret_name,
+                                                 duckdb_api::PlannedCredentialPlacement placement,
+                                                 std::string placement_name) {
+	return ScanPlanFixtureBuilder::ApiKey(exact_logical_secret_name, placement, std::move(placement_name));
 }
 
 duckdb_api::ScanPlan BuildValidPaginatedPlanFixture(const std::string &exact_logical_secret_name) {

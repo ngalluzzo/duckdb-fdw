@@ -17,8 +17,8 @@ namespace {
 // when the credential is placed as a header. Query placement excludes
 // nothing: it never adds a header, so the pre-authorization request must
 // already match exactly.
-bool SameHeaders(const std::vector<HttpHeader> &actual, const std::vector<HttpHeader> &expected,
-                 bool header_placement, const std::string &placement_name) {
+bool SameHeaders(const std::vector<HttpHeader> &actual, const std::vector<HttpHeader> &expected, bool header_placement,
+                 const std::string &placement_name) {
 	if (actual.size() != expected.size()) {
 		return false;
 	}
@@ -36,13 +36,15 @@ bool IsAdmittedRestRequest(const AdmittedRestRequestProfile &profile, const Http
 	return request.method == expected.method && request.scheme == expected.scheme && request.host == expected.host &&
 	       request.port == expected.port && request.target == expected.target && request.body.empty() &&
 	       request.content_type.empty() &&
-	       SameHeaders(request.headers, expected.headers, profile.ApiKeyHeaderPlacement(), profile.ApiKeyPlacementName());
+	       SameHeaders(request.headers, expected.headers, profile.ApiKeyHeaderPlacement(),
+	                   profile.ApiKeyPlacementName());
 }
 
 bool IsAdmittedPaginatedRestRequest(const AdmittedPaginatedRestRequestProfile &profile, const HttpRequest &request) {
 	if (request.method != profile.Method() || request.scheme != profile.Scheme() || request.host != profile.Host() ||
 	    request.port != profile.Port() || !request.body.empty() || !request.content_type.empty() ||
-	    !SameHeaders(request.headers, profile.Headers(), profile.ApiKeyHeaderPlacement(), profile.ApiKeyPlacementName())) {
+	    !SameHeaders(request.headers, profile.Headers(), profile.ApiKeyHeaderPlacement(),
+	                 profile.ApiKeyPlacementName())) {
 		return false;
 	}
 	uint64_t page = profile.FirstPage();
@@ -76,11 +78,13 @@ HttpRequest ApiKeyAuthenticator::AppendApiKey(uint64_t max_header_bytes, bool he
 		if (!request.content_type.empty() &&
 		    !TryAccumulateRequestHeaderBytes(max_header_bytes, sizeof("Content-Type") - 1, request.content_type.size(),
 		                                     header_bytes)) {
-			throw ExecutionError(ErrorStage::RESOURCE, "header_bytes", "HTTP request headers exceed their aggregate limit");
+			throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
+			                     "HTTP request headers exceed their aggregate limit");
 		}
 		if (value.size() > ScanAuthorization::CredentialByteLimit() ||
 		    !TryAccumulateRequestHeaderBytes(max_header_bytes, placement_name.size(), value.size(), header_bytes)) {
-			throw ExecutionError(ErrorStage::RESOURCE, "header_bytes", "HTTP request headers exceed their aggregate limit");
+			throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
+			                     "HTTP request headers exceed their aggregate limit");
 		}
 		try {
 			request.headers.push_back({placement_name, std::move(value)});
@@ -129,8 +133,8 @@ HttpRequest ApiKeyAuthenticator::AuthorizePaginatedRest(const AdmittedPaginatedR
 		throw ExecutionError(ErrorStage::POLICY, "authorization",
 		                     "api-key authorization is outside the admitted execution profile");
 	}
-	return AppendApiKey(profile.PageBudgets().header_bytes, profile.ApiKeyHeaderPlacement(), profile.ApiKeyPlacementName(),
-	                    std::move(request), authorization);
+	return AppendApiKey(profile.PageBudgets().header_bytes, profile.ApiKeyHeaderPlacement(),
+	                    profile.ApiKeyPlacementName(), std::move(request), authorization);
 }
 
 } // namespace internal

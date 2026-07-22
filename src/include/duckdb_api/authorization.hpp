@@ -8,6 +8,7 @@ namespace duckdb_api {
 
 namespace internal {
 class BearerAuthenticator;
+class ApiKeyAuthenticator;
 } // namespace internal
 
 // Runtime-owned authority for opening one scan. Callers must choose either the
@@ -43,6 +44,19 @@ public:
 	static uint64_t GithubUserBearerTokenByteLimit() noexcept;
 	static ScanAuthorization GithubUserBearer(std::string &&token);
 
+	// Kind-neutral static-credential capability. Query calls this for every
+	// authenticated v1 package relation regardless of whether the relation's
+	// compiled credential is bearer or api_key: at resolution time Query knows
+	// only the logical secret name, never the target relation's credential
+	// kind, so it cannot and does not choose between this and Bearer() itself.
+	// Placement (bearer header, named header, or named query parameter) is
+	// decided entirely by Remote Runtime from the admitted plan, never by
+	// which factory constructed this value. Same size/content validation as
+	// Bearer(). Additive: Bearer()/GithubUserBearer() are unchanged and remain
+	// available to existing callers.
+	static uint64_t CredentialByteLimit() noexcept;
+	static ScanAuthorization Credential(std::string &&value);
+
 	ScanAuthorization(ScanAuthorization &&other) noexcept;
 	ScanAuthorization &operator=(ScanAuthorization &&other) noexcept;
 	~ScanAuthorization() noexcept = default;
@@ -51,7 +65,7 @@ public:
 	ScanAuthorization &operator=(const ScanAuthorization &) = delete;
 
 private:
-	enum class Kind : uint8_t { ANONYMOUS, BEARER };
+	enum class Kind : uint8_t { ANONYMOUS, BEARER, CREDENTIAL };
 	class State;
 	using StateOwner = std::unique_ptr<State, void (*)(State *)>;
 
@@ -64,6 +78,7 @@ private:
 
 	friend class ScanExecutor;
 	friend class internal::BearerAuthenticator;
+	friend class internal::ApiKeyAuthenticator;
 };
 
 } // namespace duckdb_api

@@ -1,5 +1,6 @@
 #include "duckdb_api/authorization.hpp"
 #include "duckdb_api/execution.hpp"
+#include "duckdb_api/internal/runtime/authentication/api_key_authenticator.hpp"
 #include "duckdb_api/internal/runtime/authentication/bearer_authenticator.hpp"
 
 #include <new>
@@ -36,6 +37,7 @@ private:
 	std::string token;
 
 	friend class internal::BearerAuthenticator;
+	friend class internal::ApiKeyAuthenticator;
 };
 
 ScanAuthorization::ScanAuthorization(Kind kind_p, StateOwner state_p) noexcept
@@ -99,8 +101,33 @@ ScanAuthorization ScanAuthorization::GithubUserBearer(std::string &&token) {
 	return Bearer(std::move(token));
 }
 
+uint64_t ScanAuthorization::CredentialByteLimit() noexcept {
+	return BearerTokenByteLimit();
+}
+
+ScanAuthorization ScanAuthorization::Credential(std::string &&value) {
+	if (value.size() > CredentialByteLimit()) {
+		throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
+		                     "credential value exceeds the 8192-byte request-field limit");
+	}
+	if (!IsSafeBearerToken(value)) {
+		throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
+		                     "credential authorization requires a non-empty visible-ASCII value");
+	}
+	try {
+		return ScanAuthorization(Kind::CREDENTIAL,
+		                         StateOwner(new State(std::move(value)), &ScanAuthorization::DestroyState));
+	} catch (const std::bad_alloc &) {
+		throw ExecutionError(ErrorStage::RESOURCE, "authorization",
+		                     "authorization capability could not be allocated within its memory budget");
+	}
+}
+
 std::string internal::BearerAuthenticator::CopyToken(const ScanAuthorization &authorization) {
-	if (!authorization.valid || authorization.kind != ScanAuthorization::Kind::BEARER || !authorization.state) {
+	if (!authorization.valid ||
+	    (authorization.kind != ScanAuthorization::Kind::BEARER &&
+	     authorization.kind != ScanAuthorization::Kind::CREDENTIAL) ||
+	    !authorization.state) {
 		throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization", "bearer authorization capability is invalid");
 	}
 	try {
@@ -108,6 +135,19 @@ std::string internal::BearerAuthenticator::CopyToken(const ScanAuthorization &au
 	} catch (const std::bad_alloc &) {
 		throw ExecutionError(ErrorStage::RESOURCE, "authorization",
 		                     "authorization header could not be allocated within its memory budget");
+	}
+}
+
+std::string internal::ApiKeyAuthenticator::CopyToken(const ScanAuthorization &authorization) {
+	if (!authorization.valid || authorization.kind != ScanAuthorization::Kind::CREDENTIAL || !authorization.state) {
+		throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
+		                     "api-key authorization capability is invalid");
+	}
+	try {
+		return authorization.state->token;
+	} catch (const std::bad_alloc &) {
+		throw ExecutionError(ErrorStage::RESOURCE, "authorization",
+		                     "authorization value could not be allocated within its memory budget");
 	}
 }
 

@@ -122,7 +122,7 @@
     "automatic_retry_or_rate_limit_waiting",
     "author_configurable_cache_or_single_flight",
     "openapi_or_graphql_introspection_importers",
-    "authenticators_beyond_anonymous_and_capability_scoped_bearer",
+    "authenticators_beyond_anonymous_bearer_and_static_api_key",
     "dynamic_schemas",
     "write_back_transactions_or_continuous_streams",
     "compatibility_with_arbitrary_upstream_api_drift",

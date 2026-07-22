@@ -176,6 +176,62 @@ void TestGithubBearerNamesRemainOnlyACompatibilityBridge() {
 	Require(executor.open_count == 0, "GitHub compatibility bridge bypassed the generic bearer envelope");
 }
 
+void TestUnsafeCredentialValuesAreRejectedWithoutDisclosure() {
+	const std::vector<std::string> invalid_values = {"", "contains space", std::string("carriage\rreturn"),
+	                                                 std::string("line\nfeed"), std::string("embedded\0nul", 12)};
+	for (const auto &value : invalid_values) {
+		auto value_input = value;
+		RequireRejected([&]() { (void)duckdb_api::ScanAuthorization::Credential(std::move(value_input)); },
+		                duckdb_api::ErrorStage::AUTHENTICATION, value);
+	}
+}
+
+void TestCredentialByteBoundary() {
+	const auto limit = duckdb_api::ScanAuthorization::CredentialByteLimit();
+	Require(limit == duckdb_api::ScanAuthorization::BearerTokenByteLimit(),
+	        "credential byte limit diverged from the generic bearer capability");
+	auto exact = std::string(static_cast<std::size_t>(limit), 'e');
+	auto authorization = duckdb_api::ScanAuthorization::Credential(std::move(exact));
+	(void)authorization;
+
+	auto over = std::string(static_cast<std::size_t>(limit + 1), 'o');
+	const auto canary = over;
+	bool rejected = false;
+	try {
+		(void)duckdb_api::ScanAuthorization::Credential(std::move(over));
+	} catch (const duckdb_api::ExecutionError &error) {
+		rejected = true;
+		Require(error.Stage() == duckdb_api::ErrorStage::RESOURCE, "oversized credential used the wrong error stage");
+		Require(error.Field() == "header_bytes", "oversized credential used an unstable resource field");
+		Require(error.SafeMessage().find(canary) == std::string::npos,
+		        "oversized credential escaped through its diagnostic");
+	}
+	Require(rejected, "oversized credential value did not fail closed");
+}
+
+// Query's ResolveDuckdbApiSecret supplies this kind-neutral capability for
+// every authenticated v1 package relation (bearer or api_key); it must be
+// accepted by the same fail-closed envelope machinery as a direct Bearer()
+// construction, proving AlternativeOf/MatchesRequiredCredential treat it as
+// a valid non-anonymous capability rather than a distinct third state that
+// generic executors must special-case.
+void TestCredentialCapabilityFailsClosedUntilImplemented() {
+	AnonymousExecutor executor;
+	ManualControl control;
+	const auto plan = AnonymousPlan();
+	const auto token = TokenCanary();
+	auto token_input = token;
+	auto authorized = duckdb_api::ScanAuthorization::Credential(std::move(token_input));
+
+	RequireRejected([&]() { (void)executor.OpenWithAuthorization(plan, std::move(authorized), control); },
+	                duckdb_api::ErrorStage::POLICY, token);
+	Require(executor.open_count == 0, "credential authorization fell back to anonymous execution");
+
+	RequireRejected([&]() { (void)executor.OpenWithAuthorization(plan, std::move(authorized), control); },
+	                duckdb_api::ErrorStage::AUTHENTICATION, token);
+	Require(executor.open_count == 0, "duplicate credential authorization use reached the anonymous executor");
+}
+
 void TestCancellationPrecedesCapabilityUse() {
 	AnonymousExecutor executor;
 	ManualControl control;
@@ -208,6 +264,9 @@ int main() {
 		TestUnsafeBearerTokensAreRejectedWithoutDisclosure();
 		TestBearerTokenByteBoundary();
 		TestGithubBearerNamesRemainOnlyACompatibilityBridge();
+		TestUnsafeCredentialValuesAreRejectedWithoutDisclosure();
+		TestCredentialByteBoundary();
+		TestCredentialCapabilityFailsClosedUntilImplemented();
 		TestCancellationPrecedesCapabilityUse();
 		std::cout << "authorization contract tests passed" << std::endl;
 		return EXIT_SUCCESS;

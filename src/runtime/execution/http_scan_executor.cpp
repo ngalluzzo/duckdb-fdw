@@ -1,5 +1,6 @@
 #include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 
+#include "duckdb_api/internal/runtime/authentication/api_key_authenticator.hpp"
 #include "duckdb_api/internal/runtime/authentication/bearer_authenticator.hpp"
 #include "duckdb_api/internal/runtime/execution/graphql_paginated_scan.hpp"
 #include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
@@ -139,6 +140,8 @@ public:
 				auto request = BuildAdmittedRestRequest(*admitted_profile);
 				if (admitted_profile->RequiresBearer()) {
 					request = BearerAuthenticator::AuthorizeRest(*admitted_profile, std::move(request), *authorization);
+				} else if (admitted_profile->RequiresApiKey()) {
+					request = ApiKeyAuthenticator::AuthorizeRest(*admitted_profile, std::move(request), *authorization);
 				}
 				auto response = transport->Execute(request, limits, combined);
 				authorization.reset();
@@ -149,13 +152,14 @@ public:
 				    response.metadata.retained_bytes > limits.max_metadata_bytes) {
 					throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP response exceeded an execution budget");
 				}
-				if (admitted_profile->RequiresBearer() && response.status == 401) {
+				const bool authenticated = admitted_profile->RequiresBearer() || admitted_profile->RequiresApiKey();
+				if (authenticated && response.status == 401) {
 					throw ExecutionError(ErrorStage::AUTHENTICATION, "http_status",
-					                     "HTTP endpoint rejected bearer authentication");
+					                     "HTTP endpoint rejected authentication");
 				}
-				if (admitted_profile->RequiresBearer() && response.status == 403) {
+				if (authenticated && response.status == 403) {
 					throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status",
-					                     "HTTP endpoint denied bearer authorization");
+					                     "HTTP endpoint denied authorization");
 				}
 				if (response.status < 200 || response.status >= 300) {
 					throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status");
@@ -295,9 +299,9 @@ public:
 		}
 		auto paginated = TryAdmitPaginatedRestPlan(plan, profile);
 		if (paginated) {
-			if (paginated->RequiresBearer()) {
+			if (paginated->RequiresBearer() || paginated->RequiresApiKey()) {
 				throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
-				                     "authenticated execution requires a bearer authorization capability");
+				                     "authenticated execution requires an authorization capability");
 			}
 			return OpenPaginatedRestScan(std::move(paginated), ScanAuthorization::Anonymous(), transport,
 			                             profile.max_wall_milliseconds, control);
@@ -306,9 +310,9 @@ public:
 		if (!admitted) {
 			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
 		}
-		if (admitted->RequiresBearer()) {
+		if (admitted->RequiresBearer() || admitted->RequiresApiKey()) {
 			throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
-			                     "authenticated execution requires a bearer authorization capability");
+			                     "authenticated execution requires an authorization capability");
 		}
 		return OpenSingle(std::move(admitted), ScanAuthorization::Anonymous(), control);
 	}
@@ -323,9 +327,8 @@ protected:
 					throw ExecutionError(ErrorStage::POLICY, "",
 					                     "scan plan is outside the installed execution profile");
 				}
-				const auto expected = graphql_profile->RequiresBearer() ? AuthorizationAlternative::BEARER
-				                                                        : AuthorizationAlternative::ANONYMOUS;
-				if (AlternativeOf(authorization) != expected) {
+				if (!MatchesRequiredCredential(AlternativeOf(authorization), graphql_profile->RequiresBearer(),
+				                               false)) {
 					throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
 					                     "authorization capability does not match the scan plan");
 				}
@@ -339,9 +342,8 @@ protected:
 		}
 		auto paginated_profile = TryAdmitPaginatedRestPlan(plan, profile);
 		if (paginated_profile) {
-			const auto expected = paginated_profile->RequiresBearer() ? AuthorizationAlternative::BEARER
-			                                                          : AuthorizationAlternative::ANONYMOUS;
-			if (AlternativeOf(authorization) != expected) {
+			if (!MatchesRequiredCredential(AlternativeOf(authorization), paginated_profile->RequiresBearer(),
+			                               paginated_profile->RequiresApiKey())) {
 				throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
 				                     "authorization capability does not match the scan plan");
 			}
@@ -352,10 +354,8 @@ protected:
 		if (!admitted) {
 			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
 		}
-		const auto alternative = AlternativeOf(authorization);
-		const bool matches = (!admitted->RequiresBearer() && alternative == AuthorizationAlternative::ANONYMOUS) ||
-		                     (admitted->RequiresBearer() && alternative == AuthorizationAlternative::BEARER);
-		if (!matches) {
+		if (!MatchesRequiredCredential(AlternativeOf(authorization), admitted->RequiresBearer(),
+		                               admitted->RequiresApiKey())) {
 			throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
 			                     "authorization capability does not match the scan plan");
 		}

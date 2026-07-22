@@ -302,6 +302,52 @@ establishes, and adoption of the strategy in
 [`connectors/rickandmorty`](connectors/rickandmorty)'s `character_search`
 relation.
 
+### `0.11.0` — static API-key credential
+
+A connector author can declare a second static credential kind, `api_key`,
+placed as an author-named fixed HTTP header or an author-named fixed URL
+query parameter, alongside the existing `bearer` kind. This closes a gap an
+architecture maturity assessment found ahead of the `1.0.0` release gate
+below (>=10 connector providers): a large share of free/public REST APIs gate
+access with a static key rather than a bearer token, and `duckdb_api/v1`
+could not represent that shape at all.
+
+Accepted [RFC 0018](rfcs/0018-add-static-api-key-credential.md) decides the
+design and commits its implementation to this release. `api_key` is
+structurally parallel to `bearer` — one static secret value, one fixed
+destination set, no dynamic or computed credential behavior — with two
+differences: placement may be a query parameter as well as a header, and the
+header/parameter name is author-declared rather than fixed to
+`Authorization`. Review corrected the original proposal in four places before
+acceptance: Relational Semantics' `ValidateAuthentication` and
+`ScanPlanBuilder::Build` must read the compiled connector's own credential
+kind rather than hard-coding bearer; Remote Runtime's `SameHeaders`
+pre-authorization check and its existing query-field-name uniqueness check
+(owned by Runtime's admission path, not the compiler) both need to generalize
+to the new kind; Query Experience resolves the secret to an opaque
+kind-neutral value via an additive factory rather than a kind-aware
+extension to its public registration-view shape; and the schema uses the
+same closed-sibling-`$defs`-per-`oneOf`-branch idiom REST pagination already
+established, not a new conditionally-required-field shape.
+
+This release is a backward-compatible capability addition under the pre-1.0
+versioning model, so it is a `0.Y.0` minor rather than a patch. The `1.0.0`
+candidate freeze records `api_key` as an `accepted_candidate_revision` until
+this release ships, alongside a correction to the mandatory exclusion
+`authenticators_beyond_anonymous_and_capability_scoped_bearer`, which
+`api_key` otherwise textually contradicts.
+
+Release evidence includes the new schema/compiler/compiled-IR branch, the
+corrected Relational Semantics plan-construction sites, the generalized
+Remote Runtime admission and pre-authorization checks, an additive
+`ScanAuthorization` resolution factory, header- and query-name-collision
+fixture-coverage categories, the corrected `release/1.0.0/freeze.json`
+exclusion and its mutation-test coverage, and a compatibility fixture proving
+`connectors/github` and `connectors/rickandmorty` are unaffected. Choosing the
+actual third connector provider that exercises `api_key` is separate,
+PM-reserved work tracked as a follow-on, consistent with how Rick and Morty
+was chosen as provider #2.
+
 ### `1.0.0-rc.N` — compatibility rehearsal
 
 Each release candidate is an immutable build of the frozen `1.0.0` contract.

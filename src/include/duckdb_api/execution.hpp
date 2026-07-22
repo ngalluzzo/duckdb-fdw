@@ -153,16 +153,49 @@ public:
 	}
 
 protected:
-	// Concrete Runtime executors may distinguish only the two closed
+	// Concrete Runtime executors may distinguish only these closed
 	// alternatives. This inspection exposes no credential bytes and grants no
 	// host, placement, or operation authority.
 	// GITHUB_USER_BEARER is the bounded 0.7 source-compatibility spelling for
 	// existing Query consumers. It aliases BEARER and cannot select a distinct
 	// Runtime state or execution path.
-	enum class AuthorizationAlternative : uint8_t { ANONYMOUS, BEARER, GITHUB_USER_BEARER = BEARER };
+	// CREDENTIAL is the kind-neutral static-credential alternative Query
+	// supplies for every authenticated v1 package relation (ScanAuthorization::
+	// Credential()), regardless of whether the target relation's compiled
+	// credential is bearer or api_key: Query cannot know that at resolution
+	// time. It satisfies either a bearer-requiring or an api_key-requiring
+	// admitted profile; which authenticator actually decorates the request is
+	// decided entirely by the profile's own RequiresBearer()/RequiresApiKey()
+	// facts, never by this alternative.
+	enum class AuthorizationAlternative : uint8_t { ANONYMOUS, BEARER, CREDENTIAL, GITHUB_USER_BEARER = BEARER };
 	static AuthorizationAlternative AlternativeOf(const ScanAuthorization &authorization) noexcept {
-		return authorization.kind == ScanAuthorization::Kind::ANONYMOUS ? AuthorizationAlternative::ANONYMOUS
-		                                                                : AuthorizationAlternative::BEARER;
+		switch (authorization.kind) {
+		case ScanAuthorization::Kind::ANONYMOUS:
+			return AuthorizationAlternative::ANONYMOUS;
+		case ScanAuthorization::Kind::BEARER:
+			return AuthorizationAlternative::BEARER;
+		case ScanAuthorization::Kind::CREDENTIAL:
+			return AuthorizationAlternative::CREDENTIAL;
+		}
+		return AuthorizationAlternative::ANONYMOUS;
+	}
+
+	// True when the supplied alternative is an acceptable authorization for a
+	// profile whose admission facts are requires_bearer/requires_api_key.
+	// BEARER (direct legacy construction) and CREDENTIAL (the kind-neutral
+	// Query path) both satisfy a bearer-requiring profile; only CREDENTIAL
+	// satisfies an api_key-requiring profile, since no legitimate caller
+	// constructs a BEARER-tagged capability intending api_key placement.
+	static bool MatchesRequiredCredential(AuthorizationAlternative alternative, bool requires_bearer,
+	                                      bool requires_api_key) noexcept {
+		if (requires_api_key) {
+			return alternative == AuthorizationAlternative::CREDENTIAL;
+		}
+		if (requires_bearer) {
+			return alternative == AuthorizationAlternative::BEARER ||
+			       alternative == AuthorizationAlternative::CREDENTIAL;
+		}
+		return alternative == AuthorizationAlternative::ANONYMOUS;
 	}
 
 	// The public entry validates cancellation and moved-from state before this

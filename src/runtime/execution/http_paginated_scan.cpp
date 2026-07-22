@@ -1,5 +1,6 @@
 #include "duckdb_api/internal/runtime/execution/http_paginated_scan.hpp"
 
+#include "duckdb_api/internal/runtime/authentication/api_key_authenticator.hpp"
 #include "duckdb_api/internal/runtime/authentication/bearer_authenticator.hpp"
 #include "duckdb_api/internal/runtime/decoding/decoded_page_buffer.hpp"
 #include "duckdb_api/internal/runtime/decoding/json_decoder.hpp"
@@ -95,10 +96,10 @@ void CheckState(ExecutionControl &control, std::chrono::steady_clock::time_point
 
 void CheckStatus(uint32_t status) {
 	if (status == 401) {
-		throw ExecutionError(ErrorStage::AUTHENTICATION, "http_status", "HTTP endpoint rejected bearer authentication");
+		throw ExecutionError(ErrorStage::AUTHENTICATION, "http_status", "HTTP endpoint rejected authentication");
 	}
 	if (status == 403) {
-		throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status", "HTTP endpoint denied bearer authorization");
+		throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status", "HTTP endpoint denied authorization");
 	}
 	if (status != 200) {
 		throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status");
@@ -257,6 +258,9 @@ private:
 		if (admitted_profile->RequiresBearer()) {
 			request =
 			    BearerAuthenticator::AuthorizePaginatedRest(*admitted_profile, std::move(request), *authorization);
+		} else if (admitted_profile->RequiresApiKey()) {
+			request =
+			    ApiKeyAuthenticator::AuthorizePaginatedRest(*admitted_profile, std::move(request), *authorization);
 		}
 		const HttpLimits limits {0,
 		                         allowance.header_bytes,

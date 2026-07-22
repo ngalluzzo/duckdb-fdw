@@ -68,6 +68,13 @@
       }
     },
     "credential": {
+      "oneOf": [
+        {"$ref": "#/$defs/bearerCredential"},
+        {"$ref": "#/$defs/apiKeyHeaderCredential"},
+        {"$ref": "#/$defs/apiKeyQueryCredential"}
+      ]
+    },
+    "bearerCredential": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "kind", "secret_field", "placement", "destinations"],
@@ -76,6 +83,44 @@
         "kind": {"const": "bearer"},
         "secret_field": {"const": "token"},
         "placement": {"const": "authorization_header"},
+        "destinations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/origin"}
+        }
+      }
+    },
+    "apiKeyHeaderCredential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "secret_field", "placement", "header_name", "destinations"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"const": "api_key"},
+        "secret_field": {"const": "token"},
+        "placement": {"const": "header"},
+        "header_name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9-]{0,62}$"},
+        "destinations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/origin"}
+        }
+      }
+    },
+    "apiKeyQueryCredential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "secret_field", "placement", "query_param", "destinations"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"const": "api_key"},
+        "secret_field": {"const": "token"},
+        "placement": {"const": "query"},
+        "query_param": {"type": "string", "pattern": "^[A-Za-z0-9._~-]{1,63}$"},
         "destinations": {
           "type": "array",
           "minItems": 1,

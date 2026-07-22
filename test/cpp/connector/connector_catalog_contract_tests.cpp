@@ -292,6 +292,31 @@ void TestClosedValidation() {
 	            alternate_host.Destinations()[0].host.Value() == "other.example",
 	        "required bearer policy lost exact package destination authority");
 
+	const auto api_key_header = ConnectorCatalogTestAccess::ValidateRequiredApiKey(
+	    "token", duckdb_api::CompiledCredentialPlacement::HEADER_NAMED, "X-Api-Key", origin);
+	Require(api_key_header.Authenticator() == duckdb_api::CompiledAuthenticator::API_KEY &&
+	            api_key_header.Placement() == duckdb_api::CompiledCredentialPlacement::HEADER_NAMED &&
+	            api_key_header.PlacementName() == "X-Api-Key",
+	        "required api_key header policy lost its declared placement name");
+	const auto api_key_query = ConnectorCatalogTestAccess::ValidateRequiredApiKey(
+	    "token", duckdb_api::CompiledCredentialPlacement::QUERY_NAMED, "api_key", origin);
+	Require(api_key_query.Authenticator() == duckdb_api::CompiledAuthenticator::API_KEY &&
+	            api_key_query.Placement() == duckdb_api::CompiledCredentialPlacement::QUERY_NAMED &&
+	            api_key_query.PlacementName() == "api_key",
+	        "required api_key query policy lost its declared placement name");
+	RequireInvalid("required api_key header policy accepted an empty placement name", [origin]() {
+		ConnectorCatalogTestAccess::ValidateRequiredApiKey(
+		    "token", duckdb_api::CompiledCredentialPlacement::HEADER_NAMED, "", origin);
+	});
+	RequireInvalid("required api_key query policy accepted an empty placement name", [origin]() {
+		ConnectorCatalogTestAccess::ValidateRequiredApiKey(
+		    "token", duckdb_api::CompiledCredentialPlacement::QUERY_NAMED, "", origin);
+	});
+	RequireInvalid("required api_key policy accepted the bearer placement", [origin]() {
+		ConnectorCatalogTestAccess::ValidateRequiredApiKey(
+		    "token", duckdb_api::CompiledCredentialPlacement::AUTHORIZATION_HEADER, "X-Api-Key", origin);
+	});
+
 	RequireInvalid("relation accepted a fixed Authorization header", [&authenticated]() {
 		auto operation = authenticated.Operation();
 		auto rest = operation.Rest();

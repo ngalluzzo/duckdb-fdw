@@ -24,6 +24,9 @@ bool TryMaterializeRestRequest(const ScanPlan &plan, const RestConditionalBindin
                                MaterializedRestRequest &request);
 bool FitsRestRequestTarget(const std::string &path, const std::vector<AdmittedQueryParameter> &query,
                            uint64_t additional_bytes = 0) noexcept;
+// form_urlencoded encoding shared by REST query-field materialization and the
+// api_key query-placement authenticator.
+std::string FormUrlEncode(const std::string &value);
 const char *RestSchemeName(PlannedUrlScheme scheme);
 std::string BuildRestTarget(const std::string &path, const std::vector<AdmittedQueryParameter> &query,
                             const std::string *page_name, uint64_t page,
