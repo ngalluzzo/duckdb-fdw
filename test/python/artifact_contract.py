@@ -14,7 +14,7 @@ import duckdb
 
 
 EXPECTED_DUCKDB = ("v1.5.4", "08e34c447b", "Variegata")
-EXPECTED_EXTENSION = ("duckdb_api", "0.9.0", True, False, "NOT_INSTALLED")
+EXPECTED_EXTENSION = ("duckdb_api", "0.10.0", True, False, "NOT_INSTALLED")
 EXPECTED_BEARER_TOKEN_BYTES = 8 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_BYTES = 16 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_ACCOUNTING = 'name + ": " + value + "\\r\\n"'
@@ -253,7 +253,7 @@ def main() -> int:
         )
 
     with tempfile.TemporaryDirectory(prefix="duckdb-api-artifact-") as directory:
-        isolated = pathlib.Path(directory)
+        isolated = pathlib.Path(directory).resolve(strict=True)
         artifact = isolated / "duckdb_api.duckdb_extension"
         shutil.copyfile(source_artifact, artifact)
         package_root = isolated / "github-package"
