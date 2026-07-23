@@ -34,6 +34,12 @@ enum class CompiledScalarType { BOOLEAN, BIGINT, VARCHAR, DOUBLE };
 
 const char *CompiledScalarTypeName(CompiledScalarType type);
 
+// Output columns may retain one scalar directly or one flat variable-length
+// collection of that scalar. This shape is deliberately separate from
+// CompiledScalarType so relation inputs, defaults, predicates, and request
+// encodings remain scalar-only.
+enum class CompiledColumnShape { SCALAR, ARRAY };
+
 // Immutable typed scalar. NULL retains its declared scalar type so an absent
 // default, a typed NULL default, and a concrete value remain three distinct
 // states after package source has been discarded.
@@ -141,6 +147,11 @@ struct CompiledColumn {
 
 	// Returns retained `[A-Za-z_][A-Za-z0-9_]*` path segments without asking a
 	// consumer to parse extractor syntax.
+	CompiledColumnShape Shape() const;
+	CompiledScalarType ElementType() const;
+	bool ElementNullable() const;
+	// Compatibility accessor for scalar-only consumers. ARRAY columns are not
+	// scalars and therefore fail rather than silently returning an element type.
 	CompiledScalarType ScalarType() const;
 	const std::vector<std::string> &ExtractorSegments() const;
 
@@ -150,8 +161,12 @@ private:
 	CompiledColumn(std::string name, CompiledScalarType type, bool nullable, std::string extractor);
 	CompiledColumn(std::string name, CompiledScalarType type, bool nullable, std::string extractor,
 	               std::vector<std::string> extractor_segments);
+	CompiledColumn(std::string name, CompiledColumnShape shape, CompiledScalarType element_type, bool element_nullable,
+	               bool nullable, std::string extractor, std::vector<std::string> extractor_segments);
 
-	CompiledScalarType scalar_type;
+	CompiledColumnShape shape;
+	CompiledScalarType element_type;
+	bool element_nullable;
 	std::vector<std::string> extractor_segments;
 };
 

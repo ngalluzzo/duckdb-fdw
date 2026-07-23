@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace duckdb_api_test {
@@ -35,6 +36,7 @@ enum class CompiledGraphqlDigestAlgorithm { SHA256 };
 enum class CompiledGraphqlVariableType { INT_NON_NULL, STRING_NULLABLE };
 enum class CompiledGraphqlVariableSource { FIXED_PAGE_SIZE, RUNTIME_CURSOR, CALLER_INPUT, LOGICAL_SECRET };
 enum class CompiledGraphqlScalarKind { STRING, INT64, BOOLEAN };
+enum class CompiledResultShape { SCALAR, ARRAY };
 enum class CompiledGraphqlPartialDataPolicy { FAIL_ON_ANY_ERROR };
 enum class CompiledGraphqlCursorDirection { FORWARD };
 enum class CompiledGraphqlCursorDependency { SEQUENTIAL, INDEPENDENT };
@@ -306,10 +308,20 @@ struct CompiledGraphqlResponsePath {
 // or extractor strings. Canonical catalog validation requires exact agreement
 // with relation columns in order, scalar kind, nullability, and structural path.
 struct CompiledGraphqlResultColumn {
+	CompiledGraphqlResultColumn(std::string name_p, CompiledGraphqlScalarKind scalar_kind_p, bool nullable_p,
+	                            CompiledGraphqlResponsePath response_path_p,
+	                            CompiledResultShape shape_p = CompiledResultShape::SCALAR,
+	                            bool element_nullable_p = false)
+	    : name(std::move(name_p)), scalar_kind(scalar_kind_p), nullable(nullable_p),
+	      response_path(std::move(response_path_p)), shape(shape_p), element_nullable(element_nullable_p) {
+	}
+
 	std::string name;
 	CompiledGraphqlScalarKind scalar_kind;
 	bool nullable;
 	CompiledGraphqlResponsePath response_path;
+	CompiledResultShape shape;
+	bool element_nullable;
 };
 
 struct CompiledGraphqlResponse {

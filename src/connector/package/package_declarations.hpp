@@ -64,6 +64,8 @@ struct DefaultDeclaration {
 struct ColumnDeclaration {
 	LocatedText id;
 	LocatedText type;
+	LocatedText element_type;
+	LocatedText element_nullable;
 	LocatedText nullable;
 	LocatedText extract;
 	SourceMark mark;

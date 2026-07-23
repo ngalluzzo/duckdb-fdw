@@ -3,306 +3,10 @@ kind: fixture_index
 package_digest: sha256.b286e6f7481b437b243dfe2ce017a59d601d909272b9d2b35788fb78753ff23b
 
 cases:
-  - id: github_search_base
-    relation: duckdb_login_search_page
-    operation: github_search_duckdb_login_page
-    covers:
-      - operation_duckdb_login_search_page_github_search_duckdb_login_page_success
-      - auth_duckdb_login_search_page_github_search_duckdb_login_page_anonymous
-      - column_duckdb_login_search_page_id_success
-      - column_duckdb_login_search_page_id_type_mismatch_rejected
-      - column_duckdb_login_search_page_login_success
-      - column_duckdb_login_search_page_login_type_mismatch_rejected
-      - column_duckdb_login_search_page_site_admin_success
-      - column_duckdb_login_search_page_site_admin_type_mismatch_rejected
-      - column_duckdb_login_search_page_id_missing_rejected
-      - column_duckdb_login_search_page_id_null_rejected
-      - column_duckdb_login_search_page_login_missing_rejected
-      - column_duckdb_login_search_page_login_null_rejected
-      - column_duckdb_login_search_page_site_admin_missing_rejected
-      - column_duckdb_login_search_page_site_admin_null_rejected
-      - column_duckdb_login_search_page_id_minimum
-      - column_duckdb_login_search_page_id_maximum
-      - column_duckdb_login_search_page_id_underflow_rejected
-      - column_duckdb_login_search_page_id_overflow_rejected
-      - column_duckdb_login_search_page_id_fraction_rejected
-      - column_duckdb_login_search_page_login_string_budget_boundary
-      - column_duckdb_login_search_page_login_string_budget_one_over_rejected
-      - pagination_duckdb_login_search_page_github_search_duckdb_login_page_single_page_termination
-      - resource_duckdb_login_search_page_max_response_bytes_per_page_boundary
-      - resource_duckdb_login_search_page_max_response_bytes_per_page_one_over_rejected
-      - resource_duckdb_login_search_page_max_response_bytes_per_scan_boundary
-      - resource_duckdb_login_search_page_max_response_bytes_per_scan_one_over_rejected
-      - resource_duckdb_login_search_page_max_records_per_page_boundary
-      - resource_duckdb_login_search_page_max_records_per_page_one_over_rejected
-      - resource_duckdb_login_search_page_max_records_per_scan_boundary
-      - resource_duckdb_login_search_page_max_records_per_scan_one_over_rejected
-      - resource_duckdb_login_search_page_max_extracted_string_bytes_boundary
-      - resource_duckdb_login_search_page_max_extracted_string_bytes_one_over_rejected
-      - compiler_cancellation_source_enumeration
-      - compiler_cancellation_source_read
-      - compiler_cancellation_yaml_parse
-      - compiler_cancellation_reference_validation
-      - compiler_cancellation_generation_validation
-      - compiler_cancellation_publication_wait
-      - runtime_cancellation_duckdb_login_search_page_github_search_duckdb_login_page_before_request
-      - runtime_cancellation_duckdb_login_search_page_github_search_duckdb_login_page_transport
-      - runtime_cancellation_duckdb_login_search_page_github_search_duckdb_login_page_decode
-      - runtime_cancellation_duckdb_login_search_page_github_search_duckdb_login_page_page_boundary
-      - runtime_cancellation_duckdb_login_search_page_github_search_duckdb_login_page_stream_close
-      - source_identity_copied_root
-      - source_identity_byte_change
-      - source_identity_symlink_rejected
-      - source_identity_hardlink_rejected
-      - source_identity_entry_change_rejected
-      - source_identity_unlisted_relation_rejected
-      - source_identity_case_collision_rejected
-      - reload_exact_no_op
-      - reload_compatible_patch
-      - reload_compatible_minor
-      - reload_version_reuse_rejected
-      - reload_downgrade_rejected
-      - reload_incompatible_rejected
-      - diagnostic_duckdb_api_unsupported_spec
-      - diagnostic_duckdb_api_unsupported_dialect
-      - diagnostic_duckdb_api_malformed_yaml
-      - diagnostic_duckdb_api_unknown_field
-      - diagnostic_duckdb_api_missing_field
-      - diagnostic_duckdb_api_duplicate_id
-      - diagnostic_duckdb_api_invalid_reference
-      - diagnostic_duckdb_api_invalid_identifier
-      - diagnostic_duckdb_api_invalid_type
-      - diagnostic_duckdb_api_invalid_extractor
-      - diagnostic_duckdb_api_reserved_input
-      - diagnostic_duckdb_api_unsupported_declaration
-      - diagnostic_duckdb_api_invalid_selector
-      - diagnostic_duckdb_api_invalid_predicate
-      - diagnostic_duckdb_api_invalid_graphql_profile
-      - diagnostic_duckdb_api_policy_widening
-      - diagnostic_duckdb_api_resource_exhausted
-      - diagnostic_duckdb_api_package_identity
-      - diagnostic_duckdb_api_fixture_mismatch
-      - diagnostic_duckdb_api_incompatible_reload
-      - diagnostic_duckdb_api_publication_conflict
-    inputs: []
-    auth: anonymous
-    execution:
-      pages:
-        - request:
-            protocol: rest
-            method: GET
-            origin: {scheme: https, host: api.github.com, port: 443}
-            path: /search/users
-            query:
-              - {name: q, encoded_value: "duckdb+in%3Alogin"}
-              - {name: per_page, encoded_value: "3"}
-            authorization: none
-          response:
-            status: 200
-            headers: []
-            body_file: github_search_page.json
-            body_digest: sha256.bfea5907685b23cae4666bc7641bce933a3e72f3be76f7a32258ee151591f687
-    expected:
-      residual_owner: duckdb
-      remote_accuracy: unsupported
-      rows:
-        - {id: 10, login: duckdb, site_admin: false}
-      explain: {protocol: rest, pagination: disabled, auth: anonymous}
-
-  - id: github_user_base
-    relation: authenticated_user
-    operation: github_authenticated_user
-    covers:
-      - operation_authenticated_user_github_authenticated_user_success
-      - auth_authenticated_user_github_authenticated_user_bearer_present
-      - column_authenticated_user_id_success
-      - column_authenticated_user_id_type_mismatch_rejected
-      - column_authenticated_user_login_success
-      - column_authenticated_user_login_type_mismatch_rejected
-      - column_authenticated_user_site_admin_success
-      - column_authenticated_user_site_admin_type_mismatch_rejected
-      - column_authenticated_user_id_missing_rejected
-      - column_authenticated_user_id_null_rejected
-      - column_authenticated_user_login_missing_rejected
-      - column_authenticated_user_login_null_rejected
-      - column_authenticated_user_site_admin_missing_rejected
-      - column_authenticated_user_site_admin_null_rejected
-      - column_authenticated_user_id_minimum
-      - column_authenticated_user_id_maximum
-      - column_authenticated_user_id_underflow_rejected
-      - column_authenticated_user_id_overflow_rejected
-      - column_authenticated_user_id_fraction_rejected
-      - column_authenticated_user_login_string_budget_boundary
-      - column_authenticated_user_login_string_budget_one_over_rejected
-      - pagination_authenticated_user_github_authenticated_user_single_page_termination
-      - resource_authenticated_user_max_response_bytes_per_page_boundary
-      - resource_authenticated_user_max_response_bytes_per_page_one_over_rejected
-      - resource_authenticated_user_max_response_bytes_per_scan_boundary
-      - resource_authenticated_user_max_response_bytes_per_scan_one_over_rejected
-      - resource_authenticated_user_max_records_per_page_boundary
-      - resource_authenticated_user_max_records_per_page_one_over_rejected
-      - resource_authenticated_user_max_records_per_scan_boundary
-      - resource_authenticated_user_max_records_per_scan_one_over_rejected
-      - resource_authenticated_user_max_extracted_string_bytes_boundary
-      - resource_authenticated_user_max_extracted_string_bytes_one_over_rejected
-      - runtime_cancellation_authenticated_user_github_authenticated_user_before_request
-      - runtime_cancellation_authenticated_user_github_authenticated_user_transport
-      - runtime_cancellation_authenticated_user_github_authenticated_user_decode
-      - runtime_cancellation_authenticated_user_github_authenticated_user_page_boundary
-      - runtime_cancellation_authenticated_user_github_authenticated_user_stream_close
-    inputs: []
-    auth: bearer_present
-    execution:
-      pages:
-        - request:
-            protocol: rest
-            method: GET
-            origin: {scheme: https, host: api.github.com, port: 443}
-            path: /user
-            query: []
-            authorization: bearer_capability
-          response:
-            status: 200
-            headers: []
-            body_file: github_authenticated_user.json
-            body_digest: sha256.41261f04edaf152695388bb7f5ba4afd869ce5ee52e222a836e55785f0070b14
-    expected:
-      residual_owner: duckdb
-      remote_accuracy: unsupported
-      rows:
-        - {id: 20, login: fixture-user, site_admin: false}
-      explain: {protocol: rest, pagination: disabled, auth: bearer_capability}
-
-  - id: github_authenticated_user_missing_bearer
-    relation: authenticated_user
-    operation: github_authenticated_user
-    covers:
-      - auth_authenticated_user_github_authenticated_user_bearer_missing
-    inputs: []
-    auth: bearer_missing
-    pre_request_failure: {checkpoint: authorization_resolution}
-    expected:
-      runtime_error: {stage: authentication, field: authorization}
-
-  - id: github_repositories_base
-    relation: authenticated_repositories
-    operation: github_authenticated_repositories
-    covers:
-      - operation_authenticated_repositories_github_authenticated_repositories_success
-      - auth_authenticated_repositories_github_authenticated_repositories_bearer_present
-      - column_authenticated_repositories_id_success
-      - column_authenticated_repositories_id_type_mismatch_rejected
-      - column_authenticated_repositories_full_name_success
-      - column_authenticated_repositories_full_name_type_mismatch_rejected
-      - column_authenticated_repositories_private_success
-      - column_authenticated_repositories_private_type_mismatch_rejected
-      - column_authenticated_repositories_fork_success
-      - column_authenticated_repositories_fork_type_mismatch_rejected
-      - column_authenticated_repositories_archived_success
-      - column_authenticated_repositories_archived_type_mismatch_rejected
-      - column_authenticated_repositories_visibility_success
-      - column_authenticated_repositories_visibility_type_mismatch_rejected
-      - column_authenticated_repositories_id_missing_rejected
-      - column_authenticated_repositories_id_null_rejected
-      - column_authenticated_repositories_full_name_missing_rejected
-      - column_authenticated_repositories_full_name_null_rejected
-      - column_authenticated_repositories_private_missing_rejected
-      - column_authenticated_repositories_private_null_rejected
-      - column_authenticated_repositories_fork_missing_rejected
-      - column_authenticated_repositories_fork_null_rejected
-      - column_authenticated_repositories_archived_missing_rejected
-      - column_authenticated_repositories_archived_null_rejected
-      - column_authenticated_repositories_visibility_missing_rejected
-      - column_authenticated_repositories_visibility_null_rejected
-      - column_authenticated_repositories_id_minimum
-      - column_authenticated_repositories_id_maximum
-      - column_authenticated_repositories_id_underflow_rejected
-      - column_authenticated_repositories_id_overflow_rejected
-      - column_authenticated_repositories_id_fraction_rejected
-      - column_authenticated_repositories_full_name_string_budget_boundary
-      - column_authenticated_repositories_full_name_string_budget_one_over_rejected
-      - column_authenticated_repositories_visibility_string_budget_boundary
-      - column_authenticated_repositories_visibility_string_budget_one_over_rejected
-      - pagination_authenticated_repositories_github_authenticated_repositories_first_page
-      - pagination_authenticated_repositories_github_authenticated_repositories_multi_page
-      - pagination_authenticated_repositories_github_authenticated_repositories_termination
-      - pagination_authenticated_repositories_github_authenticated_repositories_encoded_target
-      - pagination_authenticated_repositories_github_authenticated_repositories_malformed_target_rejected
-      - pagination_authenticated_repositories_github_authenticated_repositories_replayed_target_rejected
-      - pagination_authenticated_repositories_github_authenticated_repositories_max_pages_exhausted
-      - resource_authenticated_repositories_max_response_bytes_per_page_boundary
-      - resource_authenticated_repositories_max_response_bytes_per_page_one_over_rejected
-      - resource_authenticated_repositories_max_response_bytes_per_scan_boundary
-      - resource_authenticated_repositories_max_response_bytes_per_scan_one_over_rejected
-      - resource_authenticated_repositories_max_records_per_page_boundary
-      - resource_authenticated_repositories_max_records_per_page_one_over_rejected
-      - resource_authenticated_repositories_max_records_per_scan_boundary
-      - resource_authenticated_repositories_max_records_per_scan_one_over_rejected
-      - resource_authenticated_repositories_max_extracted_string_bytes_boundary
-      - resource_authenticated_repositories_max_extracted_string_bytes_one_over_rejected
-      - runtime_cancellation_authenticated_repositories_github_authenticated_repositories_before_request
-      - runtime_cancellation_authenticated_repositories_github_authenticated_repositories_transport
-      - runtime_cancellation_authenticated_repositories_github_authenticated_repositories_decode
-      - runtime_cancellation_authenticated_repositories_github_authenticated_repositories_page_boundary
-      - runtime_cancellation_authenticated_repositories_github_authenticated_repositories_stream_close
-    inputs: []
-    auth: bearer_present
-    execution:
-      pages:
-        - request:
-            protocol: rest
-            method: GET
-            origin: {scheme: https, host: api.github.com, port: 443}
-            path: /user/repos
-            query:
-              - {name: per_page, encoded_value: "100"}
-              - {name: page, encoded_value: "1"}
-            authorization: bearer_capability
-          response:
-            status: 200
-            headers:
-              - {name: Link, value: "<https://api.github.com/user/repos?per_page=100&page=2>; rel=next"}
-            body_file: github_repositories_page_1.json
-            body_digest: sha256.e11b953e63c29a79edf04e8244e72ae26a0de0dfc5428d49c78b8f479c51eb78
-        - request:
-            protocol: rest
-            method: GET
-            origin: {scheme: https, host: api.github.com, port: 443}
-            path: /user/repos
-            query:
-              - {name: per_page, encoded_value: "100"}
-              - {name: page, encoded_value: "2"}
-            authorization: bearer_capability
-          response:
-            status: 200
-            headers: []
-            body_file: github_repositories_page_2.json
-            body_digest: sha256.1c56dfe394eb955c2d02a87c168bf5e07157e7cb44cb000451c1692600322357
-    expected:
-      residual_owner: duckdb
-      remote_accuracy: unsupported
-      rows:
-        - {id: 30, full_name: example/alpha, private: true, fork: false, archived: false, visibility: private}
-        - {id: 31, full_name: example/beta, private: false, fork: true, archived: false, visibility: public}
-      explain: {protocol: rest, pagination: link_next, auth: bearer_capability}
-
-  - id: github_authenticated_repositories_missing_bearer
-    relation: authenticated_repositories
-    operation: github_authenticated_repositories
-    covers:
-      - auth_authenticated_repositories_github_authenticated_repositories_bearer_missing
-    inputs: []
-    auth: bearer_missing
-    pre_request_failure: {checkpoint: authorization_resolution}
-    expected:
-      runtime_error: {stage: authentication, field: authorization}
-
   - id: private_visibility_matching
     relation: authenticated_repositories
     operation: github_authenticated_repositories
-    covers:
-      - predicate_authenticated_repositories_private_visibility_positive
-      - predicate_authenticated_repositories_private_visibility_unavailable_structure_local
+    covers: [predicate_authenticated_repositories_private_visibility_positive]
     inputs: []
     predicate:
       column: visibility
@@ -350,13 +54,14 @@ cases:
       remote_accuracy: superset
       rows:
         - {id: 1, full_name: duckdb/duckdb, private: true, fork: false, archived: false, visibility: private}
-      explain: {conditional_input: visibility, predicate_owner: duckdb}
+      explain:
+        conditional_input: visibility
+        predicate_owner: duckdb
 
   - id: private_visibility_false_or_null
     relation: authenticated_repositories
     operation: github_authenticated_repositories
-    covers:
-      - predicate_authenticated_repositories_private_visibility_non_true
+    covers: [predicate_authenticated_repositories_private_visibility_non_true]
     inputs: []
     predicate:
       column: visibility
@@ -403,13 +108,14 @@ cases:
       residual_owner: duckdb
       remote_accuracy: superset
       rows: []
-      explain: {conditional_input: visibility, predicate_owner: duckdb}
+      explain:
+        conditional_input: visibility
+        predicate_owner: duckdb
 
   - id: private_visibility_duplicates
     relation: authenticated_repositories
     operation: github_authenticated_repositories
-    covers:
-      - predicate_authenticated_repositories_private_visibility_duplicates
+    covers: [predicate_authenticated_repositories_private_visibility_duplicates]
     inputs: []
     predicate:
       column: visibility
@@ -458,92 +164,19 @@ cases:
       rows:
         - {id: 3, full_name: example/private, private: true, fork: false, archived: false, visibility: private}
         - {id: 3, full_name: example/private, private: true, fork: false, archived: false, visibility: private}
-      explain: {conditional_input: visibility, predicate_owner: duckdb}
+      explain:
+        conditional_input: visibility
+        predicate_owner: duckdb
 
   - id: viewer_repository_metrics_cursor
     relation: viewer_repository_metrics
     operation: github_viewer_repository_metrics
     covers:
       - operation_viewer_repository_metrics_github_viewer_repository_metrics_success
-      - auth_viewer_repository_metrics_github_viewer_repository_metrics_bearer_present
-      - column_viewer_repository_metrics_id_success
-      - column_viewer_repository_metrics_id_type_mismatch_rejected
-      - column_viewer_repository_metrics_full_name_success
-      - column_viewer_repository_metrics_full_name_type_mismatch_rejected
-      - column_viewer_repository_metrics_owner_login_success
-      - column_viewer_repository_metrics_owner_login_type_mismatch_rejected
-      - column_viewer_repository_metrics_stars_success
-      - column_viewer_repository_metrics_stars_type_mismatch_rejected
-      - column_viewer_repository_metrics_primary_language_success
-      - column_viewer_repository_metrics_primary_language_type_mismatch_rejected
-      - column_viewer_repository_metrics_private_success
-      - column_viewer_repository_metrics_private_type_mismatch_rejected
-      - column_viewer_repository_metrics_archived_success
-      - column_viewer_repository_metrics_archived_type_mismatch_rejected
-      - column_viewer_repository_metrics_updated_at_success
-      - column_viewer_repository_metrics_updated_at_type_mismatch_rejected
-      - column_viewer_repository_metrics_primary_language_null
-      - column_viewer_repository_metrics_id_missing_rejected
-      - column_viewer_repository_metrics_id_null_rejected
-      - column_viewer_repository_metrics_full_name_missing_rejected
-      - column_viewer_repository_metrics_full_name_null_rejected
-      - column_viewer_repository_metrics_owner_login_missing_rejected
-      - column_viewer_repository_metrics_owner_login_null_rejected
-      - column_viewer_repository_metrics_stars_missing_rejected
-      - column_viewer_repository_metrics_stars_null_rejected
-      - column_viewer_repository_metrics_private_missing_rejected
-      - column_viewer_repository_metrics_private_null_rejected
-      - column_viewer_repository_metrics_archived_missing_rejected
-      - column_viewer_repository_metrics_archived_null_rejected
-      - column_viewer_repository_metrics_updated_at_missing_rejected
-      - column_viewer_repository_metrics_updated_at_null_rejected
-      - column_viewer_repository_metrics_stars_minimum
-      - column_viewer_repository_metrics_stars_maximum
-      - column_viewer_repository_metrics_stars_underflow_rejected
-      - column_viewer_repository_metrics_stars_overflow_rejected
-      - column_viewer_repository_metrics_stars_fraction_rejected
-      - column_viewer_repository_metrics_id_string_budget_boundary
-      - column_viewer_repository_metrics_id_string_budget_one_over_rejected
-      - column_viewer_repository_metrics_full_name_string_budget_boundary
-      - column_viewer_repository_metrics_full_name_string_budget_one_over_rejected
-      - column_viewer_repository_metrics_owner_login_string_budget_boundary
-      - column_viewer_repository_metrics_owner_login_string_budget_one_over_rejected
-      - column_viewer_repository_metrics_primary_language_string_budget_boundary
-      - column_viewer_repository_metrics_primary_language_string_budget_one_over_rejected
-      - column_viewer_repository_metrics_updated_at_string_budget_boundary
-      - column_viewer_repository_metrics_updated_at_string_budget_one_over_rejected
-      - pagination_viewer_repository_metrics_github_viewer_repository_metrics_first_page
       - pagination_viewer_repository_metrics_github_viewer_repository_metrics_multi_page
       - pagination_viewer_repository_metrics_github_viewer_repository_metrics_termination
       - pagination_viewer_repository_metrics_github_viewer_repository_metrics_cursor_transition
-      - pagination_viewer_repository_metrics_github_viewer_repository_metrics_missing_cursor_rejected
-      - pagination_viewer_repository_metrics_github_viewer_repository_metrics_repeated_cursor_rejected
-      - pagination_viewer_repository_metrics_github_viewer_repository_metrics_max_pages_exhausted
-      - graphql_viewer_repository_metrics_github_viewer_repository_metrics_document_identity
-      - graphql_viewer_repository_metrics_github_viewer_repository_metrics_serialized_body_identity
-      - graphql_viewer_repository_metrics_github_viewer_repository_metrics_errors_rejected
-      - graphql_viewer_repository_metrics_github_viewer_repository_metrics_response_role_rejected
-      - resource_viewer_repository_metrics_max_response_bytes_per_page_boundary
-      - resource_viewer_repository_metrics_max_response_bytes_per_page_one_over_rejected
-      - resource_viewer_repository_metrics_max_response_bytes_per_scan_boundary
-      - resource_viewer_repository_metrics_max_response_bytes_per_scan_one_over_rejected
-      - resource_viewer_repository_metrics_max_records_per_page_boundary
-      - resource_viewer_repository_metrics_max_records_per_page_one_over_rejected
-      - resource_viewer_repository_metrics_max_records_per_scan_boundary
-      - resource_viewer_repository_metrics_max_records_per_scan_one_over_rejected
-      - resource_viewer_repository_metrics_max_extracted_string_bytes_boundary
-      - resource_viewer_repository_metrics_max_extracted_string_bytes_one_over_rejected
-      - resource_viewer_repository_metrics_github_viewer_repository_metrics_max_document_bytes_boundary
-      - resource_viewer_repository_metrics_github_viewer_repository_metrics_max_document_bytes_one_over_rejected
-      - resource_viewer_repository_metrics_github_viewer_repository_metrics_max_serialized_body_bytes_per_request_boundary
-      - resource_viewer_repository_metrics_github_viewer_repository_metrics_max_serialized_body_bytes_per_request_one_over_rejected
-      - resource_viewer_repository_metrics_github_viewer_repository_metrics_max_serialized_body_bytes_per_scan_boundary
-      - resource_viewer_repository_metrics_github_viewer_repository_metrics_max_serialized_body_bytes_per_scan_one_over_rejected
-      - runtime_cancellation_viewer_repository_metrics_github_viewer_repository_metrics_before_request
-      - runtime_cancellation_viewer_repository_metrics_github_viewer_repository_metrics_transport
-      - runtime_cancellation_viewer_repository_metrics_github_viewer_repository_metrics_decode
-      - runtime_cancellation_viewer_repository_metrics_github_viewer_repository_metrics_page_boundary
-      - runtime_cancellation_viewer_repository_metrics_github_viewer_repository_metrics_stream_close
+      - column_viewer_repository_metrics_primary_language_null
     inputs: []
     auth: bearer_present
     execution:
@@ -588,15 +221,6 @@ cases:
       rows:
         - {id: R1, full_name: duckdb/duckdb, owner_login: duckdb, stars: 42, primary_language: "C++", private: false, archived: false, updated_at: "2026-07-01T00:00:00Z"}
         - {id: R2, full_name: duckdb/community-extension, owner_login: duckdb, stars: 7, primary_language: {kind: null}, private: false, archived: false, updated_at: "2026-07-02T00:00:00Z"}
-      explain: {protocol: graphql, pagination: relay_forward, auth: bearer_capability}
-
-  - id: github_viewer_repository_metrics_missing_bearer
-    relation: viewer_repository_metrics
-    operation: github_viewer_repository_metrics
-    covers:
-      - auth_viewer_repository_metrics_github_viewer_repository_metrics_bearer_missing
-    inputs: []
-    auth: bearer_missing
-    pre_request_failure: {checkpoint: authorization_resolution}
-    expected:
-      runtime_error: {stage: authentication, field: authorization}
+      explain:
+        protocol: graphql
+        pagination: relay_forward

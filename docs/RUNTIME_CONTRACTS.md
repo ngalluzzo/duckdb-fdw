@@ -144,8 +144,11 @@ states are distinct:
 - present typed NULL default; and
 - present typed concrete default.
 
-Columns store a structural kind as authority. Any native compatibility spelling
-is derived and validated against that kind. Consumers do not parse type strings.
+Columns store scalar-or-array shape, scalar element kind, child nullability,
+outer nullability, and extractor as structural authority. A scalar always has
+`element_nullable = false`; an array is flat and may use any v1 scalar kind as
+its element kind. Any native compatibility spelling is derived and validated
+against those fields. Consumers do not parse type strings.
 
 One compiled relation input stores exact identifier, structural kind,
 nullability, and default presence/value. Inputs and columns retain declaration
@@ -185,7 +188,8 @@ compatibility profile carries no such recipe.
 
 - package identity;
 - ordered relation IDs;
-- ordered output names, structural kinds, and nullability;
+- ordered output names, scalar-or-array shape, element kinds, child
+  nullability, and outer nullability;
 - ordered input names, kinds, nullability, and typed defaults;
 - anonymous or logical-secret-required Query shape; and
 - an opaque `CompiledGenerationHandle`.
@@ -303,7 +307,7 @@ A successful planner call returns one complete immutable `ScanPlan`:
 ```text
 ScanPlan
 ├── selected closed protocol operation
-├── ordered planned columns and nullability
+├── ordered planned columns, shapes, element kinds, and two-level nullability
 ├── final typed/encoded request bindings
 ├── structured predicate decision and base domain
 ├── complete residual and relational owners
@@ -504,7 +508,29 @@ header after origin validation. Redirect, proxy, cookie, netrc, address, TLS,
 header, and response limits are configured explicitly and fail closed.
 
 Response source is exactly root object, root array, or terminal collection.
-Strict decoding validates planned column type and nullability for every row.
+The planned operation carries an explicit closed schema-authority mode;
+Runtime never infers legacy authority from whether a result-column vector is
+empty. Permanent REST admission requires a nonempty ordered structural result
+schema and exact agreement with protocol-neutral plan outputs on arity, name,
+shape, element kind, child nullability, outer nullability, and structural
+response path before request construction. A zero-column structural schema is
+invalid rather than a legacy fallback. The legacy mode accepts only an empty
+result-column vector for its bounded compatibility fixtures. Runtime does not
+repair either view or choose one as a fallback.
+Strict decoding validates planned column shape, element type, and both levels
+of nullability for every row. Array traversal checkpoints cancellation at each
+child. Retained-memory accounting charges child-vector growth and each owned
+child-string capacity while the current row is still being parsed. Row-slot
+and typed-value staging capacity is debited before allocation while child
+storage remains live. Decoders report retained page bytes separately from the
+maximum co-live decode peak, so exact and one-byte-under limits exercise the
+actual transient authority; a later field failure cannot postpone or hide an
+earlier resource exhaustion.
+
+Body-signaled `response_next` strings use the same debit-before-growth path as
+retained row strings. Their temporary capacity contributes to the decode peak,
+is returned separately from retained row bytes, and is released after the
+pagination state validates the candidate and before batch handoff accounting.
 
 ## GraphQL execution
 
@@ -531,6 +557,12 @@ structurally disjoint.
 Cursor pagination uses only validated `hasNextPage` and `endCursor` values. A
 cursor is opaque received state for the next request and never enters
 diagnostics, explanation, or registry identity.
+
+Materialized GraphQL strings reserve retained capacity before every possible
+growth and reconcile the allocator's actual capacity immediately. The decoder
+reports row-retained and temporary end-cursor bytes separately; after moving
+the cursor into pagination state, the executor counts that allocation exactly
+once.
 
 ## Pagination
 
@@ -637,15 +669,24 @@ since there is no external signal to compare against.
 ## Typed rows and DuckDB vectors
 
 Runtime yields schema-aligned rows of structural typed values. Each value has a
-kind and explicit validity. Query accepts an invalid value only for a planned
-nullable column and sets DuckDB vector validity; it never invents a sentinel.
+scalar-or-array shape, element kind, and explicit validity. Array values own a
+flat ordered sequence of typed scalar children with independent child
+validity. Query accepts an invalid outer value only for a planned nullable
+column and an invalid child only for a planned child-nullable array; it never
+invents a sentinel.
 
-Valid `false`, zero, and empty string remain values. Required NULL, kind/arity
-mismatch, empty successful batch, lossy integer, widened schema, or late decode
-failure is terminal.
+Valid `false`, zero, empty string, and empty list remain values. Required NULL,
+forbidden child NULL, nested list, kind/shape/arity mismatch, empty successful
+batch, lossy integer, non-finite or noncanonical DOUBLE payload, widened
+schema, or late decode failure is terminal. Complete batch alignment itself
+checkpoints cancellation while traversing rows, columns, and list children;
+an untrusted large batch cannot defer cancellation until vector copying.
 
-The Query adapter is the only DuckDB vector writer. Runtime contains no DuckDB
-catalog, vector, or secret-manager API.
+The Query adapter is the only DuckDB vector writer. It computes total list
+child cardinality with checked arithmetic, reserves the DuckDB `ListVector`
+child storage before writes, checkpoints cancellation while writing children,
+and publishes output cardinality only after the complete batch succeeds.
+Runtime contains no DuckDB catalog, vector, or secret-manager API.
 
 ## Resource accounting
 
@@ -663,6 +704,12 @@ It debits actual use against the minimum of host and compiled ceilings. Every
 increment and multiplication is checked before state mutation. Exceeded or
 overflowing budgets fail without another allocation or request. Zero never
 means unlimited.
+
+Before publishing a Runtime batch, each executor also charges copied column
+schema capacity and the batch's outer row-vector capacity while the retained
+decoded page is still live. The admitted decoded-page allowance must cover
+that co-live handoff exactly; one byte below the checked sum fails before the
+batch allocation or publication.
 
 For GraphQL, the aggregate serialized-request-body ceiling is no greater than
 the checked product of the effective per-request body ceiling and the maximum
@@ -747,6 +794,14 @@ service:
 Consumer tests link these services. They do not import private builders, compile
 provider sources directly, mutate plans, or parse snapshot text. End-to-end
 tests compose services only at explicit integration targets.
+
+The checked-in repository package fixture indexes are not yet wired through
+that full author-fixture execution composition. As recorded by the
+`end_to_end_fixture_execution` fast follow in `release/1.0.0/freeze.json`, they
+currently prove schema validation, exact coverage-key agreement, and payload
+digest agreement. Feature behavior is therefore also proven with focused
+production-boundary fixtures and controlled whole-graph SQL tests; those tests
+must not be described as execution of the package's checked-in fixture rows.
 
 The author-fixture integration provider interprets a closed coverage key as a
 project-owned variant selector, not author-supplied execution authority.

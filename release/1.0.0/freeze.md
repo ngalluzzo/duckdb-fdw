@@ -28,8 +28,12 @@ read either without inspecting product source.
 > change that accepted the RFC, graduating directly into the schema-closed
 > set: REST pagination strategies are now `{disabled, link_next,
 > response_next, short_page}`. The `accepted_candidate_revisions` list is
-> therefore empty, ready for any future accepted RFC that introduces a new
-> candidate revision.
+> therefore empty. A fourth revision,
+> [RFC 0022](../../docs/rfcs/0022-add-list-of-scalar-array-output-columns.md)
+> (Accepted 2026-07-22), added flat list-of-scalar output columns directly to
+> the schema-closed set: authored column shapes are now scalar and `ARRAY`,
+> with one required v1 scalar element type and independent outer/child
+> nullability.
 
 The `1.0.0` contract is not a single document. It is a layered set in which
 each layer draws authority from the one above it:
@@ -52,7 +56,7 @@ rather than duplicating them.
   choices (MIT license, DuckDB Community Extensions as the ordinary-user
   channel, source build as the contributor path, immutable releases, the
   latest-stable DuckDB requirement, best-effort GitHub Issues support).
-- RFCs 0010, 0011, 0012, 0013, and 0014 bind specific decisions propagated
+- RFCs 0010, 0011, 0012, 0013, 0014, and 0022 bind specific decisions propagated
   into `docs/ARCHITECTURE.md`, `docs/CONNECTOR_SPECIFICATIONS.md`, and
   `docs/RUNTIME_CONTRACTS.md`.
 
@@ -110,7 +114,9 @@ because the project reaches `1.0.0`.
 ### 4. Connector specification and stable package subset
 
 - Frozen: identifier `duckdb_api/v1`; the closed failsafe YAML subset and
-  byte-copied JSON schemas; static `BOOLEAN`/`BIGINT`/`VARCHAR` typing; the
+  byte-copied JSON schemas; static `BOOLEAN`/`BIGINT`/`VARCHAR`/`DOUBLE`
+  scalar typing; scalar or flat `ARRAY` output-column shape with explicit
+  scalar element type and independent outer/child nullability; the
   `sha256-length-prefixed-path-and-bytes-v1` package digest; REST `GET` and
   structured GraphQL Relay profiles; anonymous, capability-scoped bearer, and
   static api_key (header- or query-placed) authentication; deny-only network

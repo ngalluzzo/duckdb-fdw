@@ -177,7 +177,7 @@ void ScanRelationExecution(ClientContext &context, TableFunctionInput &input, Da
 				throw duckdb_api::ExecutionCancelled();
 			}
 		}
-		WriteTypedBatch(output, batch, state.expected_columns, state.max_batch_rows);
+		WriteTypedBatch(output, batch, state.expected_columns, state.max_batch_rows, control);
 	} catch (const duckdb_api::ExecutionCancelled &) {
 		ThrowCancellation(state.stream.get());
 	} catch (const duckdb::InterruptException &) {

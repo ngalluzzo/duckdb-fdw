@@ -6,8 +6,11 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -28,6 +31,13 @@ void Require(bool condition, const char *message) {
 
 std::unique_ptr<const duckdb_api::internal::AdmittedGraphqlRequestProfile> Profile() {
 	const auto plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("decoder_secret");
+	const duckdb_api::internal::HttpExecutionProfile host {
+	    duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443, false, false, false, 30000, 100};
+	return duckdb_api::internal::TryAdmitGraphqlPlan(plan, host);
+}
+
+std::unique_ptr<const duckdb_api::internal::AdmittedGraphqlRequestProfile> ArrayProfile() {
+	const auto plan = duckdb_api_test::BuildValidGraphqlArrayScanPlanFixture("decoder_secret");
 	const duckdb_api::internal::HttpExecutionProfile host {
 	    duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443, false, false, false, 30000, 100};
 	return duckdb_api::internal::TryAdmitGraphqlPlan(plan, host);
@@ -193,7 +203,7 @@ void TestMaterializedStringAndMemoryBoundaries() {
 	RequireFailure(Envelope(Node(exact + "x")), duckdb_api::ErrorStage::RESOURCE, "id");
 
 	auto exact_memory = Limits();
-	exact_memory.max_decoded_memory_bytes = decoded.retained_memory_bytes;
+	exact_memory.max_decoded_memory_bytes = decoded.peak_memory_bytes;
 	auto exact_decoded =
 	    duckdb_api::internal::DecodeGraphqlResponse(Envelope(Node(exact)), *profile, exact_memory, control);
 	Require(exact_decoded.retained_memory_bytes == decoded.retained_memory_bytes,
@@ -232,6 +242,56 @@ void TestWrongNullDuplicateAndEnvelopeShapesFailClosed() {
 	RequireFailure("{\"data\":{},\"errors\":null}", duckdb_api::ErrorStage::SCHEMA, "errors");
 }
 
+void TestGraphqlScalarArrays() {
+	auto profile = ArrayProfile();
+	Require(static_cast<bool>(profile), "GraphQL ARRAY plan must be admitted");
+	NeverCancelled control;
+	const std::string first =
+	    "{\"id\":[\"R1\",\"R1\"],\"nameWithOwner\":\"o/r\",\"owner\":{\"login\":\"o\"},"
+	    "\"stargazerCount\":[-9223372036854775808,9223372036854775807],\"primaryLanguage\":null,"
+	    "\"isPrivate\":[true,false,true],\"isArchived\":false,\"updatedAt\":\"2026-01-01T00:00:00Z\"}";
+	const std::string second = "{\"id\":[],\"nameWithOwner\":\"o/empty\",\"owner\":{\"login\":\"o\"},"
+	                           "\"stargazerCount\":[],\"primaryLanguage\":null,\"isPrivate\":[],\"isArchived\":false,"
+	                           "\"updatedAt\":\"2026-01-01T00:00:00Z\"}";
+	auto decoded =
+	    duckdb_api::internal::DecodeGraphqlResponse(Envelope(first + "," + second), *profile, Limits(), control);
+	Require(decoded.rows.size() == 2 && decoded.rows[0].values[0].elements.size() == 2 &&
+	            decoded.rows[0].values[0].elements[0].varchar_value == "R1" &&
+	            decoded.rows[0].values[0].elements[1].varchar_value == "R1" &&
+	            decoded.rows[0].values[3].elements.front().bigint_value == std::numeric_limits<int64_t>::min() &&
+	            decoded.rows[0].values[3].elements.back().bigint_value == std::numeric_limits<int64_t>::max() &&
+	            decoded.rows[0].values[5].elements.size() == 3 && decoded.rows[0].values[5].elements[0].boolean_value &&
+	            !decoded.rows[0].values[5].elements[1].boolean_value && decoded.rows[1].values[0].elements.empty() &&
+	            decoded.rows[1].values[3].elements.empty() && decoded.rows[1].values[5].elements.empty(),
+	        "GraphQL ARRAY decoding changed element kinds, order, duplicates, or empty lists");
+
+	const std::vector<std::pair<std::string, std::string>> failures = {
+	    {first.substr(0, first.find("[\"R1\",\"R1\"]")) + "\"wrong\"" +
+	         first.substr(first.find("[\"R1\",\"R1\"]") + 11),
+	     "id"},
+	    {"{\"id\":[\"R\",7],\"nameWithOwner\":\"o/r\",\"owner\":{\"login\":\"o\"},"
+	     "\"stargazerCount\":[],\"primaryLanguage\":null,\"isPrivate\":[],\"isArchived\":false,"
+	     "\"updatedAt\":\"now\"}",
+	     "id"},
+	    {"{\"id\":[[\"R\"]],\"nameWithOwner\":\"o/r\",\"owner\":{\"login\":\"o\"},"
+	     "\"stargazerCount\":[],\"primaryLanguage\":null,\"isPrivate\":[],\"isArchived\":false,"
+	     "\"updatedAt\":\"now\"}",
+	     "id"},
+	    {"{\"id\":[null],\"nameWithOwner\":\"o/r\",\"owner\":{\"login\":\"o\"},"
+	     "\"stargazerCount\":[],\"primaryLanguage\":null,\"isPrivate\":[],\"isArchived\":false,"
+	     "\"updatedAt\":\"now\"}",
+	     "id"}};
+	for (const auto &failure : failures) {
+		try {
+			(void)duckdb_api::internal::DecodeGraphqlResponse(Envelope(failure.first), *profile, Limits(), control);
+			throw std::runtime_error("invalid GraphQL ARRAY response must fail");
+		} catch (const duckdb_api::ExecutionError &error) {
+			Require(error.Stage() == duckdb_api::ErrorStage::SCHEMA && error.Field() == failure.second,
+			        "GraphQL ARRAY rejection used the wrong safe field");
+		}
+	}
+}
+
 } // namespace
 
 int main() {
@@ -244,6 +304,7 @@ int main() {
 		TestIgnoredValuesDoNotConsumeDecodedMemory();
 		TestMaterializedStringAndMemoryBoundaries();
 		TestWrongNullDuplicateAndEnvelopeShapesFailClosed();
+		TestGraphqlScalarArrays();
 		std::cout << "GraphQL response decoder tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

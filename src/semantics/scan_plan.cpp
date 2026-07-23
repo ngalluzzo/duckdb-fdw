@@ -24,7 +24,47 @@ bool SameTypedValue(const PlannedEqualityPredicate &predicate, const PlannedRest
 	throw std::logic_error("planned typed equality contains an unknown scalar kind");
 }
 
+PlannedColumnScalarKind ScalarKindFromLogicalType(const std::string &logical_type) {
+	if (logical_type == "BOOLEAN") {
+		return PlannedColumnScalarKind::BOOLEAN;
+	}
+	if (logical_type == "BIGINT") {
+		return PlannedColumnScalarKind::BIGINT;
+	}
+	if (logical_type == "DOUBLE") {
+		return PlannedColumnScalarKind::DOUBLE;
+	}
+	if (logical_type == "VARCHAR") {
+		return PlannedColumnScalarKind::VARCHAR;
+	}
+	throw std::logic_error("planned column contains an unsupported legacy logical type");
+}
+
+PlannedColumnScalarKind LegacyScalarKind(const std::string &logical_type) {
+	try {
+		return ScalarKindFromLogicalType(logical_type);
+	} catch (const std::logic_error &) {
+		// Compatibility fixtures may retain deliberately invalid legacy strings
+		// until a consumer asks for the scalar kind. The accessor below remains
+		// the fail-closed authority.
+		return PlannedColumnScalarKind::VARCHAR;
+	}
+}
+
 } // namespace
+
+PlannedColumn::PlannedColumn(std::string name_p, std::string logical_type_p, bool nullable_p, std::string extractor_p)
+    : PlannedColumn(std::move(name_p), logical_type_p, nullable_p, std::move(extractor_p), PlannedColumnShape::SCALAR,
+                    LegacyScalarKind(logical_type_p), false) {
+}
+
+PlannedColumn::PlannedColumn(std::string name_p, std::string logical_type_p, bool nullable_p, std::string extractor_p,
+                             PlannedColumnShape shape_p, PlannedColumnScalarKind element_kind_p,
+                             bool element_nullable_p)
+    : name(std::move(name_p)), logical_type(std::move(logical_type_p)), nullable(nullable_p),
+      extractor(std::move(extractor_p)), shape(shape_p), element_kind(element_kind_p),
+      element_nullable(element_nullable_p) {
+}
 
 PlannedEqualityPredicate::PlannedEqualityPredicate(std::string column_name_p,
                                                    PlannedPredicateOperator predicate_operator_p,
@@ -366,19 +406,17 @@ const std::vector<PlannedColumn> &ScanPlan::OutputColumns() const {
 }
 
 PlannedColumnScalarKind PlannedColumn::ScalarKind() const {
-	if (logical_type == "BOOLEAN") {
-		return PlannedColumnScalarKind::BOOLEAN;
+	if (shape != PlannedColumnShape::SCALAR) {
+		throw std::logic_error("planned ARRAY column has no scalar column kind");
 	}
-	if (logical_type == "BIGINT") {
-		return PlannedColumnScalarKind::BIGINT;
+	if (ScalarKindFromLogicalType(logical_type) != element_kind) {
+		throw std::logic_error("planned scalar column contains a contradictory structural type");
 	}
-	if (logical_type == "VARCHAR") {
-		return PlannedColumnScalarKind::VARCHAR;
-	}
-	if (logical_type == "DOUBLE") {
-		return PlannedColumnScalarKind::DOUBLE;
-	}
-	throw std::logic_error("planned column contains an unsupported logical type");
+	return element_kind;
+}
+
+PlannedColumnScalarKind PlannedColumn::ElementKind() const {
+	return element_kind;
 }
 
 PlannedPredicate ScanPlan::RemotePredicate() const {

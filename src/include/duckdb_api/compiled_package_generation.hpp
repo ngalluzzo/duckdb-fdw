@@ -74,16 +74,21 @@ public:
 	CompiledRegistrationColumn &operator=(CompiledRegistrationColumn &&) = delete;
 
 	const std::string &Name() const;
+	CompiledColumnShape Shape() const;
 	CompiledScalarType Type() const;
+	bool ElementNullable() const;
 	bool Nullable() const;
 
 private:
 	friend class CompiledPackageGeneration;
 
-	CompiledRegistrationColumn(std::string name, CompiledScalarType type, bool nullable);
+	CompiledRegistrationColumn(std::string name, CompiledColumnShape shape, CompiledScalarType type,
+	                           bool element_nullable, bool nullable);
 
 	std::string name;
+	CompiledColumnShape shape;
 	CompiledScalarType type;
+	bool element_nullable;
 	bool nullable;
 };
 

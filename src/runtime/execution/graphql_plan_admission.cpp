@@ -77,6 +77,46 @@ bool TryScalarKind(PlannedGraphqlScalarKind planned, ValueKind &kind, const char
 	return false;
 }
 
+bool TryOutputType(const PlannedGraphqlResultColumn &planned, OutputValueType &type, std::string &logical) {
+	ValueKind kind = ValueKind::VARCHAR;
+	const char *scalar_logical = nullptr;
+	if (!TryScalarKind(planned.scalar_kind, kind, scalar_logical)) {
+		return false;
+	}
+	if (planned.shape == PlannedResultShape::SCALAR) {
+		if (planned.element_nullable) {
+			return false;
+		}
+		type = OutputValueType::Scalar(kind);
+		logical = scalar_logical;
+		return true;
+	}
+	if (planned.shape == PlannedResultShape::ARRAY) {
+		type = OutputValueType::Array(kind, planned.element_nullable);
+		logical = std::string(scalar_logical) + "[]";
+		return true;
+	}
+	return false;
+}
+
+bool TryColumnElementKind(PlannedColumnScalarKind planned, ValueKind &kind) {
+	switch (planned) {
+	case PlannedColumnScalarKind::BOOLEAN:
+		kind = ValueKind::BOOLEAN;
+		return true;
+	case PlannedColumnScalarKind::BIGINT:
+		kind = ValueKind::BIGINT;
+		return true;
+	case PlannedColumnScalarKind::VARCHAR:
+		kind = ValueKind::VARCHAR;
+		return true;
+	case PlannedColumnScalarKind::DOUBLE:
+		kind = ValueKind::DOUBLE;
+		return true;
+	}
+	return false;
+}
+
 std::string Extractor(const std::vector<std::string> &segments) {
 	std::string result = "$";
 	for (const auto &segment : segments) {
@@ -95,12 +135,17 @@ bool HasColumns(const PlannedGraphqlOperation &operation, const std::vector<Plan
 	for (std::size_t index = 0; index < output.size(); index++) {
 		const auto &result = operation.result_columns[index];
 		const auto &column = output[index];
-		ValueKind kind = ValueKind::VARCHAR;
-		const char *logical = nullptr;
+		OutputValueType type;
+		ValueKind output_kind = ValueKind::VARCHAR;
+		std::string logical;
 		const auto joined_path = Extractor(result.response_path.segments);
 		if (!IsSafeLogicalId(result.name) || !names.insert(result.name).second ||
 		    !IsSafeGraphqlPath(result.response_path.segments, 1, 2) || !paths.insert(joined_path).second ||
-		    !TryScalarKind(result.scalar_kind, kind, logical) || column.name != result.name ||
+		    !TryOutputType(result, type, logical) || column.name != result.name ||
+		    column.shape !=
+		        (result.shape == PlannedResultShape::ARRAY ? PlannedColumnShape::ARRAY : PlannedColumnShape::SCALAR) ||
+		    column.element_nullable != result.element_nullable ||
+		    !TryColumnElementKind(column.element_kind, output_kind) || output_kind != type.element_kind ||
 		    column.logical_type != logical || column.nullable != result.nullable || column.extractor != joined_path) {
 			return false;
 		}
@@ -346,10 +391,10 @@ AdmittedGraphqlRequestProfile::AdmittedGraphqlRequestProfile(const ScanPlan &pla
 	(void)TryCopyFixedHeaders(operation.headers, true, page_budgets.header_bytes, headers);
 	document = operation.document;
 	for (const auto &column : operation.result_columns) {
-		ValueKind kind = ValueKind::VARCHAR;
-		const char *logical = nullptr;
-		(void)TryScalarKind(column.scalar_kind, kind, logical);
-		columns.push_back({column.name, kind, column.nullable, column.response_path.segments});
+		OutputValueType type;
+		std::string logical;
+		(void)TryOutputType(column, type, logical);
+		columns.push_back({column.name, type, column.nullable, column.response_path.segments});
 	}
 	page_size_variable = operation.cursor.page_size_variable;
 	cursor_variable = operation.cursor.cursor_variable;

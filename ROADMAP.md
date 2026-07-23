@@ -459,6 +459,29 @@ credentials) with fixture coverage variants `minimum`, `maximum`, and
 analog (`DOUBLE` accepts fractions) and an `underflow_rejected` analog
 (underflow is a legitimate result, not an error).
 
+### `0.14.0` — list-of-scalar output columns
+
+A connector author can preserve a JSON array as one native DuckDB list-valued
+output column. The closed `ARRAY` form declares exactly one existing v1 scalar
+element type plus child nullability, independently of the outer column's
+nullability. Lists retain source order, duplicates, empty values, and base-row
+cardinality; objects, nested lists, list-valued inputs, and remote list
+predicates remain excluded.
+
+Accepted [RFC 0022](docs/rfcs/0022-add-list-of-scalar-array-output-columns.md)
+decides the design. REST supports all four v1 scalar element types; generated
+GraphQL supports the three response scalar kinds it already owns and continues
+to reject `DOUBLE`. The first product proof restores the real Rick and Morty
+`character_search.episode` field as trailing `VARCHAR[]`, with a connector
+package-major version because the existing relation schema changes.
+
+Release evidence covers the closed schema alternatives, immutable compiled,
+registration, planned, and Runtime value shapes, strict two-level nullability,
+all scalar element conversions, GraphQL capability containment, child resource
+accounting and cancellation, package compatibility, native DuckDB `LIST`
+vectors, and an end-to-end Rick and Morty query with unchanged base-row
+cardinality.
+
 ### `1.0.0-rc.N` — compatibility rehearsal
 
 Each release candidate is an immutable build of the frozen `1.0.0` contract.

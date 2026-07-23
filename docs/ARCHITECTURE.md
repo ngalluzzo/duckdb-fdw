@@ -115,7 +115,7 @@ identity
 └── source digest
 
 ordered relations
-├── structural outputs and nullability
+├── structural scalar-or-array outputs and two-level nullability
 ├── structural inputs and typed default presence
 ├── authentication shape
 ├── operations and selectors
@@ -189,6 +189,15 @@ named relation arguments into ordered structural inputs:
 Query does not apply defaults or binder-requiredness to relation-origin
 arguments. It synthesizes and validates the separate logical secret selector
 for authenticated relations, but never resolves the secret during bind.
+
+An output column is either one scalar or one flat list of one scalar kind.
+Array metadata keeps outer-column nullability separate from child-element
+nullability; lists cannot contain lists or objects. Query derives DuckDB
+`LIST` types directly from that structural metadata and does not parse type
+spellings. Initial bind and every selective replan must correlate exact
+arity, order, names, shapes, child kinds, child nullability, and outer
+nullability with the immutable schema already published to DuckDB before a
+replacement plan becomes observable.
 
 Query supplies the full output-schema closure and every bounded DuckDB
 predicate structure it can observe. Missing DuckDB capabilities are false
@@ -313,7 +322,9 @@ retry, cache, resume, deduplication, stable ordering, or snapshot claim is
 implied.
 
 Response decoding is strict and lossless for the planned structural type.
-Every output batch has the planned arity and kind. Missing required fields,
+Arrays preserve child order, duplicates, empty lists, outer NULL, and admitted
+child NULLs as distinct states. Every output batch has the planned arity,
+shape, child kind, and nullability. Missing required fields,
 wrong JSON types, lossy integers, schema drift, GraphQL errors, invalid
 pagination, and resource exhaustion are terminal failures, not partial success
 or fallback.

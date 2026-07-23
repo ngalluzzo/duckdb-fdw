@@ -98,6 +98,45 @@ void TestResidualOnlyPackagePlanning() {
 	}
 }
 
+void TestArrayOutputPlanningAndPredicateContainment() {
+	const auto generation =
+	    duckdb_api_test::BuildPackageCompatibilityFixture(duckdb_api_test::PackageCompatibilityFixture::ARRAY_BASELINE);
+	const duckdb_api::PackageBoundScanPlanningService service(generation);
+	auto request = duckdb_api::BuildConservativeScanRequest(
+	    generation.Connector(), duckdb_api_test::PACKAGE_TYPED_RELATION, duckdb_api::LogicalSecretReference());
+	const auto plan = service.Plan(generation.OpaqueHandle(), request);
+	Require(plan.OutputColumns().size() == 3 && plan.OutputColumns()[1].name == "label" &&
+	            plan.OutputColumns()[1].logical_type == "VARCHAR[]" && plan.OutputColumns()[1].nullable &&
+	            plan.OutputColumns()[1].shape == duckdb_api::PlannedColumnShape::ARRAY &&
+	            plan.OutputColumns()[1].ElementKind() == duckdb_api::PlannedColumnScalarKind::VARCHAR &&
+	            !plan.OutputColumns()[1].element_nullable &&
+	            plan.Operation().Rest().result_columns[1].shape == duckdb_api::PlannedResultShape::ARRAY &&
+	            !plan.Operation().Rest().result_columns[1].element_nullable,
+	        "package-bound planning lost ARRAY shape, element kind, or either nullability level");
+	const auto child_nullable_generation = duckdb_api_test::BuildPackageCompatibilityFixture(
+	    duckdb_api_test::PackageCompatibilityFixture::ARRAY_ELEMENT_NULLABILITY_CHANGED);
+	const duckdb_api::PackageBoundScanPlanningService child_nullable_service(child_nullable_generation);
+	const auto child_nullable_request = duckdb_api::BuildConservativeScanRequest(
+	    child_nullable_generation.Connector(), duckdb_api_test::PACKAGE_TYPED_RELATION,
+	    duckdb_api::LogicalSecretReference());
+	const auto child_nullable_plan =
+	    child_nullable_service.Plan(child_nullable_generation.OpaqueHandle(), child_nullable_request);
+	Require(plan.Snapshot().find("label:VARCHAR[]<element!>?") != std::string::npos &&
+	            child_nullable_plan.Snapshot().find("label:VARCHAR[]<element?>?") != std::string::npos &&
+	            plan.Snapshot() != child_nullable_plan.Snapshot(),
+	        "safe plan snapshots did not distinguish ARRAY child nullability from outer nullability");
+
+	request.requested_predicate = duckdb_api::RequestedPredicate::Comparison(
+	    1, duckdb_api::RequestedPredicateValueKind::VARCHAR, duckdb_api::RequestedPredicateComparisonOperator::EQUALS,
+	    duckdb_api::RequestedPredicateValue::Varchar("not-a-list"));
+	request.retained_predicate_scope = duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE;
+	request.capabilities.selective_predicate = true;
+	request.capabilities.retains_predicate = true;
+	RequireInvalidContract(
+	    [&service, &generation, &request]() { (void)service.Plan(generation.OpaqueHandle(), request); },
+	    "a scalar predicate candidate bound to an ARRAY output column");
+}
+
 void TestNativePlanningRemainsOutsidePackageBinding() {
 	static_assert(!std::is_default_constructible<duckdb_api::PackageBoundScanPlanningService>::value,
 	              "package-bound planning must require an immutable package generation");
@@ -129,5 +168,6 @@ void RunPackageBoundScanPlannerTests() {
 	TestExactAndCopiedHandlesPlanAfterProviderRelease();
 	TestSameIdentityDifferentGenerationIsRejected();
 	TestResidualOnlyPackagePlanning();
+	TestArrayOutputPlanningAndPredicateContainment();
 	TestNativePlanningRemainsOutsidePackageBinding();
 }

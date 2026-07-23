@@ -22,11 +22,11 @@ namespace duckdb_api {
 namespace internal {
 namespace {
 
-std::vector<ValueKind> ColumnKinds(const AdmittedGraphqlRequestProfile &profile) {
-	std::vector<ValueKind> result;
+std::vector<OutputValueType> ColumnTypes(const AdmittedGraphqlRequestProfile &profile) {
+	std::vector<OutputValueType> result;
 	result.reserve(profile.Columns().size());
 	for (const auto &column : profile.Columns()) {
-		result.push_back(column.kind);
+		result.push_back(column.type);
 	}
 	return result;
 }
@@ -83,10 +83,10 @@ public:
 	                   uint64_t max_wall_milliseconds_p)
 	    : admitted_profile(std::move(admitted_profile_p)), transport(std::move(transport_p)),
 	      authorization(new ScanAuthorization(std::move(authorization_p))),
-	      column_kinds(ColumnKinds(*admitted_profile)),
+	      column_types(ColumnTypes(*admitted_profile)),
 	      accounting(ResourceProfile(*admitted_profile, max_wall_milliseconds_p)),
 	      cursor(admitted_profile->MaxPages(), 512), cancelled(false), closed(false), exhausted(false),
-	      page_loaded(false), page_has_next(false), offset(0) {
+	      page_loaded(false), page_has_next(false), decoded_memory_bytes(0), decoded_memory_allowance(0), offset(0) {
 	}
 
 	~GraphqlBatchStream() noexcept override {
@@ -100,7 +100,7 @@ public:
 		} catch (...) {
 			throw ExecutionError(ErrorStage::INTERNAL, "", "scan stream synchronization failed");
 		}
-		batch.Clear();
+		batch = TypedBatch();
 		if (closed) {
 			return false;
 		}
@@ -188,20 +188,23 @@ private:
 		if (count == 0) {
 			throw ExecutionError(ErrorStage::INTERNAL, "", "runtime attempted to produce an empty successful batch");
 		}
+		RequireTypedBatchHandoffMemory(decoded_memory_bytes, decoded_memory_allowance, count, column_types.size());
 		TypedBatch produced;
-		produced.column_kinds = column_kinds;
+		produced.column_types = column_types;
 		produced.rows.reserve(count);
+		RequireTypedBatchHandoffMemory(decoded_memory_bytes, decoded_memory_allowance, produced.rows.capacity(),
+		                               produced.column_types.capacity());
 		for (std::size_t index = 0; index < count; index++) {
 			CheckState(control, accounting.Deadline());
 			produced.rows.push_back(std::move(decoded.Rows()[offset + index]));
 		}
-		offset += count;
-		if (produced.rows.empty() || !produced.IsSchemaAligned()) {
+		if (produced.rows.empty() || !produced.IsSchemaAligned(control)) {
 			throw ExecutionError(ErrorStage::INTERNAL, "", "runtime produced a misaligned typed batch");
 		}
 		// The destination batch becomes observable only after the final checkpoint;
 		// cancellation concurrent with row movement cannot publish partial success.
 		CheckState(control, accounting.Deadline());
+		offset += count;
 		batch = std::move(produced);
 		return true;
 	}
@@ -252,8 +255,10 @@ private:
 			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                     "GraphQL page and cursor exceeded the decoded-memory budget");
 		}
-		accounting.CommitDecodedPage(
-		    {static_cast<uint64_t>(page.rows.size()), page.retained_memory_bytes + cursor_memory_after});
+		const auto retained_memory = page.retained_memory_bytes + cursor_memory_after;
+		accounting.CommitDecodedPage({static_cast<uint64_t>(page.rows.size()), retained_memory});
+		decoded_memory_bytes = retained_memory;
+		decoded_memory_allowance = allowance.decoded_memory_bytes;
 		decoded.Install(std::move(page.rows));
 		offset = 0;
 		page_loaded = true;
@@ -265,6 +270,8 @@ private:
 		}
 		authorization.reset();
 		decoded.Release();
+		decoded_memory_bytes = 0;
+		decoded_memory_allowance = 0;
 		cursor.Fail();
 		offset = 0;
 		page_loaded = false;
@@ -288,7 +295,7 @@ private:
 	const std::unique_ptr<const AdmittedGraphqlRequestProfile> admitted_profile;
 	const std::shared_ptr<const HttpTransport> transport;
 	std::unique_ptr<ScanAuthorization> authorization;
-	const std::vector<ValueKind> column_kinds;
+	const std::vector<OutputValueType> column_types;
 	ScanResourceAccounting accounting;
 	GraphqlCursorState cursor;
 	mutable std::mutex mutex;
@@ -299,6 +306,8 @@ private:
 	bool page_loaded;
 	bool page_has_next;
 	DecodedPageBuffer decoded;
+	uint64_t decoded_memory_bytes;
+	uint64_t decoded_memory_allowance;
 	std::size_t offset;
 };
 

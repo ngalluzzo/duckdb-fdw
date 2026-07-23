@@ -320,7 +320,7 @@ RuntimeFixtureJsonShape AdmitRuntimeFixtureJsonShape(const duckdb_api::ScanPlan 
 		result.records_are_array = true;
 		result.records_path = admitted->NodesPath();
 		for (const auto &column : admitted->Columns()) {
-			result.columns.push_back({column.name, column.kind, column.nullable, column.response_path});
+			result.columns.push_back({column.name, column.type, column.nullable, column.response_path});
 		}
 		return result;
 	}
@@ -336,7 +336,7 @@ RuntimeFixtureJsonShape AdmitRuntimeFixtureJsonShape(const duckdb_api::ScanPlan 
 		result.records_are_array = admitted->ResponseSource() != duckdb_api::PlannedResponseSource::ROOT_OBJECT;
 		result.records_path = admitted->RecordsPath();
 		for (const auto &column : admitted->Columns()) {
-			result.columns.push_back({column.name, column.kind, column.nullable, column.source_path});
+			result.columns.push_back({column.name, column.type, column.nullable, column.source_path});
 		}
 		return result;
 	}
@@ -347,7 +347,7 @@ RuntimeFixtureJsonShape AdmitRuntimeFixtureJsonShape(const duckdb_api::ScanPlan 
 	result.records_are_array = true;
 	result.records_path = admitted->RecordsPath();
 	for (const auto &column : admitted->Columns()) {
-		result.columns.push_back({column.name, column.kind, column.nullable, column.source_path});
+		result.columns.push_back({column.name, column.type, column.nullable, column.source_path});
 	}
 	return result;
 }

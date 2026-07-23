@@ -69,6 +69,44 @@ public:
 // construction.
 enum class ValueKind : uint8_t { BIGINT, VARCHAR, BOOLEAN, DOUBLE };
 
+enum class ValueShape : uint8_t { SCALAR, ARRAY };
+
+// Immutable structural Runtime/Query schema for one output column. The
+// element kind remains scalar even for ARRAY, making nested collections
+// unrepresentable. element_nullable is false for every scalar column.
+struct OutputValueType {
+	OutputValueType();
+	OutputValueType(ValueKind kind);
+	OutputValueType(ValueShape shape, ValueKind element_kind, bool element_nullable);
+	static OutputValueType Scalar(ValueKind kind);
+	static OutputValueType Array(ValueKind element_kind, bool element_nullable);
+
+	bool operator==(const OutputValueType &other) const noexcept;
+	bool operator!=(const OutputValueType &other) const noexcept;
+
+	ValueShape shape;
+	ValueKind element_kind;
+	bool element_nullable;
+};
+
+// One owned scalar child inside an ARRAY value. This separate non-recursive
+// type prevents a Runtime producer from constructing nested lists while
+// retaining strict scalar conversion and independent child validity.
+struct TypedScalarValue {
+	static TypedScalarValue BigInt(int64_t value);
+	static TypedScalarValue Varchar(std::string value);
+	static TypedScalarValue Boolean(bool value);
+	static TypedScalarValue Double(double value);
+	static TypedScalarValue Null(ValueKind kind);
+
+	ValueKind kind = ValueKind::VARCHAR;
+	bool valid = false;
+	int64_t bigint_value = 0;
+	std::string varchar_value;
+	bool boolean_value = false;
+	double double_value = 0.0;
+};
+
 // Protocol-neutral scalar handoff owned by Remote Runtime and consumed by
 // Query Experience. Invalid values represent SQL NULL while retaining the
 // planned scalar kind; consumers must use validity rather than inspecting a
@@ -87,28 +125,39 @@ struct TypedValue {
 	static TypedValue Boolean(bool value);
 	static TypedValue Double(double value);
 	static TypedValue Null(ValueKind kind);
+	static TypedValue Null(OutputValueType type);
+	static TypedValue Array(ValueKind element_kind, bool element_nullable, std::vector<TypedScalarValue> elements);
+
+	OutputValueType Type() const noexcept;
 
 	ValueKind kind;
+	ValueShape shape;
+	bool element_nullable;
 	bool valid;
 	int64_t bigint_value;
 	std::string varchar_value;
 	bool boolean_value;
 	double double_value;
+	std::vector<TypedScalarValue> elements;
 };
 
 struct TypedRow {
 	std::vector<TypedValue> values;
 };
 
-// A batch declares the ordered scalar kinds matching ScanPlan::output_columns.
-// Every row has exactly that arity and kind sequence. The adapter may translate
-// these values into DuckDB vectors but runtime code owns strict conversion.
+// A batch declares the ordered structural types matching
+// ScanPlan::output_columns. Every row has exactly that arity and type sequence.
+// The adapter may translate these values into DuckDB vectors but runtime code
+// owns strict conversion.
 struct TypedBatch {
-	std::vector<ValueKind> column_kinds;
+	std::vector<OutputValueType> column_types;
 	std::vector<TypedRow> rows;
 
 	void Clear();
 	bool IsSchemaAligned() const noexcept;
+	// Runtime handoff paths use the control-aware form so validation of a large
+	// ARRAY cannot become an uninterruptible publication window.
+	bool IsSchemaAligned(ExecutionControl &control) const;
 };
 
 // One independently owned scan. Next replaces rows with at most the planned

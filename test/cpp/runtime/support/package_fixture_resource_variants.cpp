@@ -327,7 +327,8 @@ RuntimeFixtureVariantObservation RuntimePackageFixtureExecutionService::ExecuteR
 	if (field == RuntimeFixtureRelationResourceField::EXTRACTED_STRING_BYTES) {
 		std::size_t ordinal = shape.columns.size();
 		for (std::size_t index = 0; index < shape.columns.size(); index++) {
-			if (shape.columns[index].kind == duckdb_api::ValueKind::VARCHAR) {
+			if (shape.columns[index].type.shape == duckdb_api::ValueShape::SCALAR &&
+			    shape.columns[index].type.element_kind == duckdb_api::ValueKind::VARCHAR) {
 				ordinal = index;
 				break;
 			}

@@ -60,13 +60,37 @@ ControlledRuntimeScenarioObservation ControlledRuntimeScenario::Observation() co
 }
 
 std::shared_ptr<ControlledRuntimeScenario> BuildControlledRuntimeScenario(ControlledRuntimeScenarioId scenario) {
-	auto runtime = BuildControlledHttpRuntime();
+	auto runtime = scenario == ControlledRuntimeScenarioId::RICKANDMORTY_CHARACTER_EPISODES
+	                   ? BuildControlledHttpRuntimeForHost("rickandmortyapi.com")
+	                   : BuildControlledHttpRuntime();
 	uint64_t expected_request_count = 1;
 	bool has_terminal_stage = false;
 	auto terminal_stage = duckdb_api::ErrorStage::INTERNAL;
 	switch (scenario) {
 	case ControlledRuntimeScenarioId::RETAINED_REST_USER:
 		runtime->Respond(200, "{\"id\":11,\"login\":\"duckdb\",\"site_admin\":false}");
+		break;
+	case ControlledRuntimeScenarioId::RICKANDMORTY_CHARACTER_EPISODES:
+		expected_request_count = 2;
+		{
+			const auto response = ControlledResponse(
+			    200, "{\"info\":{\"count\":4,\"pages\":1,\"next\":null,\"prev\":null},\"results\":["
+			         "{\"id\":4,\"name\":\"Beth Smith\",\"status\":\"Alive\",\"species\":\"Human\","
+			         "\"origin\":{\"name\":\"Earth (Replacement Dimension)\"},\"episode\":["
+			         "\"https://rickandmortyapi.com/api/episode/4\","
+			         "\"https://rickandmortyapi.com/api/episode/1\","
+			         "\"https://rickandmortyapi.com/api/episode/4\"]},"
+			         "{\"id\":1,\"name\":\"Rick Sanchez\",\"status\":\"Alive\",\"species\":\"Human\","
+			         "\"origin\":{\"name\":\"Earth (C-137)\"},\"episode\":["
+			         "\"https://rickandmortyapi.com/api/episode/1\","
+			         "\"https://rickandmortyapi.com/api/episode/2\"]},"
+			         "{\"id\":3,\"name\":\"Summer Smith\",\"status\":\"Alive\",\"species\":\"Human\","
+			         "\"origin\":{\"name\":\"Earth (Replacement Dimension)\"},\"episode\":[]},"
+			         "{\"id\":2,\"name\":\"Morty Smith\",\"status\":\"Alive\",\"species\":\"Human\","
+			         "\"origin\":{\"name\":\"unknown\"},\"episode\":["
+			         "\"https://rickandmortyapi.com/api/episode/2\"]}]}");
+			runtime->RespondSequence({response, response});
+		}
 		break;
 	case ControlledRuntimeScenarioId::GRAPHQL_MULTI_PAGE_NULL_DUPLICATE: {
 		expected_request_count = 4;

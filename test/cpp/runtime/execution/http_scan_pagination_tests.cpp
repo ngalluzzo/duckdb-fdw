@@ -190,7 +190,7 @@ void TestSequentialBackpressureAndEmptyMiddlePage() {
 	Require(runtime->Observations().empty(), "paginated Open performed transport I/O");
 	duckdb_api::TypedBatch batch;
 	Require(stream->Next(control, batch) && batch.rows.size() == 1 && batch.IsSchemaAligned() &&
-	            batch.column_kinds == std::vector<duckdb_api::ValueKind>(
+	            batch.column_types == std::vector<duckdb_api::OutputValueType>(
 	                                      {duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR,
 	                                       duckdb_api::ValueKind::BOOLEAN, duckdb_api::ValueKind::BOOLEAN,
 	                                       duckdb_api::ValueKind::BOOLEAN, duckdb_api::ValueKind::VARCHAR}) &&

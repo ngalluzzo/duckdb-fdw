@@ -23,6 +23,16 @@ PlannedRestScalarKind PlanScalarKind(CompiledScalarType type) {
 	throw std::logic_error("compiled REST scalar has an unknown type");
 }
 
+PlannedResultShape PlanResultShape(CompiledColumnShape shape) {
+	switch (shape) {
+	case CompiledColumnShape::SCALAR:
+		return PlannedResultShape::SCALAR;
+	case CompiledColumnShape::ARRAY:
+		return PlannedResultShape::ARRAY;
+	}
+	throw std::logic_error("compiled REST column has an unknown shape");
+}
+
 PlannedRestQueryEncoding PlanQueryEncoding(CompiledQueryEncoding encoding) {
 	switch (encoding) {
 	case CompiledQueryEncoding::FORM_URLENCODED:
@@ -175,7 +185,8 @@ ScanPlanBuilder::BuildRestOperation(CompiledConnectorOrigin connector_origin, co
 	    rest.records_extractor,
 	    {},
 	    {rest.records_extractor_segments},
-	    {}};
+	    {},
+	    PlannedRestSchemaAuthority::STRUCTURAL_RESULT_COLUMNS};
 
 	// The encoded-only vector is the native 0.7 compatibility bridge. Package
 	// execution authority lives exclusively in the typed bindings below.
@@ -190,8 +201,12 @@ ScanPlanBuilder::BuildRestOperation(CompiledConnectorOrigin connector_origin, co
 
 	planned.result_columns.reserve(relation.Columns().size());
 	for (const auto &column : relation.Columns()) {
-		planned.result_columns.push_back(
-		    {column.name, PlanScalarKind(column.ScalarType()), column.nullable, {column.ExtractorSegments()}});
+		planned.result_columns.push_back({column.name,
+		                                  PlanScalarKind(column.ElementType()),
+		                                  column.nullable,
+		                                  {column.ExtractorSegments()},
+		                                  PlanResultShape(column.Shape()),
+		                                  column.ElementNullable()});
 	}
 
 	planned.query_bindings.reserve(rest.request.query_parameters.size());

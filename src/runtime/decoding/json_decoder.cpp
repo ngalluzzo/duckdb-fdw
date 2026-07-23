@@ -58,6 +58,19 @@ bool IsPathPrefix(const std::vector<std::string> &prefix, const std::vector<std:
 	return prefix.size() <= path.size() && std::equal(prefix.begin(), prefix.end(), path.begin());
 }
 
+bool IsValidOutputType(const OutputValueType &type) {
+	switch (type.element_kind) {
+	case ValueKind::BIGINT:
+	case ValueKind::VARCHAR:
+	case ValueKind::BOOLEAN:
+	case ValueKind::DOUBLE:
+		break;
+	default:
+		return false;
+	}
+	return (type.shape == ValueShape::SCALAR && !type.element_nullable) || type.shape == ValueShape::ARRAY;
+}
+
 void ValidatePlan(const JsonDecodePlan &plan) {
 	const bool has_records_path = !plan.records_path.empty();
 	const bool source_valid =
@@ -75,7 +88,8 @@ void ValidatePlan(const JsonDecodePlan &plan) {
 		}
 	}
 	for (std::size_t index = 0; index < plan.columns.size(); index++) {
-		if (plan.columns[index].output_name.empty() || plan.columns[index].json_path.empty()) {
+		if (plan.columns[index].output_name.empty() || plan.columns[index].json_path.empty() ||
+		    !IsValidOutputType(plan.columns[index].type)) {
 			throw ExecutionError(ErrorStage::INTERNAL, "", "JSON decoder received an invalid schema or budget");
 		}
 		for (const auto &segment : plan.columns[index].json_path) {
@@ -101,7 +115,8 @@ void ValidatePlan(const JsonDecodePlan &plan) {
 class JsonParser {
 public:
 	JsonParser(const std::string &input_p, const JsonDecodePlan &plan_p, ExecutionControl &control_p)
-	    : input(input_p), plan(plan_p), control(control_p), position(0), decoded_memory(0) {
+	    : input(input_p), plan(plan_p), control(control_p), position(0), decoded_memory(0), pending_string_memory(0),
+	      pending_array_memory(0), pending_structural_memory(0), continuation_memory(0), peak_memory(0) {
 	}
 
 	std::vector<TypedRow> ParseResponse() {
@@ -124,12 +139,38 @@ public:
 		return ParseRecordArrayResponse();
 	}
 
-	const std::string &NextUrl() const noexcept {
-		return next_url;
+	std::string TakeNextUrl() {
+		return std::move(next_url);
 	}
 
 	uint64_t RetainedMemoryBytes() const noexcept {
 		return decoded_memory;
+	}
+
+	uint64_t PeakMemoryBytes() const noexcept {
+		return peak_memory;
+	}
+
+	uint64_t ContinuationMemoryBytes() const noexcept {
+		return continuation_memory;
+	}
+
+	void ReconcileTakenContinuationMemory(uint64_t actual) {
+		if (continuation_memory == 0 && actual != 0) {
+			throw ExecutionError(ErrorStage::INTERNAL, "", "continuation memory accounting failed");
+		}
+		if (actual > continuation_memory) {
+			uint64_t current = 0;
+			if (!CheckedAdd(decoded_memory, pending_string_memory, current) ||
+			    !CheckedAdd(current, pending_array_memory, current) ||
+			    !CheckedAdd(current, pending_structural_memory, current) || !CheckedAdd(current, actual, current) ||
+			    current > plan.max_decoded_memory_bytes) {
+				throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+				                     "response continuation exceeded its memory budget");
+			}
+		}
+		continuation_memory = actual;
+		ObserveCurrentMemory();
 	}
 
 private:
@@ -143,10 +184,17 @@ private:
 		double double_value;
 		bool seen;
 		bool valid;
+		std::vector<TypedScalarValue> elements;
 	};
 
 	std::vector<TypedRow> AllocateResult() {
 		std::vector<TypedRow> result;
+		uint64_t requested_storage = 0;
+		if (!CheckedMultiply(plan.max_records, static_cast<uint64_t>(sizeof(TypedRow)), requested_storage) ||
+		    requested_storage > plan.max_decoded_memory_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded rows exceeded their memory budget");
+		}
 		try {
 			result.reserve(static_cast<std::size_t>(plan.max_records));
 		} catch (const std::bad_alloc &) {
@@ -161,7 +209,56 @@ private:
 			                     "decoded rows exceeded their memory budget");
 		}
 		decoded_memory = row_storage;
+		ObserveCurrentMemory();
 		return result;
+	}
+
+	void ObserveCurrentMemory() {
+		uint64_t current = 0;
+		if (!CheckedAdd(decoded_memory, pending_string_memory, current) ||
+		    !CheckedAdd(current, pending_array_memory, current) ||
+		    !CheckedAdd(current, pending_structural_memory, current) ||
+		    !CheckedAdd(current, continuation_memory, current) || current > plan.max_decoded_memory_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded rows exceeded their memory budget");
+		}
+		peak_memory = std::max(peak_memory, current);
+	}
+
+	void ReservePendingStringMemory(uint64_t addition) {
+		uint64_t retained = 0;
+		if (!CheckedAdd(decoded_memory, pending_string_memory, retained) ||
+		    !CheckedAdd(retained, pending_array_memory, retained) ||
+		    !CheckedAdd(retained, pending_structural_memory, retained) ||
+		    !CheckedAdd(retained, continuation_memory, retained) || !CheckedAdd(retained, addition, retained) ||
+		    retained > plan.max_decoded_memory_bytes ||
+		    !CheckedAdd(pending_string_memory, addition, pending_string_memory)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded string exceeded its memory budget");
+		}
+		ObserveCurrentMemory();
+	}
+
+	void ReserveStructuralMemory(uint64_t addition) {
+		uint64_t retained = 0;
+		if (!CheckedAdd(decoded_memory, pending_string_memory, retained) ||
+		    !CheckedAdd(retained, pending_array_memory, retained) ||
+		    !CheckedAdd(retained, pending_structural_memory, retained) ||
+		    !CheckedAdd(retained, continuation_memory, retained) || !CheckedAdd(retained, addition, retained) ||
+		    retained > plan.max_decoded_memory_bytes ||
+		    !CheckedAdd(pending_structural_memory, addition, pending_structural_memory)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded row staging exceeded its memory budget");
+		}
+		ObserveCurrentMemory();
+	}
+
+	void ReconcileStructuralMemory(uint64_t reserved, uint64_t actual) {
+		if (actual > reserved) {
+			ReserveStructuralMemory(actual - reserved);
+		} else {
+			pending_structural_memory -= reserved - actual;
+		}
 	}
 
 	std::vector<TypedRow> ParseRootObject() {
@@ -243,14 +340,19 @@ private:
 
 	void ExtractContinuationScalar(const std::vector<std::string> &cont_path) {
 		if (Peek() == '"') {
-			const auto value = ParseString();
-			uint64_t value_bytes = 0;
-			if (!CheckedAdd(static_cast<uint64_t>(value.capacity()), 0, value_bytes) ||
-			    value_bytes > plan.max_string_bytes) {
-				throw ExecutionError(ErrorStage::RESOURCE, "extracted_string_bytes",
-				                     "response_next continuation URL exceeded the string budget");
+			const JsonColumnPlan continuation_column("extracted_string_bytes", "continuation", ValueKind::VARCHAR);
+			auto value = ParseString(&continuation_column);
+			const auto charged_capacity = static_cast<uint64_t>(value.capacity());
+			next_url.swap(value);
+			const auto retained_capacity = static_cast<uint64_t>(next_url.capacity());
+			if (retained_capacity > charged_capacity) {
+				ReservePendingStringMemory(retained_capacity - charged_capacity);
+			} else {
+				pending_string_memory -= charged_capacity - retained_capacity;
 			}
-			next_url = value;
+			continuation_memory = retained_capacity;
+			pending_string_memory -= retained_capacity;
+			ObserveCurrentMemory();
 			return;
 		}
 		if (Peek() == 'n') {
@@ -388,9 +490,67 @@ private:
 		}
 	}
 
-	std::string ParseString() {
+	void ReserveRetainedString(std::string &result, std::size_t addition, const JsonColumnPlan *column,
+	                           uint64_t &charged_capacity) {
+		if (column == nullptr) {
+			return;
+		}
+		if (addition > plan.max_string_bytes || result.size() > plan.max_string_bytes - addition) {
+			throw ExecutionError(ErrorStage::RESOURCE, column->output_name,
+			                     "required response string exceeded its byte budget");
+		}
+		const auto required = result.size() + addition;
+		if (required <= result.capacity() && charged_capacity == static_cast<uint64_t>(result.capacity())) {
+			return;
+		}
+		const auto requested = static_cast<uint64_t>(std::max(required, result.capacity()));
+		uint64_t retained = 0;
+		if (requested < charged_capacity || !CheckedAdd(decoded_memory, pending_string_memory, retained) ||
+		    !CheckedAdd(retained, pending_array_memory, retained) ||
+		    !CheckedAdd(retained, pending_structural_memory, retained) ||
+		    !CheckedAdd(retained, continuation_memory, retained) ||
+		    !CheckedAdd(retained, requested - charged_capacity, retained) || retained > plan.max_decoded_memory_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded string exceeded its memory budget");
+		}
+		try {
+			if (required > result.capacity()) {
+				result.reserve(required);
+			}
+		} catch (const std::bad_alloc &) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded string could not be allocated within its memory budget");
+		}
+		const auto actual = static_cast<uint64_t>(result.capacity());
+		if (actual < charged_capacity ||
+		    !CheckedAdd(pending_string_memory, actual - charged_capacity, pending_string_memory) ||
+		    !CheckedAdd(decoded_memory, pending_string_memory, retained) ||
+		    !CheckedAdd(retained, pending_array_memory, retained) ||
+		    !CheckedAdd(retained, pending_structural_memory, retained) ||
+		    !CheckedAdd(retained, continuation_memory, retained) || retained > plan.max_decoded_memory_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded string exceeded its memory budget");
+		}
+		charged_capacity = actual;
+		ObserveCurrentMemory();
+	}
+
+	void AppendStringByte(std::string &result, char value, const JsonColumnPlan *column, uint64_t &charged_capacity) {
+		ReserveRetainedString(result, 1, column, charged_capacity);
+		result.push_back(value);
+	}
+
+	void AppendStringBytes(std::string &result, const std::string &source, std::size_t begin, std::size_t count,
+	                       const JsonColumnPlan *column, uint64_t &charged_capacity) {
+		ReserveRetainedString(result, count, column, charged_capacity);
+		result.append(source, begin, count);
+	}
+
+	std::string ParseString(const JsonColumnPlan *retained_column = nullptr) {
 		Expect('"');
 		std::string result;
+		uint64_t charged_capacity = 0;
+		ReserveRetainedString(result, 0, retained_column, charged_capacity);
 		while (position < input.size()) {
 			Check();
 			const auto character = input[position++];
@@ -401,7 +561,7 @@ private:
 				MalformedJson();
 			}
 			if (character != '\\') {
-				AppendValidatedUtf8(character, result);
+				AppendValidatedUtf8(character, result, retained_column, charged_capacity);
 				continue;
 			}
 			if (position >= input.size()) {
@@ -412,25 +572,25 @@ private:
 			case '"':
 			case '\\':
 			case '/':
-				result.push_back(escaped);
+				AppendStringByte(result, escaped, retained_column, charged_capacity);
 				break;
 			case 'b':
-				result.push_back('\b');
+				AppendStringByte(result, '\b', retained_column, charged_capacity);
 				break;
 			case 'f':
-				result.push_back('\f');
+				AppendStringByte(result, '\f', retained_column, charged_capacity);
 				break;
 			case 'n':
-				result.push_back('\n');
+				AppendStringByte(result, '\n', retained_column, charged_capacity);
 				break;
 			case 'r':
-				result.push_back('\r');
+				AppendStringByte(result, '\r', retained_column, charged_capacity);
 				break;
 			case 't':
-				result.push_back('\t');
+				AppendStringByte(result, '\t', retained_column, charged_capacity);
 				break;
 			case 'u':
-				AppendEscapedUnicode(result);
+				AppendEscapedUnicode(result, retained_column, charged_capacity);
 				break;
 			default:
 				MalformedJson();
@@ -461,25 +621,30 @@ private:
 		return result;
 	}
 
-	void AppendCodePoint(uint32_t code_point, std::string &result) {
+	void AppendCodePoint(uint32_t code_point, std::string &result, const JsonColumnPlan *column,
+	                     uint64_t &charged_capacity) {
+		char encoded[4];
+		std::size_t count = 0;
 		if (code_point <= 0x7f) {
-			result.push_back(static_cast<char>(code_point));
+			encoded[count++] = static_cast<char>(code_point);
 		} else if (code_point <= 0x7ff) {
-			result.push_back(static_cast<char>(0xc0 | (code_point >> 6)));
-			result.push_back(static_cast<char>(0x80 | (code_point & 0x3f)));
+			encoded[count++] = static_cast<char>(0xc0 | (code_point >> 6));
+			encoded[count++] = static_cast<char>(0x80 | (code_point & 0x3f));
 		} else if (code_point <= 0xffff) {
-			result.push_back(static_cast<char>(0xe0 | (code_point >> 12)));
-			result.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3f)));
-			result.push_back(static_cast<char>(0x80 | (code_point & 0x3f)));
+			encoded[count++] = static_cast<char>(0xe0 | (code_point >> 12));
+			encoded[count++] = static_cast<char>(0x80 | ((code_point >> 6) & 0x3f));
+			encoded[count++] = static_cast<char>(0x80 | (code_point & 0x3f));
 		} else {
-			result.push_back(static_cast<char>(0xf0 | (code_point >> 18)));
-			result.push_back(static_cast<char>(0x80 | ((code_point >> 12) & 0x3f)));
-			result.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3f)));
-			result.push_back(static_cast<char>(0x80 | (code_point & 0x3f)));
+			encoded[count++] = static_cast<char>(0xf0 | (code_point >> 18));
+			encoded[count++] = static_cast<char>(0x80 | ((code_point >> 12) & 0x3f));
+			encoded[count++] = static_cast<char>(0x80 | ((code_point >> 6) & 0x3f));
+			encoded[count++] = static_cast<char>(0x80 | (code_point & 0x3f));
 		}
+		ReserveRetainedString(result, count, column, charged_capacity);
+		result.append(encoded, count);
 	}
 
-	void AppendEscapedUnicode(std::string &result) {
+	void AppendEscapedUnicode(std::string &result, const JsonColumnPlan *column, uint64_t &charged_capacity) {
 		auto code_point = ParseHexCodeUnit();
 		if (code_point >= 0xd800 && code_point <= 0xdbff) {
 			if (position + 2 > input.size() || input[position] != '\\' || input[position + 1] != 'u') {
@@ -494,13 +659,14 @@ private:
 		} else if (code_point >= 0xdc00 && code_point <= 0xdfff) {
 			MalformedJson();
 		}
-		AppendCodePoint(code_point, result);
+		AppendCodePoint(code_point, result, column, charged_capacity);
 	}
 
-	void AppendValidatedUtf8(char first_character, std::string &result) {
+	void AppendValidatedUtf8(char first_character, std::string &result, const JsonColumnPlan *column,
+	                         uint64_t &charged_capacity) {
 		const auto first = static_cast<unsigned char>(first_character);
 		if (first < 0x80) {
-			result.push_back(first_character);
+			AppendStringByte(result, first_character, column, charged_capacity);
 			return;
 		}
 
@@ -538,7 +704,7 @@ private:
 		if (code_point < minimum || code_point > 0x10ffff || (code_point >= 0xd800 && code_point <= 0xdfff)) {
 			MalformedJson();
 		}
-		result.append(input, begin, continuation_count + 1);
+		AppendStringBytes(result, input, begin, continuation_count + 1, column, charged_capacity);
 	}
 
 	std::string ParseNumberToken() {
@@ -701,7 +867,7 @@ private:
 			throw ExecutionError(ErrorStage::SCHEMA, column.output_name,
 			                     "required response field has an incompatible type");
 		}
-		auto result = ParseString();
+		auto result = ParseString(&column);
 		if (static_cast<uint64_t>(result.size()) > plan.max_string_bytes) {
 			throw ExecutionError(ErrorStage::RESOURCE, column.output_name,
 			                     "required response string exceeded its byte budget");
@@ -724,6 +890,97 @@ private:
 		                     "required response field has an incompatible type");
 	}
 
+	TypedScalarValue ParseScalarElement(const JsonColumnPlan &column) {
+		switch (column.type.element_kind) {
+		case ValueKind::BIGINT:
+			return TypedScalarValue::BigInt(ParseBigInt(column));
+		case ValueKind::VARCHAR:
+			return TypedScalarValue::Varchar(ParseVarchar(column));
+		case ValueKind::BOOLEAN:
+			return TypedScalarValue::Boolean(ParseBoolean(column));
+		case ValueKind::DOUBLE:
+			return TypedScalarValue::Double(ParseDouble(column));
+		}
+		throw ExecutionError(ErrorStage::INTERNAL, "", "JSON decoder received an invalid array element type");
+	}
+
+	void ReserveArrayElement(std::vector<TypedScalarValue> &elements) {
+		if (elements.size() < elements.capacity()) {
+			return;
+		}
+		const auto current = static_cast<uint64_t>(elements.capacity());
+		uint64_t requested = 1;
+		if (current != 0 && !CheckedMultiply(current, 2, requested)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded array exceeded its memory budget");
+		}
+		uint64_t requested_bytes = 0;
+		uint64_t current_bytes = 0;
+		uint64_t growth = 0;
+		uint64_t retained = 0;
+		if (!CheckedMultiply(requested, static_cast<uint64_t>(sizeof(TypedScalarValue)), requested_bytes) ||
+		    !CheckedMultiply(current, static_cast<uint64_t>(sizeof(TypedScalarValue)), current_bytes) ||
+		    requested_bytes < current_bytes || !CheckedAdd(decoded_memory, pending_string_memory, retained) ||
+		    !CheckedAdd(retained, pending_array_memory, retained) ||
+		    !CheckedAdd(retained, pending_structural_memory, retained) ||
+		    !CheckedAdd(retained, continuation_memory, retained) ||
+		    !CheckedAdd(retained, requested_bytes - current_bytes, retained) ||
+		    retained > plan.max_decoded_memory_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded array exceeded its memory budget");
+		}
+		try {
+			elements.reserve(static_cast<std::size_t>(requested));
+		} catch (const std::bad_alloc &) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded array could not be allocated within its memory budget");
+		}
+		uint64_t actual_bytes = 0;
+		if (!CheckedMultiply(static_cast<uint64_t>(elements.capacity()),
+		                     static_cast<uint64_t>(sizeof(TypedScalarValue)), actual_bytes) ||
+		    actual_bytes < current_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded array exceeded its memory budget");
+		}
+		growth = actual_bytes - current_bytes;
+		if (!CheckedAdd(pending_array_memory, growth, pending_array_memory) ||
+		    !CheckedAdd(decoded_memory, pending_string_memory, retained) ||
+		    !CheckedAdd(retained, pending_array_memory, retained) ||
+		    !CheckedAdd(retained, pending_structural_memory, retained) ||
+		    !CheckedAdd(retained, continuation_memory, retained) || retained > plan.max_decoded_memory_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded array exceeded its memory budget");
+		}
+		ObserveCurrentMemory();
+	}
+
+	void ParseArray(const JsonColumnPlan &column, std::vector<TypedScalarValue> &elements) {
+		SkipWhitespace();
+		if (Peek() != '[') {
+			SkipValue();
+			throw ExecutionError(ErrorStage::SCHEMA, column.output_name,
+			                     "required response field has an incompatible type");
+		}
+		Expect('[');
+		SkipWhitespace();
+		while (Peek() != ']') {
+			Check();
+			ReserveArrayElement(elements);
+			if (Peek() == 'n') {
+				ParseLiteral("null");
+				if (!column.type.element_nullable) {
+					throw ExecutionError(ErrorStage::SCHEMA, column.output_name,
+					                     "required response array contains a null element");
+				}
+				elements.push_back(TypedScalarValue::Null(column.type.element_kind));
+			} else {
+				elements.push_back(ParseScalarElement(column));
+			}
+			ConsumeArraySeparator();
+		}
+		Expect(']');
+	}
+
 	void ParseColumnValue(std::size_t column_index, std::vector<ParsedSlot> &slots) {
 		auto &slot = slots[column_index];
 		const auto &column = plan.columns[column_index];
@@ -741,7 +998,12 @@ private:
 			}
 			return;
 		}
-		switch (column.kind) {
+		if (column.type.shape == ValueShape::ARRAY) {
+			ParseArray(column, slot.elements);
+			slot.seen = true;
+			return;
+		}
+		switch (column.type.element_kind) {
 		case ValueKind::BIGINT:
 			slot.bigint_value = ParseBigInt(column);
 			break;
@@ -814,10 +1076,37 @@ private:
 			SkipValue();
 			throw ExecutionError(ErrorStage::SCHEMA, "", "response record does not match the declared schema");
 		}
-		std::vector<ParsedSlot> slots(plan.columns.size());
+		uint64_t reserved_slot_storage = 0;
+		if (!CheckedMultiply(static_cast<uint64_t>(plan.columns.size()), static_cast<uint64_t>(sizeof(ParsedSlot)),
+		                     reserved_slot_storage)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded row staging exceeded its memory budget");
+		}
+		ReserveStructuralMemory(reserved_slot_storage);
+		std::vector<ParsedSlot> slots;
+		try {
+			slots.resize(plan.columns.size());
+		} catch (const std::bad_alloc &) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded row staging could not be allocated within its memory budget");
+		}
+		uint64_t slot_storage = 0;
+		if (!CheckedMultiply(static_cast<uint64_t>(slots.capacity()), static_cast<uint64_t>(sizeof(ParsedSlot)),
+		                     slot_storage)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded row staging exceeded its memory budget");
+		}
+		ReconcileStructuralMemory(reserved_slot_storage, slot_storage);
 		ParseSelectedObject(slots, {});
 
 		TypedRow row;
+		uint64_t reserved_value_storage = 0;
+		if (!CheckedMultiply(static_cast<uint64_t>(plan.columns.size()), static_cast<uint64_t>(sizeof(TypedValue)),
+		                     reserved_value_storage)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded rows exceeded their memory budget");
+		}
+		ReserveStructuralMemory(reserved_value_storage);
 		try {
 			row.values.reserve(plan.columns.size());
 		} catch (const std::bad_alloc &) {
@@ -830,26 +1119,64 @@ private:
 			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                     "decoded rows exceeded their memory budget");
 		}
+		ReconcileStructuralMemory(reserved_value_storage, value_storage);
 		uint64_t row_memory = value_storage;
+		uint64_t row_string_memory = 0;
+		uint64_t row_array_memory = 0;
 		for (std::size_t index = 0; index < plan.columns.size(); index++) {
 			if (!slots[index].seen) {
 				throw ExecutionError(ErrorStage::SCHEMA, plan.columns[index].output_name,
 				                     "required response field is missing");
 			}
 			if (!slots[index].valid) {
-				row.values.push_back(TypedValue::Null(plan.columns[index].kind));
+				row.values.push_back(TypedValue::Null(plan.columns[index].type));
 				continue;
 			}
-			switch (plan.columns[index].kind) {
+			if (plan.columns[index].type.shape == ValueShape::ARRAY) {
+				auto value =
+				    TypedValue::Array(plan.columns[index].type.element_kind, plan.columns[index].type.element_nullable,
+				                      std::move(slots[index].elements));
+				uint64_t element_storage = 0;
+				if (!CheckedMultiply(static_cast<uint64_t>(value.elements.capacity()),
+				                     static_cast<uint64_t>(sizeof(TypedScalarValue)), element_storage)) {
+					throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+					                     "decoded rows exceeded their memory budget");
+				}
+				uint64_t updated = 0;
+				RequireMemory(row_memory, element_storage, plan.max_decoded_memory_bytes, updated);
+				row_memory = updated;
+				if (!CheckedAdd(row_array_memory, element_storage, row_array_memory)) {
+					throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+					                     "decoded rows exceeded their memory budget");
+				}
+				for (const auto &element : value.elements) {
+					if (element.kind == ValueKind::VARCHAR && element.valid) {
+						const auto bytes = static_cast<uint64_t>(element.varchar_value.capacity());
+						RequireMemory(row_memory, bytes, plan.max_decoded_memory_bytes, updated);
+						row_memory = updated;
+						if (!CheckedAdd(row_string_memory, bytes, row_string_memory)) {
+							throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+							                     "decoded rows exceeded their memory budget");
+						}
+					}
+				}
+				row.values.push_back(std::move(value));
+				continue;
+			}
+			switch (plan.columns[index].type.element_kind) {
 			case ValueKind::BIGINT:
 				row.values.push_back(TypedValue::BigInt(slots[index].bigint_value));
 				break;
 			case ValueKind::VARCHAR: {
 				auto value = TypedValue::Varchar(std::move(slots[index].varchar_value));
 				uint64_t updated = 0;
-				RequireMemory(row_memory, static_cast<uint64_t>(value.varchar_value.capacity()),
-				              plan.max_decoded_memory_bytes, updated);
+				const auto bytes = static_cast<uint64_t>(value.varchar_value.capacity());
+				RequireMemory(row_memory, bytes, plan.max_decoded_memory_bytes, updated);
 				row_memory = updated;
+				if (!CheckedAdd(row_string_memory, bytes, row_string_memory)) {
+					throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+					                     "decoded rows exceeded their memory budget");
+				}
 				row.values.push_back(std::move(value));
 				break;
 			}
@@ -862,8 +1189,17 @@ private:
 			}
 		}
 		uint64_t updated = 0;
+		if (row_string_memory > pending_string_memory || row_array_memory > pending_array_memory ||
+		    value_storage > pending_structural_memory || slot_storage > pending_structural_memory - value_storage) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "decoded rows exceeded their memory budget");
+		}
 		RequireMemory(decoded_memory, row_memory, plan.max_decoded_memory_bytes, updated);
 		decoded_memory = updated;
+		pending_string_memory -= row_string_memory;
+		pending_array_memory -= row_array_memory;
+		pending_structural_memory -= value_storage;
+		pending_structural_memory -= slot_storage;
 		return row;
 	}
 
@@ -890,6 +1226,11 @@ private:
 	ExecutionControl &control;
 	std::size_t position;
 	uint64_t decoded_memory;
+	uint64_t pending_string_memory;
+	uint64_t pending_array_memory;
+	uint64_t pending_structural_memory;
+	uint64_t continuation_memory;
+	uint64_t peak_memory;
 	std::string next_url;
 };
 
@@ -901,7 +1242,13 @@ DecodedJsonPage DecodeJsonPage(const std::string &body, const JsonDecodePlan &pl
 	try {
 		JsonParser parser(body, plan, control);
 		auto rows = parser.ParseResponse();
-		return {std::move(rows), parser.NextUrl(), parser.RetainedMemoryBytes()};
+		DecodedJsonPage page {std::move(rows), parser.TakeNextUrl(), parser.RetainedMemoryBytes(), 0, 0};
+		const auto continuation_memory =
+		    parser.ContinuationMemoryBytes() == 0 ? 0 : static_cast<uint64_t>(page.next_url.capacity());
+		parser.ReconcileTakenContinuationMemory(continuation_memory);
+		page.continuation_memory_bytes = parser.ContinuationMemoryBytes();
+		page.peak_memory_bytes = parser.PeakMemoryBytes();
+		return page;
 	} catch (const ExecutionCancelled &) {
 		throw;
 	} catch (const ExecutionError &) {

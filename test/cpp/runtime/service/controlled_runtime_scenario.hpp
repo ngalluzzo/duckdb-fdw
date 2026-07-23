@@ -13,6 +13,7 @@ namespace duckdb_api_test {
 // Runtime's private curl targets.
 enum class ControlledRuntimeScenarioId {
 	RETAINED_REST_USER,
+	RICKANDMORTY_CHARACTER_EPISODES,
 	GRAPHQL_MULTI_PAGE_NULL_DUPLICATE,
 	GRAPHQL_RELATIONAL_COMPOSITION,
 	GRAPHQL_APPLICATION_ERROR,

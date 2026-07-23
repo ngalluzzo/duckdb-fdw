@@ -343,7 +343,8 @@ void TestRepositoryAdmissionProducesOneClosedRequestProfile() {
 	auto ambiguous = duckdb_api::internal::TryAdmitPaginatedRestPlan(
 	    duckdb_api_test::BuildAmbiguousPredicateFallbackPlanFixture("fixture_secret"), execution_profile);
 	Require(base && selective && selective_complete && fallback_complete && ambiguous && base->Columns().size() == 6 &&
-	            base->Columns()[5].name == "visibility" && base->Columns()[5].kind == duckdb_api::ValueKind::VARCHAR &&
+	            base->Columns()[5].name == "visibility" &&
+	            base->Columns()[5].type == duckdb_api::OutputValueType::Scalar(duckdb_api::ValueKind::VARCHAR) &&
 	            base->Method() == "GET" && base->Scheme() == "https" && base->Host() == "api.github.com" &&
 	            base->Port() == 443 && base->Path() == "/user/repos" && base->Headers().size() == 3 &&
 	            base->PageSizeParameter() == "per_page" && base->PageSize() == 100 &&

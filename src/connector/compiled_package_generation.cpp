@@ -175,16 +175,27 @@ bool CompiledGenerationHandle::IsSameGeneration(const CompiledGenerationHandle &
 	return state == other.state;
 }
 
-CompiledRegistrationColumn::CompiledRegistrationColumn(std::string name_p, CompiledScalarType type_p, bool nullable_p)
-    : name(std::move(name_p)), type(type_p), nullable(nullable_p) {
+CompiledRegistrationColumn::CompiledRegistrationColumn(std::string name_p, CompiledColumnShape shape_p,
+                                                       CompiledScalarType type_p, bool element_nullable_p,
+                                                       bool nullable_p)
+    : name(std::move(name_p)), shape(shape_p), type(type_p), element_nullable(element_nullable_p),
+      nullable(nullable_p) {
 }
 
 const std::string &CompiledRegistrationColumn::Name() const {
 	return name;
 }
 
+CompiledColumnShape CompiledRegistrationColumn::Shape() const {
+	return shape;
+}
+
 CompiledScalarType CompiledRegistrationColumn::Type() const {
 	return type;
+}
+
+bool CompiledRegistrationColumn::ElementNullable() const {
+	return element_nullable;
 }
 
 bool CompiledRegistrationColumn::Nullable() const {
@@ -257,7 +268,8 @@ CompiledQueryRegistrationView CompiledPackageGeneration::QueryRegistration() con
 		std::vector<CompiledRegistrationColumn> columns;
 		columns.reserve(relation.Columns().size());
 		for (const auto &column : relation.Columns()) {
-			columns.push_back(CompiledRegistrationColumn(column.name, column.ScalarType(), column.nullable));
+			columns.push_back(CompiledRegistrationColumn(column.name, column.Shape(), column.ElementType(),
+			                                             column.ElementNullable(), column.nullable));
 		}
 		relations.push_back(CompiledRegistrationRelation(relation.Name(), std::move(columns), relation.Inputs(),
 		                                                 RegistrationAuthentication(relation.Authentication())));
@@ -314,6 +326,13 @@ CompiledColumn CompiledModelBuilder::Column(std::string name, CompiledScalarType
 CompiledColumn CompiledModelBuilder::Column(std::string name, CompiledScalarType type, bool nullable,
                                             std::string extractor, std::vector<std::string> extractor_segments) {
 	return CompiledColumn(std::move(name), type, nullable, std::move(extractor), std::move(extractor_segments));
+}
+
+CompiledColumn CompiledModelBuilder::ArrayColumn(std::string name, CompiledScalarType element_type,
+                                                 bool element_nullable, bool nullable, std::string extractor,
+                                                 std::vector<std::string> extractor_segments) {
+	return CompiledColumn(std::move(name), CompiledColumnShape::ARRAY, element_type, element_nullable, nullable,
+	                      std::move(extractor), std::move(extractor_segments));
 }
 
 CompiledPagination CompiledModelBuilder::DisabledPagination() {

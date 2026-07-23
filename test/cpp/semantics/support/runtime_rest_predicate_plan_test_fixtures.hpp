@@ -17,6 +17,26 @@ enum class RuntimeRestPredicatePlanCounterexample {
 	COUNT
 };
 
+// Closed malformed values for Runtime's permanent REST response-schema
+// correlation boundary. Each value starts from a production-planned ARRAY
+// relation and changes one agreement law between the protocol operation and
+// the protocol-neutral output schema.
+enum class RuntimeRestSchemaCounterexample {
+	RESULT_NAME,
+	RESULT_SHAPE,
+	RESULT_ELEMENT_KIND,
+	RESULT_ELEMENT_NULLABILITY,
+	RESULT_OUTER_NULLABILITY,
+	RESULT_PATH,
+	RESULT_ARITY,
+	RESULT_ORDER,
+	OUTPUT_NAME,
+	OUTPUT_NAME_ORDER,
+	OUTPUT_ARITY,
+	OUTPUT_SHAPE,
+	COUNT
+};
+
 // Deterministic package REST plan built through the production Connector ->
 // Query request -> Semantics planner path. It carries one BIGINT conditional
 // binding, an EXACT occurrence proof, and a DuckDB-owned typed residual.
@@ -42,5 +62,10 @@ duckdb_api::ScanPlan BuildRuntimeNativePredicateIsolationPlanFixture();
 // Friend access is confined to the implementation and cannot escape as a
 // general builder.
 duckdb_api::ScanPlan BuildRuntimeRestPredicatePlanCounterexample(RuntimeRestPredicatePlanCounterexample counterexample);
+
+// Deliberately malformed immutable ARRAY plan for negative Runtime admission
+// tests. Runtime must reject every variant before request construction or
+// transport.
+duckdb_api::ScanPlan BuildRuntimeRestSchemaCounterexample(RuntimeRestSchemaCounterexample counterexample);
 
 } // namespace duckdb_api_test

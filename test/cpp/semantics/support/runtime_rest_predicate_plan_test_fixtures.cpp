@@ -98,6 +98,14 @@ BuildRuntimeRestPredicatePlanCounterexample(RuntimeRestPredicatePlanCounterexamp
 	return ScanPlanTestAccess::RuntimeRestPredicate(BuildRuntimeExactRestPredicatePlanFixture(), counterexample);
 }
 
+duckdb_api::ScanPlan BuildRuntimeRestSchemaCounterexample(RuntimeRestSchemaCounterexample counterexample) {
+	const auto generation = BuildPackageCompatibilityFixture(PackageCompatibilityFixture::ARRAY_BASELINE);
+	auto request = duckdb_api::BuildConservativeScanRequest(generation.Connector(), PACKAGE_TYPED_RELATION,
+	                                                        duckdb_api::LogicalSecretReference());
+	return ScanPlanTestAccess::RuntimeRestSchema(duckdb_api::BuildConservativeScanPlan(generation.Connector(), request),
+	                                             counterexample);
+}
+
 duckdb_api::ScanPlan ScanPlanTestAccess::RuntimeRestPredicate(duckdb_api::ScanPlan plan,
                                                               RuntimeRestPredicatePlanCounterexample counterexample) {
 	auto operation = plan.Operation().Rest();
@@ -128,6 +136,59 @@ duckdb_api::ScanPlan ScanPlanTestAccess::RuntimeRestPredicate(duckdb_api::ScanPl
 	case RuntimeRestPredicatePlanCounterexample::COUNT:
 	default:
 		throw std::invalid_argument("unknown runtime REST predicate plan counterexample");
+	}
+	plan.operation = std::make_shared<const duckdb_api::PlannedProtocolOperation>(
+	    duckdb_api::PlannedProtocolOperation::FromRest(std::move(operation)));
+	return plan;
+}
+
+duckdb_api::ScanPlan ScanPlanTestAccess::RuntimeRestSchema(duckdb_api::ScanPlan plan,
+                                                           RuntimeRestSchemaCounterexample counterexample) {
+	auto operation = plan.Operation().Rest();
+	if (operation.result_columns.size() < 2 || plan.output_columns.size() < 2) {
+		throw std::logic_error("runtime REST schema fixture lost its ARRAY column");
+	}
+	auto &result = operation.result_columns[1];
+	switch (counterexample) {
+	case RuntimeRestSchemaCounterexample::RESULT_NAME:
+		result.name = "other_label";
+		break;
+	case RuntimeRestSchemaCounterexample::RESULT_SHAPE:
+		result.shape = duckdb_api::PlannedResultShape::SCALAR;
+		break;
+	case RuntimeRestSchemaCounterexample::RESULT_ELEMENT_KIND:
+		result.scalar_kind = duckdb_api::PlannedRestScalarKind::BIGINT;
+		break;
+	case RuntimeRestSchemaCounterexample::RESULT_ELEMENT_NULLABILITY:
+		result.element_nullable = !result.element_nullable;
+		break;
+	case RuntimeRestSchemaCounterexample::RESULT_OUTER_NULLABILITY:
+		result.nullable = !result.nullable;
+		break;
+	case RuntimeRestSchemaCounterexample::RESULT_PATH:
+		result.response_path.segments.push_back("other");
+		break;
+	case RuntimeRestSchemaCounterexample::RESULT_ARITY:
+		operation.result_columns.clear();
+		break;
+	case RuntimeRestSchemaCounterexample::RESULT_ORDER:
+		std::swap(operation.result_columns[0], operation.result_columns[1]);
+		break;
+	case RuntimeRestSchemaCounterexample::OUTPUT_NAME:
+		plan.output_columns[1].name = "other_label";
+		break;
+	case RuntimeRestSchemaCounterexample::OUTPUT_NAME_ORDER:
+		std::swap(plan.output_columns[0].name, plan.output_columns[1].name);
+		break;
+	case RuntimeRestSchemaCounterexample::OUTPUT_ARITY:
+		plan.output_columns.pop_back();
+		break;
+	case RuntimeRestSchemaCounterexample::OUTPUT_SHAPE:
+		plan.output_columns[1].shape = duckdb_api::PlannedColumnShape::SCALAR;
+		break;
+	case RuntimeRestSchemaCounterexample::COUNT:
+	default:
+		throw std::invalid_argument("unknown runtime REST schema counterexample");
 	}
 	plan.operation = std::make_shared<const duckdb_api::PlannedProtocolOperation>(
 	    duckdb_api::PlannedProtocolOperation::FromRest(std::move(operation)));

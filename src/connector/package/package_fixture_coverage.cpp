@@ -159,7 +159,7 @@ void AddColumnCoverage(CoverageBuilder &coverage, const CompiledConnector &conne
 	}
 	for (const auto &relation : connector.Relations()) {
 		for (const auto &column : relation.Columns()) {
-			if (column.ScalarType() == CompiledScalarType::BIGINT) {
+			if (column.Shape() == CompiledColumnShape::SCALAR && column.ElementType() == CompiledScalarType::BIGINT) {
 				coverage.Variants(
 				    "column_" + relation.Name() + "_" + column.name + "_",
 				    {"minimum", "maximum", "underflow_rejected", "overflow_rejected", "fraction_rejected"},
@@ -169,7 +169,7 @@ void AddColumnCoverage(CoverageBuilder &coverage, const CompiledConnector &conne
 	}
 	for (const auto &relation : connector.Relations()) {
 		for (const auto &column : relation.Columns()) {
-			if (column.ScalarType() == CompiledScalarType::VARCHAR) {
+			if (column.Shape() == CompiledColumnShape::SCALAR && column.ElementType() == CompiledScalarType::VARCHAR) {
 				coverage.Variants("column_" + relation.Name() + "_" + column.name + "_",
 				                  {"string_budget_boundary", "string_budget_one_over_rejected"},
 				                  PackageFixtureCoverageScope::COLUMN, relation.Name(), "", "", column.name);
@@ -178,7 +178,7 @@ void AddColumnCoverage(CoverageBuilder &coverage, const CompiledConnector &conne
 	}
 	for (const auto &relation : connector.Relations()) {
 		for (const auto &column : relation.Columns()) {
-			if (column.ScalarType() == CompiledScalarType::DOUBLE) {
+			if (column.Shape() == CompiledColumnShape::SCALAR && column.ElementType() == CompiledScalarType::DOUBLE) {
 				// RFC 0020: no underflow_rejected (underflow to a subnormal
 				// or exact zero is a legitimate, accepted result, not an
 				// error) and no fraction_rejected (DOUBLE accepts
@@ -188,6 +188,41 @@ void AddColumnCoverage(CoverageBuilder &coverage, const CompiledConnector &conne
 				coverage.Variants("column_" + relation.Name() + "_" + column.name + "_",
 				                  {"minimum", "maximum", "magnitude_overflow_rejected"},
 				                  PackageFixtureCoverageScope::COLUMN, relation.Name(), "", "", column.name);
+			}
+		}
+	}
+}
+
+void AddArrayCoverage(CoverageBuilder &coverage, const CompiledConnector &connector) {
+	for (const auto &relation : connector.Relations()) {
+		for (const auto &operation : relation.Operations()) {
+			for (const auto &column : relation.Columns()) {
+				if (column.Shape() != CompiledColumnShape::ARRAY) {
+					continue;
+				}
+				const auto prefix = "array_" + relation.Name() + "_" + operation.name + "_" + column.name + "_";
+				coverage.Variants(prefix,
+				                  {"success", "empty", "singleton", "ordered_duplicates", "outer_type_rejected",
+				                   "element_type_rejected", "nested_rejected", "late_invalid_element_rejected",
+				                   "decode_cancellation", "query_transfer_cancellation"},
+				                  PackageFixtureCoverageScope::ARRAY, relation.Name(), operation.name, "", column.name);
+				coverage.Variants(prefix, {column.ElementNullable() ? "null_element" : "null_element_rejected"},
+				                  PackageFixtureCoverageScope::ARRAY, relation.Name(), operation.name, "", column.name);
+				if (column.ElementType() == CompiledScalarType::BIGINT) {
+					coverage.Variants(
+					    prefix, {"minimum", "maximum", "underflow_rejected", "overflow_rejected", "fraction_rejected"},
+					    PackageFixtureCoverageScope::ARRAY, relation.Name(), operation.name, "", column.name);
+				} else if (column.ElementType() == CompiledScalarType::VARCHAR) {
+					coverage.Variants(prefix, {"string_budget_boundary", "string_budget_one_over_rejected"},
+					                  PackageFixtureCoverageScope::ARRAY, relation.Name(), operation.name, "",
+					                  column.name);
+				} else if (column.ElementType() == CompiledScalarType::DOUBLE) {
+					coverage.Variants(prefix,
+					                  {"zero", "negative_zero", "largest_finite", "smallest_normal",
+					                   "smallest_subnormal", "magnitude_overflow_rejected"},
+					                  PackageFixtureCoverageScope::ARRAY, relation.Name(), operation.name, "",
+					                  column.name);
+				}
 			}
 		}
 	}
@@ -389,6 +424,7 @@ PackageFixtureCoverage DerivePackageFixtureCoverage(const CompiledPackageGenerat
 	AddOperationCoverage(coverage, connector);
 	AddInputCoverage(coverage, connector);
 	AddColumnCoverage(coverage, connector);
+	AddArrayCoverage(coverage, connector);
 	AddSelectionAndPredicateCoverage(coverage, connector);
 	AddProtocolCoverage(coverage, connector);
 	AddResourceCoverage(coverage, connector);

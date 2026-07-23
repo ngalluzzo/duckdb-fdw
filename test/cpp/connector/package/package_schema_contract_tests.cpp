@@ -14,6 +14,48 @@ std::string GithubRelation(const std::string &name) {
 	return duckdb_api_test::ReadFile("connectors/github/relations/" + name + ".yaml");
 }
 
+void WriteArrayPackage(TemporaryPackage &package, const std::string &columns) {
+	package.Write("connector.yaml", R"YAML(api_version: duckdb_api/v1
+kind: connector
+id: array_fixture
+version: 1.0.0
+extractor_dialect: duckdb_api/json_path_v1
+network_policy:
+  origins: [{scheme: https, host: arrays.example, port: 443}]
+  redirects: deny
+  private_addresses: deny
+  link_local_addresses: deny
+  loopback_addresses: deny
+  max_response_bytes: 4096
+relations: [records]
+)YAML");
+	package.Write("relations/records.yaml", "api_version: duckdb_api/v1\nkind: relation\nid: records\n"
+	                                        "schema: static\ncolumns:\n" +
+	                                            columns +
+	                                            R"YAML(auth: {mode: anonymous}
+resources:
+  max_response_bytes_per_page: 4096
+  max_response_bytes_per_scan: 4096
+  max_records_per_page: 16
+  max_records_per_scan: 16
+  max_extracted_string_bytes: 256
+operations:
+  - id: all_records
+    fallback: true
+    cardinality: many
+    replay_safety: safe
+    request:
+      protocol: rest
+      method: GET
+      origin: {scheme: https, host: arrays.example, port: 443}
+      path: /records
+      query: []
+      headers: []
+    response: {source: terminal_collection, records: "$.records[*]"}
+    pagination: {strategy: disabled}
+)YAML");
+}
+
 void RequireFirstDiagnostic(const duckdb_api::connector::PackageCompileResult &result, PackageDiagnosticCode code,
                             PackageDiagnosticPhase phase, const std::string &message) {
 	Require(!result.Succeeded() && result.Generation() == nullptr && !result.Diagnostics().empty() &&
@@ -452,6 +494,60 @@ void TestDiagnosticCodePhaseContract() {
 	}
 }
 
+void TestArrayColumnSchemaAndGraphqlDoubleGap() {
+	const std::string valid_columns =
+	    "  - {id: flags, type: ARRAY, element_type: BOOLEAN, element_nullable: true, nullable: false, extract: "
+	    "$.flags}\n"
+	    "  - {id: ids, type: ARRAY, element_type: BIGINT, element_nullable: false, nullable: false, extract: "
+	    "$.ids}\n"
+	    "  - {id: names, type: ARRAY, element_type: VARCHAR, element_nullable: false, nullable: true, extract: "
+	    "$.names}\n"
+	    "  - {id: scores, type: ARRAY, element_type: DOUBLE, element_nullable: false, nullable: false, extract: "
+	    "$.scores}\n";
+	{
+		TemporaryPackage package;
+		WriteArrayPackage(package, valid_columns);
+		NeverCancel cancellation;
+		const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
+		Require(result.Succeeded() && result.Generation() &&
+		            result.Generation()->Connector().Relations()[0].Columns().size() == 4 &&
+		            result.Generation()->Connector().Relations()[0].Columns()[0].Shape() ==
+		                duckdb_api::CompiledColumnShape::ARRAY &&
+		            result.Generation()->Connector().Relations()[0].Columns()[0].ElementNullable() &&
+		            result.Generation()->Connector().Relations()[0].Columns()[3].ElementType() ==
+		                duckdb_api::CompiledScalarType::DOUBLE,
+		        "REST ARRAY columns did not compile across the four scalar element kinds");
+	}
+	for (const auto &invalid :
+	     {duckdb_api_test::ReplaceOnce(valid_columns, "element_type: BOOLEAN, ", ""),
+	      duckdb_api_test::ReplaceOnce(valid_columns, "element_nullable: true, ", ""),
+	      duckdb_api_test::ReplaceOnce(valid_columns, "element_type: BOOLEAN", "element_type: ARRAY"),
+	      std::string("  - {id: value, type: VARCHAR, element_type: VARCHAR, nullable: false, extract: $.value}\n")}) {
+		TemporaryPackage package;
+		WriteArrayPackage(package, invalid);
+		NeverCancel cancellation;
+		RequireFirstDiagnostic(
+		    duckdb_api_test::CompileRoot(package.Root(), cancellation),
+		    invalid.find("element_type: VARCHAR, nullable") != std::string::npos
+		        ? PackageDiagnosticCode::UNKNOWN_FIELD
+		        : (invalid.find("element_type: ARRAY") != std::string::npos ? PackageDiagnosticCode::INVALID_TYPE
+		                                                                    : PackageDiagnosticCode::MISSING_FIELD),
+		    PackageDiagnosticPhase::SCHEMA, "invalid ARRAY structural declaration did not fail at schema validation");
+	}
+	{
+		TemporaryPackage package;
+		auto graphql = GithubRelation("viewer_repository_metrics");
+		graphql = duckdb_api_test::ReplaceOnce(
+		    graphql, "  - id: id\n    type: VARCHAR\n    nullable: false",
+		    "  - id: id\n    type: ARRAY\n    element_type: DOUBLE\n    element_nullable: false\n    nullable: false");
+		duckdb_api_test::WriteGithubPackage(package, graphql);
+		NeverCancel cancellation;
+		RequireFirstDiagnostic(duckdb_api_test::CompileRoot(package.Root(), cancellation),
+		                       PackageDiagnosticCode::INVALID_GRAPHQL_PROFILE, PackageDiagnosticPhase::COMPILE,
+		                       "GraphQL ARRAY<DOUBLE> did not preserve the accepted scalar DOUBLE profile gap");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -467,6 +563,7 @@ int main() {
 		TestExtractorByteLimit();
 		TestInvalidIdentifiersStayDiagnosticOnly();
 		TestDiagnosticCodePhaseContract();
+		TestArrayColumnSchemaAndGraphqlDoubleGap();
 		TestUnsupportedPaginationStrategyRejected();
 		TestShortPagePaginationCompiles();
 		TestShortPageMissingPageSizeRejected();

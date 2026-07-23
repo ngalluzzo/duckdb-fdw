@@ -369,8 +369,11 @@ void AppendColumns(std::ostringstream &result, const std::vector<PlannedColumn> 
 		if (index > 0) {
 			result << ',';
 		}
-		result << columns[index].name << ':' << columns[index].logical_type << (columns[index].nullable ? '?' : '!')
-		       << ':' << columns[index].extractor;
+		result << columns[index].name << ':' << columns[index].logical_type;
+		if (columns[index].shape == PlannedColumnShape::ARRAY) {
+			result << "<element" << (columns[index].element_nullable ? '?' : '!') << '>';
+		}
+		result << (columns[index].nullable ? '?' : '!') << ':' << columns[index].extractor;
 	}
 }
 

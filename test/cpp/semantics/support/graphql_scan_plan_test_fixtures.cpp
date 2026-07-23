@@ -24,6 +24,33 @@ duckdb_api::ScanPlan ScanPlanTestAccess::DistinctGraphqlProvenance(duckdb_api::S
 	return plan;
 }
 
+duckdb_api::ScanPlan ScanPlanTestAccess::GraphqlArrayColumns(duckdb_api::ScanPlan plan) {
+	if (plan.output_columns.size() != 8 || plan.Operation().Graphql().result_columns.size() != 8) {
+		throw std::logic_error("GraphQL ARRAY fixture requires the canonical eight-column plan");
+	}
+	auto operation = plan.Operation().Graphql();
+	for (const auto index : {std::size_t(0), std::size_t(3), std::size_t(5)}) {
+		operation.result_columns[index].shape = duckdb_api::PlannedResultShape::ARRAY;
+		operation.result_columns[index].element_nullable = false;
+		plan.output_columns[index].shape = duckdb_api::PlannedColumnShape::ARRAY;
+		plan.output_columns[index].element_nullable = false;
+		plan.output_columns[index].logical_type += "[]";
+	}
+	ReplaceGraphql(plan, std::move(operation));
+	return plan;
+}
+
+duckdb_api::ScanPlan ScanPlanTestAccess::GraphqlDecodedMemoryBoundary(duckdb_api::ScanPlan plan,
+                                                                      uint64_t decoded_memory_bytes) {
+	if (decoded_memory_bytes == 0 || decoded_memory_bytes > duckdb_api::HOST_MAX_DECODED_MEMORY_BYTES) {
+		throw std::invalid_argument("GraphQL decoded-memory boundary is outside host authority");
+	}
+	plan.pagination.page_budgets.decoded_memory_bytes = decoded_memory_bytes;
+	plan.pagination.scan_budgets.decoded_memory_bytes = decoded_memory_bytes;
+	plan.budgets = plan.pagination.page_budgets;
+	return plan;
+}
+
 duckdb_api::ScanPlan ScanPlanTestAccess::Graphql(duckdb_api::ScanPlan plan,
                                                  GraphqlRuntimeAdmissionCounterexample counterexample) {
 	if (!MutateGraphqlProtocol(plan, counterexample) && !MutateGraphqlOperationOrSchema(plan, counterexample) &&
@@ -56,6 +83,11 @@ duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_l
 	return BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, GraphqlLocalResidualProfile::UNRESTRICTED);
 }
 
+duckdb_api::ScanPlan BuildValidGraphqlArrayScanPlanFixture(const std::string &exact_logical_secret_name) {
+	return ScanPlanTestAccess::GraphqlArrayColumns(
+	    BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, GraphqlLocalResidualProfile::UNRESTRICTED));
+}
+
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name,
                                                       GraphqlLocalResidualProfile profile) {
 	return BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, profile);
@@ -63,6 +95,13 @@ duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_l
 
 duckdb_api::ScanPlan BuildValidAnonymousGraphqlScanPlanFixture() {
 	return BuildValidAnonymousGraphqlScanPlanFixtureImpl();
+}
+
+duckdb_api::ScanPlan BuildGraphqlDecodedMemoryBoundaryPlanFixture(const std::string &exact_logical_secret_name,
+                                                                  uint64_t decoded_memory_bytes) {
+	return ScanPlanTestAccess::GraphqlDecodedMemoryBoundary(
+	    BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, GraphqlLocalResidualProfile::UNRESTRICTED),
+	    decoded_memory_bytes);
 }
 
 duckdb_api::ScanPlan BuildDistinctGraphqlProvenanceScanPlanFixture(const std::string &exact_logical_secret_name) {

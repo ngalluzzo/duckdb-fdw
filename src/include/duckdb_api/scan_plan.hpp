@@ -178,12 +178,20 @@ enum class PlannedCredentialPlacement { NONE, AUTHORIZATION_HEADER, HEADER_NAMED
 // relation's declared output schema uniformly for both REST and GraphQL
 // domains, so it does not borrow either protocol's own scalar-kind enum.
 enum class PlannedColumnScalarKind { BOOLEAN, BIGINT, VARCHAR, DOUBLE };
+enum class PlannedColumnShape { SCALAR, ARRAY };
 
 struct PlannedColumn {
+	PlannedColumn(std::string name, std::string logical_type, bool nullable, std::string extractor);
+	PlannedColumn(std::string name, std::string logical_type, bool nullable, std::string extractor,
+	              PlannedColumnShape shape, PlannedColumnScalarKind element_kind, bool element_nullable);
+
 	std::string name;
 	std::string logical_type;
 	bool nullable;
 	std::string extractor;
+	PlannedColumnShape shape;
+	PlannedColumnScalarKind element_kind;
+	bool element_nullable;
 
 	// Canonical derivation of logical_type's closed scalar vocabulary for
 	// consumers (currently Query) that would otherwise independently
@@ -192,6 +200,7 @@ struct PlannedColumn {
 	// input; logical_type remains a plain string for safe explanation and
 	// Runtime's own independent admission checks.
 	PlannedColumnScalarKind ScalarKind() const;
+	PlannedColumnScalarKind ElementKind() const;
 };
 
 // Planner-owned classification. Runtime consumes these facts without deriving

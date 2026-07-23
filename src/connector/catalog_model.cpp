@@ -68,6 +68,17 @@ CompiledScalarType ScalarTypeFromName(const std::string &logical_type) {
 	throw std::invalid_argument("compiled relation contains an unsupported logical type");
 }
 
+std::string ColumnLogicalType(CompiledColumnShape shape, CompiledScalarType element_type) {
+	ValidateScalarType(element_type);
+	switch (shape) {
+	case CompiledColumnShape::SCALAR:
+		return CompiledScalarTypeName(element_type);
+	case CompiledColumnShape::ARRAY:
+		return std::string(CompiledScalarTypeName(element_type)) + "[]";
+	}
+	throw std::invalid_argument("compiled relation contains an unknown output-column shape");
+}
+
 const char *OriginName(CompiledConnectorOrigin origin) {
 	switch (origin) {
 	case CompiledConnectorOrigin::NATIVE_PRODUCT_METADATA:
@@ -119,7 +130,8 @@ void ValidateColumn(const CompiledColumn &column) {
 	    column.extractor.size() > MAX_COMPILED_COLUMN_EXTRACTOR_BYTES || column.extractor.front() != '$') {
 		throw std::invalid_argument("compiled relation contains an invalid column declaration");
 	}
-	if (column.logical_type != CompiledScalarTypeName(column.ScalarType())) {
+	if (column.logical_type != ColumnLogicalType(column.Shape(), column.ElementType()) ||
+	    (column.Shape() == CompiledColumnShape::SCALAR && column.ElementNullable())) {
 		throw std::invalid_argument("compiled relation column type spelling disagrees with structural authority");
 	}
 	if (!internal::MatchesStructuralFieldExtractor(column.extractor, column.ExtractorSegments())) {
@@ -328,7 +340,8 @@ const CompiledInputDefault &CompiledRelationInput::Default() const {
 
 CompiledColumn::CompiledColumn(std::string name_p, std::string logical_type_p, bool nullable_p, std::string extractor_p)
     : name(std::move(name_p)), logical_type(std::move(logical_type_p)), nullable(nullable_p),
-      extractor(std::move(extractor_p)), scalar_type(ScalarTypeFromName(logical_type)), extractor_segments() {
+      extractor(std::move(extractor_p)), shape(CompiledColumnShape::SCALAR),
+      element_type(ScalarTypeFromName(logical_type)), element_nullable(false), extractor_segments() {
 	if (extractor.size() > MAX_COMPILED_COLUMN_EXTRACTOR_BYTES) {
 		throw std::invalid_argument("compiled relation column extractor exceeds its byte limit");
 	}
@@ -337,8 +350,9 @@ CompiledColumn::CompiledColumn(std::string name_p, std::string logical_type_p, b
 
 CompiledColumn::CompiledColumn(std::string name_p, CompiledScalarType type_p, bool nullable_p, std::string extractor_p)
     : name(std::move(name_p)), logical_type(CompiledScalarTypeName(type_p)), nullable(nullable_p),
-      extractor(std::move(extractor_p)), scalar_type(type_p), extractor_segments() {
-	ValidateScalarType(scalar_type);
+      extractor(std::move(extractor_p)), shape(CompiledColumnShape::SCALAR), element_type(type_p),
+      element_nullable(false), extractor_segments() {
+	ValidateScalarType(element_type);
 	if (extractor.size() > MAX_COMPILED_COLUMN_EXTRACTOR_BYTES) {
 		throw std::invalid_argument("compiled relation column extractor exceeds its byte limit");
 	}
@@ -348,16 +362,45 @@ CompiledColumn::CompiledColumn(std::string name_p, CompiledScalarType type_p, bo
 CompiledColumn::CompiledColumn(std::string name_p, CompiledScalarType type_p, bool nullable_p, std::string extractor_p,
                                std::vector<std::string> extractor_segments_p)
     : name(std::move(name_p)), logical_type(CompiledScalarTypeName(type_p)), nullable(nullable_p),
-      extractor(std::move(extractor_p)), scalar_type(type_p), extractor_segments(std::move(extractor_segments_p)) {
-	ValidateScalarType(scalar_type);
+      extractor(std::move(extractor_p)), shape(CompiledColumnShape::SCALAR), element_type(type_p),
+      element_nullable(false), extractor_segments(std::move(extractor_segments_p)) {
+	ValidateScalarType(element_type);
 	if (extractor.size() > MAX_COMPILED_COLUMN_EXTRACTOR_BYTES ||
 	    !internal::MatchesStructuralFieldExtractor(extractor, extractor_segments)) {
 		throw std::invalid_argument("compiled relation column extractor disagrees with its structural segments");
 	}
 }
 
+CompiledColumn::CompiledColumn(std::string name_p, CompiledColumnShape shape_p, CompiledScalarType element_type_p,
+                               bool element_nullable_p, bool nullable_p, std::string extractor_p,
+                               std::vector<std::string> extractor_segments_p)
+    : name(std::move(name_p)), logical_type(ColumnLogicalType(shape_p, element_type_p)), nullable(nullable_p),
+      extractor(std::move(extractor_p)), shape(shape_p), element_type(element_type_p),
+      element_nullable(element_nullable_p), extractor_segments(std::move(extractor_segments_p)) {
+	ValidateScalarType(element_type);
+	if (shape != CompiledColumnShape::ARRAY || extractor.size() > MAX_COMPILED_COLUMN_EXTRACTOR_BYTES ||
+	    !internal::MatchesStructuralFieldExtractor(extractor, extractor_segments)) {
+		throw std::invalid_argument("compiled relation ARRAY column disagrees with its structural declaration");
+	}
+}
+
+CompiledColumnShape CompiledColumn::Shape() const {
+	return shape;
+}
+
+CompiledScalarType CompiledColumn::ElementType() const {
+	return element_type;
+}
+
+bool CompiledColumn::ElementNullable() const {
+	return element_nullable;
+}
+
 CompiledScalarType CompiledColumn::ScalarType() const {
-	return scalar_type;
+	if (shape != CompiledColumnShape::SCALAR) {
+		throw std::logic_error("compiled ARRAY column has no scalar column type");
+	}
+	return element_type;
 }
 
 const std::vector<std::string> &CompiledColumn::ExtractorSegments() const {

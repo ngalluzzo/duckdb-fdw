@@ -33,7 +33,6 @@
       "each predicate mapping": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.predicates", "as": "predicate"}], "bindings": {"relation": "relation.id", "predicate": "predicate.id"}},
       "each disabled-pagination operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"equals": ["operation.request.protocol", "rest"]}, {"equals": ["operation.pagination.strategy", "disabled"]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
       "each Link-pagination operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"equals": ["operation.request.protocol", "rest"]}, {"equals": ["operation.pagination.strategy", "link_next"]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
-      "each ResponseNext-pagination operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"equals": ["operation.request.protocol", "rest"]}, {"equals": ["operation.pagination.strategy", "response_next"]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
       "each Relay-pagination operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"equals": ["operation.request.protocol", "graphql"]}, {"equals": ["operation.request.pagination.strategy", "relay_forward"]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
       "each GraphQL operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"equals": ["operation.request.protocol", "graphql"]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
       "each declared relation resource field": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"fields": "derivation_language.resource_fields.relation", "from": "relation.resources", "as": "resource"}], "bindings": {"relation": "relation.id", "resource": "resource.name"}},
@@ -127,11 +126,6 @@
       "scope": "each Link-pagination operation",
       "template": "pagination_{relation}_{operation}_{variant}",
       "variants": ["first_page", "multi_page", "termination", "encoded_target", "malformed_target_rejected", "replayed_target_rejected", "max_pages_exhausted"]
-    },
-    {
-      "scope": "each ResponseNext-pagination operation",
-      "template": "pagination_{relation}_{operation}_{variant}",
-      "variants": ["first_page", "multi_page", "termination", "encoded_target", "malformed_target_rejected", "replayed_target_rejected", "max_pages_exhausted", "next_field_wrong_type_rejected"]
     },
     {
       "scope": "each Relay-pagination operation",

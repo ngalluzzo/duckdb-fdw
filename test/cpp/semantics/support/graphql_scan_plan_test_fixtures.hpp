@@ -189,6 +189,7 @@ enum class GraphqlRuntimeAdmissionCounterexample {
 };
 
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name);
+duckdb_api::ScanPlan BuildValidGraphqlArrayScanPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name,
                                                       GraphqlLocalResidualProfile profile);
 
@@ -198,6 +199,12 @@ duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_l
 // this immutable value to exercise anonymous admission without receiving
 // Semantics construction authority.
 duckdb_api::ScanPlan BuildValidAnonymousGraphqlScanPlanFixture();
+
+// Coherent positive resource-boundary fixture. Semantics owns both page and
+// scan budget mutation so Runtime can exercise an exact production-stream
+// memory threshold without constructing or retaining plan internals.
+duckdb_api::ScanPlan BuildGraphqlDecodedMemoryBoundaryPlanFixture(const std::string &exact_logical_secret_name,
+                                                                  uint64_t decoded_memory_bytes);
 
 // Coherent positive plan with package-like connector, relation, operation, and
 // source-provenance labels. Its package document identity and generic Relay

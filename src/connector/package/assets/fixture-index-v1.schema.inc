@@ -66,10 +66,20 @@ R"DAPI_INDEX({
         "value": {"type": "string", "maxLength": 1048576}
       }
     },
-    "cell": {
+    "scalarCell": {
       "oneOf": [
         {"type": "string", "maxLength": 1048576},
         {"$ref": "#/$defs/nullValue"}
+      ]
+    },
+    "cell": {
+      "oneOf": [
+        {"$ref": "#/$defs/scalarCell"},
+        {
+          "type": "array",
+          "maxItems": 100000,
+          "items": {"$ref": "#/$defs/scalarCell"}
+        }
       ]
     },
     "input": {

@@ -217,8 +217,10 @@ id: authenticated_repositories
 schema: static
 ```
 
-`schema` is exactly `static`. V1 types are `BOOLEAN`, `BIGINT`, `VARCHAR`, and
-`DOUBLE`. Columns retain declaration order:
+`schema` is exactly `static`. Scalar column types are `BOOLEAN`, `BIGINT`,
+`VARCHAR`, and `DOUBLE`. A column may instead declare `type: ARRAY` with one
+required scalar `element_type` from that same set and an explicit required
+`element_nullable` Boolean. Columns retain declaration order:
 
 ```yaml
 columns:
@@ -226,10 +228,21 @@ columns:
     type: BOOLEAN
     nullable: false
     extract: $.private
+  - id: tags
+    type: ARRAY
+    element_type: VARCHAR
+    element_nullable: false
+    nullable: true
+    extract: $.tags
 ```
 
 Conversion is strict. Missing or JSON-null data fails for a non-nullable
-column. Numeric conversion must be integral and lossless for `BIGINT`; strings
+column. For an array column, a present value must be a JSON array; each child
+must match `element_type`, and a JSON-null child is accepted only when
+`element_nullable: true`. An empty array is a valid non-NULL value. Child
+order and duplicates are preserved. Arrays are flat: `element_type: ARRAY`,
+nested arrays, and object children are rejected. Numeric conversion must be
+integral and lossless for `BIGINT`; strings
 and Booleans are never coerced across types. `DOUBLE` accepts any JSON number
 (a fractional part and exponent are both permitted, unlike `BIGINT`) and
 decodes to the nearest IEEE-754 double; a magnitude too large to represent as
@@ -430,11 +443,15 @@ declares:
 - the closed forward Relay pagination profile.
 
 The compiler validates GraphQL names, aliases, response-path ownership,
-duplicate arguments/object fields, scalar compatibility, and disjoint row,
+duplicate arguments/object fields, scalar-or-list compatibility, and disjoint row,
 error, and page-info paths. It generates one canonical query-only document and
 parses that generated document as a backstop. Mutation, subscription,
 introspection, caller-supplied documents, fragments, directives, arbitrary
 variables, partial-data recovery, and reverse pagination are invalid.
+
+Generated GraphQL supports scalar results and flat `ARRAY` results whose
+elements are `BOOLEAN`, `BIGINT`, or `VARCHAR`. `ARRAY<DOUBLE>` remains
+rejected because this GraphQL profile has no declared floating-point scalar.
 
 Relay pagination is sequential and mutable with exact names for page size,
 cursor, `pageInfo`, `hasNextPage`, and `endCursor`; `max_concurrent_pages` is
@@ -550,7 +567,9 @@ comments, or explanation prose.
 - Reused versions with another digest, downgrade, non-greater changed source,
   next-major transition, relation removal/reordering/change, and any auth,
   origin, policy, resource, schema, input, operation, predicate, or execution
-  change to an existing relation are incompatible.
+  change to an existing relation are incompatible. Column order, scalar versus
+  array shape, array element type, child nullability, outer nullability, and
+  extractor are all schema changes.
 
 Failure publishes nothing and leaves the active generation and every bound or
 in-flight owner usable.

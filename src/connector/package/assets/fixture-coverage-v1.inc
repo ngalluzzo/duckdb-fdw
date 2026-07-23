@@ -28,6 +28,12 @@ R"DAPI_COVER({
       "each non-nullable output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.nullable", "false"]}], "bindings": {"relation": "relation.id", "column": "column.id"}},
       "each BIGINT output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.type", "BIGINT"]}], "bindings": {"relation": "relation.id", "column": "column.id"}},
       "each VARCHAR output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.type", "VARCHAR"]}], "bindings": {"relation": "relation.id", "column": "column.id"}},
+      "each operation and ARRAY output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.type", "ARRAY"]}], "bindings": {"relation": "relation.id", "operation": "operation.id", "column": "column.id"}},
+      "each operation and element-nullable ARRAY output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.type", "ARRAY"]}, {"equals": ["column.element_nullable", "true"]}], "bindings": {"relation": "relation.id", "operation": "operation.id", "column": "column.id"}},
+      "each operation and element-non-nullable ARRAY output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.type", "ARRAY"]}, {"equals": ["column.element_nullable", "false"]}], "bindings": {"relation": "relation.id", "operation": "operation.id", "column": "column.id"}},
+      "each operation and BIGINT ARRAY output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.type", "ARRAY"]}, {"equals": ["column.element_type", "BIGINT"]}], "bindings": {"relation": "relation.id", "operation": "operation.id", "column": "column.id"}},
+      "each operation and VARCHAR ARRAY output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.type", "ARRAY"]}, {"equals": ["column.element_type", "VARCHAR"]}], "bindings": {"relation": "relation.id", "operation": "operation.id", "column": "column.id"}},
+      "each operation and DOUBLE ARRAY output column": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}, {"iterate": "relation.columns", "as": "column"}], "where": [{"equals": ["column.type", "ARRAY"]}, {"equals": ["column.element_type", "DOUBLE"]}], "bindings": {"relation": "relation.id", "operation": "operation.id", "column": "column.id"}},
       "each operation in a relation containing more than one operation": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.operations", "as": "operation"}], "where": [{"count_gt": ["relation.operations", 1]}], "bindings": {"relation": "relation.id", "operation": "operation.id"}},
       "each relation containing more than one operation": {"selector": [{"iterate": "package.relations", "as": "relation"}], "where": [{"count_gt": ["relation.operations", 1]}], "bindings": {"relation": "relation.id"}},
       "each predicate mapping": {"selector": [{"iterate": "package.relations", "as": "relation"}, {"iterate": "relation.predicates", "as": "predicate"}], "bindings": {"relation": "relation.id", "predicate": "predicate.id"}},
@@ -102,6 +108,36 @@ R"DAPI_COVER({
       "scope": "each VARCHAR output column",
       "template": "column_{relation}_{column}_{variant}",
       "variants": ["string_budget_boundary", "string_budget_one_over_rejected"]
+    },
+    {
+      "scope": "each operation and ARRAY output column",
+      "template": "array_{relation}_{operation}_{column}_{variant}",
+      "variants": ["success", "empty", "singleton", "ordered_duplicates", "outer_type_rejected", "element_type_rejected", "nested_rejected", "late_invalid_element_rejected", "decode_cancellation", "query_transfer_cancellation"]
+    },
+    {
+      "scope": "each operation and element-nullable ARRAY output column",
+      "template": "array_{relation}_{operation}_{column}_{variant}",
+      "variants": ["null_element"]
+    },
+    {
+      "scope": "each operation and element-non-nullable ARRAY output column",
+      "template": "array_{relation}_{operation}_{column}_{variant}",
+      "variants": ["null_element_rejected"]
+    },
+    {
+      "scope": "each operation and BIGINT ARRAY output column",
+      "template": "array_{relation}_{operation}_{column}_{variant}",
+      "variants": ["minimum", "maximum", "underflow_rejected", "overflow_rejected", "fraction_rejected"]
+    },
+    {
+      "scope": "each operation and VARCHAR ARRAY output column",
+      "template": "array_{relation}_{operation}_{column}_{variant}",
+      "variants": ["string_budget_boundary", "string_budget_one_over_rejected"]
+    },
+    {
+      "scope": "each operation and DOUBLE ARRAY output column",
+      "template": "array_{relation}_{operation}_{column}_{variant}",
+      "variants": ["zero", "negative_zero", "largest_finite", "smallest_normal", "smallest_subnormal", "magnitude_overflow_rejected"]
     },
     {
       "scope": "each operation in a relation containing more than one operation",

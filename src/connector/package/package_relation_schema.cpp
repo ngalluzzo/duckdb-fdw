@@ -23,16 +23,47 @@ void RequireIdentifier(const LocatedText &value, PackageDiagnosticSink &diagnost
 
 ColumnDeclaration DecodeColumn(const SchemaReader &reader) {
 	ColumnDeclaration column;
-	reader.RequireMapping({"id", "type", "nullable", "extract"}, {"id", "type", "nullable", "extract"});
+	reader.RequireMapping({"id", "type", "element_type", "element_nullable", "nullable", "extract"},
+	                      {"id", "type", "nullable", "extract"});
 	column.id = reader.Text("id");
 	column.type = reader.Text("type");
+	column.element_type = reader.Text("element_type", false);
+	column.element_nullable = reader.Text("element_nullable", false);
 	column.nullable = reader.Text("nullable");
 	column.extract = reader.Text("extract");
 	column.mark = reader.Mark();
 	RequireIdentifier(column.id, reader.Diagnostics());
-	if (column.type.value != "BOOLEAN" && column.type.value != "BIGINT" && column.type.value != "VARCHAR" &&
-	    column.type.value != "DOUBLE") {
+	if (column.type.value == "ARRAY") {
+		if (reader.Field("element_type") == nullptr) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::MISSING_FIELD, PackageDiagnosticPhase::SCHEMA,
+			                         column.element_type.mark);
+		} else if (column.element_type.value != "BOOLEAN" && column.element_type.value != "BIGINT" &&
+		           column.element_type.value != "VARCHAR" && column.element_type.value != "DOUBLE") {
+			reader.Diagnostics().Add(PackageDiagnosticCode::INVALID_TYPE, PackageDiagnosticPhase::SCHEMA,
+			                         column.element_type.mark);
+		}
+		if (reader.Field("element_nullable") == nullptr) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::MISSING_FIELD, PackageDiagnosticPhase::SCHEMA,
+			                         column.element_nullable.mark);
+		} else {
+			bool element_nullable = false;
+			if (!IsPlainBoolean(column.element_nullable, element_nullable)) {
+				reader.Diagnostics().Add(PackageDiagnosticCode::INVALID_TYPE, PackageDiagnosticPhase::SCHEMA,
+				                         column.element_nullable.mark);
+			}
+		}
+	} else if (column.type.value != "BOOLEAN" && column.type.value != "BIGINT" && column.type.value != "VARCHAR" &&
+	           column.type.value != "DOUBLE") {
 		reader.Diagnostics().Add(PackageDiagnosticCode::INVALID_TYPE, PackageDiagnosticPhase::SCHEMA, column.type.mark);
+	} else {
+		if (reader.Field("element_type") != nullptr) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
+			                         column.element_type.mark);
+		}
+		if (reader.Field("element_nullable") != nullptr) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
+			                         column.element_nullable.mark);
+		}
 	}
 	bool nullable = false;
 	if (!IsPlainBoolean(column.nullable, nullable)) {

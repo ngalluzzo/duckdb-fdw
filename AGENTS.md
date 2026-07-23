@@ -224,14 +224,19 @@ Changes to product source, fixtures, build configuration, or release evidence
 must additionally pass:
 
 ```sh
+python3 -I -B scripts/verify-rfc-evidence.py
+python3 -I -B test/python/rfc_evidence_identity_tests.py
+python3 -I -B test/python/source_identity_contract.py
 scripts/verify-source-identities.py
 python3 -I -B scripts/test-native-dependencies.py
 scripts/run-native-product-tests.sh /absolute/new/build-root debug
 ```
 
-The first command is the fast content and version identity gate. The second
-uses deterministic fake SDK records to prove that native dependency drift
-fails closed. The third derives the SDK through `xcrun`, verifies the current
+The first three commands preserve immutable RFC evidence generations and prove
+their identity and source-identity mutation oracles fail closed. The fourth is
+the fast current content and version identity gate. The fifth uses
+deterministic fake SDK records to prove that native dependency drift fails
+closed. The sixth derives the SDK through `xcrun`, verifies the current
 platform libcurl inputs, and performs a fresh pinned DuckDB build, private C++
 contract tests, SQLLogicTests, loadable-artifact inventory, and the same
 clean-host direct-load contract used by `make demo` on the supported product

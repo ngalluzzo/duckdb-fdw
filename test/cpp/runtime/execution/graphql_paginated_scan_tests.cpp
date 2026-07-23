@@ -1,4 +1,9 @@
 #include "duckdb_api/authorization.hpp"
+#include "duckdb_api/internal/runtime/decoding/decoded_page_buffer.hpp"
+#include "duckdb_api/internal/runtime/decoding/graphql_response_decoder.hpp"
+#include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
+#include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
+#include "duckdb_api/internal/runtime/pagination/graphql_cursor_pagination.hpp"
 #include "runtime/support/controlled_http_transport.hpp"
 #include "runtime/support/http_scan_executor_test_support.hpp"
 #include "semantics/support/graphql_scan_plan_test_fixtures.hpp"
@@ -61,6 +66,13 @@ OpenWithToken(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &run
 }
 
 std::unique_ptr<duckdb_api::BatchStream>
+OpenPlanWithToken(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
+                  ManualHttpExecutionControl &control, const duckdb_api::ScanPlan &plan, std::string token) {
+	return runtime->Executor()->OpenWithAuthorization(
+	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+}
+
+std::unique_ptr<duckdb_api::BatchStream>
 OpenAnonymous(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
               ManualHttpExecutionControl &control) {
 	return runtime->Executor()->Open(duckdb_api_test::BuildValidAnonymousGraphqlScanPlanFixture(), control);
@@ -88,7 +100,7 @@ void TestSequentialBodiesBackpressureAndNullableRows() {
 	auto stream = Open(runtime, control, 801);
 	Require(runtime->Observations().empty(), "GraphQL Open performed request-body construction or transport I/O");
 	duckdb_api::TypedBatch batch;
-	Require(stream->Next(control, batch) && batch.rows.size() == 64 && batch.column_kinds.size() == 8 &&
+	Require(stream->Next(control, batch) && batch.rows.size() == 64 && batch.column_types.size() == 8 &&
 	            batch.IsSchemaAligned() && runtime->Observations().size() == 1,
 	        "first GraphQL pull must publish 64 rows without prefetch");
 	Require(batch.rows[0].values[0].varchar_value == "R1" && batch.rows[0].values[3].bigint_value == 1 &&
@@ -386,6 +398,64 @@ void TestIntegratedThirtyTwoPageBoundary() {
 	        "common page-accounting denial performed another request or replayed its terminal failure");
 }
 
+void TestCursorTransferExactDecodedMemoryBoundary() {
+	ManualHttpExecutionControl control;
+	const std::string cursor_value(512, 'c');
+	const auto body = Page(1, 1, true, cursor_value);
+	const auto baseline_plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("boundary_secret");
+	const duckdb_api::internal::HttpExecutionProfile profile {
+	    duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443, false, false, false, 30000, 100};
+	auto admitted = duckdb_api::internal::TryAdmitGraphqlPlan(baseline_plan, profile);
+	Require(static_cast<bool>(admitted), "GraphQL cursor boundary fixture did not admit its baseline plan");
+	const duckdb_api::internal::GraphqlDecodeLimits limits {
+	    admitted->PageBudgets().decoded_records, admitted->PageBudgets().extracted_string_bytes,
+	    admitted->PageBudgets().json_nesting, admitted->PageBudgets().decoded_memory_bytes,
+	    std::chrono::steady_clock::now() + std::chrono::seconds(5)};
+	auto decoded = duckdb_api::internal::DecodeGraphqlResponse(body, *admitted, limits, control);
+	duckdb_api::internal::GraphqlCursorState cursor(admitted->MaxPages(),
+	                                                admitted->PageBudgets().extracted_string_bytes);
+	const auto cursor_before = cursor.RetainedMemoryBytes();
+	cursor.MarkRequestStarted();
+	cursor.Advance(decoded.has_next, std::move(decoded.end_cursor));
+	const auto cursor_after = cursor.RetainedMemoryBytes();
+	const auto decode_peak = cursor_before + decoded.peak_memory_bytes;
+	const auto handoff =
+	    duckdb_api::internal::TypedBatchHandoffMemoryBytes(decoded.rows.size(), admitted->Columns().size());
+	const auto handoff_peak = decoded.retained_memory_bytes + cursor_after + handoff;
+	const auto exact_bytes = std::max(decode_peak, handoff_peak);
+	Require(exact_bytes > 1 && decoded.cursor_memory_bytes > 0,
+	        "GraphQL cursor boundary fixture did not retain a decoded cursor");
+
+	const auto exact_plan =
+	    duckdb_api_test::BuildGraphqlDecodedMemoryBoundaryPlanFixture("boundary_secret", exact_bytes);
+	const auto exact_runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	exact_runtime->Respond(200, body);
+	const std::string exact_token = "graphql_cursor_exact_boundary";
+	exact_runtime->ExpectBearer("Bearer " + exact_token);
+	auto exact_stream = OpenPlanWithToken(exact_runtime, control, exact_plan, exact_token);
+	duckdb_api::TypedBatch batch;
+	Require(exact_stream->Next(control, batch) && batch.rows.size() == 1 &&
+	            batch.rows[0].values[0].varchar_value == "R1" && exact_runtime->ConsumeBearerExpectation(1),
+	        "GraphQL cursor ownership transfer rejected its exact physical decoded-memory boundary");
+	exact_stream->Close();
+
+	const auto one_under_plan =
+	    duckdb_api_test::BuildGraphqlDecodedMemoryBoundaryPlanFixture("boundary_secret", exact_bytes - 1);
+	const auto one_under_runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	one_under_runtime->Respond(200, body);
+	const std::string one_under_token = "graphql_cursor_one_under_boundary";
+	one_under_runtime->ExpectBearer("Bearer " + one_under_token);
+	auto one_under_stream = OpenPlanWithToken(one_under_runtime, control, one_under_plan, one_under_token);
+	bool rejected = false;
+	try {
+		(void)one_under_stream->Next(control, batch);
+	} catch (const duckdb_api::ExecutionError &error) {
+		rejected = error.Stage() == duckdb_api::ErrorStage::RESOURCE && error.Field() == "decoded_memory_bytes";
+	}
+	Require(rejected && one_under_runtime->ConsumeBearerExpectation(1),
+	        "GraphQL cursor ownership transfer accepted one byte below its physical peak");
+}
+
 } // namespace
 
 int main() {
@@ -399,6 +469,7 @@ int main() {
 		TestCancellationCloseAndDestructionAfterPartialOutput();
 		TestTransportCancellationAndTwoStreamIsolation();
 		TestIntegratedThirtyTwoPageBoundary();
+		TestCursorTransferExactDecodedMemoryBoundary();
 		std::cout << "GraphQL paginated scan tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

@@ -47,6 +47,16 @@ PlannedGraphqlScalarKind PlanScalar(CompiledGraphqlScalarKind kind) {
 	throw std::logic_error("compiled GraphQL profile contains an unknown scalar kind");
 }
 
+PlannedResultShape PlanResultShape(CompiledResultShape shape) {
+	switch (shape) {
+	case CompiledResultShape::SCALAR:
+		return PlannedResultShape::SCALAR;
+	case CompiledResultShape::ARRAY:
+		return PlannedResultShape::ARRAY;
+	}
+	throw std::logic_error("compiled GraphQL result contains an unknown shape");
+}
+
 PlannedGraphqlVariableType PlanVariableType(CompiledGraphqlVariableType type) {
 	switch (type) {
 	case CompiledGraphqlVariableType::INT_NON_NULL:
@@ -74,8 +84,10 @@ bool ColumnMatches(const CompiledColumn &column, const CompiledGraphqlResultColu
                    const char *logical_type, const char *extractor, CompiledGraphqlScalarKind scalar, bool nullable,
                    std::initializer_list<const char *> path) {
 	return column.name == name && column.logical_type == logical_type && column.extractor == extractor &&
-	       column.nullable == nullable && result.name == name && result.scalar_kind == scalar &&
-	       result.nullable == nullable && PathEquals(result.response_path, path);
+	       column.nullable == nullable && column.Shape() == CompiledColumnShape::SCALAR && !column.ElementNullable() &&
+	       result.name == name && result.scalar_kind == scalar && result.nullable == nullable &&
+	       result.shape == CompiledResultShape::SCALAR && !result.element_nullable &&
+	       PathEquals(result.response_path, path);
 }
 
 bool HasCanonicalHeaders(const std::vector<CompiledHttpHeader> &headers) {
@@ -217,16 +229,16 @@ std::vector<std::string> DerivedPath(const PlannedGraphqlGeneratorRecipe &recipe
 	return result;
 }
 
-const char *LogicalTypeName(CompiledGraphqlScalarKind kind) {
+CompiledScalarType ResultElementType(CompiledGraphqlScalarKind kind) {
 	switch (kind) {
 	case CompiledGraphqlScalarKind::STRING:
-		return "VARCHAR";
+		return CompiledScalarType::VARCHAR;
 	case CompiledGraphqlScalarKind::INT64:
-		return "BIGINT";
+		return CompiledScalarType::BIGINT;
 	case CompiledGraphqlScalarKind::BOOLEAN:
-		return "BOOLEAN";
+		return CompiledScalarType::BOOLEAN;
 	}
-	throw std::logic_error("compiled package GraphQL result contains an unknown scalar kind");
+	throw std::logic_error("compiled GraphQL result contains an unknown element kind");
 }
 
 std::string RelationExtractor(const std::vector<std::string> &path) {
@@ -399,9 +411,13 @@ void ValidatePackageGraphqlOperationProfile(const CompiledRelation &relation, co
 		const auto &selection = recipe.Selections()[index];
 		const auto &result = results[index];
 		const auto &column = columns[index];
+		const auto expected_shape =
+		    result.shape == CompiledResultShape::ARRAY ? CompiledColumnShape::ARRAY : CompiledColumnShape::SCALAR;
 		if (selection.ColumnName() != result.name || selection.FieldPath() != result.response_path.segments ||
-		    column.name != result.name || column.logical_type != LogicalTypeName(result.scalar_kind) ||
-		    column.nullable != result.nullable || column.extractor != RelationExtractor(selection.FieldPath())) {
+		    column.name != result.name || column.Shape() != expected_shape ||
+		    column.ElementType() != ResultElementType(result.scalar_kind) ||
+		    column.ElementNullable() != result.element_nullable || column.nullable != result.nullable ||
+		    column.extractor != RelationExtractor(selection.FieldPath())) {
 			throw std::logic_error("selected package GraphQL columns disagree with the planned generator recipe");
 		}
 	}
@@ -474,8 +490,8 @@ PlannedGraphqlOperation PlanGraphqlOperation(const CompiledOperation &operation)
 	}
 	std::vector<PlannedGraphqlResultColumn> columns;
 	for (const auto &column : source.result_columns) {
-		columns.push_back(
-		    {column.name, PlanScalar(column.scalar_kind), column.nullable, PlanPath(column.response_path)});
+		columns.push_back({column.name, PlanScalar(column.scalar_kind), column.nullable, PlanPath(column.response_path),
+		                   PlanResultShape(column.shape), column.element_nullable});
 	}
 	std::vector<PlannedHttpHeader> headers;
 	for (const auto &header : source.headers) {

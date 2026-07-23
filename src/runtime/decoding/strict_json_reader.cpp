@@ -178,22 +178,42 @@ void RequireAppend(const std::string &result, uint64_t additional, uint64_t maxi
 	}
 }
 
+void ReserveAppend(std::string &result, uint64_t additional, uint64_t maximum, const std::string &budget_field,
+                   const char *safe_message, StrictJsonStringCapacityObserver *capacity_observer,
+                   uint64_t &charged_capacity) {
+	RequireAppend(result, additional, maximum, budget_field, safe_message);
+	if (!capacity_observer) {
+		return;
+	}
+	const auto required = static_cast<uint64_t>(result.size()) + additional;
+	if (required <= static_cast<uint64_t>(result.capacity())) {
+		return;
+	}
+	capacity_observer->ReserveStringCapacity(charged_capacity, required);
+	result.reserve(static_cast<std::size_t>(required));
+	const auto actual = static_cast<uint64_t>(result.capacity());
+	capacity_observer->ReconcileStringCapacity(required, actual);
+	charged_capacity = actual;
+}
+
 void StrictJsonReader::AppendCodePoint(uint32_t value, std::string &result, uint64_t max_decoded_bytes,
-                                       const std::string &budget_field, const char *safe_message) {
+                                       const std::string &budget_field, const char *safe_message,
+                                       StrictJsonStringCapacityObserver *capacity_observer,
+                                       uint64_t &charged_capacity) {
 	if (value <= 0x7f) {
-		RequireAppend(result, 1, max_decoded_bytes, budget_field, safe_message);
+		ReserveAppend(result, 1, max_decoded_bytes, budget_field, safe_message, capacity_observer, charged_capacity);
 		result.push_back(static_cast<char>(value));
 	} else if (value <= 0x7ff) {
-		RequireAppend(result, 2, max_decoded_bytes, budget_field, safe_message);
+		ReserveAppend(result, 2, max_decoded_bytes, budget_field, safe_message, capacity_observer, charged_capacity);
 		result.push_back(static_cast<char>(0xc0 | (value >> 6)));
 		result.push_back(static_cast<char>(0x80 | (value & 0x3f)));
 	} else if (value <= 0xffff) {
-		RequireAppend(result, 3, max_decoded_bytes, budget_field, safe_message);
+		ReserveAppend(result, 3, max_decoded_bytes, budget_field, safe_message, capacity_observer, charged_capacity);
 		result.push_back(static_cast<char>(0xe0 | (value >> 12)));
 		result.push_back(static_cast<char>(0x80 | ((value >> 6) & 0x3f)));
 		result.push_back(static_cast<char>(0x80 | (value & 0x3f)));
 	} else {
-		RequireAppend(result, 4, max_decoded_bytes, budget_field, safe_message);
+		ReserveAppend(result, 4, max_decoded_bytes, budget_field, safe_message, capacity_observer, charged_capacity);
 		result.push_back(static_cast<char>(0xf0 | (value >> 18)));
 		result.push_back(static_cast<char>(0x80 | ((value >> 12) & 0x3f)));
 		result.push_back(static_cast<char>(0x80 | ((value >> 6) & 0x3f)));
@@ -220,10 +240,11 @@ uint32_t StrictJsonReader::ParseEscapedUnicode() {
 }
 
 void StrictJsonReader::AppendUtf8(char first_character, std::string &result, uint64_t max_decoded_bytes,
-                                  const std::string &budget_field, const char *safe_message) {
+                                  const std::string &budget_field, const char *safe_message,
+                                  StrictJsonStringCapacityObserver *capacity_observer, uint64_t &charged_capacity) {
 	const auto first = static_cast<unsigned char>(first_character);
 	if (first < 0x80) {
-		RequireAppend(result, 1, max_decoded_bytes, budget_field, safe_message);
+		ReserveAppend(result, 1, max_decoded_bytes, budget_field, safe_message, capacity_observer, charged_capacity);
 		result.push_back(first_character);
 		return;
 	}
@@ -260,14 +281,23 @@ void StrictJsonReader::AppendUtf8(char first_character, std::string &result, uin
 	if (value < minimum || value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) {
 		Malformed();
 	}
-	RequireAppend(result, count + 1, max_decoded_bytes, budget_field, safe_message);
+	ReserveAppend(result, count + 1, max_decoded_bytes, budget_field, safe_message, capacity_observer,
+	              charged_capacity);
 	result.append(input, begin, count + 1);
 }
 
 std::string StrictJsonReader::ParseString(uint64_t max_decoded_bytes, const std::string &budget_field,
-                                          const char *safe_message) {
+                                          const char *safe_message,
+                                          StrictJsonStringCapacityObserver *capacity_observer) {
 	Expect('"');
 	std::string result;
+	uint64_t charged_capacity = 0;
+	if (capacity_observer) {
+		const auto initial_capacity = static_cast<uint64_t>(result.capacity());
+		capacity_observer->ReserveStringCapacity(0, initial_capacity);
+		capacity_observer->ReconcileStringCapacity(initial_capacity, initial_capacity);
+		charged_capacity = initial_capacity;
+	}
 	while (position < input.size()) {
 		Check();
 		const auto value = input[position++];
@@ -278,7 +308,8 @@ std::string StrictJsonReader::ParseString(uint64_t max_decoded_bytes, const std:
 			Malformed();
 		}
 		if (value != '\\') {
-			AppendUtf8(value, result, max_decoded_bytes, budget_field, safe_message);
+			AppendUtf8(value, result, max_decoded_bytes, budget_field, safe_message, capacity_observer,
+			           charged_capacity);
 			continue;
 		}
 		if (position >= input.size()) {
@@ -286,39 +317,48 @@ std::string StrictJsonReader::ParseString(uint64_t max_decoded_bytes, const std:
 		}
 		switch (input[position++]) {
 		case '"':
-			RequireAppend(result, 1, max_decoded_bytes, budget_field, safe_message);
+			ReserveAppend(result, 1, max_decoded_bytes, budget_field, safe_message, capacity_observer,
+			              charged_capacity);
 			result.push_back('"');
 			break;
 		case '\\':
-			RequireAppend(result, 1, max_decoded_bytes, budget_field, safe_message);
+			ReserveAppend(result, 1, max_decoded_bytes, budget_field, safe_message, capacity_observer,
+			              charged_capacity);
 			result.push_back('\\');
 			break;
 		case '/':
-			RequireAppend(result, 1, max_decoded_bytes, budget_field, safe_message);
+			ReserveAppend(result, 1, max_decoded_bytes, budget_field, safe_message, capacity_observer,
+			              charged_capacity);
 			result.push_back('/');
 			break;
 		case 'b':
-			RequireAppend(result, 1, max_decoded_bytes, budget_field, safe_message);
+			ReserveAppend(result, 1, max_decoded_bytes, budget_field, safe_message, capacity_observer,
+			              charged_capacity);
 			result.push_back('\b');
 			break;
 		case 'f':
-			RequireAppend(result, 1, max_decoded_bytes, budget_field, safe_message);
+			ReserveAppend(result, 1, max_decoded_bytes, budget_field, safe_message, capacity_observer,
+			              charged_capacity);
 			result.push_back('\f');
 			break;
 		case 'n':
-			RequireAppend(result, 1, max_decoded_bytes, budget_field, safe_message);
+			ReserveAppend(result, 1, max_decoded_bytes, budget_field, safe_message, capacity_observer,
+			              charged_capacity);
 			result.push_back('\n');
 			break;
 		case 'r':
-			RequireAppend(result, 1, max_decoded_bytes, budget_field, safe_message);
+			ReserveAppend(result, 1, max_decoded_bytes, budget_field, safe_message, capacity_observer,
+			              charged_capacity);
 			result.push_back('\r');
 			break;
 		case 't':
-			RequireAppend(result, 1, max_decoded_bytes, budget_field, safe_message);
+			ReserveAppend(result, 1, max_decoded_bytes, budget_field, safe_message, capacity_observer,
+			              charged_capacity);
 			result.push_back('\t');
 			break;
 		case 'u':
-			AppendCodePoint(ParseEscapedUnicode(), result, max_decoded_bytes, budget_field, safe_message);
+			AppendCodePoint(ParseEscapedUnicode(), result, max_decoded_bytes, budget_field, safe_message,
+			                capacity_observer, charged_capacity);
 			break;
 		default:
 			Malformed();

@@ -129,6 +129,24 @@ class ContractFreezeTests(unittest.TestCase):
             "scalar_types rejected_diagnostic",
         )
 
+    def test_column_shape_omission_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["column_shapes"]["authored"].remove("ARRAY"),
+            "column shapes disagree",
+        )
+
+    def test_array_element_type_widening_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["column_shapes"]["array_element_types"].append("DECIMAL"),
+            "array element types disagree",
+        )
+
+    def test_array_scope_drift_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["column_shapes"].__setitem__("array_nesting", "recursive"),
+            "ARRAY scope",
+        )
+
     def test_version_domain_omission_fails(self) -> None:
         self.require_rejected(lambda value: value["version_domains"].pop(), "version domains")
 

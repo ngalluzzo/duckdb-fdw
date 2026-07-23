@@ -32,6 +32,9 @@ public:
 	static CompiledColumn Column(std::string name, CompiledScalarType type, bool nullable, std::string extractor);
 	static CompiledColumn Column(std::string name, CompiledScalarType type, bool nullable, std::string extractor,
 	                             std::vector<std::string> extractor_segments);
+	static CompiledColumn ArrayColumn(std::string name, CompiledScalarType element_type, bool element_nullable,
+	                                  bool nullable, std::string extractor,
+	                                  std::vector<std::string> extractor_segments);
 	static CompiledPagination DisabledPagination();
 	static CompiledPagination LinkPagination(std::string page_size_parameter, std::uint64_t page_size,
 	                                         std::string page_number_parameter, std::uint64_t first_page,

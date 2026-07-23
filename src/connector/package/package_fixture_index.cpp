@@ -94,7 +94,8 @@ PackageFixtureCase ParseCase(const FailsafeYamlNode &node, std::size_t case_inde
 		                         : type == "BIGINT" ? CompiledScalarType::BIGINT
 		                         : type == "DOUBLE" ? CompiledScalarType::DOUBLE
 		                                            : CompiledScalarType::VARCHAR;
-		if (column == nullptr || (type != "BOOLEAN" && type != "BIGINT" && type != "VARCHAR" && type != "DOUBLE") ||
+		if (column == nullptr || column->Shape() != CompiledColumnShape::SCALAR ||
+		    (type != "BOOLEAN" && type != "BIGINT" && type != "VARCHAR" && type != "DOUBLE") ||
 		    column->ScalarType() != scalar_type || !IsTypedScalar(scalar_type, value)) {
 			Fail(source, path + ".predicate", "fixture predicate is incompatible with the compiled column", id,
 			     relation_id, operation_id);

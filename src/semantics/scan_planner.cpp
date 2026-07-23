@@ -10,6 +10,34 @@
 
 namespace duckdb_api {
 
+namespace {
+
+PlannedColumnScalarKind PlanColumnKind(CompiledScalarType type) {
+	switch (type) {
+	case CompiledScalarType::BOOLEAN:
+		return PlannedColumnScalarKind::BOOLEAN;
+	case CompiledScalarType::BIGINT:
+		return PlannedColumnScalarKind::BIGINT;
+	case CompiledScalarType::VARCHAR:
+		return PlannedColumnScalarKind::VARCHAR;
+	case CompiledScalarType::DOUBLE:
+		return PlannedColumnScalarKind::DOUBLE;
+	}
+	throw std::logic_error("compiled output column contains an unknown element type");
+}
+
+PlannedColumnShape PlanColumnShape(CompiledColumnShape shape) {
+	switch (shape) {
+	case CompiledColumnShape::SCALAR:
+		return PlannedColumnShape::SCALAR;
+	case CompiledColumnShape::ARRAY:
+		return PlannedColumnShape::ARRAY;
+	}
+	throw std::logic_error("compiled output column contains an unknown shape");
+}
+
+} // namespace
+
 PlanningError::PlanningError(PlanningErrorCode code_p, std::string safe_message)
     : std::logic_error(std::move(safe_message)), code(code_p) {
 }
@@ -58,7 +86,9 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	}
 
 	for (const auto &column : relation.Columns()) {
-		result.output_columns.push_back({column.name, column.logical_type, column.nullable, column.extractor});
+		result.output_columns.push_back({column.name, column.logical_type, column.nullable, column.extractor,
+		                                 PlanColumnShape(column.Shape()), PlanColumnKind(column.ElementType()),
+		                                 column.ElementNullable()});
 	}
 	result.remote_predicate = predicate_decision.remote_predicate;
 	result.remote_accuracy = predicate_decision.remote_accuracy;

@@ -23,9 +23,13 @@ struct DecodedGraphqlPage {
 	std::vector<TypedRow> rows;
 	bool has_next;
 	std::string end_cursor;
-	// Retained rows and cursor storage. The executor adds any normalized
-	// transport metadata before committing the page-memory allowance.
+	// Retained row storage after the cursor is transferred to pagination state.
 	uint64_t retained_memory_bytes;
+	// Temporary decoded cursor storage before that ownership transfer.
+	uint64_t cursor_memory_bytes;
+	// Maximum decoded-memory storage observed while producing the page. This
+	// includes transient row slots while they are co-live with retained rows.
+	uint64_t peak_memory_bytes;
 };
 
 // Strictly validates and decodes one complete GraphQL response envelope. A

@@ -231,20 +231,20 @@ const std::string &PlannedRestQueryBinding::EncodedValue() const noexcept {
 	return encoded_value;
 }
 
-PlannedRestOperation::PlannedRestOperation(std::string operation_name_p, PlannedHttpMethod method_p,
-                                           PlannedCardinality cardinality_p, PlannedReplaySafety replay_safety_p,
-                                           PlannedHttpOrigin origin_p, std::string path_p,
-                                           std::vector<PlannedQueryParameter> query_parameters_p,
-                                           std::vector<PlannedHttpHeader> headers_p,
-                                           PlannedResponseSource response_source_p, std::string records_extractor_p,
-                                           std::vector<PlannedRestQueryBinding> query_bindings_p,
-                                           PlannedRestResponsePath records_path_p,
-                                           std::vector<PlannedRestResultColumn> result_columns_p)
+PlannedRestOperation::PlannedRestOperation(
+    std::string operation_name_p, PlannedHttpMethod method_p, PlannedCardinality cardinality_p,
+    PlannedReplaySafety replay_safety_p, PlannedHttpOrigin origin_p, std::string path_p,
+    std::vector<PlannedQueryParameter> query_parameters_p, std::vector<PlannedHttpHeader> headers_p,
+    PlannedResponseSource response_source_p, std::string records_extractor_p,
+    std::vector<PlannedRestQueryBinding> query_bindings_p, PlannedRestResponsePath records_path_p,
+    std::vector<PlannedRestResultColumn> result_columns_p, PlannedRestSchemaAuthority schema_authority_p)
     : operation_name(std::move(operation_name_p)), method(method_p), cardinality(cardinality_p),
       replay_safety(replay_safety_p), origin(std::move(origin_p)), path(std::move(path_p)),
       query_parameters(std::move(query_parameters_p)), headers(std::move(headers_p)),
       response_source(response_source_p), records_extractor(std::move(records_extractor_p)),
       query_bindings(std::move(query_bindings_p)), records_path(std::move(records_path_p)),
+      schema_authority(result_columns_p.empty() ? schema_authority_p
+                                                : PlannedRestSchemaAuthority::STRUCTURAL_RESULT_COLUMNS),
       result_columns(std::move(result_columns_p)) {
 }
 

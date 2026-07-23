@@ -523,7 +523,7 @@
         "src/semantics/sources.cmake",
         "src/semantics/targets.cmake"
       ],
-      "sha256": "71f5586ea2c69e1eb0af06b7b1357afe3204aaf868224c9ad811df7ea8324343"
+    "sha256": "a86812b5e5b7835fcd1488fd6b9a0cae2b37b7371b9acdb8c160157740f331ab"
     },
     "public_contract": {
       "canonical_json_sha256": "2a4990a7c12d34ad9283401af83a58d6f4f728145e2e39414c1a867467c3e5b8",

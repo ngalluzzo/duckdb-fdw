@@ -1,8 +1,10 @@
 #include "duckdb_api/execution.hpp"
 #include "support/require.hpp"
 
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -11,6 +13,20 @@
 namespace {
 
 using duckdb_api_test::Require;
+
+class CancelDuringAlignment final : public duckdb_api::ExecutionControl {
+public:
+	explicit CancelDuringAlignment(std::size_t cancel_at_p) : cancel_at(cancel_at_p), calls(0) {
+	}
+
+	bool IsCancellationRequested() const noexcept override {
+		return ++calls >= cancel_at;
+	}
+
+private:
+	std::size_t cancel_at;
+	mutable std::size_t calls;
+};
 
 static_assert(std::is_nothrow_destructible<duckdb_api::ExecutionControl>::value,
               "execution control teardown must be non-throwing");
@@ -32,7 +48,7 @@ void TestTypedValuesAndSchemaAlignment() {
 	        "default TypedValue did not fail closed as a typed NULL");
 
 	duckdb_api::TypedBatch batch;
-	batch.column_kinds = {duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR,
+	batch.column_types = {duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR,
 	                      duckdb_api::ValueKind::BOOLEAN};
 	duckdb_api::TypedRow row;
 	row.values.push_back(duckdb_api::TypedValue::BigInt(42));
@@ -52,7 +68,7 @@ void TestTypedValuesAndSchemaAlignment() {
 	batch.rows[0].values.pop_back();
 	Require(!batch.IsSchemaAligned(), "typed batch accepted a row arity mismatch");
 	batch.Clear();
-	Require(batch.column_kinds.empty() && batch.rows.empty(), "typed batch clear retained values or schema");
+	Require(batch.column_types.empty() && batch.rows.empty(), "typed batch clear retained values or schema");
 }
 
 void TestNullableTypedValuesRetainKind() {
@@ -68,11 +84,67 @@ void TestNullableTypedValuesRetainKind() {
 	        "NULL BOOLEAN did not retain kind with an inert payload");
 
 	duckdb_api::TypedBatch batch;
-	batch.column_kinds = {duckdb_api::ValueKind::VARCHAR};
+	batch.column_types = {duckdb_api::ValueKind::VARCHAR};
 	duckdb_api::TypedRow row;
 	row.values.push_back(null_varchar);
 	batch.rows.push_back(std::move(row));
 	Require(batch.IsSchemaAligned(), "typed NULL was mistaken for a schema mismatch");
+}
+
+void TestFlatArraySchemaAlignment() {
+	duckdb_api::TypedBatch batch;
+	batch.column_types = {duckdb_api::OutputValueType::Array(duckdb_api::ValueKind::VARCHAR, true)};
+	std::vector<duckdb_api::TypedScalarValue> elements;
+	elements.push_back(duckdb_api::TypedScalarValue::Varchar("first"));
+	elements.push_back(duckdb_api::TypedScalarValue::Null(duckdb_api::ValueKind::VARCHAR));
+	elements.push_back(duckdb_api::TypedScalarValue::Varchar("first"));
+	batch.rows.push_back({{duckdb_api::TypedValue::Array(duckdb_api::ValueKind::VARCHAR, true, std::move(elements))}});
+	Require(batch.IsSchemaAligned() && batch.rows[0].values[0].elements.size() == 3,
+	        "flat ARRAY value did not preserve ordered nullable scalar children");
+
+	auto wrong_kind = batch;
+	wrong_kind.rows[0].values[0].elements[0] = duckdb_api::TypedScalarValue::BigInt(1);
+	Require(!wrong_kind.IsSchemaAligned(), "ARRAY schema accepted a child-kind mismatch");
+	auto forbidden_null = batch;
+	forbidden_null.column_types[0] = duckdb_api::OutputValueType::Array(duckdb_api::ValueKind::VARCHAR, false);
+	forbidden_null.rows[0].values[0].element_nullable = false;
+	Require(!forbidden_null.IsSchemaAligned(), "ARRAY schema accepted a forbidden child NULL");
+	auto inactive_payload = batch;
+	inactive_payload.rows[0].values[0].varchar_value = "not-flat";
+	Require(!inactive_payload.IsSchemaAligned(), "ARRAY schema accepted an active parent scalar payload");
+}
+
+void TestDoublePayloadAndAlignmentCancellation() {
+	duckdb_api::TypedBatch scalar;
+	scalar.column_types = {duckdb_api::ValueKind::DOUBLE};
+	scalar.rows.push_back({{duckdb_api::TypedValue::Double(1.5)}});
+	Require(scalar.IsSchemaAligned(), "finite canonical DOUBLE was rejected");
+	for (const auto invalid : {std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(),
+	                           std::numeric_limits<double>::quiet_NaN(), -0.0}) {
+		auto malformed = scalar;
+		malformed.rows[0].values[0].double_value = invalid;
+		Require(!malformed.IsSchemaAligned(), "non-finite or noncanonical scalar DOUBLE payload was accepted");
+	}
+
+	duckdb_api::TypedBatch array;
+	array.column_types = {duckdb_api::OutputValueType::Array(duckdb_api::ValueKind::DOUBLE, false)};
+	std::vector<duckdb_api::TypedScalarValue> elements(64, duckdb_api::TypedScalarValue::Double(1.0));
+	array.rows.push_back({{duckdb_api::TypedValue::Array(duckdb_api::ValueKind::DOUBLE, false, std::move(elements))}});
+	auto malformed_child = array;
+	malformed_child.rows[0].values[0].elements[32].double_value = std::numeric_limits<double>::infinity();
+	Require(!malformed_child.IsSchemaAligned(), "ARRAY schema accepted a non-finite DOUBLE child");
+	malformed_child = array;
+	malformed_child.rows[0].values[0].elements[32].double_value = -0.0;
+	Require(!malformed_child.IsSchemaAligned(), "ARRAY schema accepted a noncanonical negative-zero child");
+
+	CancelDuringAlignment control(12);
+	bool cancelled = false;
+	try {
+		(void)array.IsSchemaAligned(control);
+	} catch (const duckdb_api::ExecutionCancelled &) {
+		cancelled = true;
+	}
+	Require(cancelled, "ARRAY schema alignment did not observe cancellation during child traversal");
 }
 
 void TestStableErrorContract() {
@@ -105,6 +177,8 @@ int main() {
 	try {
 		TestTypedValuesAndSchemaAlignment();
 		TestNullableTypedValuesRetainKind();
+		TestFlatArraySchemaAlignment();
+		TestDoublePayloadAndAlignmentCancellation();
 		TestStableErrorContract();
 		std::cout << "execution contract tests passed" << std::endl;
 		return EXIT_SUCCESS;

@@ -30,7 +30,8 @@ bool HasMatchingResultColumn(const ScanPlan &plan, const PlannedEqualityPredicat
 	for (const auto &column : plan.Operation().Rest().result_columns) {
 		if (column.name == equality.ColumnName()) {
 			matching++;
-			if (column.scalar_kind != equality.Kind()) {
+			if (column.shape != PlannedResultShape::SCALAR || column.element_nullable ||
+			    column.scalar_kind != equality.Kind()) {
 				return false;
 			}
 		}

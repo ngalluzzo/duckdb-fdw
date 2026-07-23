@@ -122,6 +122,7 @@ bool HasCanonicalVariables(const std::vector<CompiledGraphqlVariable> &variables
 bool HasResultColumn(const CompiledGraphqlResultColumn &column, const char *name, CompiledGraphqlScalarKind kind,
                      bool nullable, std::initializer_list<const char *> path) {
 	return column.name == name && column.scalar_kind == kind && column.nullable == nullable &&
+	       column.shape == CompiledResultShape::SCALAR && !column.element_nullable &&
 	       PathEquals(column.response_path, path);
 }
 
@@ -152,14 +153,14 @@ bool HasColumn(const CompiledColumn &column, const char *name, const char *type,
 	       column.extractor == extractor;
 }
 
-const char *LogicalTypeName(CompiledGraphqlScalarKind kind) {
+CompiledScalarType ResultElementType(CompiledGraphqlScalarKind kind) {
 	switch (kind) {
 	case CompiledGraphqlScalarKind::STRING:
-		return "VARCHAR";
+		return CompiledScalarType::VARCHAR;
 	case CompiledGraphqlScalarKind::INT64:
-		return "BIGINT";
+		return CompiledScalarType::BIGINT;
 	case CompiledGraphqlScalarKind::BOOLEAN:
-		return "BOOLEAN";
+		return CompiledScalarType::BOOLEAN;
 	}
 	throw std::invalid_argument("compiled GraphQL result mapping contains an unknown scalar kind");
 }
@@ -186,8 +187,11 @@ bool ResultColumnsAlign(const std::vector<CompiledColumn> &columns,
 	for (std::size_t index = 0; index < columns.size(); index++) {
 		const auto &column = columns[index];
 		const auto &result_column = result_columns[index];
+		const auto expected_shape = result_column.shape == CompiledResultShape::ARRAY ? CompiledColumnShape::ARRAY
+		                                                                              : CompiledColumnShape::SCALAR;
 		if (column.name != result_column.name || column.nullable != result_column.nullable ||
-		    column.logical_type != LogicalTypeName(result_column.scalar_kind) ||
+		    column.Shape() != expected_shape || column.ElementType() != ResultElementType(result_column.scalar_kind) ||
+		    column.ElementNullable() != result_column.element_nullable ||
 		    column.extractor != RelationExtractor(result_column.response_path)) {
 			return false;
 		}

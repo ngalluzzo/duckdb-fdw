@@ -175,12 +175,31 @@ R"DUCKDBAPIV1({
       }
     },
     "column": {
+      "oneOf": [
+        {"$ref": "#/$defs/scalarColumn"},
+        {"$ref": "#/$defs/arrayColumn"}
+      ]
+    },
+    "scalarColumn": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "type", "nullable", "extract"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
         "type": {"enum": ["BOOLEAN", "BIGINT", "VARCHAR", "DOUBLE"]},
+        "nullable": {"$ref": "#/$defs/boolean"},
+        "extract": {"$ref": "#/$defs/extractPath"}
+      }
+    },
+    "arrayColumn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "element_type", "element_nullable", "nullable", "extract"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "ARRAY"},
+        "element_type": {"enum": ["BOOLEAN", "BIGINT", "VARCHAR", "DOUBLE"]},
+        "element_nullable": {"$ref": "#/$defs/boolean"},
         "nullable": {"$ref": "#/$defs/boolean"},
         "extract": {"$ref": "#/$defs/extractPath"}
       }

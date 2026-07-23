@@ -1,0 +1,12 @@
+{
+  "manifest": "duckdb_api/rfc0022_evidence_v1",
+  "artifacts": {
+    "connector-package-v1.schema.json": "sha256.589774ff75876c13d6bd52a243fd470c172e67d8121bc6ba8f11e2af0b451d41",
+    "fixture-coverage-v1.json": "sha256.6107a7131196bfcfb359b410b10f28c2f20f3ca3ddbc690bc72b874cd744e5da",
+    "fixture-index-v1.schema.json": "sha256.fae0e6f22ca0c8ed2ea8ffae61a4ac7d982907be1ce033270a93f0024cc04841"
+  },
+  "verifier": {
+    "path": "scripts/verify-rfc-evidence.py",
+    "authority": "scripts/rfc_evidence_authorities.py"
+  }
+}

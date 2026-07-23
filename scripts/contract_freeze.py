@@ -56,6 +56,7 @@ EXPECTED_RFC_AUTHORITIES = frozenset(
         "RFC 0012",
         "RFC 0013",
         "RFC 0014",
+        "RFC 0022",
     }
 )
 
@@ -161,7 +162,19 @@ def _schema_scalar_types(schema: dict[str, Any]) -> set[str]:
     # DecodeColumn/DecodeInput and package_predicate_schema.py's literal-type
     # check keep the input and predicate-literal defs in lockstep with it, so
     # cross-checking all three here would only restate the same authority.
-    return set(_schema_value(schema, ("$defs", "column", "properties", "type", "enum")))
+    return set(_schema_value(schema, ("$defs", "scalarColumn", "properties", "type", "enum")))
+
+
+def _schema_column_shapes(schema: dict[str, Any]) -> set[str]:
+    options = _schema_value(schema, ("$defs", "column", "oneOf"))
+    references = {_def_name(_schema_value(option, ("$ref",))) for option in options}
+    if references != {"scalarColumn", "arrayColumn"}:
+        raise FreezeError("connector schema column oneOf is not the closed scalar-or-array shape")
+    return {"SCALAR", "ARRAY"}
+
+
+def _schema_array_element_types(schema: dict[str, Any]) -> set[str]:
+    return set(_schema_value(schema, ("$defs", "arrayColumn", "properties", "element_type", "enum")))
 
 
 def _inventory_release_view(inventory: dict[str, Any], release: str) -> dict[str, Any]:
@@ -300,6 +313,7 @@ def verify_freeze(
         _require_freeze_field(freeze, "connector_spec", "schema_authority"),
         _require_freeze_field(freeze, "pagination_strategies", "schema_authority"),
         _require_freeze_field(freeze, "scalar_types", "schema_authority"),
+        _require_freeze_field(freeze, "column_shapes", "schema_authority"),
     }
     if declared_schema_authority != {EXPECTED_SCHEMA_AUTHORITY}:
         raise FreezeError(
@@ -344,6 +358,14 @@ def verify_freeze(
             f"freeze scalar_types rejected_diagnostic {scalar_rejected!r} disagrees with "
             f"{EXPECTED_SCALAR_TYPE_REJECTED_DIAGNOSTIC!r}"
         )
+
+    column_shapes = freeze["column_shapes"]
+    if set(column_shapes.get("authored", [])) != _schema_column_shapes(schema):
+        raise FreezeError("freeze column shapes disagree with the schema's closed column oneOf set")
+    if set(column_shapes.get("array_element_types", [])) != _schema_array_element_types(schema):
+        raise FreezeError("freeze array element types disagree with the schema's closed element-type enum")
+    if column_shapes.get("array_nesting") != "flat_only" or column_shapes.get("array_usage") != "output_columns_only":
+        raise FreezeError("freeze ARRAY scope is not the accepted flat output-only contract")
 
     declared_domains = {domain["domain"] for domain in freeze.get("version_domains", [])}
     if declared_domains != set(EXPECTED_VERSION_DOMAINS):
