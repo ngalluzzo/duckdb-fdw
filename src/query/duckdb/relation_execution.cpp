@@ -41,19 +41,41 @@ const char *ErrorStageName(duckdb_api::ErrorStage stage) {
 	return "internal";
 }
 
+// RFC 0021: append the additive structured resilience suffix for a classified
+// failure. Every token is a closed code or count drawn from the freeze-bound
+// vocabulary; never content. Appended after the preserved stage/field/message
+// prefix so existing rendered strings stay verbatim. Carries the primary class,
+// the cumulative rows exposed to DuckDB, and the terminating budget dimension
+// (when a budget terminated execution) — the facts the success signals require.
+// The full property set remains available programmatically via Properties().
+std::string ResilienceSuffix(const duckdb_api::FailureProperties &properties) {
+	std::string suffix = " [class=";
+	suffix += duckdb_api::FailureClassName(properties.failure_class);
+	suffix += " rows_exposed=" + std::to_string(properties.rows_exposed);
+	if (properties.terminating_budget != duckdb_api::BudgetDimension::NONE) {
+		suffix += " budget=";
+		suffix += duckdb_api::BudgetDimensionName(properties.terminating_budget);
+	}
+	suffix += "]";
+	return suffix;
+}
+
 [[noreturn]] void ThrowExecutionError(const duckdb_api::ExecutionError &error, const std::string &connector,
                                       const std::string &relation) {
 	if (error.Stage() == duckdb_api::ErrorStage::INTERNAL) {
 		throw duckdb::InvalidInputException(
 		    "[duckdb_api][internal] connector=%s relation=%s: unexpected execution failure", connector, relation);
 	}
+	std::string message = error.SafeMessage();
+	if (error.Classified()) {
+		message += ResilienceSuffix(error.Properties());
+	}
 	if (error.Field().empty()) {
 		throw duckdb::InvalidInputException("[duckdb_api][%s] connector=%s relation=%s: %s",
-		                                    ErrorStageName(error.Stage()), connector, relation, error.SafeMessage());
+		                                    ErrorStageName(error.Stage()), connector, relation, message);
 	}
 	throw duckdb::InvalidInputException("[duckdb_api][%s] connector=%s relation=%s field=%s: %s",
-	                                    ErrorStageName(error.Stage()), connector, relation, error.Field(),
-	                                    error.SafeMessage());
+	                                    ErrorStageName(error.Stage()), connector, relation, error.Field(), message);
 }
 
 [[noreturn]] void ThrowCancellation(duckdb_api::BatchStream *stream) {

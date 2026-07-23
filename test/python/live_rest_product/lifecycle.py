@@ -24,44 +24,47 @@ CONNECTOR_CONTEXT = "connector=github relation=duckdb_login_search_page"
 FAILURE_DIAGNOSTICS = {
     "status": (
         "Invalid Input Error: [duckdb_api][http_status] "
-        f"{CONNECTOR_CONTEXT}: HTTP endpoint returned a non-success status"
+        f"{CONNECTOR_CONTEXT}: HTTP endpoint returned a non-success status "
+        "[class=rate_limit rows_exposed=0]"
     ),
     "redirect": (
         "Invalid Input Error: [duckdb_api][http_status] "
-        f"{CONNECTOR_CONTEXT}: HTTP endpoint returned a non-success status"
+        f"{CONNECTOR_CONTEXT}: HTTP endpoint returned a non-success status "
+        "[class=remote_status rows_exposed=0]"
     ),
     "malformed": (
         "Invalid Input Error: [duckdb_api][decode] "
-        f"{CONNECTOR_CONTEXT}: HTTP response is not valid JSON"
+        f"{CONNECTOR_CONTEXT}: HTTP response is not valid JSON [class=decode rows_exposed=0]"
     ),
     "schema_missing": (
         "Invalid Input Error: [duckdb_api][schema] "
-        f"{CONNECTOR_CONTEXT} field=login: required response field is missing"
+        f"{CONNECTOR_CONTEXT} field=login: required response field is missing "
+        "[class=schema rows_exposed=0]"
     ),
     "schema_null": (
         "Invalid Input Error: [duckdb_api][schema] "
         f"{CONNECTOR_CONTEXT} field=login: "
-        "required response field has an incompatible type"
+        "required response field has an incompatible type [class=schema rows_exposed=0]"
     ),
     "schema_incompatible": (
         "Invalid Input Error: [duckdb_api][schema] "
         f"{CONNECTOR_CONTEXT} field=id: "
-        "required response field has an incompatible type"
+        "required response field has an incompatible type [class=schema rows_exposed=0]"
     ),
     "oversized": (
         "Invalid Input Error: [duckdb_api][resource] "
         f"{CONNECTOR_CONTEXT} field=response_bytes: "
-        "HTTP response exceeded its byte budget"
+        "HTTP response exceeded its byte budget [class=resource_budget rows_exposed=0 budget=response_bytes]"
     ),
     "disconnect": (
         "Invalid Input Error: [duckdb_api][transport] "
-        f"{CONNECTOR_CONTEXT}: HTTP request failed"
+        f"{CONNECTOR_CONTEXT}: HTTP request failed [class=transport rows_exposed=0]"
     ),
 }
 WALL_TIME_DIAGNOSTIC = (
     "Invalid Input Error: [duckdb_api][resource] "
     f"{CONNECTOR_CONTEXT} field=wall_milliseconds: "
-    "execution exceeded its wall-time budget"
+    "execution exceeded its wall-time budget [class=resource_budget rows_exposed=0 budget=time]"
 )
 EXECUTION_ENVELOPE_SECONDS = 5.75
 

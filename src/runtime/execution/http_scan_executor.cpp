@@ -91,7 +91,8 @@ public:
 	    : admitted_profile(std::move(admitted_profile_p)), transport(std::move(transport_p)),
 	      max_wall_milliseconds(max_wall_milliseconds_p),
 	      authorization(new ScanAuthorization(std::move(authorization_p))), cancelled(false), closed(false),
-	      attempted(false), exhausted(false), deadline_initialized(false), decoded_memory_bytes(0), offset(0) {
+	      attempted(false), exhausted(false), deadline_initialized(false), decoded_memory_bytes(0), offset(0),
+	      rows_emitted(0) {
 		for (const auto &column : admitted_profile->Columns()) {
 			column_types.push_back(column.type);
 		}
@@ -197,14 +198,15 @@ public:
 			}
 			CheckExecutionState(combined, deadline);
 			offset += count;
+			rows_emitted += static_cast<uint64_t>(count);
 			batch = std::move(produced);
 			return true;
 		} catch (const ExecutionCancelled &) {
 			RememberCurrentFailure();
 			throw;
-		} catch (const ExecutionError &) {
-			RememberCurrentFailure();
-			throw;
+		} catch (const ExecutionError &error) {
+			FailWithExecutionError(error.Stage(), error.Field(), error.SafeMessage(),
+			                       EnrichFailureProperties(FailurePropertiesFromError(error), 1, rows_emitted));
 		} catch (const std::bad_alloc &) {
 			FailWithExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                       "execution could not be allocated within its memory budget");
@@ -264,6 +266,16 @@ private:
 		}
 	}
 
+	[[noreturn]] void FailWithExecutionError(ErrorStage stage, std::string field, std::string safe_message,
+	                                         FailureProperties properties) {
+		try {
+			throw ExecutionError(stage, std::move(field), std::move(safe_message), std::move(properties));
+		} catch (...) {
+			RememberCurrentFailure();
+			throw;
+		}
+	}
+
 	const std::unique_ptr<const AdmittedRestRequestProfile> admitted_profile;
 	const std::shared_ptr<const HttpTransport> transport;
 	const uint64_t max_wall_milliseconds;
@@ -280,6 +292,8 @@ private:
 	std::vector<TypedRow> decoded;
 	uint64_t decoded_memory_bytes;
 	std::size_t offset;
+	// RFC 0021: cumulative rows emitted to DuckDB, for rows_exposed.
+	uint64_t rows_emitted;
 };
 
 class HttpScanExecutor final : public ScanExecutor {
