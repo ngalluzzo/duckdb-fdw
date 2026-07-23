@@ -45,6 +45,13 @@ struct PageResourceLimits {
 // decoded-record counters are cumulative. Decoded memory and active requests
 // are instantaneous, and max_wall_milliseconds creates one deadline that is
 // initialized by the first BeginPage and never reset.
+//
+// RFC 0021: this is the authoritative aggregate scan resilience budget.
+// cumulative_waiting_milliseconds is the waiting budget dimension; zero in v1
+// (no retry/rate-limit-waiting mechanism enabled), where zero means "no waiting
+// permitted" — a real ceiling, never unlimited. Attempts, pages, bytes, records,
+// memory, elapsed time, and waiting all debit this one aggregate; no retry or
+// wait ever resets a counter, deadline, or budget (the no-reset invariant).
 struct ScanResourceLimits {
 	uint64_t request_attempts;
 	uint64_t pages;
@@ -56,6 +63,7 @@ struct ScanResourceLimits {
 	uint64_t max_wall_milliseconds;
 	uint64_t active_requests;
 	uint64_t serialized_request_body_bytes;
+	uint64_t cumulative_waiting_milliseconds;
 };
 
 struct ScanResourceProfile {
@@ -100,6 +108,7 @@ struct ScanResourceCounters {
 	uint64_t peak_decoded_memory_bytes;
 	uint64_t active_requests;
 	uint64_t serialized_request_body_bytes;
+	uint64_t cumulative_waiting_milliseconds;
 };
 
 enum class ScanResourceState : uint8_t {
@@ -140,6 +149,15 @@ public:
 	void CommitDecodedPage(const DecodedPageResourceUsage &usage);
 	void CompletePage(bool has_next, std::chrono::steady_clock::time_point now);
 	void AbortPage() noexcept;
+
+	// RFC 0021: debit cumulative waiting against the aggregate scan budget. Never
+	// resets a counter or deadline: a wait consumes waiting budget and, by
+	// advancing the steady clock, the wall-time deadline. Fails closed if the
+	// cumulative-waiting ceiling is exceeded (including any wait when the v1
+	// ceiling is zero). Not invoked in v1 — no retry/rate-limit-waiting mechanism
+	// is enabled — so the counter remains zero. A future waiting mechanism calls
+	// this instead of owning a private, resettable counter.
+	void CommitWait(uint64_t milliseconds);
 
 	const ScanResourceProfile &Profile() const noexcept;
 	const ScanResourceCounters &Counters() const noexcept;

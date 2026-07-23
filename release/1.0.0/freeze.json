@@ -103,6 +103,34 @@
     "vocabulary_authority": "docs/CONNECTOR_SPECIFICATIONS.md#diagnostics",
     "redaction": "Absolute roots, source scalar content, credentials, generated documents, request/response bodies, rows, cursors, and remote messages are never diagnostic fields."
   },
+  "failure_taxonomy": {
+    "authority": "RFC 0021; docs/RUNTIME_CONTRACTS.md Error ownership and redaction",
+    "primary_classes": [
+      "configuration",
+      "authorization",
+      "credential_provider",
+      "destination_policy",
+      "transport",
+      "timeout",
+      "remote_status",
+      "rate_limit",
+      "protocol",
+      "decode",
+      "schema",
+      "resource_budget",
+      "cancellation",
+      "internal"
+    ],
+    "replay_classifications": [
+      "never_replayable",
+      "replayable_before_exposure",
+      "atomic_traversal_step",
+      "server_directed_delay",
+      "indeterminate"
+    ],
+    "indeterminate_replay_is_non_replayable": true,
+    "binding": "The closed primary-class and replay-classification sets are layered additively on the existing ErrorStage classification. Existing rendered diagnostic strings are preserved verbatim. No retry, rate-limit waiting, caching, or circuit-breaking mechanism is enabled."
+  },
   "relational_ownership": {
     "filter": "duckdb",
     "projection": "duckdb",

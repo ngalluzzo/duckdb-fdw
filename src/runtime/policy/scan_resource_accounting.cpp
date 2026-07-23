@@ -71,7 +71,7 @@ const std::string &ScanResourceError::SafeMessage() const noexcept {
 }
 
 ScanResourceAccounting::ScanResourceAccounting(const ScanResourceProfile &profile_p)
-    : profile(profile_p), counters {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, state(ScanResourceState::READY),
+    : profile(profile_p), counters {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, state(ScanResourceState::READY),
       deadline_started(false), deadline(), active_allowance {0, 0, 0, 0, 0, 0, {}} {
 	ValidateProfile(profile);
 }
@@ -235,6 +235,18 @@ void ScanResourceAccounting::CompletePage(bool has_next, std::chrono::steady_clo
 	}
 	state = ScanResourceState::READY;
 	RequireReadyForNext(now);
+}
+
+void ScanResourceAccounting::CommitWait(uint64_t milliseconds) {
+	if (state == ScanResourceState::FAILED || state == ScanResourceState::EXHAUSTED) {
+		Fail("resource_state", "scan resource state cannot commit a wait");
+	}
+	try {
+		counters.cumulative_waiting_milliseconds = AddChecked(counters.cumulative_waiting_milliseconds, milliseconds,
+		                                                      profile.scan.cumulative_waiting_milliseconds);
+	} catch (const ScanResourceError &) {
+		Fail("cumulative_waiting_milliseconds", "scan exceeded its cumulative-waiting budget");
+	}
 }
 
 void ScanResourceAccounting::AbortPage() noexcept {

@@ -38,7 +38,7 @@ ScanResourceProfile ResourceProfile(const AdmittedGraphqlRequestProfile &profile
 	         page.decoded_records, page.decoded_memory_bytes, page.concurrency, page.serialized_request_body_bytes},
 	        {scan.request_attempts, scan.pages, scan.header_bytes, scan.response_bytes, scan.decompressed_bytes,
 	         scan.decoded_records, scan.decoded_memory_bytes, std::min(scan.wall_milliseconds, max_wall_milliseconds),
-	         scan.concurrency, scan.serialized_request_body_bytes}};
+	         scan.concurrency, scan.serialized_request_body_bytes, 0}};
 }
 
 void CheckState(ExecutionControl &control, std::chrono::steady_clock::time_point deadline) {

@@ -104,6 +104,40 @@ MANDATORY_EXCLUSIONS = frozenset(
     }
 )
 
+# Closed resilience vocabulary established by RFC 0021. Layered additively on
+# the existing ErrorStage classification; existing rendered diagnostic strings
+# are preserved verbatim. No retry/rate-limit-waiting/cache mechanism is
+# enabled. The freeze binds these sets so silent removal or rename fails closed;
+# the C++ enum authority (src/include/duckdb_api/execution.hpp) must match.
+EXPECTED_FAILURE_PRIMARY_CLASSES = frozenset(
+    {
+        "configuration",
+        "authorization",
+        "credential_provider",
+        "destination_policy",
+        "transport",
+        "timeout",
+        "remote_status",
+        "rate_limit",
+        "protocol",
+        "decode",
+        "schema",
+        "resource_budget",
+        "cancellation",
+        "internal",
+    }
+)
+
+EXPECTED_REPLAY_CLASSIFICATIONS = frozenset(
+    {
+        "never_replayable",
+        "replayable_before_exposure",
+        "atomic_traversal_step",
+        "server_directed_delay",
+        "indeterminate",
+    }
+)
+
 
 def _rfc_status(reference: str, rfc_directory: pathlib.Path) -> str:
     match = re.fullmatch(r"RFC ([0-9]{4})", reference)
@@ -344,6 +378,24 @@ def verify_freeze(
             f"freeze scalar_types rejected_diagnostic {scalar_rejected!r} disagrees with "
             f"{EXPECTED_SCALAR_TYPE_REJECTED_DIAGNOSTIC!r}"
         )
+
+    failure_taxonomy = freeze.get("failure_taxonomy")
+    if not isinstance(failure_taxonomy, dict):
+        raise FreezeError("freeze is missing the failure_taxonomy closed-vocabulary section")
+    primary_classes = set(failure_taxonomy.get("primary_classes", []))
+    if primary_classes != EXPECTED_FAILURE_PRIMARY_CLASSES:
+        raise FreezeError(
+            f"freeze failure_taxonomy primary classes disagree: "
+            f"freeze has {sorted(primary_classes)}, expected {sorted(EXPECTED_FAILURE_PRIMARY_CLASSES)}"
+        )
+    replay = set(failure_taxonomy.get("replay_classifications", []))
+    if replay != EXPECTED_REPLAY_CLASSIFICATIONS:
+        raise FreezeError(
+            f"freeze failure_taxonomy replay classifications disagree: "
+            f"freeze has {sorted(replay)}, expected {sorted(EXPECTED_REPLAY_CLASSIFICATIONS)}"
+        )
+    if failure_taxonomy.get("indeterminate_replay_is_non_replayable") is not True:
+        raise FreezeError("freeze failure_taxonomy must assert indeterminate replay is non-replayable")
 
     declared_domains = {domain["domain"] for domain in freeze.get("version_domains", [])}
     if declared_domains != set(EXPECTED_VERSION_DOMAINS):

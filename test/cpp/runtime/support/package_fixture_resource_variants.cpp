@@ -224,7 +224,7 @@ void ProveRelationAccountingThreshold(const duckdb_api::ScanPlan &plan, bool res
 	    {1, budget.header_bytes, budget.response_bytes, budget.decompressed_bytes, budget.decoded_records,
 	     budget.decoded_memory_bytes, 1, 0},
 	    {1, 1, budget.header_bytes, budget.response_bytes, budget.decompressed_bytes, budget.decoded_records,
-	     budget.decoded_memory_bytes, budget.wall_milliseconds, 1, 0}};
+	     budget.decoded_memory_bytes, budget.wall_milliseconds, 1, 0, 0}};
 	if (response_bytes) {
 		profile.page.wire_response_bytes = per_scan ? limit + 1 : limit;
 		profile.scan.wire_response_bytes = per_scan ? limit : limit + 1;

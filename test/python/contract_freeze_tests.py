@@ -129,6 +129,48 @@ class ContractFreezeTests(unittest.TestCase):
             "scalar_types rejected_diagnostic",
         )
 
+    def test_failure_taxonomy_section_removed_fails(self) -> None:
+        self.require_rejected(lambda value: value.pop("failure_taxonomy"), "failure_taxonomy")
+
+    def test_failure_primary_class_removed_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["failure_taxonomy"]["primary_classes"].remove("rate_limit"),
+            "primary classes disagree",
+        )
+
+    def test_failure_primary_class_renamed_fails(self) -> None:
+        classes = self.freeze["failure_taxonomy"]["primary_classes"]
+        self.require_rejected(
+            lambda value: value["failure_taxonomy"]["primary_classes"].__setitem__(
+                classes.index("resource_budget"), "resource_limit"
+            ),
+            "primary classes disagree",
+        )
+
+    def test_failure_primary_class_widening_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["failure_taxonomy"]["primary_classes"].append("network_error"),
+            "primary classes disagree",
+        )
+
+    def test_replay_classification_removed_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["failure_taxonomy"]["replay_classifications"].remove("indeterminate"),
+            "replay classifications disagree",
+        )
+
+    def test_replay_classification_widening_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["failure_taxonomy"]["replay_classifications"].append("always_replay"),
+            "replay classifications disagree",
+        )
+
+    def test_indeterminate_non_replayable_invariant_removed_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["failure_taxonomy"].__setitem__("indeterminate_replay_is_non_replayable", False),
+            "indeterminate replay is non-replayable",
+        )
+
     def test_version_domain_omission_fails(self) -> None:
         self.require_rejected(lambda value: value["version_domains"].pop(), "version domains")
 

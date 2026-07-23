@@ -36,7 +36,7 @@ AccountingProfile(const duckdb_api::internal::AdmittedGraphqlRequestProfile &adm
 	         page.decoded_records, page.decoded_memory_bytes, page.concurrency, page.serialized_request_body_bytes},
 	        {scan.request_attempts, scan.pages, scan.header_bytes, scan.response_bytes, scan.decompressed_bytes,
 	         scan.decoded_records, scan.decoded_memory_bytes, scan.wall_milliseconds, scan.concurrency,
-	         scan.serialized_request_body_bytes}};
+	         scan.serialized_request_body_bytes, 0}};
 }
 
 void ValidateBodySelector(RuntimeFixtureGraphqlBodyResourceField field, RuntimeFixtureBoundaryVariant boundary) {

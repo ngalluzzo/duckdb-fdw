@@ -1,5 +1,6 @@
 #include "duckdb_api/execution.hpp"
 
+#include <stdexcept>
 #include <utility>
 
 namespace duckdb_api {
@@ -22,6 +23,120 @@ const std::string &ExecutionError::Field() const {
 
 const std::string &ExecutionError::SafeMessage() const {
 	return safe_message;
+}
+
+const char *FailureClassName(FailureClass failure_class) {
+	switch (failure_class) {
+	case FailureClass::CONFIGURATION:
+		return "configuration";
+	case FailureClass::AUTHORIZATION:
+		return "authorization";
+	case FailureClass::CREDENTIAL_PROVIDER:
+		return "credential_provider";
+	case FailureClass::DESTINATION_POLICY:
+		return "destination_policy";
+	case FailureClass::TRANSPORT:
+		return "transport";
+	case FailureClass::TIMEOUT:
+		return "timeout";
+	case FailureClass::REMOTE_STATUS:
+		return "remote_status";
+	case FailureClass::RATE_LIMIT:
+		return "rate_limit";
+	case FailureClass::PROTOCOL:
+		return "protocol";
+	case FailureClass::DECODE:
+		return "decode";
+	case FailureClass::SCHEMA:
+		return "schema";
+	case FailureClass::RESOURCE_BUDGET:
+		return "resource_budget";
+	case FailureClass::CANCELLATION:
+		return "cancellation";
+	case FailureClass::INTERNAL:
+		return "internal";
+	}
+	throw std::logic_error("unknown FailureClass");
+}
+
+const char *ReplayClassificationName(ReplayClassification classification) {
+	switch (classification) {
+	case ReplayClassification::NEVER_REPLAYABLE:
+		return "never_replayable";
+	case ReplayClassification::REPLAYABLE_BEFORE_EXPOSURE:
+		return "replayable_before_exposure";
+	case ReplayClassification::ATOMIC_TRAVERSAL_STEP:
+		return "atomic_traversal_step";
+	case ReplayClassification::SERVER_DIRECTED_DELAY:
+		return "server_directed_delay";
+	case ReplayClassification::INDETERMINATE:
+		return "indeterminate";
+	}
+	throw std::logic_error("unknown ReplayClassification");
+}
+
+const char *FailurePhaseName(FailurePhase phase) {
+	switch (phase) {
+	case FailurePhase::BIND:
+		return "bind";
+	case FailurePhase::PLAN:
+		return "plan";
+	case FailurePhase::ADMIT:
+		return "admit";
+	case FailurePhase::REQUEST:
+		return "request";
+	case FailurePhase::TRANSPORT:
+		return "transport";
+	case FailurePhase::DECODE:
+		return "decode";
+	case FailurePhase::PAGINATE:
+		return "paginate";
+	case FailurePhase::EMIT:
+		return "emit";
+	case FailurePhase::CLOSE:
+		return "close";
+	}
+	throw std::logic_error("unknown FailurePhase");
+}
+
+const char *BudgetDimensionName(BudgetDimension dimension) {
+	switch (dimension) {
+	case BudgetDimension::NONE:
+		return "none";
+	case BudgetDimension::TIME:
+		return "time";
+	case BudgetDimension::ATTEMPTS:
+		return "attempts";
+	case BudgetDimension::WAITING:
+		return "waiting";
+	case BudgetDimension::PAGES:
+		return "pages";
+	case BudgetDimension::RESPONSE_BYTES:
+		return "response_bytes";
+	case BudgetDimension::RECORDS:
+		return "records";
+	case BudgetDimension::MEMORY:
+		return "memory";
+	}
+	throw std::logic_error("unknown BudgetDimension");
+}
+
+const char *RemoteStatusClassName(RemoteStatusClass status_class) {
+	switch (status_class) {
+	case RemoteStatusClass::NONE:
+		return "none";
+	case RemoteStatusClass::SUCCESS:
+		return "success";
+	case RemoteStatusClass::CLIENT_ERROR:
+		return "client_error";
+	case RemoteStatusClass::RATE_LIMITED:
+		return "rate_limited";
+	case RemoteStatusClass::SERVER_ERROR:
+		return "server_error";
+	case RemoteStatusClass::GRAPHQL_ERRORS:
+		return "graphql_errors";
+	}
+	throw std::logic_error("unknown RemoteStatusClass");
 }
 
 TypedValue::TypedValue()

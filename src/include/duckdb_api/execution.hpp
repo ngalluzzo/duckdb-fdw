@@ -34,6 +34,95 @@ enum class ErrorStage : uint8_t {
 	REMOTE_PROTOCOL
 };
 
+// RFC 0021: the primary failure taxonomy. A stable, finer classification layered
+// additively on ErrorStage — every terminal remote-scan failure maps to exactly
+// one FailureClass. Existing rendered diagnostic strings are preserved verbatim;
+// this classification is carried as an additional structured field, not a
+// replacement of ErrorStage. No retry, rate-limit-waiting, caching, or
+// circuit-breaking mechanism is enabled. The closed set is bound to
+// release/1.0.0/freeze.json's failure_taxonomy section and enforced by
+// scripts/contract_freeze.py.
+enum class FailureClass : uint8_t {
+	CONFIGURATION,
+	AUTHORIZATION,
+	CREDENTIAL_PROVIDER,
+	DESTINATION_POLICY,
+	TRANSPORT,
+	// Reserved: no distinct transport timeout is emitted in v1 (libcurl's timeout
+	// is the scan deadline). Produced only by a future distinct idle/connect
+	// timeout, which requires its own RFC.
+	TIMEOUT,
+	REMOTE_STATUS,
+	RATE_LIMIT,
+	PROTOCOL,
+	DECODE,
+	SCHEMA,
+	RESOURCE_BUDGET,
+	CANCELLATION,
+	INTERNAL
+};
+
+// RFC 0021: replay classification for a traversal step or terminal failure. It
+// combines a Semantics-owned plan replay obligation with a Runtime-owned
+// exposure state (rows emitted for the step). Indeterminate safety is treated
+// as NEVER_REPLAYABLE. A future retry mechanism consumes this fact together with
+// an uncommitted replay unit; v1 records it without retrying.
+enum class ReplayClassification : uint8_t {
+	NEVER_REPLAYABLE,
+	REPLAYABLE_BEFORE_EXPOSURE,
+	ATOMIC_TRAVERSAL_STEP,
+	SERVER_DIRECTED_DELAY,
+	INDETERMINATE
+};
+
+// Closed-set name functions. They throw std::logic_error on an unknown value so
+// the vocabulary cannot drift silently; the names match the freeze's
+// failure_taxonomy strings verbatim.
+const char *FailureClassName(FailureClass failure_class);
+const char *ReplayClassificationName(ReplayClassification classification);
+
+// RFC 0021: the execution phase at which a failure was classified. Finer than
+// ErrorStage: it distinguishes pre-execution bind/plan/admission from request,
+// transport, decode, pagination, emission, and close. Closed-set; the name
+// function throws on an unknown value.
+enum class FailurePhase : uint8_t { BIND, PLAN, ADMIT, REQUEST, TRANSPORT, DECODE, PAGINATE, EMIT, CLOSE };
+
+// RFC 0021: which aggregate scan budget counter terminated execution, for
+// resource_budget/timeout failures. Matches the aggregate scan ledger's counter
+// dimensions. NONE marks failures not terminated by a budget. Closed-set.
+enum class BudgetDimension : uint8_t { NONE, TIME, ATTEMPTS, WAITING, PAGES, RESPONSE_BYTES, RECORDS, MEMORY };
+
+// RFC 0021: the class of an observed remote response status. Structural only —
+// never a status message, body, or remote string. NONE marks failures that did
+// not observe a remote response. Closed-set.
+enum class RemoteStatusClass : uint8_t { NONE, SUCCESS, CLIENT_ERROR, RATE_LIMITED, SERVER_ERROR, GRAPHQL_ERRORS };
+
+const char *FailurePhaseName(FailurePhase phase);
+const char *BudgetDimensionName(BudgetDimension dimension);
+const char *RemoteStatusClassName(RemoteStatusClass status_class);
+
+// RFC 0021: the additive structured failure-properties field. Every member is a
+// closed code, ordinal, or checked count — never content (no body, document,
+// cursor, row, credential, or remote message). Remote Runtime populates it at
+// terminal-failure emission; Query renders it once at the DuckDB boundary
+// without altering existing rendered strings. `step` and `attempt` are the
+// stable scan-local identity ordinals (a scan is one BatchStream lifecycle; an
+// operation is plan-derived). In v1 attempt is always 1 and no retry/waiting
+// mechanism consumes replay_classification or the waiting budget.
+struct FailureProperties {
+	FailureClass failure_class;
+	FailurePhase phase;
+	ReplayClassification replay_classification;
+	// Traversal-step ordinal, 1-based; 0 before the first step begins.
+	std::uint64_t step;
+	// Transport-attempt ordinal within the step; 1 in v1.
+	std::uint64_t attempt;
+	// Rows emitted to DuckDB before this failure (a count, never row content).
+	std::uint64_t rows_exposed;
+	RemoteStatusClass remote_status_class;
+	BudgetDimension terminating_budget;
+};
+
 class ExecutionError : public std::exception {
 public:
 	ExecutionError(ErrorStage stage, std::string field, std::string safe_message);
