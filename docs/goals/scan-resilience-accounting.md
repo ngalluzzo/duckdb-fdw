@@ -168,16 +168,62 @@ freeze section; product approval recorded (Nic Galluzzo, 2026-07-22).
 
 ### Delivered
 
-_Pending delivery._
+One authoritative, stable scan resilience accounting model (RFC 0021),
+additive and with no resilience mechanism enabled: closed `FailureClass` (14)
+and `ReplayClassification` (5) vocabularies bound to
+`release/1.0.0/freeze.json` and enforced by `scripts/contract_freeze.py`;
+`FailureProperties` (identity ordinals, phase, attempt, rows exposed, remote
+status class, terminating budget); the `cumulative_waiting` aggregate-budget
+dimension and `CommitWait` with the no-reset invariant; failure classification
+wired at every emission path (HTTP status, GraphQL cursor, Link pagination)
+with unified catch-boundary enrichment; `ClassifyReplay` (the retry-invariant
+combine); `EXPLAIN` effective-policy (declared replay safety; retry/rate-limit
+waiting/cache disabled); and the structured class surfaced at the DuckDB
+boundary as an additive suffix preserving existing rendered strings.
 
 ### Evidence
 
-_Pending delivery._
+- `make build`, `make test` green; format, source-identity, contract-freeze,
+  public-surface-inventory, and agent-asset gates green across the change set.
+- Oracles: exhaustive HTTP-status classification; `GraphqlCursorError`/
+  `LinkPaginationError` kind mapping; `ClassifyReplay` truth table;
+  `BudgetDimensionFromField`; `CommitWait` no-reset (zero-ceiling fails closed,
+  additive debit, deadline never reset); four-way termination distinguishability
+  (cancellation / deadline-TIME / reserved timeout / exhaustion); per-field
+  structured redaction; REST + GraphQL EXPLAIN effective-policy; the controlled
+  live-REST lifecycle oracle asserting the rendered class suffix.
+- `$adversarial-review` (two perspectives) found P1 carried-fact defects
+  (terminating_budget always none; cursor/link dropped step/rows_exposed;
+  `ClassifyReplay` unwired); all fixed; a fresh fix-delta re-review confirmed
+  the repairs introduce no new defects.
+- Contract propagation: `docs/ARCHITECTURE.md` and `docs/RUNTIME_CONTRACTS.md`
+  record the model.
 
 ### Material decisions and deviations
 
-_Pending delivery._
+- **Additive diagnostic suffix.** The structured class is surfaced at the DuckDB
+  boundary by appending a concise redacted suffix (`[class=<c> rows_exposed=<n>
+  budget=<b>]`) after the preserved `[duckdb_api][<stage>]` prefix and message;
+  existing rendered strings stay verbatim, INTERNAL stays opaque. An earlier
+  verbose suffix was narrowed to the success-signal facts.
+- **Replay is step-local.** `replay_classification` reflects whether the failed
+  traversal step's rows were exposed, while `rows_exposed` is the cumulative
+  count — distinct scopes by RFC design, not a contradiction.
+- **Known limitation (P3, accepted).** `request_body_bytes` terminations classify
+  as `resource_budget` with `budget=none` (the closed `BudgetDimension` set has
+  no body-bytes member); adding it is a future RFC.
+- **ROADMAP placement deferred.** Recording the model under a release in
+  `ROADMAP.md` is a product-manager decision (the model is a cross-release
+  foundation, not inherently one `0.Y.0` outcome); it remains the one open PM
+  item before the goal fully closes.
 
 ### Product options discovered
 
-_Pending delivery._
+- Automatic retry, rate-limit waiting, and author-configurable caching are
+  follow-on goals that consume this contract (each requires its own RFC and
+  debits the aggregate budget rather than resetting it).
+- A distinct transport idle/connect timeout would graduate the reserved
+  `timeout` class from unproduced to emitted (its own RFC).
+- Threading the plan's declared replay safety through to the failure-path
+  enrichment (vs the v1 `SAFE` invariant) becomes meaningful only when a
+  non-replayable operation is introduced.
