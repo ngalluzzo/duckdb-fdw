@@ -10,7 +10,10 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import atexit
+import shutil
 import socket
+import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -39,6 +42,15 @@ SCAN_FROM = (
     "relation := 'duckdb_login_search_page')"
 )
 BASE_SQL = f"SELECT id, login, site_admin {SCAN_FROM} ORDER BY id"
+_CONTROLLED_CREDENTIAL_ROOTS: list[pathlib.Path] = []
+
+
+def _cleanup_controlled_credential_roots() -> None:
+    for root in _CONTROLLED_CREDENTIAL_ROOTS:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+atexit.register(_cleanup_controlled_credential_roots)
 
 
 class OracleServer(ThreadingHTTPServer):
@@ -341,10 +353,20 @@ def configure_controlled_environment(server: OracleServer) -> None:
 
 def load_controlled_extension(
     extension_path: pathlib.Path,
+    credential_root: pathlib.Path | None = None,
 ) -> duckdb.DuckDBPyConnection:
     connection = duckdb.connect(config={"allow_unsigned_extensions": "true"})
     if connection.execute("PRAGMA version").fetchone() != EXPECTED_DUCKDB:
         raise AssertionError("controlled oracle host identity drifted")
+    if credential_root is None:
+        credential_root = pathlib.Path(
+            tempfile.mkdtemp(
+                prefix="duckdb-api-controlled-credentials-", dir="/private/tmp"
+            )
+        )
+        _CONTROLLED_CREDENTIAL_ROOTS.append(credential_root)
+    root_literal = credential_root.resolve(strict=True).as_posix().replace("'", "''")
+    connection.execute(f"SET secret_directory = '{root_literal}'")
     quoted = extension_path.resolve(strict=True).as_posix().replace("'", "''")
     connection.execute(f"LOAD '{quoted}'")
     functions = connection.execute(

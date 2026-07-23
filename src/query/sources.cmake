@@ -10,6 +10,9 @@ set(QUERY_PRODUCT_COMPOSITION_SOURCES
     ${QUERY_PACKAGE_GENERATION_COMPOSITION_SOURCES}
     src/query/product_composition.cpp)
 set(QUERY_DUCKDB_SECRET_SOURCES
+    src/query/duckdb/credential_secret.cpp
+    src/query/duckdb/credential_storage.cpp
+    src/query/duckdb/credential_provider_adapter.cpp
     src/query/duckdb/secret_integration.cpp)
 set(QUERY_DUCKDB_ADAPTER_SUPPORT_SOURCES
     src/query/duckdb/complex_filter_adapter.cpp

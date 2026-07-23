@@ -30,8 +30,10 @@ behind their public interfaces; do not reproduce those rules in the adapter.
    fallback, and Semantics' structured category and reason. Explanation is not
    parsed and grants no Runtime authority. It performs no secret lookup, I/O,
    request construction, or expression-text reconstruction.
-5. Global initialization freezes the selected plan, resolves an explicitly
-   named temporary secret, and opens one Runtime stream.
+5. Global initialization freezes the selected plan and opens one Runtime
+   stream with a call-scoped credential provider. Runtime completes admission
+   before the provider resolves the explicitly named temporary, environment,
+   or persistent credential exactly once for that scan.
 6. Each scan pull validates complete row arity, planned scalar kinds, batch
    bounds, and planned nullability before changing a `DataChunk`. Runtime nulls
    become typed vector NULLs; zero, `false`, and empty strings stay valid.
@@ -65,7 +67,7 @@ Runtime registry.
 | Baseline request retention and copied plan selection | `duckdb/table_function_plan_state.*` | `table_function_plan_state_tests.cpp` in `duckdb_api_adapter_tests` |
 | Installed connector/runtime assembly | `product_composition.cpp`, `duckdb_api/product_composition.hpp` | `test/python/source_demo_contract.py` through `make test`; `make demo` for the live path |
 | Table-function registration, callback composition, explain, bind/init/scan, cancellation, or batch transfer | `duckdb/table_function_adapter.cpp` | `duckdb_api_adapter_tests`, `duckdb_api_adapter_stream_contract_tests` |
-| Secret registration, validation, or exact-name resolution | `duckdb/secret_integration.cpp`, `duckdb_api/duckdb_secret.hpp` | `duckdb_api_duckdb_secret_tests` |
+| Credential provider/storage registration, validation, exact-name resolution, or persistent storage | `duckdb/secret_integration.cpp`, `duckdb/credential_provider_adapter.*`, `duckdb/credential_secret.*`, `duckdb/credential_storage.*`, `duckdb_api/duckdb_secret.hpp`; bounded target `duckdb_api_query_credential_service` | `duckdb_api_duckdb_secret_tests` |
 | Extension identity, load order, or initialization containment | `duckdb/extension_entrypoint.cpp`, `duckdb_api_extension.hpp` | `test/sql/duckdb_api.test`, `test/python/source_demo_contract.py` |
 | Controlled end-to-end composition | `test/cpp/query/integration/` | `test/python/live_rest_product_contract.py`, `test/python/authenticated_relation_product_contract.py`, `test/python/repository_pagination_product_contract.py` |
 | GraphQL bind, explanation, nullable rows, SQL composition, and protocol errors through provider APIs | unchanged generic adapter plus `duckdb/scan_plan_explanation.*` | `duckdb_api_graphql_query_contract_tests` |

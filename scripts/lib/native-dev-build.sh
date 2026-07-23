@@ -158,6 +158,8 @@ run_tests() {
     )
     "${REPOSITORY_ROOT}/scripts/verify-loadable-inventory.sh" \
         "${ARTIFACT}" "${PINS_FILE}" transport
+    "${PINNED_PYTHON}" -I \
+        "${REPOSITORY_ROOT}/test/python/artifact_contract.py" "${ARTIFACT}"
     "${PINNED_PYTHON}" -I -B \
         "${REPOSITORY_ROOT}/test/python/live_rest_product_contract.py" \
         "${CONTROLLED_ARTIFACT}"

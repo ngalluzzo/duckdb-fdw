@@ -6,6 +6,15 @@ This file records user-visible changes to duckdb-fdw.
 
 ### Added
 
+- Durable `duckdb_api` credentials (RFC 0023): the closed provider surface now
+  supports `config(TOKEN ...)` and `environment(VARIABLE ...)` in temporary
+  memory or explicit persistent `IN duckdb_api` storage. Each scan retains one
+  opaque authority/revision snapshot across pagination; replacement,
+  environment rotation, deletion, and restart affect only later scans.
+- Bounded project-owned persistent credential storage with autocommit-only
+  mutation, owner-private descriptor-relative files, atomic index replacement,
+  an exclusive DatabaseInstance lock, redacted inventory, and fixed
+  `credential_provider` failures. Config values are plaintext at rest.
 - Flat list-of-scalar output columns (RFC 0022). Connector authors can declare
   `type: ARRAY` with one required v1 scalar `element_type` and explicit child
   nullability; DuckDB receives a native variable-length list while Runtime

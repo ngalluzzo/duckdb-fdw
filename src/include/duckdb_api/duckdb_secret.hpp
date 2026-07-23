@@ -1,7 +1,8 @@
 #pragma once
 
-#include "duckdb_api/authorization.hpp"
+#include "duckdb_api/credential_provider.hpp"
 
+#include <memory>
 #include <string>
 
 namespace duckdb {
@@ -9,10 +10,12 @@ namespace duckdb {
 class ClientContext;
 class ExtensionLoader;
 
-// Register Query Experience's DuckDB-specific secret boundary. The type is
-// `duckdb_api`; its sole provider is `config`, and that provider accepts only a
-// redacted TOKEN VARCHAR for explicitly temporary memory storage. It performs
-// no environment, filesystem, network, or implicit credential lookup.
+// Register Query Experience's DuckDB-specific credential boundary. The closed
+// providers are `config(TOKEN VARCHAR)` and
+// `environment(VARIABLE VARCHAR)`. Explicit TEMPORARY credentials use DuckDB's
+// memory storage; explicit PERSISTENT credentials use only the project-owned
+// `duckdb_api` storage. Provider selection remains SQL DDL state and never
+// enters a connector package or scan plan.
 //
 // DuckDB 1.5.4 exposes separate, non-transactional registration calls for a
 // secret type and provider and no corresponding unregister operation. A later
@@ -22,20 +25,12 @@ class ExtensionLoader;
 // the load rather than attempting repair.
 void RegisterDuckdbApiSecrets(ExtensionLoader &loader);
 
-// Resolve the current case-insensitive exact name through DuckDB's system-
-// catalog transaction and return one opaque Runtime capability. Resolution
-// queries only the exact `memory` storage and accepts a `duckdb_api/config`
-// KeyValueSecret whose host entry is explicitly temporary. Persistent or
-// alternate-storage entries cannot satisfy or make that selection ambiguous;
-// missing, malformed, or differently typed entries fail closed without
-// exposing values.
-//
-// The ClientContext, CatalogTransaction, SecretEntry, and plaintext token are
-// call-scoped. The DuckDB objects are destroyed before this function transfers
-// token ownership to ScanAuthorization, and none is retained by Query. Each
-// call therefore observes replacement or drop independently. Runtime, not this
-// module, owns bearer placement, destination policy, capability teardown, and
-// the explicit absence of a secure-zeroization guarantee.
-duckdb_api::ScanAuthorization ResolveDuckdbApiSecret(ClientContext &context, const std::string &logical_name);
+// Build one call-scoped adapter bound to the active ClientContext. Construction
+// performs no catalog, environment, or filesystem read. Runtime invokes the
+// adapter only after complete plan admission; resolution then checks exact
+// project memory and persistent state, returns one move-only authorization plus
+// opaque authority/revision identities, and retains no DuckDB object or
+// plaintext after returning.
+std::unique_ptr<duckdb_api::CredentialProvider> CreateDuckdbApiCredentialProvider(ClientContext &context);
 
 } // namespace duckdb

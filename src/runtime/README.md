@@ -4,9 +4,12 @@ This package executes an immutable `ScanPlan` as a bounded, cancelable stream
 of typed batches. It owns authentication execution, HTTP transport, decoding,
 pagination, network and resource enforcement, and stream lifecycle.
 
-Runtime accepts a complete plan and explicit authorization capability. It does
-not construct connector metadata, classify relational operations, or depend on
-DuckDB callback state.
+Runtime accepts a complete plan and either anonymous execution, an explicit
+authorization capability, or a call-scoped credential provider. It completes
+plan/profile admission before resolving a provider exactly once and retains
+that immutable credential plus its opaque authority/revision identity for the
+stream. It does not construct connector metadata, classify relational
+operations, choose credential storage, or depend on DuckDB callback state.
 
 Protocol-specific admission converts the current public Semantics handoff into
 an immutable Runtime profile. Package REST plans consume only their ordered
@@ -62,6 +65,7 @@ may additionally restrict execution to one exact host and port.
 
 Public consumer contracts are
 [`authorization.hpp`](../include/duckdb_api/authorization.hpp),
+[`credential_provider.hpp`](../include/duckdb_api/credential_provider.hpp),
 [`execution.hpp`](../include/duckdb_api/execution.hpp), and
 [`http_runtime.hpp`](../include/duckdb_api/http_runtime.hpp). Generation
 composition additionally consumes
@@ -86,8 +90,8 @@ live-network authority.
 
 ## Before changing execution code
 
-- Admit the complete plan and authorization capability before materializing
-  credentials or starting side effects.
+- Admit the complete plan and authorization/provider alternative before
+  resolving or materializing credentials or starting transport side effects.
 - Treat predicate category, accuracy, reason, remote/residual vocabulary, and
   explanation as producer facts to validate, never as an alternate request
   builder. Only the typed conditional input may select the admitted fixed field.
@@ -135,7 +139,7 @@ Tests mirror the production directories under `test/cpp/runtime/`:
 
 | Change area | Focused targets |
 | --- | --- |
-| Authorization and stream values | `duckdb_api_authorization_contract_tests`, `duckdb_api_execution_contract_tests` |
+| Authorization, credential snapshots, and stream values | `duckdb_api_authorization_contract_tests`, `duckdb_api_credential_provider_contract_tests`, `duckdb_api_execution_contract_tests` |
 | Generation ownership and publication lifecycle | `duckdb_api_runtime_generation_contract_tests`, `duckdb_api_runtime_generation_lifecycle_tests` |
 | Request, network, and resource policy | `duckdb_api_request_validation_tests`, `duckdb_api_network_policy_tests`, `duckdb_api_scan_resource_accounting_tests` |
 | URI and Link pagination | `duckdb_api_uri_reference_tests`, `duckdb_api_link_pagination_tests` |

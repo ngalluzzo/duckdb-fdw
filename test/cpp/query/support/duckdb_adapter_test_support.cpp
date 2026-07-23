@@ -1,4 +1,5 @@
 #include "query/support/duckdb_adapter_test_support.hpp"
+#include "query/support/isolated_credential_root.hpp"
 
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
@@ -19,6 +20,7 @@ std::string QueryError(duckdb::Connection &connection, const std::string &sql) {
 std::shared_ptr<QueryLifecycleProbe>
 RegisterQueryAdapter(duckdb::DuckDB &database, duckdb_api::CompiledConnector connector, QueryRuntimeScenario scenario) {
 	auto probe = std::shared_ptr<QueryLifecycleProbe>(new QueryLifecycleProbe());
+	ConfigureIsolatedCredentialRoot(database);
 	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_adapter_test");
 	duckdb::RegisterDuckdbApi(loader, std::move(connector), BuildQueryScenarioExecutor(scenario, probe));
 	return probe;

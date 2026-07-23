@@ -2,7 +2,7 @@
   "added_settings": [],
   "added_types": [],
   "authority_inputs": [
-    "explicit_named_temporary_duckdb_secret"
+    "explicit_named_duckdb_api_credential"
   ],
   "connector_package": {
     "api_version": "duckdb_api/v1",
@@ -20,7 +20,8 @@
     "authenticated_secret_missing": "[duckdb_api][bind] connector=github relation=authenticated_user: required named argument secret is missing",
     "graphql_errors": "[duckdb_api][remote_protocol] connector=github relation=viewer_repository_metrics field=errors: remote protocol response reported application errors",
     "graphql_secret_missing": "[duckdb_api][bind] connector=github relation=viewer_repository_metrics: required named argument secret is missing",
-    "oversized_token": "[duckdb_api][resource] field=header_bytes: TOKEN exceeds the 8192-byte bearer-token limit",
+    "oversized_token": "[duckdb_api][resource] field=header_bytes: credential exceeds the 8192-byte request-field limit",
+    "provider_failure": "[duckdb_api][authentication] connector=github relation=authenticated_user field=credential_provider: credential provider resolution failed [class=credential_provider rows_exposed=0]",
     "repository_secret_missing": "[duckdb_api][bind] connector=github relation=authenticated_repositories: required named argument secret is missing"
   },
   "duckdb": [
@@ -598,24 +599,40 @@
     }
   },
   "secret_type": {
-    "environment_provider": false,
-    "fields": {
-      "TOKEN": {
-        "duckdb_type": "VARCHAR",
-        "enforced_at": [
-          "secret_creation",
-          "secret_resolution",
-          "runtime_capability"
-        ],
-        "maximum_bytes": 8192,
-        "nonempty": true,
-        "redacted": true
-      }
+    "ambiguity": "reject_same_name_across_supported_storages",
+    "config": {
+      "field": "TOKEN",
+      "maximum_bytes": 8192,
+      "nonempty_visible_ascii": true,
+      "redacted": true,
+      "revision": "stable_until_replacement"
+    },
+    "environment": {
+      "field": "VARIABLE",
+      "maximum_name_bytes": 256,
+      "portable_identifier": "[A-Za-z_][A-Za-z0-9_]*",
+      "read": "exactly_once_per_scan_initialization",
+      "redacted": true,
+      "revision": "fresh_per_successful_scan"
     },
     "implicit_selection": false,
-    "persistent": false,
-    "provider": "config",
-    "storage": "memory",
+    "persistent": {
+      "config_plaintext_at_rest": true,
+      "maximum_index_bytes": 131072,
+      "maximum_live_records": 256,
+      "maximum_record_bytes": 16384,
+      "mutation": "autocommit_only",
+      "storage": "duckdb_api"
+    },
+    "providers": [
+      "config",
+      "environment"
+    ],
+    "scan_snapshot": "opaque_authority_and_revision_retained_for_stream",
+    "storages": [
+      "memory",
+      "duckdb_api"
+    ],
     "type": "duckdb_api"
   }
 }

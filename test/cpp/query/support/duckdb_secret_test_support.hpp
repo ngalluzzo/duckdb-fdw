@@ -1,6 +1,6 @@
 #pragma once
 
-#include "duckdb_api/authorization.hpp"
+#include "duckdb_api/credential_provider.hpp"
 
 #include <functional>
 #include <memory>
@@ -14,6 +14,21 @@ class ExtensionLoader;
 
 namespace duckdb_api_test {
 namespace duckdb_secret {
+
+class ScopedCredentialRoot final {
+public:
+	ScopedCredentialRoot();
+	~ScopedCredentialRoot() noexcept;
+
+	ScopedCredentialRoot(const ScopedCredentialRoot &) = delete;
+	ScopedCredentialRoot &operator=(const ScopedCredentialRoot &) = delete;
+
+	const std::string &Path() const noexcept;
+	void Configure(duckdb::Connection &connection) const;
+
+private:
+	std::string path;
+};
 
 // Shared fixture boundary for DuckDB secret tests. It centralizes product
 // registration, runtime canaries, safe failure assertions, and exact-name
@@ -29,20 +44,25 @@ void RequireAuthenticationFailure(const std::function<void()> &action, const std
 void RequireHeaderBudgetFailure(const std::function<void()> &action, const std::string &forbidden = "");
 void RequireInternalFailure(const std::function<void()> &action, const std::string &forbidden = "");
 void RequireCanaryAbsentFromInventory(duckdb::Connection &connection, const std::string &canary);
-std::unique_ptr<duckdb_api::ScanAuthorization> Resolve(duckdb::Connection &connection, const std::string &logical_name);
+std::unique_ptr<duckdb_api::CredentialSnapshot> Resolve(duckdb::Connection &connection,
+                                                        const std::string &logical_name);
+std::unique_ptr<duckdb_api::CredentialSnapshot> Resolve(duckdb::Connection &connection, const std::string &logical_name,
+                                                        duckdb_api::ExecutionControl &control);
 void RunTest(const char *name, const std::function<void()> &test);
 
 // Case entrypoints consumed by the intentionally small suite runner.
-void TestRegisteredSurfaceIsTemporaryConfigAndRedacted();
+void TestRegisteredSurfaceCoversAllProvidersAndStorageModes();
 void TestCreationRejectsImplicitPersistenceAndMalformedOptions();
 void TestFailedProviderRegistrationNeverPublishesScan();
-void TestResolutionValidatesTypeProviderShapeAndToken();
-void TestResolutionObservesReplacementDropAndMemoryIsolation();
-void TestResolutionUsesCurrentTransaction();
-void TestResolutionRequiresTemporaryMemoryIndependently();
-void TestResolutionRequiresAnActiveTransaction();
-void TestResolutionDoesNotQueryExcludedInterruptingStorage();
-void TestResolutionDoesNotQueryExcludedFaultingStorages();
+void TestResolutionRejectsMissingGenericAndAmbiguousEntries();
+void TestConfigAndEnvironmentIdentityLifecycles();
+void TestTemporaryResolutionUsesCurrentTransaction();
+void TestTemporaryResolutionDoesNotRequirePersistentStorage();
+void TestPersistentResolutionSurvivesRestartAndRequiresAutocommit();
+void TestPersistentStorageEnforcesLiveRecordBound();
+void TestPersistentResolutionCancellationAndShutdown();
+void TestPersistentMutationFailureAtomicity();
+void TestResolutionDoesNotQueryExcludedStorages();
 
 } // namespace duckdb_secret
 } // namespace duckdb_api_test

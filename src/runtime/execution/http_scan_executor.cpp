@@ -146,7 +146,6 @@ public:
 					request = ApiKeyAuthenticator::AuthorizeRest(*admitted_profile, std::move(request), *authorization);
 				}
 				auto response = transport->Execute(request, limits, combined);
-				authorization.reset();
 				CheckExecutionState(combined, deadline);
 				if (response.header_bytes > limits.max_header_bytes ||
 				    response.response_bytes > limits.max_response_bytes ||
@@ -177,6 +176,7 @@ public:
 			CheckExecutionState(combined, deadline);
 			if (offset >= decoded.size()) {
 				exhausted = true;
+				authorization.reset();
 				return false;
 			}
 			const auto remaining = decoded.size() - offset;
@@ -318,6 +318,8 @@ public:
 				return OpenGraphqlPaginatedScan(std::move(graphql_profile), ScanAuthorization::Anonymous(), transport,
 				                                profile.max_wall_milliseconds, control);
 			}
+		} catch (const ExecutionCancelled &) {
+			throw;
 		} catch (const ExecutionError &) {
 			throw;
 		} catch (...) {
@@ -361,6 +363,8 @@ protected:
 				return OpenGraphqlPaginatedScan(std::move(graphql_profile), std::move(authorization), transport,
 				                                profile.max_wall_milliseconds, control);
 			}
+		} catch (const ExecutionCancelled &) {
+			throw;
 		} catch (const ExecutionError &) {
 			throw;
 		} catch (...) {
@@ -388,7 +392,60 @@ protected:
 		return OpenSingle(std::move(admitted), std::move(authorization), control);
 	}
 
+	std::unique_ptr<BatchStream> OpenCredentialProviderEnvelope(const ScanPlan &plan,
+	                                                            const CredentialProvider &provider,
+	                                                            ExecutionControl &control) const override {
+		try {
+			if (plan.Operation().Protocol() == PlannedProtocol::GRAPHQL) {
+				auto graphql_profile = TryAdmitGraphqlPlan(plan, profile);
+				if (!graphql_profile) {
+					throw ExecutionError(ErrorStage::POLICY, "",
+					                     "scan plan is outside the installed execution profile");
+				}
+				if (!graphql_profile->RequiresBearer() || !plan.SecretReference().IsPresent()) {
+					throw ExecutionError(ErrorStage::AUTHENTICATION, "credential_provider",
+					                     "scan plan does not admit credential-provider resolution");
+				}
+				auto authorization = ResolveCredential(plan, provider, control);
+				return OpenGraphqlPaginatedScan(std::move(graphql_profile), std::move(authorization), transport,
+				                                profile.max_wall_milliseconds, control);
+			}
+		} catch (const ExecutionCancelled &) {
+			throw;
+		} catch (const ExecutionError &) {
+			throw;
+		} catch (...) {
+			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
+		}
+		auto paginated_profile = TryAdmitPaginatedRestPlan(plan, profile);
+		if (paginated_profile) {
+			if ((!paginated_profile->RequiresBearer() && !paginated_profile->RequiresApiKey()) ||
+			    !plan.SecretReference().IsPresent()) {
+				throw ExecutionError(ErrorStage::AUTHENTICATION, "credential_provider",
+				                     "scan plan does not admit credential-provider resolution");
+			}
+			auto authorization = ResolveCredential(plan, provider, control);
+			return OpenPaginatedRestScan(std::move(paginated_profile), std::move(authorization), transport,
+			                             profile.max_wall_milliseconds, control);
+		}
+		auto admitted = TryAdmitSingleResponseHttpPlan(plan, profile);
+		if (!admitted) {
+			throw ExecutionError(ErrorStage::POLICY, "", "scan plan is outside the installed execution profile");
+		}
+		if ((!admitted->RequiresBearer() && !admitted->RequiresApiKey()) || !plan.SecretReference().IsPresent()) {
+			throw ExecutionError(ErrorStage::AUTHENTICATION, "credential_provider",
+			                     "scan plan does not admit credential-provider resolution");
+		}
+		auto authorization = ResolveCredential(plan, provider, control);
+		return OpenSingle(std::move(admitted), std::move(authorization), control);
+	}
+
 private:
+	ScanAuthorization ResolveCredential(const ScanPlan &plan, const CredentialProvider &provider,
+	                                    ExecutionControl &control) const {
+		return ResolveCredentialAfterAdmission(plan, provider, control);
+	}
+
 	std::unique_ptr<BatchStream> OpenSingle(std::unique_ptr<const AdmittedRestRequestProfile> admitted,
 	                                        ScanAuthorization authorization, ExecutionControl &control) const {
 		CheckCancellation(control);

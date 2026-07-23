@@ -63,12 +63,13 @@ and bounded GraphQL cursor pagination.
 | Function | Authentication | Result |
 | --- | --- | --- |
 | `github_duckdb_login_search_page()` | None | Up to three public users |
-| `github_authenticated_user(secret := ...)` | Temporary bearer secret | Current user identity |
-| `github_authenticated_repositories(secret := ...)` | Temporary bearer secret | A bounded repository page chain |
-| `github_viewer_repository_metrics(secret := ...)` | Temporary bearer secret | Bounded repository metrics through GraphQL |
+| `github_authenticated_user(secret := ...)` | Named `duckdb_api` credential | Current user identity |
+| `github_authenticated_repositories(secret := ...)` | Named `duckdb_api` credential | A bounded repository page chain |
+| `github_viewer_repository_metrics(secret := ...)` | Named `duckdb_api` credential | Bounded repository metrics through GraphQL |
 
-For authenticated relations, create an explicitly named temporary DuckDB
-secret. Do not put a token in a connector package or committed SQL:
+For authenticated relations, create an explicitly named DuckDB credential. Do
+not put a token in a connector package or committed SQL. A temporary config
+credential is the simplest form:
 
 ```sql
 CREATE TEMPORARY SECRET github_default (
@@ -87,6 +88,29 @@ LIMIT 10;
 The extension resolves the secret only during execution and restricts it to
 the package-declared authenticator, placement, and destination. Bind,
 `DESCRIBE`, `EXPLAIN`, and `PREPARE` remain network-free.
+
+The closed provider/storage combinations are:
+
+```sql
+CREATE TEMPORARY SECRET github_default (
+    TYPE duckdb_api, PROVIDER environment, VARIABLE 'GITHUB_TOKEN'
+);
+
+CREATE PERSISTENT SECRET github_default IN duckdb_api (
+    TYPE duckdb_api, PROVIDER config, TOKEN '<github-token>'
+);
+
+CREATE PERSISTENT SECRET github_default IN duckdb_api (
+    TYPE duckdb_api, PROVIDER environment, VARIABLE 'GITHUB_TOKEN'
+);
+```
+
+Use `CREATE OR REPLACE` to rotate within one storage. A new scan observes the
+new revision; an active scan retains its original snapshot across every page.
+Drop a persistent credential with
+`DROP PERSISTENT SECRET github_default FROM duckdb_api`. The persistent config
+format is owner-private and bounded but not encrypted: prefer temporary or
+environment-backed credentials when plaintext at rest is unacceptable.
 
 The example runners use a hidden interactive token prompt and create only a
 temporary secret. The repository examples emit schema and aggregate or boolean
@@ -168,9 +192,10 @@ with the [source guide](src/README.md) before changing production code and
 - `0.9.0` supports explicit local package loading only. Package discovery,
   remote registries, installation, updates, signatures, and trust policy are
   not distribution features yet.
-- Authentication supports an explicitly named temporary `duckdb_api/config`
-  bearer secret. Persistent and environment-backed providers, implicit secret
-  selection, and OAuth are not supported.
+- Authentication supports explicitly named `duckdb_api/config` and
+  `duckdb_api/environment` credentials in temporary memory or the bounded
+  persistent `duckdb_api` storage. Implicit selection, OAuth, and arbitrary
+  external providers are not supported.
 - There are no retries, rate-limit waits, parallel page requests, resume state,
   or caching.
 - Compatibility is limited to the exact source-build cell above.

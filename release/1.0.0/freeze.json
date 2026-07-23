@@ -9,7 +9,7 @@
     "ROADMAP.md section '1.0.0 - narrow stable contract' states the public outcome.",
     "RFC 0009 sets the intended stable boundary and the six SemVer-governed categories.",
     "docs/ARCHITECTURE.md, docs/CONNECTOR_SPECIFICATIONS.md, docs/RUNTIME_CONTRACTS.md define current behavior.",
-    "Accepted RFCs 0010, 0011, 0012, 0013, 0014, 0021, and 0022 bind specific decisions propagated into those contracts.",
+    "Accepted RFCs 0010, 0011, 0012, 0013, 0014, 0021, 0022, and 0023 bind specific decisions propagated into those contracts.",
     "release/public-surface/inventory.json is the SQL-surface compatibility oracle.",
     "release/<version>/pins.json and public_contract.json are per-release identity and contract evidence."
   ],
@@ -146,6 +146,24 @@
     "indeterminate_replay_is_non_replayable": true,
     "binding": "The closed primary-class and replay-classification sets are layered additively on the existing ErrorStage classification. Existing rendered diagnostic strings are preserved verbatim. No retry, rate-limit waiting, caching, or circuit-breaking mechanism is enabled."
   },
+  "credential_providers": {
+    "providers": [
+      "config",
+      "environment"
+    ],
+    "config_storages": [
+      "duckdb_api",
+      "memory"
+    ],
+    "environment_storages": [
+      "duckdb_api",
+      "memory"
+    ],
+    "environment_resolution": "execution_time_exact_variable",
+    "persistent_storage": "bounded_project_duckdb_api",
+    "scan_snapshot_identity": "opaque_authority_and_revision",
+    "authority": "RFC 0023; docs/ARCHITECTURE.md Execution and authorization; docs/RUNTIME_CONTRACTS.md Credential provider and authorization snapshot"
+  },
   "relational_ownership": {
     "filter": "duckdb",
     "projection": "duckdb",
@@ -198,63 +216,7 @@
     }
   ],
   "accepted_candidate_revisions": [],
-  "accepted_contract_revisions": [
-    {
-      "id": "durable_credential_providers",
-      "kind": "credential_provider_contract",
-      "scope": "Add explicit environment-backed and bounded persistent duckdb_api credential sources, opaque authority/revision snapshots, and provider-classified failures without changing connector authentication declarations.",
-      "status": "accepted_by_rfc_pending_implementation",
-      "authority": "RFC 0023",
-      "target_release": "next_pre_1_0_minor",
-      "target_release_authority": "RFC 0014 pre-1.0 additive-change policy",
-      "current_contract_authority": [
-        {
-          "path": "src/query/duckdb/secret_integration.cpp",
-          "sha256": "d4bd6df48c5cf9e0f6628ccfd145ef35ed9d3b609cd08e3cc1657678be374399"
-        },
-        {
-          "path": "test/sql/duckdb_api.test",
-          "sha256": "45831bdec06b01738b0d4b3d3a1454aa8255079744c6d7d8187b42a6f5880e28"
-        }
-      ],
-      "current_contract": {
-        "providers": [
-          "config"
-        ],
-        "config_storages": [
-          "memory"
-        ],
-        "environment_storages": [],
-        "environment_resolution": "unsupported",
-        "persistent_storage": "unsupported",
-        "scan_snapshot_identity": "implicit_token_ownership_only"
-      },
-      "target_contract": {
-        "providers": [
-          "config",
-          "environment"
-        ],
-        "config_storages": [
-          "duckdb_api",
-          "memory"
-        ],
-        "environment_storages": [
-          "duckdb_api",
-          "memory"
-        ],
-        "environment_resolution": "execution_time_exact_variable",
-        "persistent_storage": "bounded_project_duckdb_api",
-        "scan_snapshot_identity": "opaque_authority_and_revision"
-      },
-      "graduation_rule": "When product source, SQL and restart demonstrations, provider/snapshot oracles, redaction and failure evidence, and fresh native gates pass, add the live credential-provider closed-set section and remove this pending revision in the same coherent commit.",
-      "retained_exclusions": [
-        "authenticators_beyond_anonymous_bearer_and_static_api_key",
-        "automatic_retry_or_rate_limit_waiting",
-        "author_configurable_cache_or_single_flight"
-      ],
-      "not_yet_current": true
-    }
-  ],
+  "accepted_contract_revisions": [],
   "not_yet_frozen": [
     {
       "item": "supported_duckdb_profile_platform_architecture_installation_matrix_rows",

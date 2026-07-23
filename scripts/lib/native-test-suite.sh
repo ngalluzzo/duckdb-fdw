@@ -37,6 +37,7 @@ CURL_FREE_LINKAGE_TARGETS=(
     duckdb_api_runtime_generation_contract_tests
     duckdb_api_runtime_generation_lifecycle_tests
     duckdb_api_authorization_contract_tests
+    duckdb_api_credential_provider_contract_tests
     duckdb_api_network_policy_tests
     duckdb_api_uri_reference_tests
     duckdb_api_link_pagination_tests
@@ -176,6 +177,7 @@ run_native_test_binaries() {
     "${native_test_root}/duckdb_api_runtime_generation_contract_tests" "${source_root}"
     "${native_test_root}/duckdb_api_runtime_generation_lifecycle_tests" "${source_root}"
     "${native_test_root}/duckdb_api_authorization_contract_tests"
+    "${native_test_root}/duckdb_api_credential_provider_contract_tests"
     "${native_test_root}/duckdb_api_network_policy_tests"
     "${native_test_root}/duckdb_api_uri_reference_tests"
     "${native_test_root}/duckdb_api_link_pagination_tests"

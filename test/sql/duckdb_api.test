@@ -9,6 +9,9 @@ Catalog Error: Table Function with name duckdb_api_scan does not exist!
 
 require duckdb_api
 
+statement ok
+SET secret_directory = '__TEST_DIR__/duckdb_api_credentials';
+
 query T
 SELECT extension_version
 FROM duckdb_extensions()
@@ -42,29 +45,60 @@ CREATE TEMPORARY SECRET sql_contract (
 );
 
 query TTTTT
-SELECT type, provider, storage, persistent, secret_string
+SELECT type, provider, storage, persistent,
+       secret_string LIKE '%token=redacted%'
+       AND secret_string NOT LIKE '%sql-contract-sentinel%'
 FROM duckdb_secrets()
 WHERE name = 'sql_contract';
 ----
-duckdb_api	config	memory	false	name=sql_contract;type=duckdb_api;provider=config;serializable=true;scope;token=redacted
+duckdb_api	config	memory	false	true
 
 statement ok
 DROP SECRET sql_contract;
 
-statement error
+statement ok
 CREATE TEMPORARY SECRET environment_contract (
     TYPE duckdb_api,
     PROVIDER environment,
     VARIABLE 'DUCKDB_API_RFC_TRIAL'
 );
+
+query TTTTT
+SELECT type, provider, storage, persistent,
+       secret_string LIKE '%variable=redacted%'
+       AND secret_string NOT LIKE '%DUCKDB_API_RFC_TRIAL%'
+FROM duckdb_secrets()
+WHERE name = 'environment_contract';
 ----
-Invalid Input Error: Secret provider 'environment' not found for type 'duckdb_api'
+duckdb_api	environment	memory	false	true
+
+statement ok
+DROP TEMPORARY SECRET environment_contract;
+
+statement ok
+CREATE PERSISTENT SECRET persistent_contract IN duckdb_api (
+    TYPE duckdb_api,
+    PROVIDER config,
+    TOKEN 'persistent-contract-sentinel'
+);
+
+query TTTTT
+SELECT type, provider, storage, persistent,
+       secret_string LIKE '%token=redacted%'
+       AND secret_string NOT LIKE '%persistent-contract-sentinel%'
+FROM duckdb_secrets()
+WHERE name = 'persistent_contract';
+----
+duckdb_api	config	duckdb_api	true	true
+
+statement ok
+DROP PERSISTENT SECRET persistent_contract;
 
 statement error
-CREATE SECRET persistent_contract (
+CREATE SECRET implicit_contract (
     TYPE duckdb_api,
     PROVIDER config,
     TOKEN 'rejected'
 );
 ----
-Invalid Input Error: [duckdb_api][authentication] duckdb_api secrets require explicit CREATE TEMPORARY SECRET
+Invalid Input Error: [duckdb_api][authentication] use explicit TEMPORARY memory storage or PERSISTENT IN duckdb_api storage

@@ -1,173 +1,36 @@
 #include "duckdb_api/duckdb_secret.hpp"
 
-#include "duckdb/catalog/catalog_transaction.hpp"
-#include "duckdb/common/exception.hpp"
-#include "duckdb/common/string_util.hpp"
-#include "duckdb/common/types/value.hpp"
-#include "duckdb/main/extension/extension_loader.hpp"
-#include "duckdb/main/secret/secret.hpp"
-#include "duckdb/main/secret/secret_manager.hpp"
-#include "duckdb_api/execution.hpp"
+#include "credential_provider_adapter_internal.hpp"
+#include "credential_secret_internal.hpp"
+#include "credential_storage_internal.hpp"
 
-#include <exception>
-#include <new>
-#include <string>
+#include "duckdb/common/exception.hpp"
+#include "duckdb/main/database.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb/main/secret/secret_manager.hpp"
+
 #include <utility>
 
 namespace duckdb {
 namespace {
 
-static const char DUCKDB_API_SECRET_TYPE[] = "duckdb_api";
-static const char DUCKDB_API_SECRET_PROVIDER[] = "config";
-static const char DUCKDB_API_TOKEN_KEY[] = "token";
-
-[[noreturn]] void ThrowCreationError(const char *message) {
-	throw InvalidInputException("[duckdb_api][authentication] %s", message);
-}
-
-[[noreturn]] void ThrowCreationHeaderBudgetError() {
+unique_ptr<BaseSecret> RejectGenericDeserialization(Deserializer &, BaseSecret) {
 	throw InvalidInputException(
-	    "[duckdb_api][resource] field=header_bytes: TOKEN exceeds the 8192-byte bearer-token limit");
-}
-
-[[noreturn]] void ThrowResolutionError(const char *message) {
-	throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::AUTHENTICATION, "secret", message);
-}
-
-unique_ptr<BaseSecret> CreateDuckdbApiSecret(ClientContext &, CreateSecretInput &input) {
-	if (!StringUtil::CIEquals(input.type, DUCKDB_API_SECRET_TYPE) ||
-	    !StringUtil::CIEquals(input.provider, DUCKDB_API_SECRET_PROVIDER)) {
-		ThrowCreationError("secret type and provider do not match the installed credential boundary");
-	}
-	if (input.persist_type != SecretPersistType::TEMPORARY) {
-		ThrowCreationError("duckdb_api secrets require explicit CREATE TEMPORARY SECRET");
-	}
-	if (!input.storage_type.empty() &&
-	    !StringUtil::CIEquals(input.storage_type, SecretManager::TEMPORARY_STORAGE_NAME)) {
-		ThrowCreationError("duckdb_api secrets support only temporary memory storage");
-	}
-
-	const auto token = input.options.find(DUCKDB_API_TOKEN_KEY);
-	if (token == input.options.end() || token->second.IsNull() || token->second.type().id() != LogicalTypeId::VARCHAR) {
-		ThrowCreationError("TOKEN must be a non-empty VARCHAR");
-	}
-	// DuckDB owns this value. Inspect it by reference so an oversized secret is
-	// rejected before Query allocates any additional credential-sized buffer.
-	const auto &token_text = StringValue::Get(token->second);
-	if (token_text.empty()) {
-		ThrowCreationError("TOKEN must be a non-empty VARCHAR");
-	}
-	if (token_text.size() > duckdb_api::ScanAuthorization::CredentialByteLimit()) {
-		ThrowCreationHeaderBudgetError();
-	}
-
-	auto secret =
-	    make_uniq<KeyValueSecret>(input.scope, DUCKDB_API_SECRET_TYPE, DUCKDB_API_SECRET_PROVIDER, input.name);
-	secret->secret_map[DUCKDB_API_TOKEN_KEY] = token->second;
-	secret->redact_keys.insert(DUCKDB_API_TOKEN_KEY);
-	return std::move(secret);
-}
-
-std::string ResolveToken(ClientContext &context, const std::string &logical_name) {
-	if (logical_name.empty()) {
-		ThrowResolutionError("a non-empty named duckdb_api secret is required");
-	}
-
-	unique_ptr<SecretEntry> entry;
-	try {
-		auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
-		auto &manager = SecretManager::Get(context);
-		// The storage selector is part of credential authority, not a
-		// post-lookup validation. DuckDB's all-storage lookup may lazily open and
-		// deserialize a same-named local-file secret before returning it. Query
-		// therefore asks only the exact temporary-memory backend; excluded
-		// persistent or alternate storages cannot satisfy or interfere with the
-		// selection.
-		entry = manager.GetSecretByName(transaction, logical_name, SecretManager::TEMPORARY_STORAGE_NAME);
-	} catch (const OutOfMemoryException &) {
-		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "secret",
-		                                 "named secret resolution exceeded available memory");
-	} catch (const InterruptException &) {
-		throw duckdb_api::ExecutionCancelled();
-	} catch (const Exception &) {
-		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::INTERNAL, "", "named secret resolution failed");
-	} catch (const std::bad_alloc &) {
-		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "secret",
-		                                 "named secret resolution exceeded available memory");
-	} catch (const std::exception &) {
-		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::INTERNAL, "", "named secret resolution failed");
-	} catch (...) {
-		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::INTERNAL, "", "named secret resolution failed");
-	}
-
-	if (!entry || !entry->secret) {
-		ThrowResolutionError("named duckdb_api secret was not found");
-	}
-	if (entry->persist_type != SecretPersistType::TEMPORARY ||
-	    !StringUtil::CIEquals(entry->storage_mode, SecretManager::TEMPORARY_STORAGE_NAME)) {
-		ThrowResolutionError("named duckdb_api secret is not temporary memory state");
-	}
-	if (!StringUtil::CIEquals(entry->secret->GetType(), DUCKDB_API_SECRET_TYPE)) {
-		ThrowResolutionError("named secret has the wrong type");
-	}
-	if (!StringUtil::CIEquals(entry->secret->GetProvider(), DUCKDB_API_SECRET_PROVIDER)) {
-		ThrowResolutionError("named duckdb_api secret has the wrong provider");
-	}
-
-	const auto *key_value = dynamic_cast<const KeyValueSecret *>(entry->secret.get());
-	if (!key_value) {
-		ThrowResolutionError("named duckdb_api secret is malformed");
-	}
-	Value token;
-	if (!key_value->TryGetValue(DUCKDB_API_TOKEN_KEY, token) || token.IsNull() ||
-	    token.type().id() != LogicalTypeId::VARCHAR) {
-		ThrowResolutionError("named duckdb_api secret has no usable token");
-	}
-	// Validate DuckDB's shared value in place. Returning the string below takes
-	// the single bounded plaintext snapshot that crosses into Runtime.
-	const auto &token_snapshot = StringValue::Get(token);
-	if (token_snapshot.empty()) {
-		ThrowResolutionError("named duckdb_api secret has no usable token");
-	}
-	if (token_snapshot.size() > duckdb_api::ScanAuthorization::CredentialByteLimit()) {
-		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "header_bytes",
-		                                 "bearer token exceeds the 8192-byte request-header limit");
-	}
-	return token_snapshot;
+	    "[duckdb_api][credential_provider] generic credential deserialization is not supported");
 }
 
 } // namespace
 
 void RegisterDuckdbApiSecrets(ExtensionLoader &loader) {
 	SecretType type;
-	type.name = DUCKDB_API_SECRET_TYPE;
-	type.deserializer = KeyValueSecret::Deserialize<KeyValueSecret>;
-	type.default_provider = DUCKDB_API_SECRET_PROVIDER;
+	type.name = duckdb_api_query_internal::DuckdbApiSecretType();
+	type.deserializer = RejectGenericDeserialization;
+	type.default_provider = duckdb_api_query_internal::DuckdbApiConfigProvider();
 	loader.RegisterSecretType(std::move(type));
 
-	CreateSecretFunction provider;
-	provider.secret_type = DUCKDB_API_SECRET_TYPE;
-	provider.provider = DUCKDB_API_SECRET_PROVIDER;
-	provider.function = CreateDuckdbApiSecret;
-	provider.named_parameters[DUCKDB_API_TOKEN_KEY] = LogicalType::VARCHAR;
-	loader.RegisterFunction(std::move(provider));
-}
-
-duckdb_api::ScanAuthorization ResolveDuckdbApiSecret(ClientContext &context, const std::string &logical_name) {
-	// ResolveToken owns and destroys DuckDB's cloned SecretEntry before Runtime
-	// receives the only Query-created plaintext snapshot. Query resolves only
-	// the secret name here; it has no access to which credential kind (bearer
-	// or api_key) the target relation declared, so it always constructs the
-	// kind-neutral Credential() capability. Remote Runtime alone decides
-	// bearer-header, named-header, or named-query placement from the admitted
-	// plan (RUNTIME_CONTRACTS.md's authorization-capability contract).
-	try {
-		auto token = ResolveToken(context, logical_name);
-		return duckdb_api::ScanAuthorization::Credential(std::move(token));
-	} catch (const std::bad_alloc &) {
-		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "authorization",
-		                                 "authorization capability could not be allocated within its memory budget");
-	}
+	auto &database = loader.GetDatabaseInstance();
+	SecretManager::Get(database).LoadSecretStorage(duckdb_api_query_internal::CreateDuckdbApiSecretStorage(database));
+	duckdb_api_query_internal::RegisterDuckdbApiCredentialProviders(loader);
 }
 
 } // namespace duckdb

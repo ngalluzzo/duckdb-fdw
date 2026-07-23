@@ -1,10 +1,15 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 
 namespace duckdb_api {
+
+class CredentialSnapshot;
+class CredentialProvider;
 
 namespace internal {
 class BearerAuthenticator;
@@ -13,7 +18,8 @@ class ApiKeyAuthenticator;
 
 // Runtime-owned authority for opening one scan. Callers must choose either the
 // anonymous alternative or the bearer alternative, then move the value into
-// ScanExecutor::OpenWithAuthorization.
+// ScanExecutor::OpenWithAuthorization. Provider-backed consumers instead use
+// CredentialSnapshot through ScanExecutor::OpenWithCredentialProvider.
 //
 // Bearer takes ownership of one token snapshot. That alternative is scoped
 // inside Runtime to bearer authentication for the exact admitted destination;
@@ -71,12 +77,21 @@ private:
 
 	ScanAuthorization(Kind kind, StateOwner state) noexcept;
 	static void DestroyState(State *state) noexcept;
+	static ScanAuthorization CredentialWithIdentity(std::string &&value, const std::array<std::uint8_t, 16> &authority,
+	                                                const std::array<std::uint8_t, 16> &revision);
+	bool HasCredentialIdentity() const noexcept;
+	bool SameCredentialAuthority(const ScanAuthorization &other) const noexcept;
+	bool SameCredentialRevision(const ScanAuthorization &other) const noexcept;
+	std::size_t CredentialAuthorityHash() const noexcept;
+	std::size_t CredentialRevisionHash() const noexcept;
 
 	Kind kind;
 	StateOwner state;
 	bool valid;
 
 	friend class ScanExecutor;
+	friend class CredentialSnapshot;
+	friend class CredentialProvider;
 	friend class internal::BearerAuthenticator;
 	friend class internal::ApiKeyAuthenticator;
 };

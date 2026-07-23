@@ -3,6 +3,7 @@
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb_api/connector.hpp"
 #include "duckdb_api_extension.hpp"
+#include "query/support/isolated_credential_root.hpp"
 #include "runtime/service/controlled_runtime_scenario.hpp"
 #include "support/require.hpp"
 
@@ -29,6 +30,7 @@ class ControlledProduct {
 public:
 	explicit ControlledProduct(ControlledRuntimeScenarioId scenario_id)
 	    : scenario(duckdb_api_test::BuildControlledRuntimeScenario(scenario_id)), database(nullptr) {
+		duckdb_api_test::ConfigureIsolatedCredentialRoot(database);
 		duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_graphql_product_test");
 		duckdb::RegisterDuckdbApi(loader, duckdb_api::BuildNativeGithubConnector(), scenario->Executor());
 	}

@@ -20,6 +20,7 @@ from .service import (
 
 
 TOKEN = "query-repository-product-token"
+TOKEN_B = "query-repository-product-token-replacement"
 REPOSITORY_SCHEMA = [
     ("id", "BIGINT"),
     ("full_name", "VARCHAR"),
@@ -90,13 +91,16 @@ def page_paths(pages: Iterable[int], *, selective: bool = False) -> list[str]:
 
 
 def assert_exact_requests(
-    server: RepositoryOracleServer, expected_paths: list[str]
+    server: RepositoryOracleServer,
+    expected_paths: list[str],
+    *,
+    token: str = TOKEN,
 ) -> None:
     requests = server.requests()
     if len(requests) != len(expected_paths):
         raise AssertionError("repository request count drifted")
     for request, expected_path in zip(requests, expected_paths, strict=True):
-        assert_request(request, expected_path, server)
+        assert_request(request, expected_path, server, token=token)
 
 
 def assert_request_paths_unordered(
@@ -160,7 +164,11 @@ def assert_ordered_tie_groups(
 
 
 def assert_request(
-    request: dict[str, object], expected_path: str, server: RepositoryOracleServer
+    request: dict[str, object],
+    expected_path: str,
+    server: RepositoryOracleServer,
+    *,
+    token: str = TOKEN,
 ) -> None:
     if request["method"] != "GET" or request["path"] != expected_path:
         raise AssertionError("repository request sequence drifted")
@@ -168,7 +176,7 @@ def assert_request(
     required = {
         "host": [f"127.0.0.1:{server.server_port}"],
         "accept": ["application/vnd.github+json"],
-        "authorization": [f"Bearer {TOKEN}"],
+        "authorization": [f"Bearer {token}"],
         "user-agent": ["duckdb-api/0.6.0"],
         "x-github-api-version": ["2022-11-28"],
     }
@@ -200,6 +208,7 @@ def assert_redacted(
     diagnostic = str(error)
     forbidden = (
         TOKEN,
+        TOKEN_B,
         RESPONSE_SECRET,
         HOSTILE_NEXT,
         "Authorization",

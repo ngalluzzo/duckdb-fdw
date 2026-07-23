@@ -211,21 +211,44 @@ public:
 	    : scenario(scenario_p), probe(std::move(probe_p)) {
 	}
 
-	std::unique_ptr<duckdb_api::BatchStream> Open(const duckdb_api::ScanPlan &,
-	                                              duckdb_api::ExecutionControl &) const override {
-		probe->legacy_open_calls.fetch_add(1, std::memory_order_relaxed);
-		throw std::logic_error("Query adapter invoked the legacy executor entry point");
+	std::unique_ptr<duckdb_api::BatchStream> Open(const duckdb_api::ScanPlan &plan,
+	                                              duckdb_api::ExecutionControl &control) const override {
+		if (plan.Authentication() != duckdb_api::FeatureState::DISABLED) {
+			throw std::logic_error("anonymous execution received an authenticated scan plan");
+		}
+		return OpenAuthorizationEnvelope(plan, duckdb_api::ScanAuthorization::Anonymous(), control);
 	}
 
 protected:
+	std::unique_ptr<duckdb_api::BatchStream>
+	OpenCredentialProviderEnvelope(const duckdb_api::ScanPlan &plan, const duckdb_api::CredentialProvider &provider,
+	                               duckdb_api::ExecutionControl &control) const override {
+		if (plan.Authentication() != duckdb_api::FeatureState::ENABLED) {
+			throw std::logic_error("credential provider received an anonymous scan plan");
+		}
+		if (plan.Operation().Protocol() == duckdb_api::PlannedProtocol::REST &&
+		    (plan.RelationName() != "authenticated_user" ||
+		     plan.Domain() != duckdb_api::BaseDomain::SUCCESSFUL_ROOT_OBJECT ||
+		     plan.Operation().Rest().cardinality != duckdb_api::PlannedCardinality::EXACTLY_ONE_ON_SUCCESS)) {
+			throw std::logic_error("credential provider received the wrong REST plan profile");
+		}
+		if (plan.Operation().Protocol() == duckdb_api::PlannedProtocol::GRAPHQL &&
+		    (plan.RelationName() != "viewer_repository_metrics" ||
+		     plan.Domain() != duckdb_api::BaseDomain::GRAPHQL_VIEWER_REPOSITORY_OCCURRENCES ||
+		     plan.Operation().Graphql().cardinality != duckdb_api::PlannedCardinality::ZERO_TO_MANY)) {
+			throw std::logic_error("credential provider received the wrong GraphQL plan profile");
+		}
+		auto authorization = ResolveCredentialAfterAdmission(plan, provider, control);
+		return OpenAuthorizationEnvelope(plan, std::move(authorization), control);
+	}
+
 	std::unique_ptr<duckdb_api::BatchStream>
 	OpenAuthorizationEnvelope(const duckdb_api::ScanPlan &plan, duckdb_api::ScanAuthorization authorization,
 	                          duckdb_api::ExecutionControl &control) const override {
 		probe->authorization_open_calls.fetch_add(1, std::memory_order_relaxed);
 		const auto alternative = AlternativeOf(authorization);
-		// Query's ResolveDuckdbApiSecret now supplies the kind-neutral CREDENTIAL
-		// alternative for every authenticated relation (bearer or api_key); it
-		// cannot know the target relation's credential kind at resolution time.
+		// Query's credential provider supplies the kind-neutral CREDENTIAL
+		// alternative for every authenticated relation (bearer or api_key).
 		// GITHUB_USER_BEARER (aliasing BEARER) remains valid for any direct
 		// legacy construction, so either non-anonymous alternative is authenticated.
 		const bool authenticated = alternative != AuthorizationAlternative::ANONYMOUS;

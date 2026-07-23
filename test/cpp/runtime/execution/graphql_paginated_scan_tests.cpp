@@ -5,6 +5,7 @@
 #include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 #include "duckdb_api/internal/runtime/pagination/graphql_cursor_pagination.hpp"
 #include "runtime/support/controlled_http_transport.hpp"
+#include "runtime/support/credential_provider_test_support.hpp"
 #include "runtime/support/http_scan_executor_test_support.hpp"
 #include "semantics/support/graphql_scan_plan_test_fixtures.hpp"
 #include "support/require.hpp"
@@ -24,6 +25,21 @@ namespace {
 using duckdb_api_test::ControlledResponse;
 using duckdb_api_test::ManualHttpExecutionControl;
 using duckdb_api_test::Require;
+using duckdb_api_test::RotatingCredentialProvider;
+
+class CancelOnPollControl final : public duckdb_api::ExecutionControl {
+public:
+	explicit CancelOnPollControl(std::size_t cancel_on_p) : cancel_on(cancel_on_p), polls(0) {
+	}
+
+	bool IsCancellationRequested() const noexcept override {
+		return ++polls >= cancel_on;
+	}
+
+private:
+	const std::size_t cancel_on;
+	mutable std::size_t polls;
+};
 
 std::string Node(uint64_t id) {
 	return std::string("{\"id\":\"R") + std::to_string(id) + "\",\"nameWithOwner\":\"owner/repository-" +
@@ -127,6 +143,57 @@ void TestSequentialBodiesBackpressureAndNullableRows() {
 		        "GraphQL request authority, redaction, or body allowance drifted");
 	}
 	Require(runtime->ConsumeBearerExpectation(2), "GraphQL pages did not retain one isolated authorization capability");
+}
+
+void TestCredentialProviderSnapshotPersistsAcrossGraphqlPages() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence(
+	    {ControlledResponse(200, Page(1, 1, true, "provider-cursor")), ControlledResponse(200, Page(2, 1, false, ""))});
+	ManualHttpExecutionControl control;
+	auto initial = duckdb_api_test::GeneratedHttpBearerToken(820);
+	auto replacement = duckdb_api_test::GeneratedHttpBearerToken(821);
+	RotatingCredentialProvider provider(initial);
+	runtime->ExpectBearer("Bearer " + initial);
+	auto stream = runtime->Executor()->OpenWithCredentialProvider(
+	    duckdb_api_test::BuildValidGraphqlScanPlanFixture("graphql_secret"), provider, control);
+	Require(provider.ResolveCount() == 1 && runtime->Observations().empty(),
+	        "GraphQL provider open did not resolve once before transport");
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows[0].values[0].varchar_value == "R1" &&
+	            runtime->Observations().size() == 1,
+	        "provider-backed GraphQL scan did not emit its first page");
+	provider.Replace(replacement);
+	Require(stream->Next(control, batch) && batch.rows[0].values[0].varchar_value == "R2" &&
+	            !stream->Next(control, batch),
+	        "provider replacement interrupted the existing GraphQL snapshot");
+	Require(provider.ResolveCount() == 1 && runtime->Observations().size() == 2 && runtime->ConsumeBearerExpectation(2),
+	        "GraphQL scan re-resolved or changed credential between pages");
+}
+
+void TestLateOpenCancellationRemainsCancellation() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	const auto plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("graphql_secret");
+	CancelOnPollControl direct_control(2);
+	bool direct_cancelled = false;
+	try {
+		(void)runtime->Executor()->OpenWithAuthorization(
+		    plan, duckdb_api::ScanAuthorization::GithubUserBearer("graphql_direct_cancel"), direct_control);
+	} catch (const duckdb_api::ExecutionCancelled &) {
+		direct_cancelled = true;
+	}
+	Require(direct_cancelled && runtime->Observations().empty(),
+	        "late direct GraphQL cancellation was relabeled or reached transport");
+
+	RotatingCredentialProvider provider("graphql_provider_cancel");
+	CancelOnPollControl provider_control(4);
+	bool provider_cancelled = false;
+	try {
+		(void)runtime->Executor()->OpenWithCredentialProvider(plan, provider, provider_control);
+	} catch (const duckdb_api::ExecutionCancelled &) {
+		provider_cancelled = true;
+	}
+	Require(provider_cancelled && provider.ResolveCount() == 1 && runtime->Observations().empty(),
+	        "late provider-backed GraphQL cancellation was relabeled or reached transport");
 }
 
 void TestAnonymousExecutionAndAuthorizationAlternatives() {
@@ -487,6 +554,8 @@ void TestMidScanFailureExposure() {
 int main() {
 	try {
 		TestSequentialBodiesBackpressureAndNullableRows();
+		TestCredentialProviderSnapshotPersistsAcrossGraphqlPages();
+		TestLateOpenCancellationRemainsCancellation();
 		TestAnonymousExecutionAndAuthorizationAlternatives();
 		TestRemoteErrorIsRedactedAndTerminal();
 		TestCloseBeforePullIsSideEffectFree();

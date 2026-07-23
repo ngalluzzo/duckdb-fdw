@@ -99,13 +99,13 @@ OpenAuthorizedStream(const duckdb_api::ScanPlan &plan, const std::shared_ptr<con
 		if (!reference.IsPresent()) {
 			throw std::logic_error("authenticated scan plan has no logical secret reference");
 		}
-		auto authorization = duckdb::ResolveDuckdbApiSecret(context, reference.Name());
-		return executor->OpenWithAuthorization(plan, std::move(authorization), control);
+		auto provider = duckdb::CreateDuckdbApiCredentialProvider(context);
+		return executor->OpenWithCredentialProvider(plan, *provider, control);
 	}
 	if (plan.Authentication() != duckdb_api::FeatureState::DISABLED) {
 		throw std::logic_error("scan plan has an unknown authentication state");
 	}
-	return executor->OpenWithAuthorization(plan, duckdb_api::ScanAuthorization::Anonymous(), control);
+	return executor->Open(plan, control);
 }
 
 // One DuckDB source task exclusively owns one mutable stream. Destruction is a

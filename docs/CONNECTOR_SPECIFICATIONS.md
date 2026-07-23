@@ -183,6 +183,14 @@ diagnostics, fixtures, digests, or catalog introspection for either kind;
 `EXPLAIN` renders the credential kind and the declared placement name (e.g.
 `authenticator:api_key,placement:header:X-Api-Key`) but never the value.
 
+The package does not choose the DuckDB credential provider or storage.
+Operators bind the logical relation argument to an explicitly created
+`duckdb_api` credential. The closed SQL surface admits `config(TOKEN ...)` and
+`environment(VARIABLE ...)`, each in temporary `memory` or persistent
+`duckdb_api` storage. Runtime resolves one immutable snapshot after plan
+admission; provider choice, storage, authority identity, and revision never
+become package syntax or request-policy facts.
+
 ### Network policy
 
 Every manifest declares a deny-only network policy:

@@ -20,7 +20,7 @@ EXPECTED_OUTBOUND_PROJECT_HEADER_BYTES = 16 * 1024
 EXPECTED_OUTBOUND_PROJECT_HEADER_ACCOUNTING = 'name + ": " + value + "\\r\\n"'
 EXPECTED_OVERSIZED_TOKEN_DIAGNOSTIC = (
     "[duckdb_api][resource] field=header_bytes: "
-    "TOKEN exceeds the 8192-byte bearer-token limit"
+    "credential exceeds the 8192-byte request-field limit"
 )
 EXPECTED_HEADER_BUDGET_REJECTION = {
     "category": "resource",
@@ -238,7 +238,7 @@ def main() -> int:
 
     repository_root = pathlib.Path(__file__).resolve().parents[2]
     expected_behavior = json.loads(
-        (repository_root / "release/0.9.0/public_contract.json").read_text()
+        (repository_root / "release/0.10.0/public_contract.json").read_text()
     )
     source_artifact = pathlib.Path(sys.argv[1]).resolve(strict=True)
     artifact_bytes = source_artifact.read_bytes()
@@ -291,6 +291,8 @@ def main() -> int:
         connection = duckdb.connect(config={"allow_unsigned_extensions": "true"})
         if connection.execute("PRAGMA version").fetchone() != EXPECTED_DUCKDB:
             raise AssertionError("artifact test host identity drifted")
+        credential_root = isolated / "credential-root"
+        connection.execute(f"SET secret_directory = '{credential_root.as_posix()}'")
 
         before_functions = set(
             connection.execute(
@@ -433,18 +435,49 @@ def main() -> int:
             WHERE name = 'artifact_contract'
             """
         ).fetchone()
-        if secret_inventory != (
-            "duckdb_api",
-            "config",
-            False,
-            "memory",
-            "name=artifact_contract;type=duckdb_api;provider=config;"
-            "serializable=true;scope;token=redacted",
-        ):
+        if secret_inventory[0:4] != ("duckdb_api", "config", False, "memory"):
             raise AssertionError(f"secret inventory drifted: {secret_inventory!r}")
-        if secret_sentinel in repr(secret_inventory):
+        if (
+            "token=redacted" not in secret_inventory[4]
+            or secret_sentinel in repr(secret_inventory)
+        ):
             raise AssertionError("secret inventory exposed the token")
         connection.execute("DROP SECRET artifact_contract")
+
+        environment_name = "DUCKDB_API_ARTIFACT_CREDENTIAL"
+        connection.execute(
+            "CREATE TEMPORARY SECRET artifact_environment "
+            "(TYPE duckdb_api, PROVIDER environment, "
+            f"VARIABLE '{environment_name}')"
+        )
+        environment_inventory = connection.execute(
+            "SELECT provider, persistent, storage, secret_string "
+            "FROM duckdb_secrets() WHERE name = 'artifact_environment'"
+        ).fetchone()
+        if (
+            environment_inventory[0:3] != ("environment", False, "memory")
+            or "variable=redacted" not in environment_inventory[3]
+            or environment_name in repr(environment_inventory)
+        ):
+            raise AssertionError("environment credential inventory drifted")
+        connection.execute("DROP TEMPORARY SECRET artifact_environment")
+
+        persistent_sentinel = "artifact-persistent-token-sentinel"
+        connection.execute(
+            "CREATE PERSISTENT SECRET artifact_persistent IN duckdb_api "
+            f"(TYPE duckdb_api, PROVIDER config, TOKEN '{persistent_sentinel}')"
+        )
+        persistent_inventory = connection.execute(
+            "SELECT provider, persistent, storage, secret_string "
+            "FROM duckdb_secrets() WHERE name = 'artifact_persistent'"
+        ).fetchone()
+        if (
+            persistent_inventory[0:3] != ("config", True, "duckdb_api")
+            or "token=redacted" not in persistent_inventory[3]
+            or persistent_sentinel in repr(persistent_inventory)
+        ):
+            raise AssertionError("persistent credential inventory drifted")
+        connection.execute("DROP PERSISTENT SECRET artifact_persistent")
 
         diagnostics = expected_behavior["diagnostics"]
         if diagnostics.get("oversized_token") != EXPECTED_OVERSIZED_TOKEN_DIAGNOSTIC:
@@ -463,10 +496,10 @@ def main() -> int:
             "SELECT secret_string FROM duckdb_secrets() "
             "WHERE name = 'artifact_contract_boundary'"
         ).fetchone()
-        if boundary_inventory != (
-            "name=artifact_contract_boundary;type=duckdb_api;provider=config;"
-            "serializable=true;scope;token=redacted",
-        ) or boundary_token in repr(boundary_inventory):
+        if (
+            "token=redacted" not in boundary_inventory[0]
+            or boundary_token in repr(boundary_inventory)
+        ):
             raise AssertionError("exact-limit TOKEN was rejected or not redacted")
         connection.execute("DROP SECRET artifact_contract_boundary")
 
@@ -629,7 +662,7 @@ def main() -> int:
         behavior = {
             "added_settings": [],
             "added_types": [],
-            "authority_inputs": ["explicit_named_temporary_duckdb_secret"],
+            "authority_inputs": ["explicit_named_duckdb_api_credential"],
             "connector_package": {
                 "api_version": "duckdb_api/v1",
                 "package_root": "explicit_absolute_local_directory",
@@ -645,7 +678,7 @@ def main() -> int:
             "diagnostics": diagnostics,
             "duckdb": list(EXPECTED_DUCKDB[:2]),
             "explain_fields": EXPECTED_EXPLAIN_FIELDS,
-            "extension": ["duckdb_api", "0.9.0"],
+            "extension": ["duckdb_api", "0.10.0"],
             "generated_functions": EXPECTED_GENERATED_FUNCTIONS,
             "management_functions": EXPECTED_MANAGEMENT_FUNCTIONS,
             "relations": [
@@ -841,29 +874,39 @@ def main() -> int:
             },
             "removed_relations": [{"connector": "example", "relation": "items"}],
             "secret_type": {
-                "environment_provider": False,
-                "fields": {
-                    "TOKEN": {
-                        "duckdb_type": "VARCHAR",
-                        "enforced_at": [
-                            "secret_creation",
-                            "secret_resolution",
-                            "runtime_capability",
-                        ],
-                        "maximum_bytes": EXPECTED_BEARER_TOKEN_BYTES,
-                        "nonempty": True,
-                        "redacted": True,
-                    }
+                "ambiguity": "reject_same_name_across_supported_storages",
+                "config": {
+                    "field": "TOKEN",
+                    "maximum_bytes": EXPECTED_BEARER_TOKEN_BYTES,
+                    "nonempty_visible_ascii": True,
+                    "redacted": True,
+                    "revision": "stable_until_replacement",
+                },
+                "environment": {
+                    "field": "VARIABLE",
+                    "maximum_name_bytes": 256,
+                    "portable_identifier": "[A-Za-z_][A-Za-z0-9_]*",
+                    "read": "exactly_once_per_scan_initialization",
+                    "redacted": True,
+                    "revision": "fresh_per_successful_scan",
                 },
                 "implicit_selection": False,
-                "persistent": False,
-                "provider": "config",
-                "storage": "memory",
+                "persistent": {
+                    "config_plaintext_at_rest": True,
+                    "maximum_index_bytes": 128 * 1024,
+                    "maximum_live_records": 256,
+                    "maximum_record_bytes": 16 * 1024,
+                    "mutation": "autocommit_only",
+                    "storage": "duckdb_api",
+                },
+                "providers": ["config", "environment"],
+                "scan_snapshot": "opaque_authority_and_revision_retained_for_stream",
+                "storages": ["memory", "duckdb_api"],
                 "type": "duckdb_api",
             },
         }
         if behavior != expected_behavior:
-            raise AssertionError("observed public inventory disagrees with the 0.9.0 contract")
+            raise AssertionError("observed public inventory disagrees with the 0.10.0 contract")
         print(
             json.dumps(
                 {

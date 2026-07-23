@@ -36,10 +36,10 @@ read either without inspecting product source.
 > with one required v1 scalar element type and independent outer/child
 > nullability. A fifth revision,
 > [RFC 0023](../../docs/rfcs/0023-add-durable-credential-providers.md)
-> (Accepted 2026-07-23), decides explicit environment-backed and bounded
+> (Accepted 2026-07-23), added explicit environment-backed and bounded
 > persistent credential sources plus opaque scan authority/revision snapshots.
-> Its implementation is pending, so `accepted_contract_revisions` records both
-> the current temporary-config boundary and the accepted target contract.
+> Its implementation has graduated into the live closed provider, storage, and
+> snapshot contract; `accepted_contract_revisions` is therefore empty.
 
 The `1.0.0` contract is not a single document. It is a layered set in which
 each layer draws authority from the one above it:
@@ -268,32 +268,32 @@ next request directly (the trust model both RFC 0016 and RFC 0019
 deliberately declined — see their Alternatives sections), and reverse or
 bidirectional traversal, still require their own later accepted RFC.
 
-## Accepted non-schema contract revisions pending implementation
+## Graduated non-schema contract revisions
 
-`accepted_contract_revisions` is the generic decided-future ledger for public
-or shared contracts that are not represented by the connector JSON schema.
-Every entry records its accepted RFC, current and target closed contract,
-current executable authority, target release, graduation rule, and the exact
-exclusion set that remains in force. The current authority is bound by scoped
-SHA-256 identities for the Query implementation and installed SQL oracle, so
-an additive provider or storage cannot retain old markers and pass as the old
-product. The freeze gate rejects omission, vocabulary or content drift,
-premature graduation, a non-Accepted RFC, and one-sided or coordinated loss of
-retained exclusions.
+`accepted_contract_revisions` remains the decided-future ledger for public or
+shared contracts that are not represented by the connector JSON schema. It is
+empty after the durable-credential revision graduated into the live closed
+contract below. Future entries must continue to record their accepted RFC,
+current and target authority, target release, graduation rule, and retained
+exclusions; the freeze gate rejects premature graduation and coordinated drift.
 
-### Durable credential providers — **accepted, implementation pending**
+### Durable credential providers — **accepted and live**
 
-[RFC 0023](../../docs/rfcs/0023-add-durable-credential-providers.md) accepts a
-closed two-provider contract: the existing `config` provider and a new exact
-`environment` provider, each usable from temporary `memory` or the bounded
-project-owned `duckdb_api` persistent storage. The installed product remains at
-`config` plus temporary `memory` until implementation graduates this entry.
-Graduation requires the live closed-set section, SQL/restart demonstrations,
-provider/snapshot lifecycle and redaction oracles, and fresh native gates in
-the same coherent change. The retained-exclusion set is exactly authenticator
-expansion, automatic retry/rate-limit waiting, and author-configurable
-caching/single-flight; it cannot contract before graduation even if the
-top-level freeze is changed at the same time.
+[RFC 0023](../../docs/rfcs/0023-add-durable-credential-providers.md) is live as
+the closed two-provider contract: exact `config` and `environment` providers,
+each usable from temporary `memory` or bounded, project-owned `duckdb_api`
+persistent storage. Environment variables are named explicitly and read only
+at execution. Persistent records are owner-private, bounded, lazy-opened, and
+selected without exposing payloads through inventory.
+
+Every admitted scan resolves exactly once and retains one immutable
+authorization snapshot plus opaque non-secret authority and revision identities
+across all pages and attempts. Replacement changes the revision while retaining
+authority; drop and recreation mint a new authority; prepared and concurrent
+executions resolve independently. Plans, packages, explanations, logs,
+diagnostics, caches, and unrelated scans receive none of the payload or identity
+material. The retained exclusions remain authenticator expansion, automatic
+retry or rate-limit waiting, and author-configurable caching or single-flight.
 
 ## Not yet frozen
 

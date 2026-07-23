@@ -2,6 +2,7 @@
 # focused consumers without importing the complete transport graph.
 set(REMOTE_RUNTIME_INTERFACE_SOURCES
     src/runtime/api/authorization.cpp
+    src/runtime/api/credential_provider.cpp
     src/runtime/api/execution_error.cpp)
 set(REMOTE_RUNTIME_GENERATION_SOURCES
     src/runtime/generation/generation_snapshot.cpp

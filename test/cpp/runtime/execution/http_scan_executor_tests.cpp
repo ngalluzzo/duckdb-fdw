@@ -1,13 +1,17 @@
 #include "duckdb_api/authorization.hpp"
+#include "duckdb_api/credential_provider.hpp"
 #include "runtime/support/controlled_http_transport.hpp"
 #include "runtime/support/http_scan_executor_test_support.hpp"
 #include "support/require.hpp"
 
 #include <atomic>
+#include <array>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -22,6 +26,55 @@ using duckdb_api_test::OneAuthenticatedHttpRow;
 using duckdb_api_test::Require;
 using duckdb_api_test::RequireHttpExecutionError;
 using duckdb_api_test::ThreeHttpRows;
+
+std::array<std::uint8_t, 16> ProviderIdentity(std::uint8_t marker) {
+	std::array<std::uint8_t, 16> result {};
+	result[0] = marker;
+	result[15] = static_cast<std::uint8_t>(marker ^ 0xa5U);
+	return result;
+}
+
+enum class HttpProviderMode { SUCCESS, THROW_EXECUTION_ERROR, CANCEL_AFTER_READ };
+
+class MutableHttpCredentialProvider final : public duckdb_api::CredentialProvider {
+public:
+	MutableHttpCredentialProvider(std::string token_p, HttpProviderMode mode_p = HttpProviderMode::SUCCESS)
+	    : token(std::move(token_p)), authority(ProviderIdentity(0x61)), revision(ProviderIdentity(0x71)), mode(mode_p),
+	      resolve_count(0) {
+	}
+
+	duckdb_api::CredentialSnapshot Resolve(const duckdb_api::PlannedSecretReference &,
+	                                       duckdb_api::ExecutionControl &control) const override {
+		resolve_count++;
+		if (mode == HttpProviderMode::THROW_EXECUTION_ERROR) {
+			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::INTERNAL, "host_path_canary",
+			                                 "provider_value_canary");
+		}
+		if (mode == HttpProviderMode::CANCEL_AFTER_READ) {
+			auto *manual = dynamic_cast<ManualHttpExecutionControl *>(&control);
+			Require(manual != nullptr, "cancelling provider received the wrong control type");
+			manual->Cancel();
+		}
+		auto value = token;
+		return StaticCredential(std::move(value), authority, revision);
+	}
+
+	void Replace(std::string token_p) {
+		token = std::move(token_p);
+		revision = ProviderIdentity(static_cast<std::uint8_t>(revision[0] + 1));
+	}
+
+	std::size_t ResolveCount() const noexcept {
+		return resolve_count;
+	}
+
+private:
+	std::string token;
+	std::array<std::uint8_t, 16> authority;
+	std::array<std::uint8_t, 16> revision;
+	HttpProviderMode mode;
+	mutable std::size_t resolve_count;
+};
 
 void TestOneRequestAndSchemaAlignedBatches() {
 	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
@@ -413,6 +466,91 @@ void TestCleanExhaustionOutlivesDeadline() {
 	        "clean exhaustion changed into a deadline failure or replayed transport");
 }
 
+void TestCredentialProviderSnapshotRotation() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	ManualHttpExecutionControl control;
+	auto first_token = GeneratedHttpBearerToken(101);
+	auto second_token = GeneratedHttpBearerToken(102);
+	MutableHttpCredentialProvider provider(first_token);
+	runtime->Respond(200, OneAuthenticatedHttpRow("first-provider-snapshot"));
+	runtime->ExpectBearer("Bearer " + first_token);
+	auto first_stream =
+	    runtime->Executor()->OpenWithCredentialProvider(BuildAuthenticatedHttpPlan(), provider, control);
+	Require(provider.ResolveCount() == 1 && runtime->Observation().request_count == 0,
+	        "provider-backed Open did not resolve once before transport");
+	provider.Replace(second_token);
+	duckdb_api::TypedBatch first_batch;
+	Require(first_stream->Next(control, first_batch) &&
+	            first_batch.rows[0].values[1].varchar_value == "first-provider-snapshot" &&
+	            runtime->ConsumeBearerExpectation(1),
+	        "credential replacement mutated an already-open stream snapshot");
+	Require(!first_stream->Next(control, first_batch), "provider-backed single response did not exhaust cleanly");
+
+	runtime->Respond(200, OneAuthenticatedHttpRow("second-provider-snapshot"));
+	runtime->ExpectBearer("Bearer " + second_token);
+	auto second_stream =
+	    runtime->Executor()->OpenWithCredentialProvider(BuildAuthenticatedHttpPlan(), provider, control);
+	duckdb_api::TypedBatch second_batch;
+	Require(provider.ResolveCount() == 2 && second_stream->Next(control, second_batch) &&
+	            second_batch.rows[0].values[1].varchar_value == "second-provider-snapshot" &&
+	            runtime->ConsumeBearerExpectation(1),
+	        "later scan did not resolve the replacement credential revision");
+	Require(!second_stream->Next(control, second_batch), "replacement scan did not exhaust cleanly");
+}
+
+void TestCredentialProviderAdmissionAndFailureBoundary() {
+	ManualHttpExecutionControl control;
+	const auto anonymous_runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	MutableHttpCredentialProvider anonymous_provider(GeneratedHttpBearerToken(111));
+	bool rejected = false;
+	try {
+		(void)anonymous_runtime->Executor()->OpenWithCredentialProvider(BuildAnonymousHttpPlan(), anonymous_provider,
+		                                                                control);
+	} catch (const duckdb_api::ExecutionError &error) {
+		rejected = error.Stage() == duckdb_api::ErrorStage::AUTHENTICATION;
+	}
+	Require(rejected && anonymous_provider.ResolveCount() == 0 && anonymous_runtime->Observation().request_count == 0,
+	        "anonymous plan observed the credential provider or transport");
+
+	const auto failed_runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	MutableHttpCredentialProvider failed_provider(GeneratedHttpBearerToken(112),
+	                                              HttpProviderMode::THROW_EXECUTION_ERROR);
+	rejected = false;
+	try {
+		(void)failed_runtime->Executor()->OpenWithCredentialProvider(BuildAuthenticatedHttpPlan(), failed_provider,
+		                                                             control);
+	} catch (const duckdb_api::ExecutionError &error) {
+		rejected = true;
+		Require(error.Stage() == duckdb_api::ErrorStage::AUTHENTICATION && error.Field() == "credential_provider" &&
+		            error.SafeMessage() == "credential provider resolution failed" && error.Classified(),
+		        "concrete executor did not normalize provider failure");
+		const auto &properties = error.Properties();
+		Require(properties.failure_class == duckdb_api::FailureClass::CREDENTIAL_PROVIDER &&
+		            properties.phase == duckdb_api::FailurePhase::ADMIT && properties.step == 0 &&
+		            properties.attempt == 1 && properties.rows_exposed == 0 &&
+		            properties.remote_status_class == duckdb_api::RemoteStatusClass::NONE &&
+		            properties.terminating_budget == duckdb_api::BudgetDimension::NONE &&
+		            properties.replay_classification == duckdb_api::ReplayClassification::REPLAYABLE_BEFORE_EXPOSURE,
+		        "concrete provider failure properties drifted");
+	}
+	Require(rejected && failed_provider.ResolveCount() == 1 && failed_runtime->Observation().request_count == 0,
+	        "provider failure reached transport or retried resolution");
+
+	const auto cancelled_runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	ManualHttpExecutionControl cancelled_control;
+	MutableHttpCredentialProvider cancelled_provider(GeneratedHttpBearerToken(113),
+	                                                 HttpProviderMode::CANCEL_AFTER_READ);
+	bool cancelled = false;
+	try {
+		(void)cancelled_runtime->Executor()->OpenWithCredentialProvider(BuildAuthenticatedHttpPlan(),
+		                                                                cancelled_provider, cancelled_control);
+	} catch (const duckdb_api::ExecutionCancelled &) {
+		cancelled = true;
+	}
+	Require(cancelled && cancelled_provider.ResolveCount() == 1 && cancelled_runtime->Observation().request_count == 0,
+	        "post-provider cancellation entered a stream or transport");
+}
+
 } // namespace
 
 int main() {
@@ -428,6 +566,8 @@ int main() {
 		TestCancellationAndIdempotentClose();
 		TestDeadlinePersistsAcrossBatchPulls();
 		TestCleanExhaustionOutlivesDeadline();
+		TestCredentialProviderSnapshotRotation();
+		TestCredentialProviderAdmissionAndFailureBoundary();
 		std::cout << "HTTP scan executor tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

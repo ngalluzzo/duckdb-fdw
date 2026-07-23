@@ -1,6 +1,7 @@
 #include "query/support/duckdb_secret_test_support.hpp"
 
 #include "duckdb/catalog/catalog_transaction.hpp"
+#include "duckdb/common/local_file_system.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
@@ -9,9 +10,12 @@
 #include "duckdb_api/duckdb_secret.hpp"
 #include "duckdb_api/execution.hpp"
 #include "duckdb_api_extension.hpp"
+#include "semantics/support/scan_plan_test_fixtures.hpp"
 #include "support/require.hpp"
 
+#include <cstdlib>
 #include <stdexcept>
+#include <unistd.h>
 #include <utility>
 
 namespace duckdb_api_test {
@@ -26,7 +30,39 @@ public:
 	}
 };
 
+class ManualControl final : public duckdb_api::ExecutionControl {
+public:
+	bool IsCancellationRequested() const noexcept override {
+		return false;
+	}
+};
+
 } // namespace
+
+ScopedCredentialRoot::ScopedCredentialRoot() {
+	char pattern[] = "/private/tmp/duckdb-api-credential-tests-XXXXXX";
+	const auto *created = ::mkdtemp(pattern);
+	if (!created) {
+		throw std::runtime_error("could not create isolated credential test root");
+	}
+	path = created;
+}
+
+ScopedCredentialRoot::~ScopedCredentialRoot() noexcept {
+	try {
+		duckdb::LocalFileSystem().RemoveDirectory(path);
+	} catch (...) {
+	}
+}
+
+const std::string &ScopedCredentialRoot::Path() const noexcept {
+	return path;
+}
+
+void ScopedCredentialRoot::Configure(duckdb::Connection &connection) const {
+	auto result = connection.Query("SET secret_directory = '" + path + "'");
+	Require(!result->HasError(), "could not configure isolated credential test root");
+}
 
 std::string TokenCanary(char marker) {
 	std::string result(11, 'q');
@@ -69,8 +105,7 @@ void RequireAuthenticationFailure(const std::function<void()> &action, const std
 		rejected = true;
 		Require(error.Stage() == duckdb_api::ErrorStage::AUTHENTICATION,
 		        "secret resolution used the wrong error stage");
-		Require(error.Field() == "secret" || error.Field() == "authorization",
-		        "secret resolution used an unstable safe field");
+		Require(error.Field() == "credential_provider", "secret resolution used an unstable safe field");
 		Require(!error.SafeMessage().empty() && error.SafeMessage().size() <= 128,
 		        "secret resolution produced an empty or unbounded diagnostic");
 		Require(forbidden.empty() || error.SafeMessage().find(forbidden) == std::string::npos,
@@ -80,36 +115,11 @@ void RequireAuthenticationFailure(const std::function<void()> &action, const std
 }
 
 void RequireHeaderBudgetFailure(const std::function<void()> &action, const std::string &forbidden) {
-	bool rejected = false;
-	try {
-		action();
-	} catch (const duckdb_api::ExecutionError &error) {
-		rejected = true;
-		Require(error.Stage() == duckdb_api::ErrorStage::RESOURCE,
-		        "oversized secret resolution used the wrong error stage");
-		Require(error.Field() == "header_bytes", "oversized secret resolution used an unstable resource field");
-		Require(error.SafeMessage() == "bearer token exceeds the 8192-byte request-header limit",
-		        "oversized secret resolution used an unstable safe diagnostic");
-		Require(forbidden.empty() || error.SafeMessage().find(forbidden) == std::string::npos,
-		        "oversized secret resolution exposed credential bytes");
-	}
-	Require(rejected, "oversized secret resolution did not fail closed");
+	RequireAuthenticationFailure(action, forbidden);
 }
 
 void RequireInternalFailure(const std::function<void()> &action, const std::string &forbidden) {
-	bool rejected = false;
-	try {
-		action();
-	} catch (const duckdb_api::ExecutionError &error) {
-		rejected = true;
-		Require(error.Stage() == duckdb_api::ErrorStage::INTERNAL, "host secret failure used the wrong error stage");
-		Require(error.Field().empty(), "host secret failure exposed an unstable field");
-		Require(error.SafeMessage() == "named secret resolution failed",
-		        "host secret failure did not use the fixed safe diagnostic");
-		Require(forbidden.empty() || error.SafeMessage().find(forbidden) == std::string::npos,
-		        "host secret failure exposed credential bytes");
-	}
-	Require(rejected, "host secret failure did not fail closed");
+	RequireAuthenticationFailure(action, forbidden);
 }
 
 void RequireCanaryAbsentFromInventory(duckdb::Connection &connection, const std::string &canary) {
@@ -121,12 +131,19 @@ void RequireCanaryAbsentFromInventory(duckdb::Connection &connection, const std:
 	}
 }
 
-std::unique_ptr<duckdb_api::ScanAuthorization> Resolve(duckdb::Connection &connection,
-                                                       const std::string &logical_name) {
-	std::unique_ptr<duckdb_api::ScanAuthorization> result;
+std::unique_ptr<duckdb_api::CredentialSnapshot> Resolve(duckdb::Connection &connection,
+                                                        const std::string &logical_name) {
+	ManualControl control;
+	return Resolve(connection, logical_name, control);
+}
+
+std::unique_ptr<duckdb_api::CredentialSnapshot> Resolve(duckdb::Connection &connection, const std::string &logical_name,
+                                                        duckdb_api::ExecutionControl &control) {
+	std::unique_ptr<duckdb_api::CredentialSnapshot> result;
 	connection.context->RunFunctionInTransaction([&]() {
-		result.reset(
-		    new duckdb_api::ScanAuthorization(duckdb::ResolveDuckdbApiSecret(*connection.context, logical_name)));
+		auto provider = duckdb::CreateDuckdbApiCredentialProvider(*connection.context);
+		const auto plan = duckdb_api_test::BuildValidAuthenticatedPlanFixture(logical_name);
+		result.reset(new duckdb_api::CredentialSnapshot(provider->Resolve(plan.SecretReference(), control)));
 	});
 	return result;
 }

@@ -3,6 +3,7 @@
 #include "duckdb_api/internal/runtime/authentication/api_key_authenticator.hpp"
 #include "duckdb_api/internal/runtime/authentication/bearer_authenticator.hpp"
 
+#include <array>
 #include <new>
 #include <utility>
 
@@ -26,16 +27,40 @@ bool IsSafeBearerToken(const std::string &token) {
 	return true;
 }
 
+std::size_t HashIdentity(const std::array<std::uint8_t, 16> &bytes) noexcept {
+	std::size_t result = sizeof(std::size_t) == 8 ? static_cast<std::size_t>(1469598103934665603ULL)
+	                                              : static_cast<std::size_t>(2166136261U);
+	const std::size_t prime =
+	    sizeof(std::size_t) == 8 ? static_cast<std::size_t>(1099511628211ULL) : static_cast<std::size_t>(16777619U);
+	for (const auto byte : bytes) {
+		result ^= static_cast<std::size_t>(byte);
+		result *= prime;
+	}
+	return result;
+}
+
 } // namespace
 
 class ScanAuthorization::State {
 public:
-	explicit State(std::string token_p) : token(std::move(token_p)) {
+	explicit State(std::string token_p)
+	    : token(std::move(token_p)), authority {}, revision {}, has_credential_identity(false) {
+	}
+
+	State(std::string token_p, const std::array<std::uint8_t, 16> &authority_p,
+	      const std::array<std::uint8_t, 16> &revision_p)
+	    : token(std::move(token_p)), authority(authority_p), revision(revision_p), has_credential_identity(true) {
 	}
 
 private:
 	std::string token;
+	// Non-secret random identity state moves with the token so a stream cannot
+	// outlive or separate it from the credential revision it admitted.
+	std::array<std::uint8_t, 16> authority;
+	std::array<std::uint8_t, 16> revision;
+	bool has_credential_identity;
 
+	friend class ScanAuthorization;
 	friend class internal::BearerAuthenticator;
 	friend class internal::ApiKeyAuthenticator;
 };
@@ -121,6 +146,46 @@ ScanAuthorization ScanAuthorization::Credential(std::string &&value) {
 		throw ExecutionError(ErrorStage::RESOURCE, "authorization",
 		                     "authorization capability could not be allocated within its memory budget");
 	}
+}
+
+ScanAuthorization ScanAuthorization::CredentialWithIdentity(std::string &&value,
+                                                            const std::array<std::uint8_t, 16> &authority,
+                                                            const std::array<std::uint8_t, 16> &revision) {
+	if (value.size() > CredentialByteLimit()) {
+		throw ExecutionError(ErrorStage::RESOURCE, "header_bytes",
+		                     "credential value exceeds the 8192-byte request-field limit");
+	}
+	if (!IsSafeBearerToken(value)) {
+		throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization",
+		                     "credential authorization requires a non-empty visible-ASCII value");
+	}
+	try {
+		return ScanAuthorization(Kind::CREDENTIAL, StateOwner(new State(std::move(value), authority, revision),
+		                                                      &ScanAuthorization::DestroyState));
+	} catch (const std::bad_alloc &) {
+		throw ExecutionError(ErrorStage::RESOURCE, "authorization",
+		                     "authorization capability could not be allocated within its memory budget");
+	}
+}
+
+bool ScanAuthorization::HasCredentialIdentity() const noexcept {
+	return valid && kind == Kind::CREDENTIAL && state && state->has_credential_identity;
+}
+
+bool ScanAuthorization::SameCredentialAuthority(const ScanAuthorization &other) const noexcept {
+	return HasCredentialIdentity() && other.HasCredentialIdentity() && state->authority == other.state->authority;
+}
+
+bool ScanAuthorization::SameCredentialRevision(const ScanAuthorization &other) const noexcept {
+	return HasCredentialIdentity() && other.HasCredentialIdentity() && state->revision == other.state->revision;
+}
+
+std::size_t ScanAuthorization::CredentialAuthorityHash() const noexcept {
+	return HasCredentialIdentity() ? HashIdentity(state->authority) : 0;
+}
+
+std::size_t ScanAuthorization::CredentialRevisionHash() const noexcept {
+	return HasCredentialIdentity() ? HashIdentity(state->revision) : 0;
 }
 
 std::string internal::BearerAuthenticator::CopyToken(const ScanAuthorization &authorization) {

@@ -9,7 +9,6 @@ drift between the freeze and the authoritative sources fails closed.
 
 from __future__ import annotations
 
-import hashlib
 import pathlib
 import re
 from typing import Any
@@ -115,42 +114,18 @@ REQUIRED_CONTRACT_REVISION_KEYS = frozenset(
     }
 )
 
-EXPECTED_CONTRACT_REVISION_IDS = frozenset({"durable_credential_providers"})
+EXPECTED_CONTRACT_REVISION_IDS = frozenset()
 
-EXPECTED_CURRENT_CREDENTIAL_PROVIDER_CONTRACT = {
-    "providers": ["config"],
-    "config_storages": ["memory"],
-    "environment_storages": [],
-    "environment_resolution": "unsupported",
-    "persistent_storage": "unsupported",
-    "scan_snapshot_identity": "implicit_token_ownership_only",
-}
-
-EXPECTED_TARGET_CREDENTIAL_PROVIDER_CONTRACT = {
+EXPECTED_CREDENTIAL_PROVIDER_CONTRACT = {
     "providers": ["config", "environment"],
     "config_storages": ["duckdb_api", "memory"],
     "environment_storages": ["duckdb_api", "memory"],
     "environment_resolution": "execution_time_exact_variable",
     "persistent_storage": "bounded_project_duckdb_api",
     "scan_snapshot_identity": "opaque_authority_and_revision",
+    "authority": "RFC 0023; docs/ARCHITECTURE.md Execution and authorization; "
+    "docs/RUNTIME_CONTRACTS.md Credential provider and authorization snapshot",
 }
-
-EXPECTED_CURRENT_CREDENTIAL_ARTIFACT_IDENTITIES = [
-    {
-        "path": "src/query/duckdb/secret_integration.cpp",
-        "sha256": "d4bd6df48c5cf9e0f6628ccfd145ef35ed9d3b609cd08e3cc1657678be374399",
-    },
-    {
-        "path": "test/sql/duckdb_api.test",
-        "sha256": "45831bdec06b01738b0d4b3d3a1454aa8255079744c6d7d8187b42a6f5880e28",
-    },
-]
-
-EXPECTED_CREDENTIAL_PROVIDER_RETAINED_EXCLUSIONS = [
-    "authenticators_beyond_anonymous_bearer_and_static_api_key",
-    "automatic_retry_or_rate_limit_waiting",
-    "author_configurable_cache_or_single_flight",
-]
 
 MANDATORY_EXCLUSIONS = frozenset(
     {
@@ -159,6 +134,7 @@ MANDATORY_EXCLUSIONS = frozenset(
         "internal_types_and_traits_public",
         "central_connector_discovery_or_distribution_registry",
         "connector_package_signing_or_trust_infrastructure",
+        "authenticators_beyond_anonymous_bearer_and_static_api_key",
         "automatic_retry_or_rate_limit_waiting",
         "author_configurable_cache_or_single_flight",
         "dynamic_schemas",
@@ -392,19 +368,15 @@ def _verify_accepted_candidate_revisions(
         )
 
 
-def _verify_current_credential_provider_artifacts(repository_root: pathlib.Path) -> None:
-    for identity in EXPECTED_CURRENT_CREDENTIAL_ARTIFACT_IDENTITIES:
-        artifact = repository_root / identity["path"]
-        actual = hashlib.sha256(artifact.read_bytes()).hexdigest()
-        if actual != identity["sha256"]:
-            raise FreezeError(
-                "current credential-provider artifact identity drifted before the accepted revision graduated: "
-                f"{identity['path']!r}"
-            )
+def _verify_credential_provider_contract(freeze: dict[str, Any]) -> None:
+    if freeze.get("credential_providers") != EXPECTED_CREDENTIAL_PROVIDER_CONTRACT:
+        raise FreezeError(
+            "freeze credential-provider closed set disagrees with the graduated RFC 0023 contract"
+        )
 
 
 def _verify_accepted_contract_revisions(
-    freeze: dict[str, Any], *, rfc_directory: pathlib.Path, repository_root: pathlib.Path
+    freeze: dict[str, Any], *, rfc_directory: pathlib.Path
 ) -> None:
     revisions = freeze.get("accepted_contract_revisions")
     if not isinstance(revisions, list):
@@ -453,24 +425,9 @@ def _verify_accepted_contract_revisions(
                 f"{sorted(missing_exclusions)}"
             )
 
-        if entry["kind"] == "credential_provider_contract":
-            if retained != EXPECTED_CREDENTIAL_PROVIDER_RETAINED_EXCLUSIONS:
-                raise FreezeError(
-                    "accepted credential-provider revision retained exclusions drifted from RFC 0023"
-                )
-            if entry["current_contract"] != EXPECTED_CURRENT_CREDENTIAL_PROVIDER_CONTRACT:
-                raise FreezeError(
-                    "accepted credential-provider revision current contract drifted from the Query product oracle"
-                )
-            if entry["target_contract"] != EXPECTED_TARGET_CREDENTIAL_PROVIDER_CONTRACT:
-                raise FreezeError("accepted credential-provider revision target contract drifted from RFC 0023")
-            if entry["current_contract_authority"] != EXPECTED_CURRENT_CREDENTIAL_ARTIFACT_IDENTITIES:
-                raise FreezeError("accepted credential-provider revision current authority drifted")
-            _verify_current_credential_provider_artifacts(repository_root)
-        else:
-            raise FreezeError(
-                f"accepted_contract_revisions entry {revision_id!r} has unknown kind {entry['kind']!r}"
-            )
+        raise FreezeError(
+            f"accepted_contract_revisions entry {revision_id!r} has unknown kind {entry['kind']!r}"
+        )
 
     missing_expected = EXPECTED_CONTRACT_REVISION_IDS - revision_ids
     if missing_expected:
@@ -595,9 +552,8 @@ def verify_freeze(
         raise FreezeError("freeze does not record the end-to-end fixture execution fast-follow")
 
     _verify_accepted_candidate_revisions(freeze, schema=schema, rfc_directory=rfc_directory)
-    _verify_accepted_contract_revisions(
-        freeze, rfc_directory=rfc_directory, repository_root=repository_root
-    )
+    _verify_credential_provider_contract(freeze)
+    _verify_accepted_contract_revisions(freeze, rfc_directory=rfc_directory)
 
     not_yet_frozen = {entry["item"] for entry in freeze.get("not_yet_frozen", [])}
     if not_yet_frozen != EXPECTED_NOT_YET_FROZEN:

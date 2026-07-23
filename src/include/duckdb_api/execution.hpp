@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb_api/authorization.hpp"
+#include "duckdb_api/credential_provider.hpp"
 #include "duckdb_api/scan_plan.hpp"
 
 #include <cstdint>
@@ -319,20 +320,21 @@ public:
 };
 
 // Immutable Remote Runtime service retained by the adapter. Open preserves the
-// existing anonymous service. OpenWithAuthorization is the permanent explicit
-// capability-envelope service for new consumers: it takes ownership by value,
-// rejects moved-from capabilities as authentication failures, and returns a
-// new isolated stream for each scan. The default implementation rejects every
-// valid envelope as an unsupported executable policy. Existing anonymous
-// executors remain source-compatible through Open, while no envelope can fall
-// back to anonymous execution until the concrete executor validates and owns
-// both alternatives.
+// anonymous service. OpenWithAuthorization is the explicit capability-envelope
+// compatibility service: it takes ownership by value, rejects moved-from
+// capabilities as authentication failures, and returns a new isolated stream
+// for each scan. OpenWithCredentialProvider is the provider-neutral service for
+// named credentials. Existing anonymous and explicit-authorization executors
+// remain source-compatible, while neither authenticated entry point can fall
+// back to anonymous execution.
 //
-// Both methods are call-scoped and must not retain ExecutionControl. Open and
-// OpenWithAuthorization perform no network I/O; concrete authorized executors
-// validate the complete plan/capability intersection before stream creation
-// and keep the moved capability isolated to that stream. Authorization release
-// on rejection, cancellation, Close, and destruction is owned by Runtime.
+// All methods are call-scoped and must not retain ExecutionControl. Open and
+// OpenWithAuthorization perform no network I/O before stream creation.
+// OpenWithCredentialProvider admits the complete plan/profile before its one
+// provider resolution and before transport work. Concrete authenticated
+// executors keep the moved authorization state isolated to that stream.
+// Authorization release on rejection, cancellation, Close, and destruction is
+// owned by Runtime.
 class ScanExecutor {
 public:
 	virtual ~ScanExecutor() noexcept;
@@ -347,6 +349,19 @@ public:
 			throw ExecutionError(ErrorStage::AUTHENTICATION, "authorization", "authorization capability is invalid");
 		}
 		return OpenAuthorizationEnvelope(plan, std::move(authorization), control);
+	}
+
+	// Admission-ordered credential service. The concrete Runtime executor must
+	// completely validate the immutable plan/profile intersection before it
+	// invokes provider.Resolve exactly once. The provider is call-scoped and is
+	// never retained by the returned stream; the moved snapshot's authorization
+	// and opaque identities remain one stream-owned state.
+	std::unique_ptr<BatchStream> OpenWithCredentialProvider(const ScanPlan &plan, const CredentialProvider &provider,
+	                                                        ExecutionControl &control) const {
+		if (control.IsCancellationRequested()) {
+			throw ExecutionCancelled();
+		}
+		return OpenCredentialProviderEnvelope(plan, provider, control);
 	}
 
 protected:
@@ -395,6 +410,52 @@ protected:
 		return alternative == AuthorizationAlternative::ANONYMOUS;
 	}
 
+	static ScanAuthorization TakeCredentialAuthorization(CredentialSnapshot &&snapshot) {
+		if (!snapshot.valid || !snapshot.authorization.valid || !snapshot.authorization.HasCredentialIdentity()) {
+			throw ExecutionError(ErrorStage::AUTHENTICATION, "credential_provider",
+			                     "credential provider returned an invalid snapshot");
+		}
+		snapshot.valid = false;
+		return std::move(snapshot.authorization);
+	}
+
+	// Shared post-admission provider boundary for concrete Runtime executors and
+	// bounded test executors. The caller must already have admitted the complete
+	// immutable plan/profile intersection. Every non-cancellation provider or
+	// snapshot failure is normalized here so host details cannot cross the
+	// Runtime boundary.
+	static ScanAuthorization ResolveCredentialAfterAdmission(const ScanPlan &plan, const CredentialProvider &provider,
+	                                                         ExecutionControl &control) {
+		const auto &operation = plan.Operation();
+		const bool replay_safe = operation.Protocol() == PlannedProtocol::REST
+		                             ? operation.Rest().replay_safety == PlannedReplaySafety::SAFE
+		                             : operation.Graphql().replay_safety == PlannedReplaySafety::SAFE;
+		try {
+			if (control.IsCancellationRequested()) {
+				throw ExecutionCancelled();
+			}
+			auto snapshot = provider.Resolve(plan.SecretReference(), control);
+			if (control.IsCancellationRequested()) {
+				throw ExecutionCancelled();
+			}
+			return TakeCredentialAuthorization(std::move(snapshot));
+		} catch (const ExecutionCancelled &) {
+			throw;
+		} catch (...) {
+			FailureProperties properties {};
+			properties.failure_class = FailureClass::CREDENTIAL_PROVIDER;
+			properties.phase = FailurePhase::ADMIT;
+			properties.replay_classification = ClassifyReplay(replay_safe, false);
+			properties.step = 0;
+			properties.attempt = 1;
+			properties.rows_exposed = 0;
+			properties.remote_status_class = RemoteStatusClass::NONE;
+			properties.terminating_budget = BudgetDimension::NONE;
+			throw ExecutionError(ErrorStage::AUTHENTICATION, "credential_provider",
+			                     "credential provider resolution failed", properties);
+		}
+	}
+
 	// The public entry validates cancellation and moved-from state before this
 	// extension point. An executor overriding it must validate the complete
 	// plan/alternative intersection before moving the envelope into a stream.
@@ -404,6 +465,15 @@ protected:
 	OpenAuthorizationEnvelope(const ScanPlan &plan, ScanAuthorization authorization, ExecutionControl &control) const {
 		throw ExecutionError(ErrorStage::POLICY, "authorization",
 		                     "authorization envelope is not supported by this executor");
+	}
+
+	// Compatibility default performs no provider observation. A concrete
+	// executor must override this method to establish admission-before-provider
+	// ordering; unsupported executors fail closed without resolving a secret.
+	virtual std::unique_ptr<BatchStream> OpenCredentialProviderEnvelope(const ScanPlan &, const CredentialProvider &,
+	                                                                    ExecutionControl &) const {
+		throw ExecutionError(ErrorStage::POLICY, "credential_provider",
+		                     "credential providers are not supported by this executor");
 	}
 };
 

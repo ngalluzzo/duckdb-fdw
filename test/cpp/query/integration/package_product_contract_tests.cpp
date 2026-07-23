@@ -6,6 +6,7 @@
 #include "duckdb_api/scan_planner.hpp"
 #include "duckdb_api_extension.hpp"
 #include "connector/support/local_package_source_test_fixtures.hpp"
+#include "query/support/isolated_credential_root.hpp"
 #include "runtime/service/controlled_runtime_scenario.hpp"
 #include "support/require.hpp"
 
@@ -115,9 +116,9 @@ public:
 	PlanEchoExecutor() : anonymous_opens(0), authenticated_opens(0) {
 	}
 
-	std::unique_ptr<duckdb_api::BatchStream> Open(const duckdb_api::ScanPlan &,
-	                                              duckdb_api::ExecutionControl &) const override {
-		throw std::logic_error("package product fake received the legacy execution path");
+	std::unique_ptr<duckdb_api::BatchStream> Open(const duckdb_api::ScanPlan &plan,
+	                                              duckdb_api::ExecutionControl &control) const override {
+		return OpenAuthorizationEnvelope(plan, duckdb_api::ScanAuthorization::Anonymous(), control);
 	}
 
 	mutable std::atomic<std::uint64_t> anonymous_opens;
@@ -125,13 +126,23 @@ public:
 
 protected:
 	std::unique_ptr<duckdb_api::BatchStream>
+	OpenCredentialProviderEnvelope(const duckdb_api::ScanPlan &plan, const duckdb_api::CredentialProvider &provider,
+	                               duckdb_api::ExecutionControl &control) const override {
+		if (plan.Authentication() != duckdb_api::FeatureState::ENABLED) {
+			throw std::logic_error("package product provider received an anonymous plan");
+		}
+		auto authorization = ResolveCredentialAfterAdmission(plan, provider, control);
+		return OpenAuthorizationEnvelope(plan, std::move(authorization), control);
+	}
+
+	std::unique_ptr<duckdb_api::BatchStream>
 	OpenAuthorizationEnvelope(const duckdb_api::ScanPlan &plan, duckdb_api::ScanAuthorization authorization,
 	                          duckdb_api::ExecutionControl &control) const override {
 		if (control.IsCancellationRequested()) {
 			throw duckdb_api::ExecutionCancelled();
 		}
 		const auto alternative = AlternativeOf(authorization);
-		// Query's ResolveDuckdbApiSecret supplies the kind-neutral CREDENTIAL
+		// Query's credential provider supplies the kind-neutral CREDENTIAL
 		// alternative for every authenticated relation (it cannot know the
 		// target relation's bearer-vs-api_key credential kind at resolution
 		// time), so either non-anonymous alternative is a valid authenticated
@@ -152,6 +163,7 @@ protected:
 void TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(const std::string &repository_root) {
 	auto executor = std::shared_ptr<PlanEchoExecutor>(new PlanEchoExecutor());
 	duckdb::DuckDB database(nullptr);
+	duckdb_api_test::ConfigureIsolatedCredentialRoot(database);
 	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_package_catalog_composition_test");
 	duckdb::RegisterDuckdbApiSecrets(loader);
 	duckdb::RegisterDuckdbApiPackageSurface(loader, duckdb_api::BuildPackageGenerationComposition(executor));
@@ -245,6 +257,7 @@ void TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(const std::strin
 void TestShortPageReachesRealExplainOutput(const std::string &repository_root) {
 	auto executor = std::shared_ptr<PlanEchoExecutor>(new PlanEchoExecutor());
 	duckdb::DuckDB database(nullptr);
+	duckdb_api_test::ConfigureIsolatedCredentialRoot(database);
 	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_short_page_explain_test");
 	duckdb::RegisterDuckdbApiSecrets(loader);
 	duckdb::RegisterDuckdbApiPackageSurface(loader, duckdb_api::BuildPackageGenerationComposition(executor));
@@ -285,6 +298,7 @@ void TestShortPageReachesRealExplainOutput(const std::string &repository_root) {
 void TestDoubleColumnReachesRealDescribeAndSelectOutput(const std::string &repository_root) {
 	auto executor = std::shared_ptr<PlanEchoExecutor>(new PlanEchoExecutor());
 	duckdb::DuckDB database(nullptr);
+	duckdb_api_test::ConfigureIsolatedCredentialRoot(database);
 	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_double_column_describe_test");
 	duckdb::RegisterDuckdbApiSecrets(loader);
 	duckdb::RegisterDuckdbApiPackageSurface(loader, duckdb_api::BuildPackageGenerationComposition(executor));
@@ -325,6 +339,7 @@ void TestGeneratedRelationsExecuteThroughRuntime(const std::string &repository_r
 		auto scenario = duckdb_api_test::BuildControlledRuntimeScenario(
 		    duckdb_api_test::ControlledRuntimeScenarioId::RICKANDMORTY_CHARACTER_EPISODES);
 		duckdb::DuckDB database(nullptr);
+		duckdb_api_test::ConfigureIsolatedCredentialRoot(database);
 		duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_rickandmorty_array_product_test");
 		duckdb::RegisterDuckdbApiSecrets(loader);
 		duckdb::RegisterDuckdbApiPackageSurface(loader,
@@ -387,6 +402,7 @@ void TestGeneratedRelationsExecuteThroughRuntime(const std::string &repository_r
 		auto scenario = duckdb_api_test::BuildControlledRuntimeScenario(
 		    duckdb_api_test::ControlledRuntimeScenarioId::RETAINED_REST_USER);
 		duckdb::DuckDB database(nullptr);
+		duckdb_api_test::ConfigureIsolatedCredentialRoot(database);
 		duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_package_rest_product_test");
 		duckdb::RegisterDuckdbApiSecrets(loader);
 		duckdb::RegisterDuckdbApiPackageSurface(loader,
@@ -407,6 +423,7 @@ void TestGeneratedRelationsExecuteThroughRuntime(const std::string &repository_r
 		auto scenario = duckdb_api_test::BuildControlledRuntimeScenario(
 		    duckdb_api_test::ControlledRuntimeScenarioId::GRAPHQL_MULTI_PAGE_NULL_DUPLICATE);
 		duckdb::DuckDB database(nullptr);
+		duckdb_api_test::ConfigureIsolatedCredentialRoot(database);
 		duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_package_graphql_product_test");
 		duckdb::RegisterDuckdbApiSecrets(loader);
 		duckdb::RegisterDuckdbApiPackageSurface(loader,

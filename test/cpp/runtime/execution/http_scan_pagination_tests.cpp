@@ -1,5 +1,6 @@
 #include "duckdb_api/authorization.hpp"
 #include "runtime/support/controlled_http_transport.hpp"
+#include "runtime/support/credential_provider_test_support.hpp"
 #include "runtime/support/http_scan_executor_test_support.hpp"
 #include "semantics/support/permanent_rest_scan_plan_test_fixtures.hpp"
 #include "support/require.hpp"
@@ -28,6 +29,7 @@ using duckdb_api_test::ControlledTransportFailure;
 using duckdb_api_test::GeneratedHttpBearerToken;
 using duckdb_api_test::ManualHttpExecutionControl;
 using duckdb_api_test::Require;
+using duckdb_api_test::RotatingCredentialProvider;
 
 std::string Repository(uint64_t id, const std::string &name) {
 	return std::string("[{\"id\":") + std::to_string(id) + ",\"full_name\":\"" + name +
@@ -213,6 +215,31 @@ void TestSequentialBackpressureAndEmptyMiddlePage() {
 		        "transport did not receive the page-scoped normalized-metadata allowance");
 	}
 	Require(runtime->ConsumeBearerExpectation(3), "one scan did not use the same opaque capability on every page");
+}
+
+void TestCredentialProviderSnapshotPersistsAcrossPages() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({ControlledResponse(200, Repository(1, "provider-first"), {NextLink(2)}),
+	                          ControlledResponse(200, Repository(2, "provider-second"))});
+	ManualHttpExecutionControl control;
+	auto initial = GeneratedHttpBearerToken(720);
+	auto replacement = GeneratedHttpBearerToken(721);
+	RotatingCredentialProvider provider(initial);
+	runtime->ExpectBearer("Bearer " + initial);
+	auto stream = runtime->Executor()->OpenWithCredentialProvider(
+	    BuildValidAuthenticatedRepositoriesPlanFixture("github_default"), provider, control);
+	Require(provider.ResolveCount() == 1 && runtime->Observations().empty(),
+	        "paginated provider open did not resolve once before transport");
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows[0].values[1].varchar_value == "provider-first" &&
+	            runtime->Observations().size() == 1,
+	        "provider-backed pagination did not emit its first page");
+	provider.Replace(replacement);
+	Require(stream->Next(control, batch) && batch.rows[0].values[1].varchar_value == "provider-second" &&
+	            !stream->Next(control, batch),
+	        "provider replacement interrupted the existing pagination snapshot");
+	Require(provider.ResolveCount() == 1 && runtime->Observations().size() == 2 && runtime->ConsumeBearerExpectation(2),
+	        "paginated scan re-resolved or changed credential between pages");
 }
 
 void TestGenericPaginatedRestUsesCopiedExecutableFacts() {
@@ -624,6 +651,7 @@ void TestCancellationCloseAndAggregatePageCeiling() {
 int main() {
 	try {
 		TestSequentialBackpressureAndEmptyMiddlePage();
+		TestCredentialProviderSnapshotPersistsAcrossPages();
 		TestGenericPaginatedRestUsesCopiedExecutableFacts();
 		TestShortPageTerminatesOnShortPage();
 		TestShortPageTerminatesOnEmptyPage();

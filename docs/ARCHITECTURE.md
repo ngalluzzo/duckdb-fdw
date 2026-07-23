@@ -280,12 +280,36 @@ based on typed executable facts and content identity, never connector ID,
 relation name, package version, source path, SQL name, or explanation prose.
 
 An authenticated scan carries a logical DuckDB secret reference until global
-execution initialization. Query resolves exactly that name through the pinned
-Secret Manager integration and moves an opaque authorization capability into
-Runtime. Runtime validates authenticator, placement, destination, and network
-policy before decorating a request. The credential value never enters package
+execution initialization. Query supplies a call-scoped credential provider;
+after complete admission, Runtime asks it to resolve exactly that logical name
+once. The provider returns one move-only snapshot containing opaque authority
+and revision identities plus Runtime's inaccessible authorization state.
+Runtime retains that snapshot for the complete stream, including every page
+and any future attempt. A replacement, deletion, or environment change can
+affect only a later scan.
+
+The `duckdb_api` secret surface is closed at `config` and `environment`.
+`config` stores one validated `TOKEN`; `environment` stores one portable
+`VARIABLE` name and reads exactly that variable once per scan. Either provider
+uses explicit temporary `memory` storage or explicit persistent `duckdb_api`
+storage. Exact resolution ignores every other DuckDB storage and generic host
+secret object. A supported same-named entry in both admitted storages is an
+error, never a precedence decision.
+
+Persistent mutation is immediate and autocommit-only. The project storage is
+a bounded owner-private `duckdb_api` child beneath DuckDB's
+`secret_directory`, opened and mutated through retained directory descriptors
+with no-follow checks, an exclusive DatabaseInstance lock, atomic index
+replacement, and fixed redacted failures. Its config records contain plaintext
+credential material; operators use temporary or environment-backed credentials
+when plaintext at rest is unacceptable.
+
+Runtime validates authenticator, placement, destination, and network policy
+before decorating a request. Credential bytes, logical names, environment
+variable names, storage paths, and opaque identities never enter package
 source, compiled explanation, `ScanPlan`, diagnostics, fixtures, digests, or
-catalog introspection.
+catalog introspection. Provider failures are classified separately from remote
+authentication or authorization failures and acquire no transport authority.
 
 The host and package network policies are intersected. Package policy can
 narrow but never widen exact HTTPS origin, redirect, proxy, private/link-local/

@@ -438,7 +438,7 @@ staging fail, the current lease holder may reach one terminal transition, and
 then registry ownership is released. Independently retained snapshots, owners,
 and their opaque canonical-root custody remain valid.
 
-## Authorization capability
+## Credential provider and authorization snapshot
 
 `ScanAuthorization` is a move-only opaque capability:
 
@@ -446,18 +446,19 @@ and their opaque canonical-root custody remain valid.
 anonymous | approved bearer token state | approved kind-neutral credential state
 ```
 
-Only the Query Secret Manager integration may create the accepted bearer or
-credential alternative from a resolved logical reference. Only Runtime may
-consume it. Its value is not copyable, renderable, or accessible to
-Semantics, Connector, fixtures, plans, diagnostics, or registry metadata.
+Only a `CredentialProvider` may create a `CredentialSnapshot` from a logical
+reference. The snapshot owns one authorization capability plus opaque,
+non-secret authority and revision identities. It is move-only; its identity
+values are copyable only for equality and hashing and cannot be rendered,
+serialized, ordered, or inspected. Credential bytes and identity bytes are not
+accessible to Semantics, Connector, fixtures, plans, diagnostics, or registry
+metadata.
 
 **Accepted by [RFC 0018](../rfcs/0018-add-static-api-key-credential.md).**
-Query's Secret Manager integration resolves only a logical secret name; it
-has no access to which credential kind (bearer or api_key) the target
-relation declared, so it always constructs the kind-neutral credential
-alternative for every authenticated v1 package relation, not a
-kind-specific one. This alternative is additive: the existing bearer
-alternative and its direct-construction call sites are unchanged. Runtime
+Query's provider integration receives only a logical secret name; it has no
+access to which credential kind (bearer or api_key) the target relation
+declared, so it always constructs the kind-neutral credential alternative for
+every authenticated v1 package relation, not a kind-specific one. Runtime
 alone decides, from the admitted plan's own `PlannedAuthenticator`/
 `PlannedCredentialPlacement` facts — never from which alternative the
 capability was constructed as — whether to decorate a request as a bearer
@@ -468,24 +469,39 @@ plan requires api_key, since no legitimate caller constructs the bearer
 alternative intending api_key placement.
 
 Runtime validates the complete plan before authorizing a request. Destination
-and placement are exact. Failed admission consumes or decorates no
-credential state. Destruction and terminal paths erase and release
-capability state without throwing. For api_key query placement, the
+and placement are exact. It invokes the call-scoped provider exactly once only
+after that admission, normalizes every non-cancellation provider exception to
+the fixed `credential_provider` failure, and performs no transport work on
+failure. The returned snapshot is retained unchanged by the complete stream,
+including all pages and any future attempts. Destruction and terminal paths
+erase and release capability state without throwing. For api_key query placement, the
 declared parameter's name and value are appended directly to the admitted
 request target at authorization time and never enter the plan's regular
 query-binding facts, so no diagnostic or explanation code path can render
 them.
 
+Query's installed provider surface is closed at `config` and `environment` in
+temporary `memory` or persistent `duckdb_api` storage. `config` snapshots use
+the stored creation/replacement revision. `environment` reads one exact
+portable variable name once per successful scan initialization and mints a
+fresh conservative revision. Replacement retains authority and changes
+revision; drop and recreation change authority. A supported cross-storage name
+collision fails as ambiguous. Persistent config identity and revision survive
+restart. The bounded owner-private persistent format contains plaintext config
+values and therefore makes no encryption-at-rest claim.
+
 ## Executor and admitted profiles
 
 ```text
-ScanExecutor::Open(plan, moved_authorization, execution_control)
+ScanExecutor::Open(plan, execution_control)
+ScanExecutor::OpenWithCredentialProvider(plan, provider, execution_control)
     -> BatchStream
 ```
 
-`Open` validates and copies one immutable admitted execution profile. It
-performs no network I/O. The first stream pull begins the deadline and may make
-the first request.
+Anonymous Query execution uses `Open`; authenticated execution uses
+`OpenWithCredentialProvider`. Both validate and copy one immutable admitted
+execution profile and perform no network I/O. The first stream pull begins the
+deadline and may make the first request.
 
 Admission checks protocol, operation, request fields, response schema,
 cardinality, authentication, network capability, pagination, ownership,
@@ -787,8 +803,8 @@ Errors remain typed to their boundary:
 | --- | --- |
 | Connector | source, YAML, schema, reference, identity, compatibility, fixture mismatch |
 | Semantics | invalid typed input, no/tied operation, invalid proof or plan contract |
-| Runtime | authentication, policy, transport, HTTP, decode, GraphQL, pagination, resource, cancellation |
-| Query | bind shape, secret lookup, publication conflict, DuckDB callback/FFI boundary |
+| Runtime | provider-boundary normalization, authentication, policy, transport, HTTP, decode, GraphQL, pagination, resource, cancellation |
+| Query | bind shape, credential DDL/storage, publication conflict, DuckDB callback/FFI boundary |
 
 Query maps structured failures once into bounded DuckDB diagnostics. Unknown
 exceptions become a fixed internal failure. Cancellation remains DuckDB

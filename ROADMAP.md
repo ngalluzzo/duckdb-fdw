@@ -482,6 +482,31 @@ accounting and cancellation, package compatibility, native DuckDB `LIST`
 vectors, and an end-to-end Rick and Morty query with unchanged base-row
 cardinality.
 
+### `0.15.0` — durable credential providers
+
+An operator can configure `duckdb_api` credentials from explicit config or an
+exact environment-variable reference, in temporary memory or bounded
+project-owned persistent storage. Runtime resolves one opaque authority and
+revision snapshot only after complete plan admission and retains it for every
+page and attempt in the scan. Replacement, deletion, restart, or environment
+rotation affects only a later scan.
+
+Accepted [RFC 0023](docs/rfcs/0023-add-durable-credential-providers.md)
+decides the two-provider/two-storage surface, exact-name and ambiguity rules,
+authority/revision identity laws, fixed provider failures, and the
+autocommit-only descriptor-relative persistent format. Persistent config
+records are owner-private and bounded but contain plaintext credential bytes;
+temporary or environment-backed credentials remain the recommendation when
+plaintext at rest is unacceptable.
+
+Release evidence covers all four provider/storage combinations, prepared and
+concurrent scans, replacement/drop/recreation identity laws, environment
+rotation, persistent restart and exclusive locking, admission-before-read,
+snapshot retention across pagination, cancellation and shutdown, corruption
+and bounds failures, full redaction, and independent credential/concurrency/
+lifecycle review. OAuth, arbitrary executable or external providers, automatic
+retry, rate-limit waiting, and shared result caching remain excluded.
+
 ### `1.0.0-rc.N` — compatibility rehearsal
 
 Each release candidate is an immutable build of the frozen `1.0.0` contract.

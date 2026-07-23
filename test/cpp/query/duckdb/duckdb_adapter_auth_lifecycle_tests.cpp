@@ -129,13 +129,13 @@ void TestMalformedAndPersistentSecretsStayOutsideRuntime() {
 	RegisterStoredSecret(connection, StoredSecret("duckdb_api", "config", "persistent_only", &token),
 	                     duckdb::SecretPersistType::PERSISTENT, "query_adapter_persistent");
 	RequireRejectedStoredSecret(connection, probe, "persistent_only", canary);
-	RegisterStoredSecret(connection, StoredSecret("duckdb_api", "config", "shadowed", &token));
+	CreateTemporarySecret(connection, "shadowed", canary);
 	RegisterStoredSecret(connection, StoredSecret("duckdb_api", "config", "shadowed", &token),
 	                     duckdb::SecretPersistType::PERSISTENT, "query_adapter_persistent");
 	RequireAuthenticatedSuccess(connection, AuthenticatedSql("shadowed"));
 	Require(probe->authorization_open_calls.load(std::memory_order_relaxed) == 1 &&
 	            probe->github_bearer_authorizations.load(std::memory_order_relaxed) == 1,
-	        "same-named persistent state interfered with temporary-memory execution");
+	        "foreign same-named persistent state interfered with the supported temporary credential");
 }
 
 void TestConcurrentAuthenticatedExecutionsAreIsolated() {

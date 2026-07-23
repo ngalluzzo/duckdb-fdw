@@ -26,6 +26,7 @@ class ResponseSpec:
     body: bytes
     links: tuple[str, ...] = ()
     block: bool = False
+    gate: bool = False
 
 
 def repository_body(
@@ -191,6 +192,16 @@ class RepositoryOracleHandler(BaseHTTPRequestHandler):
         if response.block:
             self._block_response()
             return
+        if response.gate:
+            self.oracle.blocked_started.set()
+            if not self.oracle.release_blocked.wait(5):
+                response = ResponseSpec(500, b'{"message":"gate timeout"}')
+            self._write_response(response)
+            self.oracle.blocked_exited.set()
+            return
+        self._write_response(response)
+
+    def _write_response(self, response: ResponseSpec) -> None:
         self.send_response(response.status)
         for link in response.links:
             self.send_header("Link", link)

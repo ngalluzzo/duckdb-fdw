@@ -1,4 +1,5 @@
 #include "query/packages/support/package_query_test_support.hpp"
+#include "query/support/isolated_credential_root.hpp"
 
 #include "catalog_generation_coordinator.hpp"
 #include "duckdb/main/connection.hpp"
@@ -202,12 +203,22 @@ public:
 	    : marker(std::move(marker_p)), probe(std::move(probe_p)) {
 	}
 
-	std::unique_ptr<duckdb_api::BatchStream> Open(const duckdb_api::ScanPlan &,
-	                                              duckdb_api::ExecutionControl &) const override {
-		throw std::logic_error("Query package test executor received the legacy authorization path");
+	std::unique_ptr<duckdb_api::BatchStream> Open(const duckdb_api::ScanPlan &plan,
+	                                              duckdb_api::ExecutionControl &control) const override {
+		return OpenAuthorizationEnvelope(plan, duckdb_api::ScanAuthorization::Anonymous(), control);
 	}
 
 protected:
+	std::unique_ptr<duckdb_api::BatchStream>
+	OpenCredentialProviderEnvelope(const duckdb_api::ScanPlan &plan, const duckdb_api::CredentialProvider &provider,
+	                               duckdb_api::ExecutionControl &control) const override {
+		if (plan.Authentication() != duckdb_api::FeatureState::ENABLED) {
+			throw std::logic_error("Query package test provider received an anonymous plan");
+		}
+		auto authorization = ResolveCredentialAfterAdmission(plan, provider, control);
+		return OpenAuthorizationEnvelope(plan, std::move(authorization), control);
+	}
+
 	std::unique_ptr<duckdb_api::BatchStream>
 	OpenAuthorizationEnvelope(const duckdb_api::ScanPlan &plan, duckdb_api::ScanAuthorization authorization,
 	                          duckdb_api::ExecutionControl &control) const override {
@@ -215,7 +226,7 @@ protected:
 			throw duckdb_api::ExecutionCancelled();
 		}
 		const auto alternative = AlternativeOf(authorization);
-		// ResolveDuckdbApiSecret supplies the kind-neutral CREDENTIAL
+		// Query's credential provider supplies the kind-neutral CREDENTIAL
 		// alternative for every authenticated relation, not BEARER/
 		// GITHUB_USER_BEARER specifically, so any non-anonymous alternative
 		// is valid here.
@@ -403,6 +414,7 @@ BuildRickAndMortyPackageQueryStaging(const std::string &absolute_repository_root
 std::shared_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator>
 RegisterPackageQuerySurface(duckdb::DuckDB &database,
                             const std::shared_ptr<const duckdb_api::QueryPackageStagingService> &staging) {
+	ConfigureIsolatedCredentialRoot(database);
 	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_package_query_tests");
 	duckdb::RegisterDuckdbApiSecrets(loader);
 	return duckdb::duckdb_api_query_internal::RegisterPackageSurfaceInternal(loader, staging);

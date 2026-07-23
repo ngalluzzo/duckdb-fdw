@@ -293,32 +293,28 @@ class ContractFreezeTests(unittest.TestCase):
             "accepted_contract_revisions",
         )
 
-    def test_expected_contract_revision_omission_fails(self) -> None:
+    def test_graduated_contract_revision_cannot_return_pending(self) -> None:
         self.require_rejected(
-            lambda value: value["accepted_contract_revisions"].clear(),
-            "accepted_contract_revisions",
+            lambda value: value["accepted_contract_revisions"].append({"id": "durable_credential_providers"}),
+            "missing required keys",
         )
 
-    def test_credential_provider_current_contract_drift_fails(self) -> None:
+    def test_credential_provider_closed_set_removed_fails(self) -> None:
         self.require_rejected(
-            lambda value: value["accepted_contract_revisions"][0]["current_contract"]["providers"].append(
-                "environment"
-            ),
-            "current contract drifted",
+            lambda value: value.pop("credential_providers"),
+            "credential-provider closed set",
         )
 
-    def test_credential_provider_target_contract_drift_fails(self) -> None:
+    def test_credential_provider_provider_drift_fails(self) -> None:
         self.require_rejected(
-            lambda value: value["accepted_contract_revisions"][0]["target_contract"]["providers"].remove(
-                "environment"
-            ),
-            "target contract drifted",
+            lambda value: value["credential_providers"]["providers"].remove("environment"),
+            "credential-provider closed set",
         )
 
-    def test_credential_provider_premature_graduation_fails(self) -> None:
+    def test_credential_provider_storage_drift_fails(self) -> None:
         self.require_rejected(
-            lambda value: value["accepted_contract_revisions"][0].__setitem__("not_yet_current", False),
-            "prematurely graduated",
+            lambda value: value["credential_providers"]["config_storages"].remove("duckdb_api"),
+            "credential-provider closed set",
         )
 
     def test_credential_provider_retained_exclusion_loss_fails(self) -> None:
@@ -326,44 +322,14 @@ class ContractFreezeTests(unittest.TestCase):
             lambda value: value["exclusions"].remove(
                 "authenticators_beyond_anonymous_bearer_and_static_api_key"
             ),
-            "lost retained exclusions",
+            "mandatory exclusions",
         )
 
-    def test_credential_provider_coordinated_retained_exclusion_loss_fails(self) -> None:
-        def remove_from_both(value) -> None:
-            exclusion = "authenticators_beyond_anonymous_bearer_and_static_api_key"
-            value["exclusions"].remove(exclusion)
-            value["accepted_contract_revisions"][0]["retained_exclusions"].remove(exclusion)
-
-        self.require_rejected(remove_from_both, "retained exclusions drifted")
-
-    def test_credential_provider_current_artifact_drift_fails(self) -> None:
-        import shutil
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as temporary:
-            repository = pathlib.Path(temporary)
-            for relative in (
-                pathlib.Path("src/query/duckdb/secret_integration.cpp"),
-                pathlib.Path("test/sql/duckdb_api.test"),
-            ):
-                target = repository / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(REPOSITORY_ROOT / relative, target)
-            source = repository / "src/query/duckdb/secret_integration.cpp"
-            source.write_text(
-                source.read_text(encoding="utf-8")
-                + "\n// Synthetic additive environment provider registration.\n",
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(FreezeError, "artifact identity drifted"):
-                verify_freeze(
-                    copy.deepcopy(self.freeze),
-                    inventory=self.inventory,
-                    schema=self.schema,
-                    rfc_directory=self.rfc_directory,
-                    repository_root=repository,
-                )
+    def test_credential_provider_authority_drift_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["credential_providers"].__setitem__("authority", "conversation memory"),
+            "credential-provider closed set",
+        )
 
     def test_not_yet_frozen_spurious_fails(self) -> None:
         self.require_rejected(
