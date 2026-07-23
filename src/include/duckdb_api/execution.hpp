@@ -163,6 +163,16 @@ FailureClass ClassifyFailureClass(ErrorStage stage);
 // before decode, so no rows were exposed); the scan catch boundary enriches them.
 FailureProperties HttpStatusFailureProperties(uint32_t status, bool auth_rejected);
 
+// RFC 0021: combine declared replay safety with exposure state into the replay
+// classification for a traversal step or terminal failure. Codifies the
+// AGENTS.md retry invariant — "a retry requires both declared replay safety and
+// an uncommitted replay unit": a step whose rows were already exposed to DuckDB
+// has crossed its commitment boundary and is never replayable; a safe operation
+// that failed before exposure is replayable; anything not proven safe is never
+// replayable (indeterminate safety is non-replayable). SERVER_DIRECTED_DELAY
+// and ATOMIC_TRAVERSAL_STEP are set by sites with that specific context.
+ReplayClassification ClassifyReplay(bool declared_replay_safe, bool step_rows_exposed);
+
 // Protocol-neutral cancellation marker. The adapter translates it exactly
 // once into the host engine's interruption type.
 class ExecutionCancelled : public std::exception {

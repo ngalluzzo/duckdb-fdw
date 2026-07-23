@@ -183,6 +183,13 @@ FailureProperties HttpStatusFailureProperties(uint32_t status, bool auth_rejecte
 	return properties;
 }
 
+ReplayClassification ClassifyReplay(bool declared_replay_safe, bool step_rows_exposed) {
+	if (!declared_replay_safe || step_rows_exposed) {
+		return ReplayClassification::NEVER_REPLAYABLE;
+	}
+	return ReplayClassification::REPLAYABLE_BEFORE_EXPOSURE;
+}
+
 const char *FailureClassName(FailureClass failure_class) {
 	switch (failure_class) {
 	case FailureClass::CONFIGURATION:

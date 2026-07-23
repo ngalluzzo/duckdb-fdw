@@ -244,6 +244,17 @@ void TestFailureClassification() {
 	            "rate_limited",
 	        "RemoteStatusClassName drifted");
 
+	// ClassifyReplay: the AGENTS.md retry invariant (declared safety AND uncommitted
+	// replay unit) as a truth table.
+	Require(duckdb_api::ClassifyReplay(true, false) == duckdb_api::ReplayClassification::REPLAYABLE_BEFORE_EXPOSURE,
+	        "safe failure before exposure must be replayable");
+	Require(duckdb_api::ClassifyReplay(true, true) == duckdb_api::ReplayClassification::NEVER_REPLAYABLE,
+	        "safe failure after exposure must not be replayable (commitment crossed)");
+	Require(duckdb_api::ClassifyReplay(false, false) == duckdb_api::ReplayClassification::NEVER_REPLAYABLE,
+	        "unsafe operation must not be replayable even before exposure");
+	Require(duckdb_api::ClassifyReplay(false, true) == duckdb_api::ReplayClassification::NEVER_REPLAYABLE,
+	        "unsafe operation after exposure must not be replayable");
+
 	// Classified ExecutionError carries properties; unclassified does not.
 	const duckdb_api::FailureProperties properties {duckdb_api::FailureClass::RESOURCE_BUDGET,
 	                                                duckdb_api::FailurePhase::DECODE,
