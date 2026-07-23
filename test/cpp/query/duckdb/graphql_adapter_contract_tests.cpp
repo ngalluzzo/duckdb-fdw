@@ -241,6 +241,19 @@ void TestRemoteProtocolErrorUsesSingleRedactedBoundary() {
 	        "GraphQL application error did not cancel and close exactly one stream");
 }
 
+void TestRestExplainReplayPolicy() {
+	const auto connector = duckdb_api::BuildNativeGithubConnector();
+	const auto request = duckdb_api::BuildConservativeScanRequest(connector, "duckdb_login_search_page",
+	                                                              duckdb_api::LogicalSecretReference());
+	const auto plan = duckdb_api::BuildConservativeScanPlan(connector, request);
+	auto explanation = duckdb::duckdb_api_query_internal::ExplainSelectedScan(request, plan);
+	Require(explanation["Protocol"] == "rest" && explanation["Declared Replay Safety"] == "safe" &&
+	            explanation["Retry"] == "disabled" && explanation["Rate-Limit Waiting"] == "disabled" &&
+	            explanation["Cache"] == "disabled",
+	        "REST EXPLAIN did not surface the effective resilience policy (declared replay safety read from the REST "
+	        "plan)");
+}
+
 } // namespace
 
 int main() {
@@ -249,6 +262,7 @@ int main() {
 		TestOfflineBindPrepareAndSafeExplanation();
 		TestPreparedTypedRowsNullsAndDuckdbComposition();
 		TestRemoteProtocolErrorUsesSingleRedactedBoundary();
+		TestRestExplainReplayPolicy();
 		std::cout << "GraphQL Query adapter contract tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {
