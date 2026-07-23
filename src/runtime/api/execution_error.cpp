@@ -158,6 +158,31 @@ FailureClass ClassifyFailureClass(ErrorStage stage) {
 	throw std::logic_error("unknown ErrorStage");
 }
 
+FailureProperties HttpStatusFailureProperties(uint32_t status, bool auth_rejected) {
+	FailureProperties properties {};
+	properties.phase = FailurePhase::REQUEST;
+	properties.step = 0;
+	properties.attempt = 1;
+	properties.rows_exposed = 0;
+	properties.terminating_budget = BudgetDimension::NONE;
+	if (status == 429 || status == 503) {
+		properties.failure_class = FailureClass::RATE_LIMIT;
+		properties.remote_status_class = RemoteStatusClass::RATE_LIMITED;
+		properties.replay_classification = ReplayClassification::SERVER_DIRECTED_DELAY;
+		return properties;
+	}
+	if (auth_rejected && (status == 401 || status == 403)) {
+		properties.failure_class = FailureClass::AUTHORIZATION;
+		properties.remote_status_class = RemoteStatusClass::CLIENT_ERROR;
+		properties.replay_classification = ReplayClassification::REPLAYABLE_BEFORE_EXPOSURE;
+		return properties;
+	}
+	properties.failure_class = FailureClass::REMOTE_STATUS;
+	properties.remote_status_class = status >= 500 ? RemoteStatusClass::SERVER_ERROR : RemoteStatusClass::CLIENT_ERROR;
+	properties.replay_classification = ReplayClassification::REPLAYABLE_BEFORE_EXPOSURE;
+	return properties;
+}
+
 const char *FailureClassName(FailureClass failure_class) {
 	switch (failure_class) {
 	case FailureClass::CONFIGURATION:

@@ -52,13 +52,16 @@ void CheckState(ExecutionControl &control, std::chrono::steady_clock::time_point
 
 void CheckStatus(uint32_t status) {
 	if (status == 401) {
-		throw ExecutionError(ErrorStage::AUTHENTICATION, "http_status", "HTTP endpoint rejected authentication");
+		throw ExecutionError(ErrorStage::AUTHENTICATION, "http_status", "HTTP endpoint rejected authentication",
+		                     HttpStatusFailureProperties(status, true));
 	}
 	if (status == 403) {
-		throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status", "HTTP endpoint denied authorization");
+		throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status", "HTTP endpoint denied authorization",
+		                     HttpStatusFailureProperties(status, true));
 	}
 	if (status != 200) {
-		throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status");
+		throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status",
+		                     HttpStatusFailureProperties(status, false));
 	}
 }
 

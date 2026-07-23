@@ -155,6 +155,14 @@ private:
 // page-budget exhaustion -> RESOURCE_BUDGET, a malformed continuation -> PROTOCOL.
 FailureClass ClassifyFailureClass(ErrorStage stage);
 
+// RFC 0021: classify an HTTP response status into failure properties. auth_rejected
+// is true when authentication was attempted and the endpoint rejected it (401/403
+// -> AUTHORIZATION); false treats a 401/403 as an ordinary remote-status rejection
+// (e.g. an anonymous request the endpoint refused). 429/503 -> RATE_LIMIT with a
+// server-directed delay. step and rows_exposed are zero (a status is observed
+// before decode, so no rows were exposed); the scan catch boundary enriches them.
+FailureProperties HttpStatusFailureProperties(uint32_t status, bool auth_rejected);
+
 // Protocol-neutral cancellation marker. The adapter translates it exactly
 // once into the host engine's interruption type.
 class ExecutionCancelled : public std::exception {

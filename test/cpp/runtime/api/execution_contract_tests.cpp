@@ -171,6 +171,100 @@ void TestStableErrorContract() {
 	        "remote protocol diagnostic lost its safe structural contract");
 }
 
+void TestFailureClassification() {
+	// ClassifyFailureClass: the coarse ErrorStage -> FailureClass fallback used at
+	// the adapter translation boundary when no explicit properties were attached.
+	Require(duckdb_api::ClassifyFailureClass(duckdb_api::ErrorStage::TRANSPORT) == duckdb_api::FailureClass::TRANSPORT,
+	        "TRANSPORT stage classified incorrectly");
+	Require(duckdb_api::ClassifyFailureClass(duckdb_api::ErrorStage::HTTP_STATUS) ==
+	            duckdb_api::FailureClass::REMOTE_STATUS,
+	        "HTTP_STATUS stage classified incorrectly");
+	Require(duckdb_api::ClassifyFailureClass(duckdb_api::ErrorStage::DECODE) == duckdb_api::FailureClass::DECODE,
+	        "DECODE stage classified incorrectly");
+	Require(duckdb_api::ClassifyFailureClass(duckdb_api::ErrorStage::SCHEMA) == duckdb_api::FailureClass::SCHEMA,
+	        "SCHEMA stage classified incorrectly");
+	Require(duckdb_api::ClassifyFailureClass(duckdb_api::ErrorStage::POLICY) ==
+	            duckdb_api::FailureClass::DESTINATION_POLICY,
+	        "POLICY stage classified incorrectly");
+	Require(duckdb_api::ClassifyFailureClass(duckdb_api::ErrorStage::RESOURCE) ==
+	            duckdb_api::FailureClass::RESOURCE_BUDGET,
+	        "RESOURCE stage classified incorrectly");
+	Require(duckdb_api::ClassifyFailureClass(duckdb_api::ErrorStage::INTERNAL) == duckdb_api::FailureClass::INTERNAL,
+	        "INTERNAL stage classified incorrectly");
+	Require(duckdb_api::ClassifyFailureClass(duckdb_api::ErrorStage::AUTHENTICATION) ==
+	            duckdb_api::FailureClass::CREDENTIAL_PROVIDER,
+	        "AUTHENTICATION stage classified incorrectly");
+	Require(duckdb_api::ClassifyFailureClass(duckdb_api::ErrorStage::AUTHORIZATION) ==
+	            duckdb_api::FailureClass::AUTHORIZATION,
+	        "AUTHORIZATION stage classified incorrectly");
+	Require(duckdb_api::ClassifyFailureClass(duckdb_api::ErrorStage::REMOTE_PROTOCOL) ==
+	            duckdb_api::FailureClass::PROTOCOL,
+	        "REMOTE_PROTOCOL stage classified incorrectly");
+
+	// HttpStatusFailureProperties: the four-way status distinction (RFC 0021 §2).
+	const auto rate_limited = duckdb_api::HttpStatusFailureProperties(429, true);
+	Require(rate_limited.failure_class == duckdb_api::FailureClass::RATE_LIMIT &&
+	            rate_limited.remote_status_class == duckdb_api::RemoteStatusClass::RATE_LIMITED &&
+	            rate_limited.replay_classification == duckdb_api::ReplayClassification::SERVER_DIRECTED_DELAY,
+	        "HTTP 429 was not classified as a server-directed rate limit");
+	const auto unavailable = duckdb_api::HttpStatusFailureProperties(503, false);
+	Require(unavailable.failure_class == duckdb_api::FailureClass::RATE_LIMIT &&
+	            unavailable.replay_classification == duckdb_api::ReplayClassification::SERVER_DIRECTED_DELAY,
+	        "HTTP 503 was not classified as a server-directed rate limit");
+	const auto auth_rejected = duckdb_api::HttpStatusFailureProperties(401, true);
+	Require(auth_rejected.failure_class == duckdb_api::FailureClass::AUTHORIZATION &&
+	            auth_rejected.remote_status_class == duckdb_api::RemoteStatusClass::CLIENT_ERROR,
+	        "HTTP 401 (auth attempted) was not classified as an authorization rejection");
+	const auto anon_rejected = duckdb_api::HttpStatusFailureProperties(401, false);
+	Require(anon_rejected.failure_class == duckdb_api::FailureClass::REMOTE_STATUS,
+	        "HTTP 401 (anonymous) was not classified as a remote-status rejection");
+	const auto server_error = duckdb_api::HttpStatusFailureProperties(500, false);
+	Require(server_error.failure_class == duckdb_api::FailureClass::REMOTE_STATUS &&
+	            server_error.remote_status_class == duckdb_api::RemoteStatusClass::SERVER_ERROR,
+	        "HTTP 5xx was not classified as a server error");
+	const auto client_error = duckdb_api::HttpStatusFailureProperties(404, false);
+	Require(client_error.failure_class == duckdb_api::FailureClass::REMOTE_STATUS &&
+	            client_error.remote_status_class == duckdb_api::RemoteStatusClass::CLIENT_ERROR,
+	        "HTTP 4xx was not classified as a client error");
+	// A status is observed before decode: no rows exposed, v1 attempt is 1.
+	Require(rate_limited.rows_exposed == 0 && rate_limited.attempt == 1,
+	        "status failure did not default rows_exposed=0 / attempt=1");
+
+	// Closed-set name functions bind the C++ vocabulary to the freeze strings.
+	Require(std::string(duckdb_api::FailureClassName(duckdb_api::FailureClass::RATE_LIMIT)) == "rate_limit",
+	        "FailureClassName drifted from the freeze string");
+	Require(std::string(duckdb_api::ReplayClassificationName(
+	            duckdb_api::ReplayClassification::SERVER_DIRECTED_DELAY)) == "server_directed_delay",
+	        "ReplayClassificationName drifted from the freeze string");
+	Require(std::string(duckdb_api::FailurePhaseName(duckdb_api::FailurePhase::REQUEST)) == "request",
+	        "FailurePhaseName drifted");
+	Require(std::string(duckdb_api::BudgetDimensionName(duckdb_api::BudgetDimension::TIME)) == "time",
+	        "BudgetDimensionName drifted");
+	Require(std::string(duckdb_api::RemoteStatusClassName(duckdb_api::RemoteStatusClass::RATE_LIMITED)) ==
+	            "rate_limited",
+	        "RemoteStatusClassName drifted");
+
+	// Classified ExecutionError carries properties; unclassified does not.
+	const duckdb_api::FailureProperties properties {duckdb_api::FailureClass::RESOURCE_BUDGET,
+	                                                duckdb_api::FailurePhase::DECODE,
+	                                                duckdb_api::ReplayClassification::ATOMIC_TRAVERSAL_STEP,
+	                                                3,
+	                                                1,
+	                                                0,
+	                                                duckdb_api::RemoteStatusClass::NONE,
+	                                                duckdb_api::BudgetDimension::PAGES};
+	const duckdb_api::ExecutionError classified(duckdb_api::ErrorStage::RESOURCE, "pages",
+	                                            "scan exhausted its page budget", properties);
+	Require(classified.Classified() &&
+	            classified.Properties().failure_class == duckdb_api::FailureClass::RESOURCE_BUDGET &&
+	            classified.Properties().step == 3 &&
+	            classified.Properties().terminating_budget == duckdb_api::BudgetDimension::PAGES,
+	        "classified ExecutionError did not carry its failure properties");
+	const duckdb_api::ExecutionError unclassified(duckdb_api::ErrorStage::RESOURCE, "pages",
+	                                              "scan exhausted its page budget");
+	Require(!unclassified.Classified(), "unclassified ExecutionError reported Classified() true");
+}
+
 } // namespace
 
 int main() {
@@ -180,6 +274,7 @@ int main() {
 		TestFlatArraySchemaAlignment();
 		TestDoublePayloadAndAlignmentCancellation();
 		TestStableErrorContract();
+		TestFailureClassification();
 		std::cout << "execution contract tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

@@ -156,14 +156,16 @@ public:
 				const bool authenticated = admitted_profile->RequiresBearer() || admitted_profile->RequiresApiKey();
 				if (authenticated && response.status == 401) {
 					throw ExecutionError(ErrorStage::AUTHENTICATION, "http_status",
-					                     "HTTP endpoint rejected authentication");
+					                     "HTTP endpoint rejected authentication",
+					                     HttpStatusFailureProperties(response.status, true));
 				}
 				if (authenticated && response.status == 403) {
-					throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status",
-					                     "HTTP endpoint denied authorization");
+					throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status", "HTTP endpoint denied authorization",
+					                     HttpStatusFailureProperties(response.status, true));
 				}
 				if (response.status < 200 || response.status >= 300) {
-					throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status");
+					throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status",
+					                     HttpStatusFailureProperties(response.status, false));
 				}
 				auto page = DecodeJsonPage(response.body, BuildDecodePlan(*admitted_profile, deadline), combined);
 				decoded_memory_bytes = page.retained_memory_bytes;
