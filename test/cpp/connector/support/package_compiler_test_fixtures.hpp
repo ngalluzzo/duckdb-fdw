@@ -171,6 +171,11 @@ CompileNonGithubGraphqlGenerationFixture(const std::string &absolute_repository_
 // anonymous replayable REST read. Consumers receive compiled facts only.
 duckdb_api::CompiledPackageGeneration CompileRetryV2GenerationFixture(const std::string &absolute_repository_root);
 
+// Exact duckdb_api/v3 provider fixture with REST and GraphQL replayable reads
+// carrying ordinary retry plus bounded waiting rate-limit policy. Consumers
+// receive immutable compiled facts only.
+duckdb_api::CompiledPackageGeneration CompileRateLimitV3GenerationFixture(const std::string &absolute_repository_root);
+
 enum class RepositoryGithubGraphqlCounterexample {
 	DOCUMENT_MISMATCH,
 	DIGEST_MISMATCH,

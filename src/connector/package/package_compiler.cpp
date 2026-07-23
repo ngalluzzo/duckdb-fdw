@@ -72,7 +72,8 @@ PackageCompileResult CompilePackageImpl(const PackageSourceSnapshot &snapshot, c
                                         PackageCancellation &cancellation,
                                         internal::PackageCompilationPhaseHook *phase_hook) {
 	internal::PackageDiagnosticSink diagnostics(host_limits.max_diagnostics);
-	if (!snapshot.IsValid() || !VerifyConnectorPackageV1SchemaAsset() || !VerifyConnectorPackageV2SchemaAsset()) {
+	if (!snapshot.IsValid() || !VerifyConnectorPackageV1SchemaAsset() || !VerifyConnectorPackageV2SchemaAsset() ||
+	    !VerifyConnectorPackageV3SchemaAsset()) {
 		diagnostics.Add(PackageDiagnosticCode::PACKAGE_IDENTITY, PackageDiagnosticPhase::SOURCE, RootMark());
 		return PackageCompileResult(nullptr, diagnostics.Finish());
 	}

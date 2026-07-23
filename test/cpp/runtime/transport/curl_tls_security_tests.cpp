@@ -37,7 +37,9 @@ void RunProbe(const std::string &mode, uint16_t port, const std::string &ca_file
 	    hostname_counterexample ? "" : "localhost:" + port_text + ":127.0.0.1",
 	    duckdb_api_test::PrivateCurlSocketPolicy::ALLOW_LOOPBACK_PORT,
 	    2000,
-	    &policy_checks};
+	    &policy_checks,
+	    nullptr,
+	    nullptr};
 	ManualControl control;
 	if (mode == "success") {
 		const auto result = duckdb_api_test::PerformPrivateCurlProbe(options, control);

@@ -54,6 +54,12 @@ static const uint64_t RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP = 3;
 static const uint64_t RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN = 96;
 static const uint64_t RETRY_MAX_DELAY_MILLISECONDS = 100;
 static const uint64_t RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN = 250;
+static const uint64_t RATE_LIMIT_MAX_REQUEST_ATTEMPTS_PER_STEP = 3;
+static const uint64_t RATE_LIMIT_MAX_DELAY_MILLISECONDS = 30000;
+static const uint64_t RATE_LIMIT_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN = 30000;
+static const uint64_t RESILIENCE_MAX_REQUEST_ATTEMPTS_PER_STEP = 3;
+static const uint64_t RESILIENCE_MAX_REQUEST_ATTEMPTS_PER_SCAN = 96;
+static const uint64_t RESILIENCE_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN = 30000;
 
 // The base domain names the complete row-producing source before DuckDB-owned
 // relational operators. ROOT_ARRAY_RECORDS is one complete unpaginated
@@ -128,8 +134,9 @@ enum class PlannedOperationReplayClass {
 	UNKNOWN
 };
 
-// Immutable Connector recommendation plus Semantics-derived aggregate attempt
-// authority. Runtime may only narrow these fields during admission.
+// Immutable Connector recommendation plus Semantics-derived retry-specific
+// scan reachability. This is not the shared aggregate attempt pool; Runtime
+// admits that separately from ResiliencePlan and may only narrow either value.
 struct RetryPlan {
 	uint64_t max_attempts_per_step;
 	uint64_t max_attempts_per_scan;
@@ -137,6 +144,52 @@ struct RetryPlan {
 	uint64_t max_cumulative_waiting_milliseconds_per_scan;
 
 	bool Enabled() const noexcept;
+	bool IsWithinHardBounds() const noexcept;
+};
+
+// Closed planned vocabulary copied from Connector. These values contain only
+// author-declared structural facts; response header values, quota identity,
+// clocks, and scheduler state never enter the immutable relational plan.
+enum class PlannedRateLimitMode { FAIL, WAIT, WAIT_IF_DEADLINE_ALLOWS };
+enum class PlannedRateLimitPrincipalScope { CREDENTIAL_AUTHORITY, SHARED };
+enum class PlannedRateLimitGuidanceFormat { RETRY_AFTER, DELTA_SECONDS, UNIX_SECONDS };
+
+struct PlannedRateLimitGuidance {
+	std::string header_name;
+	PlannedRateLimitGuidanceFormat format;
+};
+
+// Exact normalized Connector policy plus the package-major identity Runtime
+// needs for quota isolation. Semantics derives package_major_version only from
+// the selected connector's canonical package version and otherwise copies the
+// policy field-for-field.
+struct RateLimitPlan {
+	bool declared;
+	PlannedRateLimitMode mode;
+	std::vector<uint16_t> statuses;
+	std::string operation_family;
+	PlannedRateLimitPrincipalScope scope;
+	std::vector<PlannedRateLimitGuidance> guidance;
+	std::string remaining_quota_header;
+	std::string remote_bucket_header;
+	uint64_t max_attempts_per_step;
+	uint64_t max_delay_milliseconds;
+	uint64_t max_cumulative_waiting_milliseconds_per_scan;
+	std::uint32_t package_major_version;
+
+	bool Declared() const noexcept;
+	bool WaitingEnabled() const noexcept;
+	bool IsWithinHardBounds() const noexcept;
+};
+
+// One aggregate authority shared by ordinary retry and reactive rate-limit
+// handling. Per-step attempts are a maximum, not two additive pools; scan
+// attempts and total waiting are checked and capped during planning.
+struct ResiliencePlan {
+	uint64_t max_attempts_per_step;
+	uint64_t max_attempts_per_scan;
+	uint64_t max_cumulative_waiting_milliseconds_per_scan;
+
 	bool IsWithinHardBounds() const noexcept;
 };
 
@@ -487,6 +540,9 @@ public:
 	FeatureState Retry() const;
 	PlannedOperationReplayClass ReplayClass() const noexcept;
 	const RetryPlan &RetryPolicy() const noexcept;
+	FeatureState RateLimit() const noexcept;
+	const RateLimitPlan &RateLimitPolicy() const noexcept;
+	const ResiliencePlan &ResiliencePolicy() const noexcept;
 	FeatureState Cache() const;
 	FeatureState Authentication() const;
 
@@ -540,6 +596,9 @@ private:
 	FeatureState retry;
 	PlannedOperationReplayClass replay_class;
 	RetryPlan retry_policy;
+	FeatureState rate_limit;
+	RateLimitPlan rate_limit_policy;
+	ResiliencePlan resilience_policy;
 	FeatureState cache;
 	FeatureState authentication;
 	PlannedSecretReference secret_reference;

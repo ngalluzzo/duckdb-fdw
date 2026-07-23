@@ -51,6 +51,8 @@ bool IsCanonicalDouble(const LocatedText &value, double &parsed);
 bool IsExtractor(const std::string &value, bool collection, std::vector<std::string> *segments = nullptr);
 bool IsFixedPath(const std::string &value);
 bool IsHeaderName(const std::string &value);
+bool IsRateLimitHeaderName(const std::string &value);
+bool IsRateLimitOperationFamily(const std::string &value);
 bool IsHeaderValue(const std::string &value);
 bool IsQueryName(const std::string &value);
 bool IsCanonicalHost(const std::string &value);

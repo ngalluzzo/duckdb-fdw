@@ -56,6 +56,21 @@ operations:
 )YAML");
 }
 
+void WriteRateLimitV3Package(TemporaryPackage &package, const std::string &rest_relation = std::string()) {
+	package.Write("connector.yaml", duckdb_api_test::ReadFile("test/fixtures/package_rate_limit_v3/connector.yaml"));
+	package.Write("relations/disabled_events.yaml",
+	              duckdb_api_test::ReadFile("test/fixtures/package_rate_limit_v3/relations/disabled_events.yaml"));
+	package.Write("relations/fail_events.yaml",
+	              duckdb_api_test::ReadFile("test/fixtures/package_rate_limit_v3/relations/fail_events.yaml"));
+	package.Write("relations/duplicate_events.yaml",
+	              rest_relation.empty()
+	                  ? duckdb_api_test::ReadFile("test/fixtures/package_rate_limit_v3/relations/duplicate_events.yaml")
+	                  : rest_relation);
+	package.Write(
+	    "relations/duplicate_graphql_events.yaml",
+	    duckdb_api_test::ReadFile("test/fixtures/package_rate_limit_v3/relations/duplicate_graphql_events.yaml"));
+}
+
 void RequireFirstDiagnostic(const duckdb_api::connector::PackageCompileResult &result, PackageDiagnosticCode code,
                             PackageDiagnosticPhase phase, const std::string &message) {
 	Require(!result.Succeeded() && result.Generation() == nullptr && !result.Diagnostics().empty() &&
@@ -94,6 +109,96 @@ void TestV1RejectsRetryDeclaration() {
 	                       "duckdb_api/v1 accepted the v2-only retry declaration");
 	Require(result.Diagnostics()[0].Coordinate().yaml_path == "$.operations[0].retry",
 	        "v1 retry rejection lost its exact source path");
+}
+
+void TestV1AndV2RejectRateLimitDeclaration() {
+	const std::string declaration = "    rate_limit:\n"
+	                                "      statuses: [429]\n"
+	                                "      mode: fail\n"
+	                                "      operation_family: core_requests\n"
+	                                "      principal_scope: credential_authority\n";
+	{
+		TemporaryPackage package;
+		duckdb_api_test::WriteGithubPackage(package);
+		package.Write("relations/authenticated_user.yaml",
+		              duckdb_api_test::ReplaceOnce(GithubRelation("authenticated_user"), "    replay_safety: safe\n",
+		                                           "    replay_safety: safe\n" + declaration));
+		NeverCancel cancellation;
+		const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
+		RequireFirstDiagnostic(result, PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
+		                       "duckdb_api/v1 accepted the v3-only rate-limit declaration");
+		Require(result.Diagnostics()[0].Coordinate().yaml_path == "$.operations[0].rate_limit",
+		        "v1 rate-limit rejection lost its exact source path");
+	}
+	{
+		TemporaryPackage package;
+		package.Write("connector.yaml", duckdb_api_test::ReadFile("test/fixtures/package_retry_v2/connector.yaml"));
+		auto rest = duckdb_api_test::ReadFile("test/fixtures/package_retry_v2/relations/duplicate_events.yaml");
+		package.Write(
+		    "relations/duplicate_events.yaml",
+		    duckdb_api_test::ReplaceOnce(rest, "    replay_safety: safe\n", "    replay_safety: safe\n" + declaration));
+		package.Write(
+		    "relations/duplicate_graphql_events.yaml",
+		    duckdb_api_test::ReadFile("test/fixtures/package_retry_v2/relations/duplicate_graphql_events.yaml"));
+		NeverCancel cancellation;
+		const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
+		RequireFirstDiagnostic(result, PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
+		                       "duckdb_api/v2 accepted the v3-only rate-limit declaration");
+		Require(result.Diagnostics()[0].Coordinate().yaml_path == "$.operations[0].rate_limit",
+		        "v2 rate-limit rejection lost its exact source path");
+	}
+}
+
+void TestV3RateLimitSchemaContract() {
+	const auto source =
+	    duckdb_api_test::ReadFile("test/fixtures/package_rate_limit_v3/relations/duplicate_events.yaml");
+	{
+		TemporaryPackage package;
+		WriteRateLimitV3Package(package);
+		NeverCancel cancellation;
+		const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
+		Require(result.Succeeded() && result.Generation() != nullptr,
+		        "accepted duckdb_api/v3 rate-limit fixture did not compile");
+	}
+	{
+		TemporaryPackage package;
+		WriteRateLimitV3Package(package, duckdb_api_test::ReplaceOnce(source, "operation_family: core_requests",
+		                                                              "operation_family: " + std::string(64, 'a')));
+		NeverCancel cancellation;
+		Require(duckdb_api_test::CompileRoot(package.Root(), cancellation).Succeeded(),
+		        "v3 rejected the exact 64-byte operation-family boundary");
+	}
+	const std::vector<std::pair<std::string, std::string>> mutations = {
+	    {"statuses: [503, 429]", "statuses: [503, 401]"},
+	    {"statuses: [503, 429]", "statuses: [503, \"429\"]"},
+	    {"operation_family: core_requests", "operation_family: " + std::string(65, 'a')},
+	    {"header: retry-after", "header: Retry-After"},
+	    {"header: retry-after", "header: date"},
+	    {"header: x-ratelimit-remaining", "header: retry-after"},
+	    {"mode: wait_if_deadline_allows", "mode: fail"},
+	    {"max_attempts_per_step: 3", "max_attempts_per_step: 4"},
+	    {"max_delay_milliseconds: 30000", "max_delay_milliseconds: 30001"},
+	    {"principal_scope: credential_authority", "principal_scope: Credential_Authority"}};
+	for (const auto &mutation : mutations) {
+		TemporaryPackage package;
+		WriteRateLimitV3Package(package, duckdb_api_test::ReplaceOnce(source, mutation.first, mutation.second));
+		NeverCancel cancellation;
+		const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
+		Require(!result.Succeeded() && !result.Diagnostics().empty(),
+		        "v3 accepted a malformed, contradictory, or differently cased rate-limit fact");
+	}
+}
+
+void TestRateLimitV3ExampleCompiles() {
+	TemporaryPackage package;
+	package.Write("connector.yaml", duckdb_api_test::ReadFile("examples/rate-limit-v3/connector.yaml"));
+	package.Write("relations/events.yaml", duckdb_api_test::ReadFile("examples/rate-limit-v3/relations/events.yaml"));
+	NeverCancel cancellation;
+	const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
+	Require(result.Succeeded() && result.Generation() != nullptr &&
+	            result.Generation()->Identity().SpecIdentifier() == "duckdb_api/v3" &&
+	            result.Generation()->Connector().Relations()[0].Operation().RateLimitPolicy().WaitingEnabled(),
+	        "documented rate-limit v3 example drifted from the production compiler contract");
 }
 
 void TestCrossFileAndPolicyReferences() {
@@ -572,6 +677,9 @@ int main() {
 	try {
 		TestClosedSchemaAndAllOrNothing();
 		TestV1RejectsRetryDeclaration();
+		TestV1AndV2RejectRateLimitDeclaration();
+		TestV3RateLimitSchemaContract();
+		TestRateLimitV3ExampleCompiles();
 		TestCrossFileAndPolicyReferences();
 		TestTypedDefaults();
 		TestTypedDoubleDefaultsRoundTrip();

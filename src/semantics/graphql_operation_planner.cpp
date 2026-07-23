@@ -425,6 +425,9 @@ void ValidatePackageGraphqlOperationProfile(const CompiledRelation &relation, co
 	const auto &cursor = graphql.cursor;
 	const auto retry_attempts =
 	    operation.RetryRecommendation().Enabled() ? operation.RetryRecommendation().max_attempts_per_step : 1;
+	const auto rate_limit_attempts =
+	    operation.RateLimitPolicy().WaitingEnabled() ? operation.RateLimitPolicy().max_attempts_per_step : 1;
+	const auto resilience_attempts = std::max(retry_attempts, rate_limit_attempts);
 	if (cursor.direction != CompiledGraphqlCursorDirection::FORWARD ||
 	    cursor.dependency != CompiledGraphqlCursorDependency::SEQUENTIAL ||
 	    cursor.consistency != CompiledGraphqlCursorConsistency::MUTABLE || cursor.supports_total ||
@@ -438,9 +441,9 @@ void ValidatePackageGraphqlOperationProfile(const CompiledRelation &relation, co
 	    graphql.max_serialized_request_body_bytes_per_request >
 	        std::numeric_limits<std::uint64_t>::max() / cursor.max_pages_per_scan ||
 	    graphql.max_serialized_request_body_bytes_per_request * cursor.max_pages_per_scan >
-	        std::numeric_limits<std::uint64_t>::max() / retry_attempts ||
+	        std::numeric_limits<std::uint64_t>::max() / resilience_attempts ||
 	    graphql.max_serialized_request_body_bytes_per_scan >
-	        graphql.max_serialized_request_body_bytes_per_request * cursor.max_pages_per_scan * retry_attempts) {
+	        graphql.max_serialized_request_body_bytes_per_request * cursor.max_pages_per_scan * resilience_attempts) {
 		throw std::logic_error("selected package GraphQL cursor, feature, or body envelope is contradictory");
 	}
 

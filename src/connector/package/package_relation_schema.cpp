@@ -213,7 +213,8 @@ bool DecodeRelationSchema(const std::string &file, const FailsafeYamlNode &root,
 	relation.auth = DecodeAuth(reader.Child("auth"));
 	relation.resources = DecodeResources(reader.Child("resources"));
 	relation.mark = reader.Mark();
-	if ((relation.api_version.value != "duckdb_api/v1" && relation.api_version.value != "duckdb_api/v2") ||
+	if ((relation.api_version.value != "duckdb_api/v1" && relation.api_version.value != "duckdb_api/v2" &&
+	     relation.api_version.value != "duckdb_api/v3") ||
 	    relation.api_version.value != expected_spec_identifier) {
 		diagnostics.Add(PackageDiagnosticCode::UNSUPPORTED_SPEC, PackageDiagnosticPhase::SCHEMA,
 		                relation.api_version.mark);
@@ -226,11 +227,13 @@ bool DecodeRelationSchema(const std::string &file, const FailsafeYamlNode &root,
 	                                        relation.id.value, diagnostics);
 	DecodeUniqueSequence<InputDeclaration>(reader, "inputs", 0, 128, DecodeInput, relation.inputs, relation.id.value,
 	                                       diagnostics);
-	const bool retry_supported = expected_spec_identifier == "duckdb_api/v2";
+	const bool retry_supported =
+	    expected_spec_identifier == "duckdb_api/v2" || expected_spec_identifier == "duckdb_api/v3";
+	const bool rate_limit_supported = expected_spec_identifier == "duckdb_api/v3";
 	DecodeUniqueSequence<OperationDeclaration>(
 	    reader, "operations", 1, 64,
-	    [retry_supported](const SchemaReader &operation_reader) {
-		    return DecodeOperationSchema(operation_reader, retry_supported);
+	    [retry_supported, rate_limit_supported](const SchemaReader &operation_reader) {
+		    return DecodeOperationSchema(operation_reader, retry_supported, rate_limit_supported);
 	    },
 	    relation.operations, relation.id.value, diagnostics);
 	DecodeUniqueSequence<PredicateDeclaration>(reader, "predicates", 0, 64, DecodePredicateSchema, relation.predicates,

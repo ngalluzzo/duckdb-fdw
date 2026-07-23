@@ -22,6 +22,13 @@ std::uint64_t BoundedProduct(std::uint64_t left, std::uint64_t right, std::uint6
 	return std::min(left * right, ceiling);
 }
 
+std::uint64_t BoundedSum(std::uint64_t left, std::uint64_t right, std::uint64_t ceiling, const char *field) {
+	if (left > std::numeric_limits<std::uint64_t>::max() - right) {
+		throw std::logic_error(std::string("selected operation overflows ") + field);
+	}
+	return std::min(left + right, ceiling);
+}
+
 namespace {
 
 const char *SupportedScalarTypeName(CompiledScalarType type) {
@@ -54,6 +61,35 @@ bool IsSupportedColumnType(const CompiledColumn &column) {
 
 bool Contains(const std::vector<std::string> &values, const std::string &expected) {
 	return std::find(values.begin(), values.end(), expected) != values.end();
+}
+
+bool IsOperationFamilyCharacter(char value, bool first) {
+	return (value >= 'a' && value <= 'z') || (!first && ((value >= '0' && value <= '9') || value == '_'));
+}
+
+bool IsCanonicalOperationFamily(const std::string &value) {
+	if (value.empty() || value.size() > 64) {
+		return false;
+	}
+	for (std::size_t index = 0; index < value.size(); index++) {
+		if (!IsOperationFamilyCharacter(value[index], index == 0)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool IsHttpTokenCharacter(char value) {
+	return (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9') || value == '!' || value == '#' ||
+	       value == '$' || value == '%' || value == '&' || value == '\'' || value == '*' || value == '+' ||
+	       value == '-' || value == '.' || value == '^' || value == '_' || value == '`' || value == '|' || value == '~';
+}
+
+bool IsCanonicalRateLimitHeaderName(const std::string &value) {
+	if (value.empty() || value.size() > 64 || value == "date") {
+		return false;
+	}
+	return std::all_of(value.begin(), value.end(), IsHttpTokenCharacter);
 }
 
 bool OriginsEqual(const CompiledHttpOrigin &left, const CompiledHttpOrigin &right) {
@@ -96,6 +132,68 @@ void ValidateRetryContract(const CompiledOperation &operation) {
 	    retry.max_cumulative_waiting_milliseconds_per_scan == 0 ||
 	    retry.max_cumulative_waiting_milliseconds_per_scan > RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN) {
 		throw std::logic_error("retry recommendation exceeds planner authority");
+	}
+}
+
+void ValidateRateLimitContract(const CompiledOperation &operation) {
+	const auto &policy = operation.RateLimitPolicy();
+	if (!policy.Declared()) {
+		if (policy.max_attempts_per_step != 0 || policy.max_delay_milliseconds != 0 ||
+		    policy.max_cumulative_waiting_milliseconds_per_scan != 0 || !policy.statuses.empty() ||
+		    !policy.operation_family.empty() || !policy.guidance.empty() || !policy.remaining_quota_header.empty() ||
+		    !policy.remote_bucket_header.empty()) {
+			throw std::logic_error("disabled rate-limit policy is contradictory");
+		}
+		return;
+	}
+	if (operation.ReplayClass() != CompiledOperationReplayClass::REPLAYABLE_READ) {
+		throw std::logic_error("rate-limit policy requires a replayable read operation");
+	}
+	(void)PlanRateLimitMode(policy.mode);
+	(void)PlanRateLimitPrincipalScope(policy.scope);
+	for (const auto &field : policy.guidance) {
+		(void)PlanRateLimitGuidanceFormat(field.format);
+	}
+	if (policy.statuses.empty() || policy.statuses.size() > 8 || !IsCanonicalOperationFamily(policy.operation_family)) {
+		throw std::logic_error("rate-limit policy contains incomplete structural facts");
+	}
+	for (std::size_t index = 0; index < policy.statuses.size(); index++) {
+		const auto status = policy.statuses[index];
+		if (status < 400 || status > 599 || status == 401 || status == 403 || status == 407 ||
+		    (index > 0 && policy.statuses[index - 1] >= status)) {
+			throw std::logic_error("rate-limit policy contains an unsafe or non-normalized status set");
+		}
+	}
+	std::vector<std::string> response_fields;
+	response_fields.reserve(policy.guidance.size() + 2);
+	for (const auto &field : policy.guidance) {
+		if (!IsCanonicalRateLimitHeaderName(field.header_name) || Contains(response_fields, field.header_name)) {
+			throw std::logic_error("rate-limit policy contains a duplicate or non-canonical response field");
+		}
+		response_fields.push_back(field.header_name);
+	}
+	for (const auto *field : {&policy.remaining_quota_header, &policy.remote_bucket_header}) {
+		if (!field->empty()) {
+			if (!IsCanonicalRateLimitHeaderName(*field) || Contains(response_fields, *field)) {
+				throw std::logic_error("rate-limit policy contains a duplicate or non-canonical response field");
+			}
+			response_fields.push_back(*field);
+		}
+	}
+	if (policy.mode == CompiledRateLimitMode::FAIL) {
+		if (!policy.guidance.empty() || !policy.remaining_quota_header.empty() ||
+		    !policy.remote_bucket_header.empty() || policy.max_attempts_per_step != 0 ||
+		    policy.max_delay_milliseconds != 0 || policy.max_cumulative_waiting_milliseconds_per_scan != 0) {
+			throw std::logic_error("fail-mode rate-limit policy carries waiting authority");
+		}
+		return;
+	}
+	if (!policy.WaitingEnabled() || policy.guidance.empty() || policy.guidance.size() > 4 ||
+	    policy.max_attempts_per_step < 2 || policy.max_attempts_per_step > RATE_LIMIT_MAX_REQUEST_ATTEMPTS_PER_STEP ||
+	    policy.max_delay_milliseconds == 0 || policy.max_delay_milliseconds > RATE_LIMIT_MAX_DELAY_MILLISECONDS ||
+	    policy.max_cumulative_waiting_milliseconds_per_scan == 0 ||
+	    policy.max_cumulative_waiting_milliseconds_per_scan > RATE_LIMIT_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN) {
+		throw std::logic_error("rate-limit policy exceeds planner authority");
 	}
 }
 
@@ -309,6 +407,7 @@ void ValidateOperation(CompiledConnectorOrigin connector_origin, const CompiledR
 	}
 	if (operation.Protocol() == CompiledProtocol::GRAPHQL) {
 		ValidateRetryContract(operation);
+		ValidateRateLimitContract(operation);
 		ValidateGraphqlOperationProfile(relation, operation, network_policy);
 		return;
 	}
@@ -317,6 +416,7 @@ void ValidateOperation(CompiledConnectorOrigin connector_origin, const CompiledR
 	}
 	const auto &rest = operation.Rest();
 	ValidateRetryContract(operation);
+	ValidateRateLimitContract(operation);
 	if (rest.request.path.empty() || rest.request.path.front() != '/' ||
 	    (!network_policy.allowed_origins.empty() && !IsFixedPackagePath(rest.request.path))) {
 		throw std::logic_error("selected REST operation contains an unsupported request or retry declaration");

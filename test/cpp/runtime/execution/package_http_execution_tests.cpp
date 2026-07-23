@@ -1,6 +1,7 @@
 #include "duckdb_api/authorization.hpp"
 #include "duckdb_api/execution.hpp"
 #include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
+#include "duckdb_api/internal/runtime/execution/http_plan_admission.hpp"
 #include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 #include "duckdb_api/internal/runtime/execution/http_retry_controller.hpp"
 #include "runtime/support/controlled_http_transport.hpp"
@@ -38,6 +39,28 @@ duckdb_api::internal::HttpExecutionProfile NonGithubProfile() {
 	        duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
 	        duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
 	        duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
+}
+
+duckdb_api::internal::HttpExecutionProfile RateLimitProfile(uint64_t retry_scan_attempts = 96,
+                                                            uint64_t rate_scan_attempts = 96, uint64_t retry_wait = 250,
+                                                            uint64_t combined_wait = 30000) {
+	return {duckdb_api::PlannedUrlScheme::HTTPS,
+	        "api.example.com",
+	        8443,
+	        false,
+	        false,
+	        false,
+	        30000,
+	        250,
+	        3,
+	        retry_scan_attempts,
+	        100,
+	        retry_wait,
+	        3,
+	        rate_scan_attempts,
+	        30000,
+	        30000,
+	        combined_wait};
 }
 
 class NeverCancelled final : public duckdb_api::ExecutionControl {
@@ -449,6 +472,94 @@ void TestRetryV2TerminalMatrixAndCancellation(const std::string &repository_root
 	        "cancellation during retry backoff started another request");
 }
 
+void TestRateLimitV3AdmissionAndProductionRecovery(const std::string &repository_root) {
+	const auto rest_plan = duckdb_api_test::BuildRateLimitV3PackageRestPlan(repository_root);
+	const auto graphql_plan = duckdb_api_test::BuildRateLimitV3PackageGraphqlPlan(repository_root);
+	auto graphql = duckdb_api::internal::TryAdmitGraphqlPlan(graphql_plan, RateLimitProfile());
+	Require(graphql && graphql->RetryPolicy().max_attempts_per_step == 2 &&
+	            graphql->RetryPolicy().max_attempts_per_scan == 4 &&
+	            graphql->RateLimitPolicy().max_attempts_per_step == 3 &&
+	            graphql->RateLimitPolicy().max_attempts_per_scan == 6 &&
+	            graphql->ResiliencePolicy().max_attempts_per_step == 3 &&
+	            graphql->ResiliencePolicy().max_attempts_per_scan == 6 && graphql->MaxScanBodyBytes() == 24576,
+	        "GraphQL admission did not use max-not-sum resilience attempts for reachable body authority");
+
+	auto narrowed = duckdb_api::internal::TryAdmitSingleResponseHttpPlan(rest_plan, RateLimitProfile(2, 2, 10, 10));
+	Require(narrowed && narrowed->RetryPolicy().max_attempts_per_scan == 2 &&
+	            narrowed->RateLimitPolicy().max_attempts_per_scan == 2 &&
+	            narrowed->ResiliencePolicy().max_attempts_per_scan == 2 &&
+	            narrowed->ResiliencePolicy().max_cumulative_waiting_milliseconds_per_scan == 10,
+	        "Runtime re-expanded narrowed per-scan attempt or aggregate waiting authority");
+	Require(!duckdb_api::internal::TryAdmitSingleResponseHttpPlan(rest_plan, RateLimitProfile(2, 2, 25, 10)),
+	        "Runtime widened a nonzero combined-wait operator cap below ordinary retry authority");
+
+	const auto graphql_runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	auto limited_graphql = ControlledResponse(429, "");
+	limited_graphql.rate_limit_fields = {{"x-ratelimit-reset-after", "1"}};
+	graphql_runtime->RespondSequence({limited_graphql, ControlledResponse(200, RetryGraphqlDuplicatePage())});
+	NeverCancelled control;
+	auto graphql_stream = graphql_runtime->Executor()->Open(graphql_plan, control);
+	duckdb_api::TypedBatch graphql_batch;
+	Require(graphql_stream->Next(control, graphql_batch) && graphql_batch.rows.size() == 2 &&
+	            graphql_batch.rows[0].values[0].varchar_value == "duplicate" &&
+	            graphql_batch.rows[1].values[0].varchar_value == "duplicate",
+	        "positive GraphQL rate-limit wait did not recover the duplicate-bearing page");
+	const auto graphql_diagnostics = graphql_stream->Diagnostics();
+	Require(graphql_runtime->Observations().size() == 2 && graphql_diagnostics.aggregate_attempts == 2 &&
+	            graphql_diagnostics.cumulative_rate_limit_waiting_milliseconds >= 1000 &&
+	            graphql_diagnostics.rate_limit_events == 1 && graphql_diagnostics.rate_limit_waits == 1 &&
+	            !graphql_diagnostics.rate_limit_waiting,
+	        "positive GraphQL rate-limit recovery lost effective wait or attempt diagnostics");
+
+	const auto cancelled_runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	auto cancelled_limit = ControlledResponse(429, "");
+	cancelled_limit.rate_limit_fields = {{"x-ratelimit-reset-after", "1"}};
+	cancelled_runtime->RespondSequence({cancelled_limit, ControlledResponse(200, RetryGraphqlDuplicatePage())});
+	AtomicCancellation cancellation;
+	auto cancelled_stream = cancelled_runtime->Executor()->Open(graphql_plan, cancellation);
+	std::exception_ptr terminal;
+	std::thread worker([&]() {
+		try {
+			duckdb_api::TypedBatch ignored;
+			(void)cancelled_stream->Next(cancellation, ignored);
+		} catch (...) {
+			terminal = std::current_exception();
+		}
+	});
+	Require(cancelled_runtime->WaitForRequestCount(1, std::chrono::milliseconds(1000)),
+	        "rate-limit cancellation oracle did not observe the limiting response");
+	bool observed_waiting = false;
+	const auto observation_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+	while (!observed_waiting && std::chrono::steady_clock::now() < observation_deadline) {
+		observed_waiting = cancelled_stream->Diagnostics().rate_limit_waiting;
+		std::this_thread::yield();
+	}
+	cancellation.Request();
+	worker.join();
+	bool was_cancelled = false;
+	try {
+		if (terminal) {
+			std::rethrow_exception(terminal);
+		}
+	} catch (const duckdb_api::ExecutionCancelled &) {
+		was_cancelled = true;
+	}
+	Require(observed_waiting && was_cancelled && cancelled_runtime->Observations().size() == 1,
+	        "live wait diagnostics or cancellation allowed a stranded or extra rate-limit attempt");
+
+	const auto rest_runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	auto limited_rest = ControlledResponse(429, "");
+	limited_rest.rate_limit_fields = {
+	    {"retry-after", "0"}, {"x-ratelimit-remaining", "0"}, {"x-ratelimit-resource", "core"}};
+	const std::string duplicate_page = "[{\"id\":\"duplicate\",\"ordinal\":1},{\"id\":\"duplicate\",\"ordinal\":1}]";
+	rest_runtime->RespondSequence({limited_rest, ControlledResponse(200, duplicate_page)});
+	auto rest_stream = rest_runtime->Executor()->Open(rest_plan, control);
+	duckdb_api::TypedBatch rest_batch;
+	Require(rest_stream->Next(control, rest_batch) && rest_batch.rows.size() == 2 &&
+	            rest_runtime->Observations().size() == 2 && rest_stream->Diagnostics().rate_limit_events == 1,
+	        "REST immediate rate-limit recovery did not preserve the duplicate-bearing page");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -464,6 +575,7 @@ int main(int argc, char **argv) {
 		TestRetryV2RecoversDuplicateBagWithStructuredDiagnostics(repository_root);
 		TestRetryV2CompilerGeneratedGraphqlRecovery(repository_root);
 		TestRetryV2TerminalMatrixAndCancellation(repository_root);
+		TestRateLimitV3AdmissionAndProductionRecovery(repository_root);
 		std::cout << "package HTTP execution tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const duckdb_api::ExecutionError &error) {

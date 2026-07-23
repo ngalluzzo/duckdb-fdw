@@ -14,11 +14,7 @@ namespace internal {
 inline bool TryAdmitRetryPolicy(const ScanPlan &plan, const HttpExecutionProfile &profile, RetryPlan &result) {
 	const auto &planned = plan.RetryPolicy();
 	const bool paginated = plan.Pagination().Strategy() != PlannedPaginationStrategy::DISABLED;
-	const auto expected_aggregate =
-	    paginated ? plan.Pagination().ScanBudgets().request_attempts : plan.Budgets().request_attempts;
 	if (plan.ReplayClass() != PlannedOperationReplayClass::REPLAYABLE_READ || !planned.IsWithinHardBounds() ||
-	    planned.max_attempts_per_step != plan.Budgets().request_attempts ||
-	    planned.max_attempts_per_scan != expected_aggregate ||
 	    (plan.Retry() == FeatureState::ENABLED) != planned.Enabled() || profile.max_retry_attempts_per_step == 0 ||
 	    profile.max_retry_attempts_per_step > RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP ||
 	    profile.max_retry_attempts_per_scan == 0 ||

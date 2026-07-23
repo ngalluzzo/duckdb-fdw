@@ -4,6 +4,8 @@
 #include "scan_plan_builder.hpp"
 #include "scan_planner_internal.hpp"
 
+#include "duckdb_api/package_semver.hpp"
+
 #include <algorithm>
 #include <stdexcept>
 #include <utility>
@@ -129,12 +131,42 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	result.providers = FeatureState::DISABLED;
 	result.replay_class = PlanReplayClass(operation.ReplayClass());
 	const auto &retry_recommendation = operation.RetryRecommendation();
-	const auto attempts_per_step = retry_recommendation.Enabled() ? retry_recommendation.max_attempts_per_step : 1;
+	const auto retry_attempts_per_step =
+	    retry_recommendation.Enabled() ? retry_recommendation.max_attempts_per_step : 1;
 	result.retry = retry_recommendation.Enabled() ? FeatureState::ENABLED : FeatureState::DISABLED;
 	result.retry_policy = {
-	    attempts_per_step, attempts_per_step,
+	    retry_attempts_per_step, retry_attempts_per_step,
 	    retry_recommendation.Enabled() ? retry_recommendation.max_delay_milliseconds : 0,
 	    retry_recommendation.Enabled() ? retry_recommendation.max_cumulative_waiting_milliseconds_per_scan : 0};
+	const auto &compiled_rate_limit = operation.RateLimitPolicy();
+	result.rate_limit = compiled_rate_limit.Declared() ? FeatureState::ENABLED : FeatureState::DISABLED;
+	result.rate_limit_policy.declared = compiled_rate_limit.Declared();
+	result.rate_limit_policy.mode = PlanRateLimitMode(compiled_rate_limit.mode);
+	result.rate_limit_policy.statuses = compiled_rate_limit.statuses;
+	result.rate_limit_policy.operation_family = compiled_rate_limit.operation_family;
+	result.rate_limit_policy.scope = PlanRateLimitPrincipalScope(compiled_rate_limit.scope);
+	result.rate_limit_policy.guidance.clear();
+	result.rate_limit_policy.guidance.reserve(compiled_rate_limit.guidance.size());
+	for (const auto &guidance : compiled_rate_limit.guidance) {
+		result.rate_limit_policy.guidance.push_back(
+		    {guidance.header_name, PlanRateLimitGuidanceFormat(guidance.format)});
+	}
+	result.rate_limit_policy.remaining_quota_header = compiled_rate_limit.remaining_quota_header;
+	result.rate_limit_policy.remote_bucket_header = compiled_rate_limit.remote_bucket_header;
+	result.rate_limit_policy.max_attempts_per_step = compiled_rate_limit.max_attempts_per_step;
+	result.rate_limit_policy.max_delay_milliseconds = compiled_rate_limit.max_delay_milliseconds;
+	result.rate_limit_policy.max_cumulative_waiting_milliseconds_per_scan =
+	    compiled_rate_limit.max_cumulative_waiting_milliseconds_per_scan;
+	result.rate_limit_policy.package_major_version =
+	    compiled_rate_limit.Declared() ? PackageSemVer::Parse(connector.Version()).Major() : 0;
+	const auto rate_limit_attempts_per_step =
+	    compiled_rate_limit.WaitingEnabled() ? compiled_rate_limit.max_attempts_per_step : 1;
+	const auto attempts_per_step = std::max(retry_attempts_per_step, rate_limit_attempts_per_step);
+	result.resilience_policy = {attempts_per_step, attempts_per_step,
+	                            BoundedSum(result.retry_policy.max_cumulative_waiting_milliseconds_per_scan,
+	                                       result.rate_limit_policy.max_cumulative_waiting_milliseconds_per_scan,
+	                                       RESILIENCE_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN,
+	                                       "aggregate resilience waiting scope")};
 	result.cache = FeatureState::DISABLED;
 	result.secret_reference = request.secret_reference.IsPresent()
 	                              ? PlannedSecretReference(request.secret_reference.Name())
@@ -186,7 +218,8 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		if (!result.budgets.IsWithinLiveRestBounds()) {
 			throw std::logic_error("selected relation produced an invalid single-response resource envelope");
 		}
-		result.retry_policy.max_attempts_per_scan = attempts_per_step;
+		result.retry_policy.max_attempts_per_scan = retry_attempts_per_step;
+		result.resilience_policy.max_attempts_per_scan = attempts_per_step;
 	} else if (operation.Protocol() == CompiledProtocol::REST) {
 		const auto &rest = operation.Rest();
 		const auto &compiled_pagination = rest.pagination;
@@ -229,7 +262,10 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		const auto max_pages = compiled_pagination.MaxPagesPerScan();
 		const auto aggregate_attempts = BoundedProduct(
 		    max_pages, attempts_per_step, RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN, "aggregate request-attempt scope");
-		result.retry_policy.max_attempts_per_scan = aggregate_attempts;
+		result.retry_policy.max_attempts_per_scan =
+		    BoundedProduct(max_pages, retry_attempts_per_step, RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+		                   "ordinary retry request-attempt scope");
+		result.resilience_policy.max_attempts_per_scan = aggregate_attempts;
 		result.pagination.scan_budgets = {
 		    aggregate_attempts,
 		    max_pages,
@@ -267,7 +303,10 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    std::min(graphql.max_serialized_request_body_bytes_per_request, HOST_MAX_SERIALIZED_REQUEST_BODY_BYTES);
 		const auto aggregate_attempts = BoundedProduct(
 		    max_pages, attempts_per_step, RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN, "aggregate request-attempt scope");
-		result.retry_policy.max_attempts_per_scan = aggregate_attempts;
+		result.retry_policy.max_attempts_per_scan =
+		    BoundedProduct(max_pages, retry_attempts_per_step, RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+		                   "ordinary retry request-attempt scope");
+		result.resilience_policy.max_attempts_per_scan = aggregate_attempts;
 		// A narrower effective page cannot spend the declared scan ceiling after
 		// the cursor reaches its page limit. Keep aggregate authority reachable.
 		const auto reachable_scan_serialized_body_bytes = BoundedProduct(
@@ -346,13 +385,15 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    predicate_decision.reason +
 		    "; selected JSON-path records define the complete base domain; DuckDB retains all relational operators";
 	}
-	if (!result.retry_policy.IsWithinHardBounds() ||
+	if (!result.retry_policy.IsWithinHardBounds() || !result.rate_limit_policy.IsWithinHardBounds() ||
+	    !result.resilience_policy.IsWithinHardBounds() ||
 	    (result.retry == FeatureState::ENABLED) != result.retry_policy.Enabled() ||
+	    (result.rate_limit == FeatureState::ENABLED) != result.rate_limit_policy.Declared() ||
 	    result.replay_class != PlannedOperationReplayClass::REPLAYABLE_READ ||
-	    result.retry_policy.max_attempts_per_step != result.Budgets().request_attempts ||
+	    result.resilience_policy.max_attempts_per_step != result.Budgets().request_attempts ||
 	    (result.pagination.Strategy() != PlannedPaginationStrategy::DISABLED &&
-	     result.retry_policy.max_attempts_per_scan != result.pagination.ScanBudgets().request_attempts)) {
-		throw std::logic_error("selected operation produced an incoherent retry plan");
+	     result.resilience_policy.max_attempts_per_scan != result.pagination.ScanBudgets().request_attempts)) {
+		throw std::logic_error("selected operation produced an incoherent resilience plan");
 	}
 	result.ValidatePredicateMaterialization();
 	return result;

@@ -44,7 +44,12 @@ read either without inspecting product source.
 > (Accepted 2026-07-23), added `duckdb_api/v2` as the complete v1 grammar plus
 > an optional bounded-retry recommendation. Its implementation graduated
 > directly into the live connector, planning, runtime, diagnostic, and
-> lifecycle contracts; `accepted_contract_revisions` is therefore empty.
+> lifecycle contracts. A seventh revision,
+> [RFC 0025](../../docs/rfcs/0025-enable-bounded-reactive-rate-limit-handling.md)
+> (Accepted 2026-07-23), added `duckdb_api/v3` as v2 plus optional bounded
+> reactive rate-limit policy. It likewise graduated directly into the live
+> connector, planning, runtime, diagnostic, and lifecycle contracts;
+> `accepted_contract_revisions` is therefore empty.
 
 The `1.0.0` contract is not a single document. It is a layered set in which
 each layer draws authority from the one above it:
@@ -67,7 +72,7 @@ rather than duplicating them.
   choices (MIT license, DuckDB Community Extensions as the ordinary-user
   channel, source build as the contributor path, immutable releases, the
   latest-stable DuckDB requirement, best-effort GitHub Issues support).
-- RFCs 0010, 0011, 0012, 0013, 0014, 0021, 0022, 0023, and 0024 bind specific decisions propagated
+- RFCs 0010, 0011, 0012, 0013, 0014, 0021, 0022, 0023, 0024, and 0025 bind specific decisions propagated
   into `docs/ARCHITECTURE.md`, `docs/CONNECTOR_SPECIFICATIONS.md`, and
   `docs/RUNTIME_CONTRACTS.md`.
 
@@ -76,7 +81,7 @@ rather than duplicating them.
 | Domain | Contract | Authority |
 | --- | --- | --- |
 | Project and extension | SemVer for the documented product surface and observable behavior | `ROADMAP.md` Versioning model |
-| Connector specification | Compatibility identifiers for the declarative language: frozen one-attempt `duckdb_api/v1` and retry-capable `duckdb_api/v2` | RFCs 0013 and 0024 |
+| Connector specification | Compatibility identifiers for the declarative language: frozen one-attempt `duckdb_api/v1`, retry-capable `duckdb_api/v2`, and bounded reactive rate-limit-capable `duckdb_api/v3` | RFCs 0013, 0024, and 0025 |
 | Connector package | Independent SemVer for one connector's relations, inputs, policies, schemas, upstream adaptations | RFC 0013 |
 | DuckDB compatibility | Tested matrix of DuckDB release, profile, platform, architecture, installation mode | `ROADMAP.md`; evidence-derived at `0.9.0` |
 
@@ -124,9 +129,10 @@ because the project reaches `1.0.0`.
 
 ### 4. Connector specification and stable package subset
 
-- Frozen: identifiers `duckdb_api/v1` and `duckdb_api/v2`; v1 remains the
+- Frozen: identifiers `duckdb_api/v1`, `duckdb_api/v2`, and `duckdb_api/v3`; v1 remains the
   byte-identical one-attempt grammar, while v2 is the complete v1 grammar plus
-  an optional bounded-retry recommendation. The closed failsafe YAML subset and
+  an optional bounded-retry recommendation and v3 retains v2 plus optional
+  bounded reactive rate-limit policy. The closed failsafe YAML subset and
   byte-copied JSON schemas; static `BOOLEAN`/`BIGINT`/`VARCHAR`/`DOUBLE`
   scalar typing; scalar or flat `ARRAY` output-column shape with explicit
   scalar element type and independent outer/child nullability; the
@@ -136,9 +142,9 @@ because the project reaches `1.0.0`.
   policy; positive resource ceilings; reload compatibility rules; offline
   fixture identity; the closed pagination strategy sets (REST `{disabled,
   link_next, response_next, short_page}`, GraphQL `{relay_forward}`).
-- Authority: `docs/CONNECTOR_SPECIFICATIONS.md`; RFCs 0013 and 0024.
+- Authority: `docs/CONNECTOR_SPECIFICATIONS.md`; RFCs 0013, 0024, and 0025.
 - Machine oracle: `src/connector/package/assets/connector-package-v1.schema.json`
-  and `src/connector/package/assets/connector-package-v2.schema.json`;
+  through `src/connector/package/assets/connector-package-v3.schema.json`;
   `release/<version>/pins.json` `identities.repository_connector_package`.
 
 ### 5. Observable relational, security, resource, replay, and lifecycle guarantees
@@ -150,7 +156,9 @@ because the project reaches `1.0.0`.
   connector policy narrows host policy and never widens it; sequential
   pagination unless independence and consistency are proven; v1 remains one
   attempt, while an opted-in v2 replayable read may repeat only an unaccepted
-  step within the closed three-attempt/96-scan-attempt policy; checked unsigned
+  step within the closed three-attempt/96-scan-attempt policy; v3 may react to
+  declared complete quota responses through the same attempt ledger and one
+  bounded executor-local coordination domain; checked unsigned
   resource arithmetic; immutable
   plans and snapshots for active scans; strict lossless conversion; atomic
   catalog publication with `Runtime lease -> Query catalog` lock order;
@@ -187,7 +195,7 @@ rather than silently ignoring them.
   dependency resolution and lockfiles; connector-package signing or trust
   infrastructure (accountability exists via RFC 0015; capability is post-v1).
 - Tier 2 JQ-compatible transforms; Tier 3 native or WASM custom code; column
-  providers; partitions; rate-limit waiting or proactive quota scheduling;
+  providers; partitions; proactive or distributed quota scheduling;
   author-configurable cache or single-flight behavior.
 - OpenAPI or GraphQL introspection importers; authenticators beyond
   anonymous, capability-scoped bearer, and static api_key (RFC 0018); dynamic
@@ -302,8 +310,8 @@ across all pages and attempts. Replacement changes the revision while retaining
 authority; drop and recreation mint a new authority; prepared and concurrent
 executions resolve independently. Plans, packages, explanations, logs,
 diagnostics, caches, and unrelated scans receive none of the payload or identity
-material. The retained exclusions remain authenticator expansion, rate-limit
-waiting or proactive quota scheduling, and author-configurable caching or
+material. The retained exclusions remain authenticator expansion, proactive
+or distributed quota scheduling, and author-configurable caching or
 single-flight.
 
 ### Bounded replay-safe retry — **accepted and live**
@@ -326,6 +334,31 @@ pages, time, memory, or rows; all attempts reuse one credential snapshot and
 perform fresh destination-policy validation. Structured diagnostics expose the
 attempt, cumulative delay, and current-step exposure state without content.
 
+### Bounded reactive rate-limit handling — **accepted and live**
+
+[RFC 0025](../../docs/rfcs/0025-enable-bounded-reactive-rate-limit-handling.md)
+is live as the closed v3 opt-in contract. A proved `replayable_read` declares
+one through eight non-authorization statuses; `fail`, `wait`, or
+`wait_if_deadline_allows`; an operation family; credential-authority or
+explicit shared scope; up to four strict guidance fields; optional remaining
+and remote-bucket roles; and positive bounded maxima. V1 and v2 behavior is
+unchanged.
+
+One resilience controller applies a declared matching policy before ordinary
+retry. Per-step attempts use the maximum of the two mechanism ceilings and the
+same 96-attempt scan ledger; aggregate wait is a checked sum capped at 30000
+milliseconds. Only fully received responses participate. Strict guidance,
+deadline, replay/exposure, byte, body, attempt, wait, and bucket-stability
+checks precede every repeated request.
+
+Each concrete Runtime executor owns a bounded FIFO coordinator with one
+in-flight permit per non-renderable exact destination, package-major,
+operation-family, principal, and optional remote-bucket key. The hard bounds
+are 64 queued-or-permitted waiters per key and 4096 per executor. Cancellation
+and close drain queued work without overlapping same-key transport. Remaining
+quota never proactively paces success; distributed coordination, caching,
+circuit breaking, and parallel pages remain excluded.
+
 ## Not yet frozen
 
 These are `1.0.0` inputs that `0.9.0` derives from evidence rather than
@@ -345,8 +378,9 @@ decides:
 - `test/python/contract_freeze_tests.py` cross-checks it against the
   authoritative sources: the SQL surface matches the inventory's `0.10.0`
   release view exactly; the connector-spec identifiers match the immutable v1
-  and v2 schema consts; the pagination strategy sets match v2's closed
-  `oneOf`; the bounded-retry section matches RFC 0024's graduated policy; the
+  v1, v2, and v3 schema consts; the pagination strategy sets match v3's closed
+  `oneOf`; the bounded-retry and bounded reactive rate-limit sections match
+  RFC 0024 and RFC 0025's graduated policies; the
   RFC citations resolve to accepted decisions; the
   `accepted_candidate_revisions` entries each carry the required structure
   (id, scope, status, authority, target_release, graduation_rule) and fail

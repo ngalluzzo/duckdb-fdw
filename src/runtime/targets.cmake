@@ -18,6 +18,16 @@ target_link_libraries(
   PUBLIC duckdb_api_runtime_interface_service
          duckdb_api_local_package_custody_service)
 
+# Runtime's reactive resilience foundation is independently testable and owns
+# no protocol, transport, credential, ScanPlan, Query, or DuckDB dependency.
+add_library(
+  duckdb_api_runtime_resilience_service STATIC
+  ${REMOTE_RUNTIME_RESILIENCE_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_runtime_resilience_service)
+target_link_libraries(
+  duckdb_api_runtime_resilience_service
+  PRIVATE Threads::Threads)
+
 add_library(
   duckdb_api_runtime_executor_service STATIC
   ${REMOTE_RUNTIME_EXECUTOR_SOURCES})
@@ -26,4 +36,5 @@ target_link_libraries(
   duckdb_api_runtime_executor_service
   PUBLIC duckdb_api_runtime_interface_service
          duckdb_api_scan_plan_service
-         duckdb_api_content_digest_service)
+         duckdb_api_content_digest_service
+  PRIVATE duckdb_api_runtime_resilience_service)

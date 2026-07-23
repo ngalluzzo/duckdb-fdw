@@ -211,6 +211,7 @@ void ScanPlanFixtureBuilder::EnablePagination(duckdb_api::ScanPlan &plan,
 	                                0};
 	plan.budgets = plan.pagination.page_budgets;
 	plan.retry_policy = {1, max_pages, 0, 0};
+	plan.resilience_policy = {1, max_pages, 0};
 }
 
 duckdb_api::ScanPlan ScanPlanFixtureBuilder::Anonymous() {
@@ -712,6 +713,7 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string *secret_n
 	    30000, 1,  256 * 1024};
 	plan.budgets = plan.pagination.page_budgets;
 	plan.retry_policy = {1, plan.pagination.scan_budgets.request_attempts, 0, 0};
+	plan.resilience_policy = {1, plan.pagination.scan_budgets.request_attempts, 0};
 	if (secret_name != nullptr) {
 		RequireBearer(plan, *secret_name);
 	}

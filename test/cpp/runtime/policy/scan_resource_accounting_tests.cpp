@@ -25,7 +25,7 @@ using Clock = std::chrono::steady_clock;
 const std::string CANARY = "private-repository-canary";
 
 ScanResourceProfile Profile() {
-	return {{1, 10, 20, 30, 4, 50, 1, 0}, {3, 3, 30, 60, 90, 12, 50, 100, 1, 0, 0}};
+	return {{1, 10, 20, 30, 4, 50, 1, 0}, {3, 3, 30, 60, 90, 12, 50, 100, 1, 0, 0, 0, 0, 0}};
 }
 
 void RequireError(const std::function<void()> &action, const std::string &field, const std::string &label) {
@@ -406,7 +406,7 @@ void TestOrderingAbortAndTerminalState() {
 void TestMaximumCounterBoundary() {
 	const auto maximum = std::numeric_limits<uint64_t>::max();
 	const ScanResourceProfile profile = {{1, maximum, maximum, maximum, maximum, maximum, 1, 0},
-	                                     {2, 2, maximum, maximum, maximum, maximum, maximum, 100, 1, 0, 0}};
+	                                     {2, 2, maximum, maximum, maximum, maximum, maximum, 100, 1, 0, 0, 0, 0, 0}};
 	ScanResourceAccounting accounting(profile);
 	const Clock::time_point start;
 	const auto allowance = accounting.BeginPage(start);

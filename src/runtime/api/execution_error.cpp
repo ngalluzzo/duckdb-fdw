@@ -310,6 +310,36 @@ const char *ReplayClassificationName(ReplayClassification classification) {
 	throw std::logic_error("unknown ReplayClassification");
 }
 
+const char *RateLimitReasonName(RateLimitReason reason) {
+	switch (reason) {
+	case RateLimitReason::NONE:
+		return "none";
+	case RateLimitReason::POLICY_FAIL:
+		return "policy_fail";
+	case RateLimitReason::GUIDANCE_MISSING:
+		return "guidance_missing";
+	case RateLimitReason::MALFORMED_GUIDANCE:
+		return "malformed_guidance";
+	case RateLimitReason::GUIDANCE_EXCEEDS_POLICY:
+		return "guidance_exceeds_policy";
+	case RateLimitReason::DEADLINE_INSUFFICIENT:
+		return "deadline_insufficient";
+	case RateLimitReason::WAITING_EXHAUSTED:
+		return "waiting_exhausted";
+	case RateLimitReason::ATTEMPTS_EXHAUSTED:
+		return "attempts_exhausted";
+	case RateLimitReason::QUEUE_SATURATED:
+		return "queue_saturated";
+	case RateLimitReason::SCHEDULER_CLOSED:
+		return "scheduler_closed";
+	case RateLimitReason::REPEATED_IMMEDIATE:
+		return "repeated_immediate";
+	case RateLimitReason::BUCKET_CHANGED:
+		return "bucket_changed";
+	}
+	throw std::logic_error("unknown RateLimitReason");
+}
+
 const char *FailurePhaseName(FailurePhase phase) {
 	switch (phase) {
 	case FailurePhase::BIND:
@@ -544,7 +574,7 @@ BatchStream::~BatchStream() noexcept {
 }
 
 ExecutionSnapshot BatchStream::Diagnostics() const noexcept {
-	return {1, 1, 0, 0, 0, 0, 0, ExposureState::UNACCEPTED};
+	return {1, 1, 0, 0, 0, 0, 0, ExposureState::UNACCEPTED, 1, 1, 0, 0, 0, 0, 0, 0, 0, RateLimitReason::NONE, false};
 }
 
 ScanExecutor::~ScanExecutor() noexcept {

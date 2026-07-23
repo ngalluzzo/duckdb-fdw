@@ -226,11 +226,35 @@ struct RetryDeclaration {
 	SourceMark mark;
 };
 
+struct RateLimitGuidanceDeclaration {
+	LocatedText header;
+	LocatedText format;
+	SourceMark mark;
+};
+
+struct RateLimitDeclaration {
+	bool present;
+	std::vector<LocatedText> statuses;
+	LocatedText mode;
+	LocatedText operation_family;
+	LocatedText principal_scope;
+	std::vector<RateLimitGuidanceDeclaration> guidance;
+	bool remaining_present;
+	LocatedText remaining_header;
+	bool remote_bucket_present;
+	LocatedText remote_bucket_header;
+	LocatedText max_attempts_per_step;
+	LocatedText max_delay_milliseconds;
+	LocatedText max_cumulative_waiting_milliseconds_per_scan;
+	SourceMark mark;
+};
+
 struct OperationDeclaration {
 	LocatedText id;
 	LocatedText cardinality;
 	LocatedText replay_safety;
 	RetryDeclaration retry;
+	RateLimitDeclaration rate_limit;
 	SelectorDeclaration selector;
 	bool graphql;
 	RestRequestDeclaration rest;

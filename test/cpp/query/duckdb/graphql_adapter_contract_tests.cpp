@@ -87,7 +87,10 @@ void TestPublicProviderPlanAndProtocolNeutralRequest() {
 	            explanation["Page Body Bytes"] == "8192" && explanation["Scan Body Bytes"] == "262144" &&
 	            explanation["Stable Row Order"] == "none" && explanation["Snapshot Guarantee"] == "none" &&
 	            explanation["Declared Replay Safety"] == "safe" && explanation["Retry"] == "disabled" &&
-	            explanation["Rate-Limit Waiting"] == "disabled" && explanation["Cache"] == "disabled",
+	            explanation["Rate-Limit Waiting"] == "disabled" &&
+	            explanation["Resilience"] == "planned[max_attempts_per_step:1,max_attempts_per_scan:32,"
+	                                         "max_cumulative_waiting_milliseconds_per_scan:0]" &&
+	            explanation["Cache"] == "disabled",
 	        "typed GraphQL explanation facts changed or inferred unsupported authority");
 	for (const auto &forbidden :
 	     {"api.github.com", "viewer {", "repositories(", "$pageSize", "$cursor", "Authorization", "Bearer "}) {
@@ -249,6 +252,8 @@ void TestRestExplainReplayPolicy() {
 	auto explanation = duckdb::duckdb_api_query_internal::ExplainSelectedScan(request, plan);
 	Require(explanation["Protocol"] == "rest" && explanation["Declared Replay Safety"] == "safe" &&
 	            explanation["Retry"] == "disabled" && explanation["Rate-Limit Waiting"] == "disabled" &&
+	            explanation["Resilience"] == "planned[max_attempts_per_step:1,max_attempts_per_scan:1,"
+	                                         "max_cumulative_waiting_milliseconds_per_scan:0]" &&
 	            explanation["Cache"] == "disabled",
 	        "REST EXPLAIN did not surface the effective resilience policy (declared replay safety read from the REST "
 	        "plan)");

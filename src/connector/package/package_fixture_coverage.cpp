@@ -17,12 +17,15 @@ public:
 	         const std::string &relation = std::string(), const std::string &operation = std::string(),
 	         const std::string &input = std::string(), const std::string &column = std::string(),
 	         const std::string &predicate = std::string(), const std::string &resource = std::string(),
-	         const std::string &diagnostic = std::string()) {
+	         const std::string &diagnostic = std::string(), std::uint16_t rate_limit_status = 0,
+	         const std::string &rate_limit_header = std::string(),
+	         CompiledRateLimitGuidanceFormat rate_limit_format = CompiledRateLimitGuidanceFormat::RETRY_AFTER) {
 		if (!IsKey(key) || !unique.insert(key).second) {
 			throw std::invalid_argument("compiled package derives an invalid or duplicate fixture coverage key");
 		}
 		keys.push_back(key);
-		entries.push_back({key, scope, variant, relation, operation, input, column, predicate, resource, diagnostic});
+		entries.push_back({key, scope, variant, relation, operation, input, column, predicate, resource, diagnostic,
+		                   rate_limit_status, rate_limit_header, rate_limit_format});
 	}
 
 	void Variants(const std::string &prefix, const std::vector<const char *> &variants,
@@ -355,6 +358,70 @@ void AddResourceCoverage(CoverageBuilder &coverage, const CompiledConnector &con
 	}
 }
 
+const char *RateLimitModeVariant(const CompiledRateLimitPolicy &policy) {
+	if (!policy.Declared()) {
+		return "mode_disabled";
+	}
+	switch (policy.mode) {
+	case CompiledRateLimitMode::FAIL:
+		return "mode_fail";
+	case CompiledRateLimitMode::WAIT:
+		return "mode_wait";
+	case CompiledRateLimitMode::WAIT_IF_DEADLINE_ALLOWS:
+		return "mode_wait_if_deadline_allows";
+	}
+	throw std::invalid_argument("compiled package contains an unknown rate-limit mode");
+}
+
+const char *RateLimitFormatVariant(CompiledRateLimitGuidanceFormat format) {
+	switch (format) {
+	case CompiledRateLimitGuidanceFormat::RETRY_AFTER:
+		return "retry_after";
+	case CompiledRateLimitGuidanceFormat::DELTA_SECONDS:
+		return "delta_seconds";
+	case CompiledRateLimitGuidanceFormat::UNIX_SECONDS:
+		return "unix_seconds";
+	}
+	throw std::invalid_argument("compiled package contains an unknown rate-limit guidance format");
+}
+
+void AddRateLimitCoverage(CoverageBuilder &coverage, const CompiledConnector &connector) {
+	for (const auto &relation : connector.Relations()) {
+		for (const auto &operation : relation.Operations()) {
+			const auto &policy = operation.RateLimitPolicy();
+			const auto prefix = "rate_limit_" + relation.Name() + "_" + operation.name + "_";
+			const auto *mode = RateLimitModeVariant(policy);
+			coverage.Add(prefix + mode, PackageFixtureCoverageScope::RATE_LIMIT, mode, relation.Name(), operation.name);
+			if (policy.Declared()) {
+				for (const auto status : policy.statuses) {
+					const auto variant = "status_" + std::to_string(status);
+					coverage.Add(prefix + variant, PackageFixtureCoverageScope::RATE_LIMIT, variant, relation.Name(),
+					             operation.name, "", "", "", "", "", status);
+				}
+				for (std::size_t index = 0; index < policy.guidance.size(); index++) {
+					const auto &guidance = policy.guidance[index];
+					const auto variant =
+					    "guidance_" + std::to_string(index) + "_" + RateLimitFormatVariant(guidance.format);
+					coverage.Add(prefix + variant, PackageFixtureCoverageScope::RATE_LIMIT, variant, relation.Name(),
+					             operation.name, "", "", "", "", "", 0, guidance.header_name, guidance.format);
+				}
+				if (!policy.remaining_quota_header.empty()) {
+					coverage.Add(prefix + "remaining_present", PackageFixtureCoverageScope::RATE_LIMIT,
+					             "remaining_present", relation.Name(), operation.name, "", "", "", "", "", 0,
+					             policy.remaining_quota_header);
+				}
+				if (!policy.remote_bucket_header.empty()) {
+					coverage.Add(prefix + "remote_bucket_present", PackageFixtureCoverageScope::RATE_LIMIT,
+					             "remote_bucket_present", relation.Name(), operation.name, "", "", "", "", "", 0,
+					             policy.remote_bucket_header);
+				}
+			}
+			coverage.Add(prefix + "safe_explanation", PackageFixtureCoverageScope::RATE_LIMIT, "safe_explanation",
+			             relation.Name(), operation.name);
+		}
+	}
+}
+
 void AddLifecycleAndDiagnosticCoverage(CoverageBuilder &coverage, const CompiledConnector &connector) {
 	coverage.Variants("compiler_cancellation_",
 	                  {"source_enumeration", "source_read", "yaml_parse", "reference_validation",
@@ -416,10 +483,10 @@ const std::string &PackageFixtureCoverage::OrderedDigest() const noexcept {
 
 PackageFixtureCoverage DerivePackageFixtureCoverage(const CompiledPackageGeneration &generation) {
 	const auto &spec = generation.Identity().SpecIdentifier();
-	if ((spec != "duckdb_api/v1" && spec != "duckdb_api/v2") ||
+	if ((spec != "duckdb_api/v1" && spec != "duckdb_api/v2" && spec != "duckdb_api/v3") ||
 	    generation.Connector().Origin() != CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA) {
 		throw std::invalid_argument(
-		    "fixture coverage requires one compiled duckdb_api/v1 or duckdb_api/v2 package generation");
+		    "fixture coverage requires one compiled duckdb_api/v1, duckdb_api/v2, or duckdb_api/v3 package generation");
 	}
 	CoverageBuilder coverage;
 	const auto &connector = generation.Connector();
@@ -430,6 +497,9 @@ PackageFixtureCoverage DerivePackageFixtureCoverage(const CompiledPackageGenerat
 	AddSelectionAndPredicateCoverage(coverage, connector);
 	AddProtocolCoverage(coverage, connector);
 	AddResourceCoverage(coverage, connector);
+	if (spec == "duckdb_api/v3") {
+		AddRateLimitCoverage(coverage, connector);
+	}
 	AddLifecycleAndDiagnosticCoverage(coverage, connector);
 	return coverage.Finish();
 }

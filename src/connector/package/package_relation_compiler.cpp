@@ -171,7 +171,11 @@ CompiledResourceCeilings CompileResources(const RelationDeclaration &relation, P
 		const auto request_bytes = ParseUnsigned(operation.graphql_request.max_serialized_body_bytes_per_request);
 		const auto scan_request_bytes = ParseUnsigned(operation.graphql_request.max_serialized_body_bytes_per_scan);
 		const auto pages = ParseUnsigned(operation.graphql_request.pagination.max_pages_per_scan);
-		const auto attempts = operation.retry.present ? ParseUnsigned(operation.retry.max_attempts_per_step) : 1;
+		const auto retry_attempts = operation.retry.present ? ParseUnsigned(operation.retry.max_attempts_per_step) : 1;
+		const auto rate_limit_attempts = operation.rate_limit.present && operation.rate_limit.mode.value != "fail"
+		                                     ? ParseUnsigned(operation.rate_limit.max_attempts_per_step)
+		                                     : 1;
+		const auto attempts = retry_attempts > rate_limit_attempts ? retry_attempts : rate_limit_attempts;
 		const bool aggregate_overflow =
 		    pages == 0 || attempts == 0 || pages > std::numeric_limits<std::uint64_t>::max() / attempts;
 		const auto aggregate_attempts = aggregate_overflow ? 0 : pages * attempts;

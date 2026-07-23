@@ -56,6 +56,17 @@ std::string ResilienceSuffix(const duckdb_api::FailureProperties &properties) {
 	suffix += " exposure=";
 	suffix += duckdb_api::ExposureStateName(properties.exposure_state);
 	suffix += " rows_exposed=" + std::to_string(properties.rows_exposed);
+	if (properties.rate_limit_reason != duckdb_api::RateLimitReason::NONE || properties.rate_limit_events != 0 ||
+	    properties.rate_limit_waits != 0 || properties.cumulative_rate_limit_waiting_milliseconds != 0 ||
+	    properties.rate_limit_waiting) {
+		suffix += " rate_limit_reason=";
+		suffix += duckdb_api::RateLimitReasonName(properties.rate_limit_reason);
+		suffix += " rate_limit_events=" + std::to_string(properties.rate_limit_events);
+		suffix += " rate_limit_waits=" + std::to_string(properties.rate_limit_waits);
+		suffix += " rate_limit_wait_ms=" + std::to_string(properties.cumulative_rate_limit_waiting_milliseconds);
+		suffix += " remote_transport_ms=" + std::to_string(properties.cumulative_remote_transport_milliseconds);
+		suffix += properties.rate_limit_waiting ? " rate_limit_waiting=true" : " rate_limit_waiting=false";
+	}
 	if (properties.terminating_budget != duckdb_api::BudgetDimension::NONE) {
 		suffix += " budget=";
 		suffix += duckdb_api::BudgetDimensionName(properties.terminating_budget);

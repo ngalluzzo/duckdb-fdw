@@ -343,6 +343,11 @@ void ControlledSocketService::Serve() noexcept {
 		if (mode == ControlledSocketMode::BLOCK) {
 			std::unique_lock<std::mutex> guard(mutex);
 			condition.wait(guard, [&]() { return stop; });
+		} else if (mode == ControlledSocketMode::PARTIAL_RESPONSE_BLOCK) {
+			(void)SendAll(accepted, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 64\r\n"
+			                        "Connection: close\r\n\r\n{\"partial\":");
+			std::unique_lock<std::mutex> guard(mutex);
+			condition.wait(guard, [&]() { return stop; });
 		} else if (mode == ControlledSocketMode::BLOCK_THEN_AUTHENTICATED_SUCCESS && connection_index == 0) {
 			while (recv(accepted, buffer, sizeof(buffer), 0) > 0) {
 			}

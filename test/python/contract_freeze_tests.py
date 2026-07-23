@@ -21,7 +21,7 @@ class ContractFreezeTests(unittest.TestCase):
         cls.freeze = load_json(REPOSITORY_ROOT / "release" / "1.0.0" / "freeze.json")
         cls.inventory = load_json(REPOSITORY_ROOT / "release" / "public-surface" / "inventory.json")
         cls.schema = load_json(
-            REPOSITORY_ROOT / "src" / "connector" / "package" / "assets" / "connector-package-v2.schema.json"
+            REPOSITORY_ROOT / "src" / "connector" / "package" / "assets" / "connector-package-v3.schema.json"
         )
         cls.v1_schema = load_json(
             REPOSITORY_ROOT / "src" / "connector" / "package" / "assets" / "connector-package-v1.schema.json"
@@ -67,7 +67,7 @@ class ContractFreezeTests(unittest.TestCase):
     def test_declared_schema_authority_drift_fails(self) -> None:
         self.require_rejected(
             lambda value: value["connector_spec"]["schema_authorities"].__setitem__(
-                "duckdb_api/v2", "src/connector/package/assets/old.schema.json"
+                "duckdb_api/v3", "src/connector/package/assets/old.schema.json"
             ),
             "connector-spec contract",
         )
@@ -206,6 +206,30 @@ class ContractFreezeTests(unittest.TestCase):
         self.require_rejected(
             lambda value: value["bounded_retry"].__setitem__("partial_response", "retryable"),
             "bounded-retry contract",
+        )
+
+    def test_rate_limit_attempt_composition_widening_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["bounded_reactive_rate_limit"].__setitem__(
+                "per_step_attempt_composition", "sum"
+            ),
+            "bounded reactive rate-limit contract",
+        )
+
+    def test_rate_limit_queue_ceiling_drift_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["bounded_reactive_rate_limit"].__setitem__(
+                "max_queued_or_permitted_per_key", 65
+            ),
+            "bounded reactive rate-limit contract",
+        )
+
+    def test_rate_limit_reason_removed_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["bounded_reactive_rate_limit"]["diagnostic_reasons"].remove(
+                "bucket_changed"
+            ),
+            "bounded reactive rate-limit contract",
         )
 
     def test_column_shape_omission_fails(self) -> None:

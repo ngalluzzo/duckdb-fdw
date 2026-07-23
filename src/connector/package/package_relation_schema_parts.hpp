@@ -12,7 +12,7 @@ RestRequestDeclaration DecodeRestRequestSchema(const SchemaReader &reader);
 RestResponseDeclaration DecodeRestResponseSchema(const SchemaReader &reader);
 RestPaginationDeclaration DecodeRestPaginationSchema(const SchemaReader &reader);
 GraphqlRequestDeclaration DecodeGraphqlRequestSchema(const SchemaReader &reader);
-OperationDeclaration DecodeOperationSchema(const SchemaReader &reader, bool retry_supported);
+OperationDeclaration DecodeOperationSchema(const SchemaReader &reader, bool retry_supported, bool rate_limit_supported);
 PredicateDeclaration DecodePredicateSchema(const SchemaReader &reader);
 
 } // namespace internal

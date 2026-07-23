@@ -35,7 +35,9 @@ void ValidateProfile(const ScanResourceProfile &profile) {
 	    page.decoded_records == 0 || page.decoded_memory_bytes == 0 || scan.request_attempts == 0 || scan.pages == 0 ||
 	    scan.header_bytes == 0 || scan.wire_response_bytes == 0 || scan.decompressed_response_bytes == 0 ||
 	    scan.decoded_records == 0 || scan.retained_decoded_memory_bytes == 0 || scan.max_wall_milliseconds == 0 ||
-	    ((page.serialized_request_body_bytes == 0) != (scan.serialized_request_body_bytes == 0))) {
+	    ((page.serialized_request_body_bytes == 0) != (scan.serialized_request_body_bytes == 0)) ||
+	    scan.cumulative_retry_waiting_milliseconds > scan.cumulative_waiting_milliseconds ||
+	    scan.cumulative_rate_limit_waiting_milliseconds > scan.cumulative_waiting_milliseconds) {
 		ThrowProfileError();
 	}
 	using Milliseconds = std::chrono::milliseconds;
@@ -72,8 +74,15 @@ const std::string &ScanResourceError::SafeMessage() const noexcept {
 }
 
 ScanResourceAccounting::ScanResourceAccounting(const ScanResourceProfile &profile_p)
-    : profile(profile_p), counters {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, state(ScanResourceState::READY),
+    : profile(profile_p), counters {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, state(ScanResourceState::READY),
       deadline_started(false), deadline(), active_allowance {0, 0, 0, 0, 0, 0, {}}, current_step_attempts(0) {
+	// Preserve the pre-v3 aggregate-initializer surface used by focused Runtime
+	// consumers: an aggregate waiting budget with neither mechanism split is an
+	// ordinary-retry budget. New v3 profiles always provide both split fields.
+	if (profile.scan.cumulative_waiting_milliseconds != 0 && profile.scan.cumulative_retry_waiting_milliseconds == 0 &&
+	    profile.scan.cumulative_rate_limit_waiting_milliseconds == 0) {
+		profile.scan.cumulative_retry_waiting_milliseconds = profile.scan.cumulative_waiting_milliseconds;
+	}
 	ValidateProfile(profile);
 }
 
@@ -274,14 +283,48 @@ void ScanResourceAccounting::CompletePage(bool has_next, std::chrono::steady_clo
 }
 
 void ScanResourceAccounting::CommitWait(uint64_t milliseconds) {
+	CommitRetryWait(milliseconds);
+}
+
+void ScanResourceAccounting::CommitRetryWait(uint64_t milliseconds) {
 	if (state != ScanResourceState::STEP_ACTIVE) {
 		Fail("resource_state", "scan resource state cannot commit a wait");
 	}
 	try {
 		counters.cumulative_waiting_milliseconds = AddChecked(counters.cumulative_waiting_milliseconds, milliseconds,
 		                                                      profile.scan.cumulative_waiting_milliseconds);
+		counters.cumulative_retry_waiting_milliseconds =
+		    AddChecked(counters.cumulative_retry_waiting_milliseconds, milliseconds,
+		               profile.scan.cumulative_retry_waiting_milliseconds);
 	} catch (const ScanResourceError &) {
 		Fail("cumulative_waiting_milliseconds", "scan exceeded its cumulative-waiting budget");
+	}
+}
+
+void ScanResourceAccounting::CommitRateLimitWait(uint64_t milliseconds) {
+	if (state != ScanResourceState::STEP_ACTIVE) {
+		Fail("resource_state", "scan resource state cannot commit a rate-limit wait");
+	}
+	try {
+		counters.cumulative_waiting_milliseconds = AddChecked(counters.cumulative_waiting_milliseconds, milliseconds,
+		                                                      profile.scan.cumulative_waiting_milliseconds);
+		counters.cumulative_rate_limit_waiting_milliseconds =
+		    AddChecked(counters.cumulative_rate_limit_waiting_milliseconds, milliseconds,
+		               profile.scan.cumulative_rate_limit_waiting_milliseconds);
+	} catch (const ScanResourceError &) {
+		Fail("cumulative_waiting_milliseconds", "scan exceeded its cumulative-waiting budget");
+	}
+}
+
+void ScanResourceAccounting::CommitRemoteTransportTime(uint64_t milliseconds) {
+	if (state != ScanResourceState::REQUEST_ACTIVE && state != ScanResourceState::REQUEST_BODY_COMMITTED) {
+		Fail("resource_state", "scan resource state cannot commit remote transport time");
+	}
+	try {
+		counters.cumulative_remote_transport_milliseconds = AddChecked(
+		    counters.cumulative_remote_transport_milliseconds, milliseconds, std::numeric_limits<uint64_t>::max());
+	} catch (const ScanResourceError &) {
+		Fail("wall_milliseconds", "scan remote transport accounting overflowed");
 	}
 }
 

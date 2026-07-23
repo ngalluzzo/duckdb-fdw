@@ -77,8 +77,19 @@ BuildRuntimeFixtureResponses(const RuntimeFixtureTranscript &transcript, duckdb_
 			}
 		}
 		const auto wire_response_bytes = overrides ? overrides->wire_response_bytes[responses.size()] : 0;
-		responses.push_back({page.status, page.body, std::move(link_field_values), header_bytes, false, "",
-		                     wire_response_bytes, 0, false, duckdb_api::internal::HttpTransportFailureKind::OTHER, 0});
+		responses.push_back({page.status,
+		                     page.body,
+		                     std::move(link_field_values),
+		                     header_bytes,
+		                     false,
+		                     "",
+		                     wire_response_bytes,
+		                     0,
+		                     false,
+		                     {},
+		                     {},
+		                     duckdb_api::internal::HttpTransportFailureKind::OTHER,
+		                     0});
 		CheckCancellation(control);
 	}
 	return responses;

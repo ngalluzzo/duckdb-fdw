@@ -1,5 +1,7 @@
 #include "package_relation_schema_parts.hpp"
 
+#include <set>
+
 namespace duckdb_api {
 namespace connector {
 namespace internal {
@@ -72,11 +74,163 @@ RetryDeclaration DecodeRetry(const SchemaReader &reader) {
 	return retry;
 }
 
+void RequireRateLimitField(const SchemaReader &reader, const char *name) {
+	if (reader.Field(name) == nullptr) {
+		reader.Diagnostics().Add(PackageDiagnosticCode::MISSING_FIELD, PackageDiagnosticPhase::SCHEMA,
+		                         reader.FieldMark(name));
+	}
+}
+
+void ForbidRateLimitField(const SchemaReader &reader, const char *name) {
+	if (reader.Field(name) != nullptr) {
+		reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+		                         reader.FieldMark(name));
+	}
+}
+
+RateLimitGuidanceDeclaration DecodeRateLimitGuidance(const SchemaReader &reader) {
+	RateLimitGuidanceDeclaration guidance;
+	guidance.mark = reader.Mark();
+	reader.RequireMapping({"header", "format"}, {"header", "format"});
+	guidance.header = reader.Text("header");
+	guidance.format = reader.Text("format");
+	if (!IsRateLimitHeaderName(guidance.header.value)) {
+		reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+		                         guidance.header.mark);
+	}
+	if (guidance.format.value != "retry_after" && guidance.format.value != "delta_seconds" &&
+	    guidance.format.value != "unix_seconds") {
+		reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+		                         guidance.format.mark);
+	}
+	return guidance;
+}
+
+LocatedText DecodeRateLimitHeaderRole(const SchemaReader &reader) {
+	reader.RequireMapping({"header"}, {"header"});
+	auto header = reader.Text("header");
+	if (!IsRateLimitHeaderName(header.value)) {
+		reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+		                         header.mark);
+	}
+	return header;
+}
+
+RateLimitDeclaration DecodeRateLimit(const SchemaReader &reader) {
+	RateLimitDeclaration rate_limit;
+	rate_limit.present = true;
+	rate_limit.remaining_present = reader.Field("remaining") != nullptr;
+	rate_limit.remote_bucket_present = reader.Field("remote_bucket") != nullptr;
+	rate_limit.mark = reader.Mark();
+	reader.RequireMapping({"statuses", "mode", "operation_family", "principal_scope", "guidance", "remaining",
+	                       "remote_bucket", "max_attempts_per_step", "max_delay_milliseconds",
+	                       "max_cumulative_waiting_milliseconds_per_scan"},
+	                      {"statuses", "mode", "operation_family", "principal_scope"});
+	rate_limit.statuses = reader.TextSequence("statuses", 1, 8);
+	rate_limit.mode = reader.Text("mode");
+	rate_limit.operation_family = reader.Text("operation_family");
+	rate_limit.principal_scope = reader.Text("principal_scope");
+
+	std::set<std::uint64_t> statuses;
+	for (const auto &source : rate_limit.statuses) {
+		std::uint64_t status = 0;
+		if (source.value.size() != 3 || !IsCanonicalUnsigned(source, status) || status < 400 || status > 599 ||
+		    status == 401 || status == 403 || status == 407) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+			                         source.mark);
+		} else if (!statuses.insert(status).second) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::DUPLICATE_ID, PackageDiagnosticPhase::SCHEMA, source.mark);
+		}
+	}
+	if (rate_limit.mode.value != "fail" && rate_limit.mode.value != "wait" &&
+	    rate_limit.mode.value != "wait_if_deadline_allows") {
+		reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+		                         rate_limit.mode.mark);
+	}
+	if (!IsRateLimitOperationFamily(rate_limit.operation_family.value)) {
+		reader.Diagnostics().Add(PackageDiagnosticCode::INVALID_IDENTIFIER, PackageDiagnosticPhase::SCHEMA,
+		                         rate_limit.operation_family.mark);
+	}
+	if (rate_limit.principal_scope.value != "credential_authority" && rate_limit.principal_scope.value != "shared") {
+		reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+		                         rate_limit.principal_scope.mark);
+	}
+
+	if (reader.Field("guidance") != nullptr) {
+		const auto *sequence = reader.Sequence("guidance", 1, 4);
+		if (sequence != nullptr) {
+			for (std::size_t index = 0; index < sequence->Size(); index++) {
+				rate_limit.guidance.push_back(DecodeRateLimitGuidance(
+				    reader.Child(sequence->SequenceValue(index), ".guidance[" + std::to_string(index) + "]")));
+			}
+		}
+	}
+	if (rate_limit.remaining_present) {
+		rate_limit.remaining_header = DecodeRateLimitHeaderRole(reader.Child("remaining"));
+	}
+	if (rate_limit.remote_bucket_present) {
+		rate_limit.remote_bucket_header = DecodeRateLimitHeaderRole(reader.Child("remote_bucket"));
+	}
+
+	std::set<std::string> headers;
+	for (const auto &guidance : rate_limit.guidance) {
+		if (!headers.insert(guidance.header.value).second) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::DUPLICATE_ID, PackageDiagnosticPhase::SCHEMA,
+			                         guidance.header.mark);
+		}
+	}
+	for (const auto *header : {rate_limit.remaining_present ? &rate_limit.remaining_header : nullptr,
+	                           rate_limit.remote_bucket_present ? &rate_limit.remote_bucket_header : nullptr}) {
+		if (header != nullptr && !headers.insert(header->value).second) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::DUPLICATE_ID, PackageDiagnosticPhase::SCHEMA, header->mark);
+		}
+	}
+
+	if (rate_limit.mode.value == "fail") {
+		for (const auto *name : {"guidance", "remaining", "remote_bucket", "max_attempts_per_step",
+		                         "max_delay_milliseconds", "max_cumulative_waiting_milliseconds_per_scan"}) {
+			ForbidRateLimitField(reader, name);
+		}
+		return rate_limit;
+	}
+	if (rate_limit.mode.value == "wait" || rate_limit.mode.value == "wait_if_deadline_allows") {
+		for (const auto *name : {"guidance", "max_attempts_per_step", "max_delay_milliseconds",
+		                         "max_cumulative_waiting_milliseconds_per_scan"}) {
+			RequireRateLimitField(reader, name);
+		}
+		rate_limit.max_attempts_per_step = reader.Text("max_attempts_per_step");
+		rate_limit.max_delay_milliseconds = reader.Text("max_delay_milliseconds");
+		rate_limit.max_cumulative_waiting_milliseconds_per_scan =
+		    reader.Text("max_cumulative_waiting_milliseconds_per_scan");
+		std::uint64_t attempts = 0;
+		std::uint64_t delay = 0;
+		std::uint64_t waiting = 0;
+		if (!IsCanonicalUnsigned(rate_limit.max_attempts_per_step, attempts) || attempts < 2 || attempts > 3) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+			                         rate_limit.max_attempts_per_step.mark);
+		}
+		if (!IsCanonicalUnsigned(rate_limit.max_delay_milliseconds, delay) || delay > 30000) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+			                         rate_limit.max_delay_milliseconds.mark);
+		}
+		if (!IsCanonicalUnsigned(rate_limit.max_cumulative_waiting_milliseconds_per_scan, waiting) || waiting > 30000) {
+			reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+			                         rate_limit.max_cumulative_waiting_milliseconds_per_scan.mark);
+		}
+	}
+	return rate_limit;
+}
+
 } // namespace
 
-OperationDeclaration DecodeOperationSchema(const SchemaReader &reader, bool retry_supported) {
+OperationDeclaration DecodeOperationSchema(const SchemaReader &reader, bool retry_supported,
+                                           bool rate_limit_supported) {
 	OperationDeclaration operation;
-	if (retry_supported) {
+	if (rate_limit_supported) {
+		reader.RequireMapping({"id", "fallback", "when", "cardinality", "replay_safety", "retry", "rate_limit",
+		                       "request", "response", "pagination"},
+		                      {"id", "cardinality", "replay_safety", "request"});
+	} else if (retry_supported) {
 		reader.RequireMapping(
 		    {"id", "fallback", "when", "cardinality", "replay_safety", "retry", "request", "response", "pagination"},
 		    {"id", "cardinality", "replay_safety", "request"});
@@ -89,8 +243,12 @@ OperationDeclaration DecodeOperationSchema(const SchemaReader &reader, bool retr
 	operation.cardinality = reader.Text("cardinality");
 	operation.replay_safety = reader.Text("replay_safety");
 	operation.retry.present = false;
+	operation.rate_limit.present = false;
 	if (retry_supported && reader.Field("retry") != nullptr) {
 		operation.retry = DecodeRetry(reader.Child("retry"));
+	}
+	if (rate_limit_supported && reader.Field("rate_limit") != nullptr) {
+		operation.rate_limit = DecodeRateLimit(reader.Child("rate_limit"));
 	}
 	operation.selector = DecodeSelector(reader);
 	operation.mark = reader.Mark();

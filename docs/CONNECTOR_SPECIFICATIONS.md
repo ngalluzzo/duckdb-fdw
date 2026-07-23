@@ -2,11 +2,14 @@
 
 This document is the author-facing contract for local declarative connector
 packages. The accepted specification identifiers are the frozen
-`duckdb_api/v1` family and the additive `duckdb_api/v2` family.
+`duckdb_api/v1` family, the additive `duckdb_api/v2` family, and the reactive
+rate-limit-capable `duckdb_api/v3` family.
 [RFC 0013](rfcs/0013-define-connector-package-v1-contract.md) accepted v1;
 [RFC 0024](rfcs/0024-enable-bounded-replay-safe-retry.md) accepted v2 solely
-to add an explicit bounded safe-read retry recommendation. The schemas below
-close every source shape.
+to add an explicit bounded safe-read retry recommendation; and
+[RFC 0025](rfcs/0025-enable-bounded-reactive-rate-limit-handling.md) accepted
+v3 to add explicit bounded reaction to declared remote quota responses. The
+schemas below close every source shape.
 
 The specification describes immutable metadata. It does not grant network or
 credential authority by itself, and it does not contain DuckDB catalog state,
@@ -34,7 +37,7 @@ Four identities remain distinct:
 
 | Identity | Value |
 | --- | --- |
-| Specification | Exact matching `duckdb_api/v1` or `duckdb_api/v2` in every machine-readable source file |
+| Specification | Exact matching `duckdb_api/v1`, `duckdb_api/v2`, or `duckdb_api/v3` in every machine-readable source file |
 | Project | The extension release version |
 | Package | Canonical author SemVer `MAJOR.MINOR.PATCH` in `connector.yaml` |
 | Generation | Specification, connector ID, package version, and package digest |
@@ -92,6 +95,7 @@ The exact decoded source schemas are:
 
 - [`connector-package-v1.schema.json`](rfcs/evidence/0013/connector-package-v1.schema.json)
 - [`connector-package-v2.schema.json`](../src/connector/package/assets/connector-package-v2.schema.json)
+- [`connector-package-v3.schema.json`](../src/connector/package/assets/connector-package-v3.schema.json)
 - [`fixture-index-v1.schema.json`](rfcs/evidence/0013/fixture-index-v1.schema.json)
 
 Unknown fields fail. Schema validation is followed by identifier, reference,
@@ -375,6 +379,58 @@ V1 rejects `retry` as an unknown field and retains byte-for-byte one-attempt
 behavior. Moving to v2 or changing a retry block requires a package-major
 version because it changes request amplification and failure behavior.
 
+## V3 bounded reactive rate-limit policy
+
+`duckdb_api/v3` retains the complete v2 grammar and permits a replayable read
+to declare one optional `rate_limit` block:
+
+```yaml
+rate_limit:
+  statuses: [429]
+  mode: wait_if_deadline_allows
+  operation_family: core_requests
+  principal_scope: credential_authority
+  guidance:
+    - header: retry-after
+      format: retry_after
+    - header: x-ratelimit-reset
+      format: unix_seconds
+  remaining:
+    header: x-ratelimit-remaining
+  remote_bucket:
+    header: x-ratelimit-resource
+  max_attempts_per_step: 3
+  max_delay_milliseconds: 30000
+  max_cumulative_waiting_milliseconds_per_scan: 30000
+```
+
+Presence requires `statuses`, `mode`, `operation_family`, and
+`principal_scope`; no field has an implicit default. Statuses are one through
+eight unique exact three-digit decimals in `400..599`, excluding `401`, `403`,
+and `407`. Mode is `fail`, `wait`, or `wait_if_deadline_allows`.
+`operation_family` matches `[a-z][a-z0-9_]{0,63}`. Principal scope is exactly
+`credential_authority` or `shared`; only the latter is source-visible consent
+for different credential authorities to share one local quota key.
+
+Declared field names are unique across roles, 1 through 64 bytes, lower-case
+HTTP tokens; `date` is reserved. Guidance contains one through four unique
+fields whose formats are `retry_after`, `delta_seconds`, or `unix_seconds`.
+Optional `remaining` and `remote_bucket` blocks each contain only `header`.
+Header names are immutable structural facts; response values are never
+compiled, planned, explained, or retained as fixture identities.
+
+Waiting modes require guidance and all three maxima. Attempts are `2..3`; the
+one-delay and aggregate rate-limit-wait maxima are each `1..30000`
+milliseconds. `fail` forbids guidance, remaining, remote bucket, and maxima
+and always terminates a complete matching response as `policy_fail` without
+parsing fields. The block is rejected for any operation other than a proved
+`replayable_read`. V1 and v2 reject it.
+
+Changing from v1 or v2 to v3 requires a package-major version even when the
+block is absent. Adding, removing, or changing the block within v3 also
+requires a package-major version: it can change requests, latency, failure
+behavior, and the local coordination identity.
+
 ## REST operations
 
 REST v1 admits replay-safe HTTPS `GET` with a fixed origin and path:
@@ -568,12 +624,22 @@ typed rows, predicate occurrence laws, error stage, and safe explanation.
 They cannot grant network or credential authority and do not replace the host
 policy or Runtime admission checks.
 
-V2 packages use this same offline fixture contract and coverage derivation.
+V2 and v3 packages use this same offline fixture contract and coverage
+derivation.
 Authors provide the ordinary success, duplicate, and terminal-response bags;
 the project-owned Runtime suite supplies transient gateway and zero-response
 transport failures, retry exhaustion, cancellation, and byte-boundary probes.
 The fixture grammar does not let an author manufacture transport facts or
 assert that a retry occurred.
+
+For v3, the author transcript remains the same single-attempt base transcript.
+Connector derives closed coverage for disabled/fail/wait modes, declared
+statuses and guidance formats, optional remaining/bucket roles, and safe
+explanation. Project-owned typed variants inject matching responses, paired
+wall/steady clocks, queue state, waits, and follow-up attempts. No author field
+supplies a clock, scheduler hook, transport failure, or assertion that another
+attempt occurred. Derived, claimed, and actually executed coverage keys must
+agree exactly.
 
 Each declared `covers` key selects a closed project-owned variant executor in
 addition to identifying its compiled scope. The case transcript and expected
@@ -634,6 +700,7 @@ V1 source and fixture processing is finite:
 | Columns, inputs, operations, predicates per relation | 256, 128, 64, 64 |
 | Credentials and origins | 64 each |
 | Query fields, fixed arguments, fixed headers per operation | 64, 64, 32 |
+| Rate-limit statuses, guidance fields, field-name bytes, remote-bucket value bytes | 8, 4, 64, 128 |
 | Generated GraphQL document | 64 KiB, further narrowed by relation policy |
 | Diagnostics | 256 |
 | Fixture cases and response pages per case | 1,024 and 32 |
@@ -647,11 +714,12 @@ host and specification ceilings; zero never means unlimited.
 
 `duckdb_api/v1` contains exactly its frozen byte-copied schemas and remains
 one-attempt. `duckdb_api/v2` adds only the bounded safe-read retry block above.
-Neither family contains author-chosen SQL names, automatic discovery,
+`duckdb_api/v3` retains v2 and adds only the bounded reactive rate-limit block
+above. None contains author-chosen SQL names, automatic discovery,
 URLs as package roots, OpenAPI or GraphQL introspection import, raw GraphQL
 documents, dynamic schemas, write operations, connection profiles,
 partitions, providers, enrichment, retry of writes or unclassified failures,
-caching, rate-limit waiting,
+caching, proactive successful-response pacing, distributed quota coordination,
 remote projection/order/limit declarations, an opaque body-embedded cursor
 used directly to build the next request, reverse or bidirectional traversal,
 custom native code, WASM, or a public C++ ABI.

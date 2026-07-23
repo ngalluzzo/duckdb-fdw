@@ -1,5 +1,6 @@
 #include "semantics/support/graphql_plan_equality.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace duckdb_api_test {
@@ -266,6 +267,39 @@ std::size_t CountGraphqlPlanDifferences(const duckdb_api::ScanPlan &left, const 
 	}
 	CountValue(count, left.Providers(), right.Providers());
 	CountValue(count, left.Retry(), right.Retry());
+	CountValue(count, left.RetryPolicy().max_attempts_per_step, right.RetryPolicy().max_attempts_per_step);
+	CountValue(count, left.RetryPolicy().max_attempts_per_scan, right.RetryPolicy().max_attempts_per_scan);
+	CountValue(count, left.RetryPolicy().max_delay_milliseconds, right.RetryPolicy().max_delay_milliseconds);
+	CountValue(count, left.RetryPolicy().max_cumulative_waiting_milliseconds_per_scan,
+	           right.RetryPolicy().max_cumulative_waiting_milliseconds_per_scan);
+	CountValue(count, left.RateLimit(), right.RateLimit());
+	CountValue(count, left.RateLimitPolicy().Declared(), right.RateLimitPolicy().Declared());
+	if (left.RateLimitPolicy().Declared() && right.RateLimitPolicy().Declared()) {
+		const auto &left_rate_limit = left.RateLimitPolicy();
+		const auto &right_rate_limit = right.RateLimitPolicy();
+		CountValue(count, left_rate_limit.mode, right_rate_limit.mode);
+		CountValue(count, left_rate_limit.statuses, right_rate_limit.statuses);
+		CountValue(count, left_rate_limit.operation_family, right_rate_limit.operation_family);
+		CountValue(count, left_rate_limit.scope, right_rate_limit.scope);
+		CountValue(count, left_rate_limit.guidance.size(), right_rate_limit.guidance.size());
+		for (std::size_t index = 0; index < std::min(left_rate_limit.guidance.size(), right_rate_limit.guidance.size());
+		     index++) {
+			CountValue(count, left_rate_limit.guidance[index].header_name,
+			           right_rate_limit.guidance[index].header_name);
+			CountValue(count, left_rate_limit.guidance[index].format, right_rate_limit.guidance[index].format);
+		}
+		CountValue(count, left_rate_limit.remaining_quota_header, right_rate_limit.remaining_quota_header);
+		CountValue(count, left_rate_limit.remote_bucket_header, right_rate_limit.remote_bucket_header);
+		CountValue(count, left_rate_limit.max_attempts_per_step, right_rate_limit.max_attempts_per_step);
+		CountValue(count, left_rate_limit.max_delay_milliseconds, right_rate_limit.max_delay_milliseconds);
+		CountValue(count, left_rate_limit.max_cumulative_waiting_milliseconds_per_scan,
+		           right_rate_limit.max_cumulative_waiting_milliseconds_per_scan);
+		CountValue(count, left_rate_limit.package_major_version, right_rate_limit.package_major_version);
+	}
+	CountValue(count, left.ResiliencePolicy().max_attempts_per_step, right.ResiliencePolicy().max_attempts_per_step);
+	CountValue(count, left.ResiliencePolicy().max_attempts_per_scan, right.ResiliencePolicy().max_attempts_per_scan);
+	CountValue(count, left.ResiliencePolicy().max_cumulative_waiting_milliseconds_per_scan,
+	           right.ResiliencePolicy().max_cumulative_waiting_milliseconds_per_scan);
 	CountValue(count, left.Cache(), right.Cache());
 	CountValue(count, left.Authentication(), right.Authentication());
 	CountValue(count, left.SecretReference().IsPresent(), right.SecretReference().IsPresent());

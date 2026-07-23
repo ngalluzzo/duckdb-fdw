@@ -34,7 +34,7 @@ public:
 	                                       const duckdb_api::internal::HttpLimits &,
 	                                       duckdb_api::ExecutionControl &) const override {
 		get_count++;
-		return {200, 0, 0, 0, "", {{}, 0, false}};
+		return {200, 0, 0, 0, "", {{}, 0, false, {}, {}}};
 	}
 
 	mutable uint64_t get_count;
@@ -49,14 +49,14 @@ public:
 	                                       const duckdb_api::internal::HttpLimits &,
 	                                       duckdb_api::ExecutionControl &) const override {
 		get_count++;
-		return {200, 0, 0, 0, "", {{}, 0, false}};
+		return {200, 0, 0, 0, "", {{}, 0, false, {}, {}}};
 	}
 
 	duckdb_api::internal::HttpResponse Post(const duckdb_api::internal::HttpRequest &,
 	                                        const duckdb_api::internal::HttpLimits &,
 	                                        duckdb_api::ExecutionControl &) const override {
 		post_count++;
-		return {200, 0, 0, 0, "", {{}, 0, false}};
+		return {200, 0, 0, 0, "", {{}, 0, false, {}, {}}};
 	}
 
 	mutable uint64_t get_count;
@@ -64,7 +64,8 @@ public:
 };
 
 duckdb_api::internal::HttpLimits Limits(uint64_t max_request_body_bytes) {
-	return {max_request_body_bytes, 64, 64, 64, 0, std::chrono::steady_clock::now() + std::chrono::seconds(1)};
+	return {
+	    max_request_body_bytes, 64, 64, 64, 0, std::chrono::steady_clock::now() + std::chrono::seconds(1), {}, false};
 }
 
 duckdb_api::internal::HttpRequest Request(std::string method) {

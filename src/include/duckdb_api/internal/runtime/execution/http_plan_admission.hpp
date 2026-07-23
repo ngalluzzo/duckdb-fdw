@@ -2,6 +2,7 @@
 
 #include "duckdb_api/execution.hpp"
 #include "duckdb_api/internal/runtime/execution/rest_authority_admission.hpp"
+#include "duckdb_api/internal/runtime/execution/rate_limit_policy_admission.hpp"
 #include "duckdb_api/internal/runtime/transport/http_transport.hpp"
 
 #include <cstdint>
@@ -61,12 +62,15 @@ public:
 	const std::string &ApiKeyPlacementName() const;
 	const ResourceBudgets &Budgets() const;
 	const RetryPlan &RetryPolicy() const;
+	const AdmittedRateLimitPolicy &RateLimitPolicy() const;
+	const AdmittedResiliencePolicy &ResiliencePolicy() const;
 
 private:
 	friend std::unique_ptr<const AdmittedRestRequestProfile>
 	TryAdmitSingleResponseHttpPlan(const ScanPlan &, const HttpExecutionProfile &);
 	AdmittedRestRequestProfile(const ScanPlan &plan, MaterializedRestRequest &&request, RequiredCredential credential,
-	                           RetryPlan retry);
+	                           RetryPlan retry, AdmittedRateLimitPolicy rate_limit,
+	                           AdmittedResiliencePolicy resilience);
 
 	std::string method;
 	std::string scheme;
@@ -81,6 +85,8 @@ private:
 	RequiredCredential credential;
 	ResourceBudgets budgets;
 	RetryPlan retry;
+	AdmittedRateLimitPolicy rate_limit;
+	AdmittedResiliencePolicy resilience;
 };
 
 // Immutable authority for a sequential Link traversal. Query order and every
@@ -125,12 +131,15 @@ public:
 	const ResourceBudgets &PageBudgets() const;
 	const ScanResourceBudgets &ScanBudgets() const;
 	const RetryPlan &RetryPolicy() const;
+	const AdmittedRateLimitPolicy &RateLimitPolicy() const;
+	const AdmittedResiliencePolicy &ResiliencePolicy() const;
 
 private:
 	friend std::unique_ptr<const AdmittedPaginatedRestRequestProfile>
 	TryAdmitPaginatedRestPlan(const ScanPlan &, const HttpExecutionProfile &);
 	AdmittedPaginatedRestRequestProfile(const ScanPlan &plan, MaterializedRestRequest &&request,
-	                                    RequiredCredential credential, RetryPlan retry);
+	                                    RequiredCredential credential, RetryPlan retry,
+	                                    AdmittedRateLimitPolicy rate_limit, AdmittedResiliencePolicy resilience);
 
 	std::string method;
 	std::string scheme;
@@ -155,6 +164,8 @@ private:
 	ResourceBudgets page_budgets;
 	ScanResourceBudgets scan_budgets;
 	RetryPlan retry;
+	AdmittedRateLimitPolicy rate_limit;
+	AdmittedResiliencePolicy resilience;
 };
 
 std::unique_ptr<const AdmittedRestRequestProfile> TryAdmitSingleResponseHttpPlan(const ScanPlan &plan,

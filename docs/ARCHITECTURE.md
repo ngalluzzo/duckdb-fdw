@@ -347,6 +347,23 @@ resume, deduplication, stable ordering, or snapshot claim is implied. An
 explicitly recommended v2 safe-read retry repeats only the current unaccepted
 page.
 
+V3 may additionally react to a complete response whose status and bounded
+field interpretations match the immutable plan. One protocol-neutral
+resilience loop commits the attempt first, applies declared rate-limit policy,
+then applies ordinary retry. Per-step attempt authority is the maximum of the
+two enabled mechanism ceilings, never their sum; aggregate waiting is their
+checked sum within the one 30000-millisecond scan ceiling. Partial responses,
+accepted/exposed steps, and unknown policy facts are terminal.
+
+Each concrete Runtime executor owns one bounded reactive
+`RateLimitCoordinator`, which is therefore shared by streams of one DuckDB
+`DatabaseInstance` and by no other instance or process. Its non-renderable key
+contains the exact destination, connector/package major, operation family,
+opaque credential authority or explicit shared tag, and a bounded optional
+remote bucket. It grants at most one move-only in-flight permit per exact key,
+uses FIFO tail requeue, and never proactively paces an initial or successful
+request. Distinct keys progress independently.
+
 Response decoding is strict and lossless for the planned structural type.
 Arrays preserve child order, duplicates, empty lists, outer NULL, and admitted
 child NULLs as distinct states. Every output batch has the planned arity,
@@ -384,6 +401,13 @@ host policy, and an unaccepted/unexposed current traversal step. Runtime
 buffers, decodes, validates, continuation-checks, resource-accepts, and
 installs the complete page before Query can observe a row. Failed attempts
 never advance current Link/cursor state.
+
+V3 waiting is likewise limited to the current unaccepted step. Queue admission,
+steady-clock waiting, and permit handoff remain cancellation and deadline
+checkpoints. Queues are bounded to 64 queued-or-permitted entries per exact key
+and 4096 per executor. Executor close wakes and drains queued waiters; a
+canceled in-flight transport retains its permit until terminal cleanup, so
+same-key requests cannot overlap through cancellation.
 
 ## Atomic catalog publication
 
@@ -453,8 +477,12 @@ debit rather than reset. The effective resilience and budget policy (declared
 replay safety and the planned connector recommendation) is explainable. V1
 renders retry disabled; Runtime diagnostics authoritatively report the later
 hard/operator/connector minimum, aggregate attempts, cumulative delay, current
-step, and `unaccepted`/`accepted_unexposed`/`exposed`. Rate-limit waiting and
-cache remain disabled; indeterminate replay safety is non-replayable. The
+step, and `unaccepted`/`accepted_unexposed`/`exposed`. V3 diagnostics separately
+report ordinary retry delay, rate-limit wait, remote transport time, rate-limit
+event/wait counts, current wait state, and one closed terminal reason without
+rendering response-field values, remote buckets, opaque identities, URLs, or
+timestamps. Proactive quota pacing and cache remain disabled; indeterminate
+replay safety is non-replayable. The
 closed primary-class and replay-classification vocabularies
 are bound to `release/1.0.0/freeze.json` and enforced by
 `scripts/contract_freeze.py`.
@@ -465,8 +493,9 @@ The implementation is a native C++ DuckDB table-function extension on the
 exact tested DuckDB and platform dependency cell. The compiled types and
 private builders are not a public binary plugin ABI.
 
-`duckdb_api/v1` is the frozen local-package syntax family and `duckdb_api/v2`
-is its retry-only additive successor, both defined by
+`duckdb_api/v1` is the frozen local-package syntax family, `duckdb_api/v2`
+is its retry-only additive successor, and `duckdb_api/v3` adds bounded reactive
+rate-limit policy. All are defined by
 [CONNECTOR_SPECIFICATIONS.md](CONNECTOR_SPECIFICATIONS.md). Package SemVer
 does not grant execution authority. Reload compatibility is a normalized
 compiled-descriptor decision, not an inference from version alone.

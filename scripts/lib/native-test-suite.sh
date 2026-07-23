@@ -43,6 +43,9 @@ CURL_FREE_LINKAGE_TARGETS=(
     duckdb_api_link_pagination_tests
     duckdb_api_scan_resource_accounting_tests
     duckdb_api_request_validation_tests
+    duckdb_api_rate_limit_guidance_tests
+    duckdb_api_rate_limit_coordinator_tests
+    duckdb_api_rate_limit_execution_tests
     duckdb_api_http_transport_contract_tests
     duckdb_api_decoded_page_buffer_tests
     duckdb_api_json_decoder_tests
@@ -183,6 +186,9 @@ run_native_test_binaries() {
     "${native_test_root}/duckdb_api_link_pagination_tests"
     "${native_test_root}/duckdb_api_scan_resource_accounting_tests"
     "${native_test_root}/duckdb_api_request_validation_tests"
+    "${native_test_root}/duckdb_api_rate_limit_guidance_tests"
+    "${native_test_root}/duckdb_api_rate_limit_coordinator_tests"
+    "${native_test_root}/duckdb_api_rate_limit_execution_tests"
     "${native_test_root}/duckdb_api_http_transport_contract_tests"
     "${native_test_root}/duckdb_api_decoded_page_buffer_tests"
     "${native_test_root}/duckdb_api_json_decoder_tests"

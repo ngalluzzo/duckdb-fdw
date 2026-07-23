@@ -22,6 +22,8 @@ struct PrivateCurlProbeOptions {
 	PrivateCurlSocketPolicy socket_policy;
 	uint64_t wall_milliseconds;
 	uint64_t *completed_socket_policy_checks;
+	duckdb_api::internal::CurlBodyObserver body_observer;
+	void *body_observer_context;
 };
 
 struct PrivateCurlProbeResult {

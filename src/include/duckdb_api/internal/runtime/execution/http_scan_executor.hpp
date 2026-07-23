@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace duckdb_api {
 namespace internal {
@@ -23,6 +24,29 @@ std::shared_ptr<const ScanExecutor> BuildHttpScanExecutor(std::unique_ptr<HttpTr
 // addresses. No SQL, setting, environment value, or per-scan input constructs
 // or widens these ceilings.
 struct HttpExecutionProfile {
+	HttpExecutionProfile(
+	    PlannedUrlScheme scheme_p, std::string host_p, uint16_t port_p, bool private_addresses_enabled_p,
+	    bool link_local_addresses_enabled_p, bool loopback_addresses_enabled_p, uint64_t max_wall_milliseconds_p,
+	    uint64_t max_decoded_records_p, uint64_t max_retry_attempts_per_step_p, uint64_t max_retry_attempts_per_scan_p,
+	    uint64_t max_retry_delay_milliseconds_p, uint64_t max_retry_waiting_milliseconds_per_scan_p,
+	    uint64_t max_rate_limit_attempts_per_step_p = 0, uint64_t max_rate_limit_attempts_per_scan_p = 0,
+	    uint64_t max_rate_limit_delay_milliseconds_p = 0, uint64_t max_rate_limit_waiting_milliseconds_per_scan_p = 0,
+	    uint64_t max_combined_waiting_milliseconds_per_scan_p = 0)
+	    : scheme(scheme_p), host(std::move(host_p)), port(port_p),
+	      private_addresses_enabled(private_addresses_enabled_p),
+	      link_local_addresses_enabled(link_local_addresses_enabled_p),
+	      loopback_addresses_enabled(loopback_addresses_enabled_p), max_wall_milliseconds(max_wall_milliseconds_p),
+	      max_decoded_records(max_decoded_records_p), max_retry_attempts_per_step(max_retry_attempts_per_step_p),
+	      max_retry_attempts_per_scan(max_retry_attempts_per_scan_p),
+	      max_retry_delay_milliseconds(max_retry_delay_milliseconds_p),
+	      max_retry_waiting_milliseconds_per_scan(max_retry_waiting_milliseconds_per_scan_p),
+	      max_rate_limit_attempts_per_step(max_rate_limit_attempts_per_step_p),
+	      max_rate_limit_attempts_per_scan(max_rate_limit_attempts_per_scan_p),
+	      max_rate_limit_delay_milliseconds(max_rate_limit_delay_milliseconds_p),
+	      max_rate_limit_waiting_milliseconds_per_scan(max_rate_limit_waiting_milliseconds_per_scan_p),
+	      max_combined_waiting_milliseconds_per_scan(max_combined_waiting_milliseconds_per_scan_p) {
+	}
+
 	PlannedUrlScheme scheme;
 	std::string host;
 	uint16_t port;
@@ -37,6 +61,11 @@ struct HttpExecutionProfile {
 	uint64_t max_retry_attempts_per_scan;
 	uint64_t max_retry_delay_milliseconds;
 	uint64_t max_retry_waiting_milliseconds_per_scan;
+	uint64_t max_rate_limit_attempts_per_step;
+	uint64_t max_rate_limit_attempts_per_scan;
+	uint64_t max_rate_limit_delay_milliseconds;
+	uint64_t max_rate_limit_waiting_milliseconds_per_scan;
+	uint64_t max_combined_waiting_milliseconds_per_scan;
 };
 
 // Shared origin/network intersection used by protocol-specific admission. It

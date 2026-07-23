@@ -39,8 +39,8 @@ enum class ErrorStage : uint8_t {
 // additively on ErrorStage — every terminal remote-scan failure maps to exactly
 // one FailureClass. Existing rendered diagnostic strings are preserved verbatim;
 // this classification is carried as an additional structured field, not a
-// replacement of ErrorStage. No retry, rate-limit-waiting, caching, or
-// circuit-breaking mechanism is enabled. The closed set is bound to
+// replacement of ErrorStage. Retry and rate-limit handling consume this
+// vocabulary; caching and circuit breaking remain disabled. The closed set is bound to
 // release/1.0.0/freeze.json's failure_taxonomy section and enforced by
 // scripts/contract_freeze.py.
 enum class FailureClass : uint8_t {
@@ -107,6 +107,28 @@ const char *BudgetDimensionName(BudgetDimension dimension);
 const char *RemoteStatusClassName(RemoteStatusClass status_class);
 const char *ExposureStateName(ExposureState state);
 
+// RFC 0025: content-free terminal and progress classification for bounded
+// reactive rate-limit handling. NONE is the canonical value for scans that did
+// not observe a declared rate-limit event. Unknown values fail closed through
+// RateLimitReasonName; response values, bucket text, identities, URLs, and
+// timestamps never cross this boundary.
+enum class RateLimitReason : uint8_t {
+	NONE,
+	POLICY_FAIL,
+	GUIDANCE_MISSING,
+	MALFORMED_GUIDANCE,
+	GUIDANCE_EXCEEDS_POLICY,
+	DEADLINE_INSUFFICIENT,
+	WAITING_EXHAUSTED,
+	ATTEMPTS_EXHAUSTED,
+	QUEUE_SATURATED,
+	SCHEDULER_CLOSED,
+	REPEATED_IMMEDIATE,
+	BUCKET_CHANGED
+};
+
+const char *RateLimitReasonName(RateLimitReason reason);
+
 // RFC 0021: the additive structured failure-properties field. Every member is a
 // closed code, ordinal, or checked count — never content (no body, document,
 // cursor, row, credential, or remote message). Remote Runtime populates it at
@@ -129,6 +151,14 @@ struct FailureProperties {
 	BudgetDimension terminating_budget;
 	std::uint64_t cumulative_delay_milliseconds;
 	ExposureState exposure_state;
+	// RFC 0025 additions remain separate from ordinary retry delay. These are
+	// checked durations and counts only, never observed response content.
+	std::uint64_t cumulative_rate_limit_waiting_milliseconds;
+	std::uint64_t cumulative_remote_transport_milliseconds;
+	std::uint64_t rate_limit_events;
+	std::uint64_t rate_limit_waits;
+	RateLimitReason rate_limit_reason;
+	bool rate_limit_waiting;
 };
 
 class ExecutionError : public std::exception {
@@ -331,6 +361,17 @@ struct ExecutionSnapshot {
 	std::uint64_t cumulative_delay_milliseconds;
 	std::uint64_t current_step;
 	ExposureState exposure_state;
+	std::uint64_t effective_max_rate_limit_attempts_per_step;
+	std::uint64_t effective_max_rate_limit_attempts_per_scan;
+	std::uint64_t effective_max_rate_limit_delay_milliseconds;
+	std::uint64_t effective_max_rate_limit_waiting_milliseconds_per_scan;
+	std::uint64_t effective_max_combined_waiting_milliseconds_per_scan;
+	std::uint64_t cumulative_rate_limit_waiting_milliseconds;
+	std::uint64_t cumulative_remote_transport_milliseconds;
+	std::uint64_t rate_limit_events;
+	std::uint64_t rate_limit_waits;
+	RateLimitReason rate_limit_reason;
+	bool rate_limit_waiting;
 };
 
 class BatchStream {
@@ -444,6 +485,29 @@ protected:
 		return std::move(snapshot.authorization);
 	}
 
+	// Runtime's v3 quota identity needs the provider-minted authority value
+	// alongside the move-only authorization while keeping revision and secret
+	// bytes out of the coordinator. Compatibility consumers may continue using
+	// ResolveCredentialAfterAdmission and deliberately discard this identity.
+	struct ResolvedCredential {
+		ResolvedCredential(ScanAuthorization authorization_p, CredentialAuthorityIdentity authority_p)
+		    : authorization(std::move(authorization_p)), authority(std::move(authority_p)) {
+		}
+
+		ScanAuthorization authorization;
+		CredentialAuthorityIdentity authority;
+	};
+
+	static ResolvedCredential TakeResolvedCredential(CredentialSnapshot &&snapshot) {
+		if (!snapshot.valid || !snapshot.authorization.valid || !snapshot.authorization.HasCredentialIdentity()) {
+			throw ExecutionError(ErrorStage::AUTHENTICATION, "credential_provider",
+			                     "credential provider returned an invalid snapshot");
+		}
+		auto authority = snapshot.AuthorityIdentity();
+		snapshot.valid = false;
+		return ResolvedCredential(std::move(snapshot.authorization), std::move(authority));
+	}
+
 	// Shared post-admission provider boundary for concrete Runtime executors and
 	// bounded test executors. The caller must already have admitted the complete
 	// immutable plan/profile intersection. Every non-cancellation provider or
@@ -451,6 +515,13 @@ protected:
 	// Runtime boundary.
 	static ScanAuthorization ResolveCredentialAfterAdmission(const ScanPlan &plan, const CredentialProvider &provider,
 	                                                         ExecutionControl &control) {
+		auto resolved = ResolveCredentialWithAuthorityAfterAdmission(plan, provider, control);
+		return std::move(resolved.authorization);
+	}
+
+	static ResolvedCredential ResolveCredentialWithAuthorityAfterAdmission(const ScanPlan &plan,
+	                                                                       const CredentialProvider &provider,
+	                                                                       ExecutionControl &control) {
 		const auto &operation = plan.Operation();
 		const bool replay_safe = operation.Protocol() == PlannedProtocol::REST
 		                             ? operation.Rest().replay_safety == PlannedReplaySafety::SAFE
@@ -463,7 +534,7 @@ protected:
 			if (control.IsCancellationRequested()) {
 				throw ExecutionCancelled();
 			}
-			return TakeCredentialAuthorization(std::move(snapshot));
+			return TakeResolvedCredential(std::move(snapshot));
 		} catch (const ExecutionCancelled &) {
 			throw;
 		} catch (...) {

@@ -148,8 +148,12 @@ void RequireDuckDbRelationalOwnership(const duckdb_api::ScanPlan &plan) {
 	        "plan introduced remote/runtime ordering or bound delegation");
 	Require(plan.Providers() == duckdb_api::FeatureState::DISABLED &&
 	            plan.Retry() == duckdb_api::FeatureState::DISABLED &&
+	            plan.RateLimit() == duckdb_api::FeatureState::DISABLED && !plan.RateLimitPolicy().Declared() &&
+	            plan.RateLimitPolicy().IsWithinHardBounds() &&
+	            plan.ResiliencePolicy().max_attempts_per_step == plan.Budgets().request_attempts &&
+	            plan.ResiliencePolicy().max_cumulative_waiting_milliseconds_per_scan == 0 &&
 	            plan.Cache() == duckdb_api::FeatureState::DISABLED,
-	        "plan enabled an excluded provider, retry, or cache feature");
+	        "plan enabled an excluded provider, retry, rate-limit, or cache feature");
 }
 
 void RequireDisabledPaginationPayloadInaccessible(const duckdb_api::PaginationPlan &pagination) {

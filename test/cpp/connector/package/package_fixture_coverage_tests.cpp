@@ -185,6 +185,80 @@ void TestRetryV2CoverageUsesTheSameOfflineContract(const std::string &repository
 	            Contains(coverage, "graphql_duplicate_graphql_events_list_duplicate_graphql_events_"
 	                               "serialized_body_identity"),
 	        "duckdb_api/v2 retry operations were rejected or omitted by offline fixture coverage derivation");
+	const auto *relation = generation.Connector().FindRelation("duplicate_events");
+	Require(relation != nullptr && relation->Snapshot().find("rate_limit=") == std::string::npos,
+	        "v3 safe-explanation syntax changed the frozen v2 compiled snapshot");
+}
+
+void TestRateLimitV3CoverageIsTypedAndClosed(const std::string &repository_root) {
+	const auto generation = duckdb_api_test::CompileRateLimitV3GenerationFixture(repository_root);
+	const auto coverage = duckdb_api::connector::DerivePackageFixtureCoverage(generation);
+	const auto *rest_relation = generation.Connector().FindRelation("duplicate_events");
+	const auto *graphql_relation = generation.Connector().FindRelation("duplicate_graphql_events");
+	const auto *disabled_relation = generation.Connector().FindRelation("disabled_events");
+	Require(rest_relation != nullptr && graphql_relation != nullptr && disabled_relation != nullptr &&
+	            disabled_relation->Snapshot().find("rate_limit=disabled") != std::string::npos,
+	        "v3 fixture lost a relation or its explicit disabled safe explanation");
+	const auto &rest = rest_relation->Operation();
+	const auto &rest_policy = rest.RateLimitPolicy();
+	const auto &graphql = graphql_relation->Operation();
+	const auto &graphql_policy = graphql.RateLimitPolicy();
+	Require(
+	    rest.RetryRecommendation().Enabled() && rest_policy.Declared() && rest_policy.WaitingEnabled() &&
+	        rest_policy.mode == duckdb_api::CompiledRateLimitMode::WAIT_IF_DEADLINE_ALLOWS &&
+	        rest_policy.statuses == std::vector<std::uint16_t>({429, 503}) &&
+	        rest_policy.operation_family == "core_requests" &&
+	        rest_policy.scope == duckdb_api::CompiledRateLimitPrincipalScope::CREDENTIAL_AUTHORITY &&
+	        rest_policy.guidance.size() == 2 && rest_policy.guidance[0].header_name == "retry-after" &&
+	        rest_policy.guidance[0].format == duckdb_api::CompiledRateLimitGuidanceFormat::RETRY_AFTER &&
+	        rest_policy.guidance[1].header_name == "x-ratelimit-reset" &&
+	        rest_policy.guidance[1].format == duckdb_api::CompiledRateLimitGuidanceFormat::UNIX_SECONDS &&
+	        rest_policy.remaining_quota_header == "x-ratelimit-remaining" &&
+	        rest_policy.remote_bucket_header == "x-ratelimit-resource" && rest_policy.max_attempts_per_step == 3 &&
+	        rest_policy.max_delay_milliseconds == 30000 &&
+	        rest_policy.max_cumulative_waiting_milliseconds_per_scan == 30000 &&
+	        graphql.RetryRecommendation().Enabled() && graphql_policy.Declared() &&
+	        graphql_policy.mode == duckdb_api::CompiledRateLimitMode::WAIT &&
+	        graphql_policy.scope == duckdb_api::CompiledRateLimitPrincipalScope::SHARED &&
+	        graphql_policy.guidance.size() == 1 &&
+	        graphql_policy.guidance[0].format == duckdb_api::CompiledRateLimitGuidanceFormat::DELTA_SECONDS,
+	    "v3 IR lost sorted statuses, ordered guidance, policy identity, optional roles, maxima, or retry coexistence");
+	const auto snapshot = rest_relation->Snapshot();
+	Require(
+	    snapshot.find("rate_limit=mode:wait_if_deadline_allows,statuses:[429,503],operation_family:core_requests") !=
+	            std::string::npos &&
+	        snapshot.find("retry-after:retry_after,x-ratelimit-reset:unix_seconds") != std::string::npos &&
+	        snapshot.find("received") == std::string::npos,
+	    "Connector safe explanation omitted normalized policy facts or exposed response values");
+	Require(generation.Identity().SpecIdentifier() == "duckdb_api/v3" &&
+	            Contains(coverage, "rate_limit_disabled_events_list_disabled_events_mode_disabled") &&
+	            Contains(coverage, "rate_limit_fail_events_list_fail_events_mode_fail") &&
+	            Contains(coverage, "rate_limit_duplicate_events_list_duplicate_events_mode_wait_if_deadline_allows") &&
+	            Contains(coverage, "rate_limit_duplicate_graphql_events_list_duplicate_graphql_events_mode_wait") &&
+	            Contains(coverage, "rate_limit_duplicate_events_list_duplicate_events_status_429") &&
+	            Contains(coverage, "rate_limit_duplicate_events_list_duplicate_events_status_503") &&
+	            Contains(coverage, "rate_limit_duplicate_events_list_duplicate_events_guidance_0_retry_after") &&
+	            Contains(coverage, "rate_limit_duplicate_events_list_duplicate_events_guidance_1_unix_seconds") &&
+	            Contains(coverage, "rate_limit_duplicate_events_list_duplicate_events_remaining_present") &&
+	            Contains(coverage, "rate_limit_duplicate_events_list_duplicate_events_remote_bucket_present") &&
+	            Contains(coverage, "rate_limit_duplicate_events_list_duplicate_events_safe_explanation"),
+	        "v3 coverage omitted a disabled, fail, wait, status, guidance, optional-role, or explanation variant");
+	const auto status =
+	    std::find_if(coverage.Entries().begin(), coverage.Entries().end(),
+	                 [](const duckdb_api::connector::PackageFixtureCoverageEntry &entry) {
+		                 return entry.key == "rate_limit_duplicate_events_list_duplicate_events_status_503";
+	                 });
+	const auto guidance = std::find_if(
+	    coverage.Entries().begin(), coverage.Entries().end(),
+	    [](const duckdb_api::connector::PackageFixtureCoverageEntry &entry) {
+		    return entry.key == "rate_limit_duplicate_events_list_duplicate_events_guidance_1_unix_seconds";
+	    });
+	Require(status != coverage.Entries().end() && guidance != coverage.Entries().end() &&
+	            status->scope == duckdb_api::connector::PackageFixtureCoverageScope::RATE_LIMIT &&
+	            status->relation == "duplicate_events" && status->operation == "list_duplicate_events" &&
+	            status->rate_limit_status == 503 && guidance->rate_limit_header == "x-ratelimit-reset" &&
+	            guidance->rate_limit_format == duckdb_api::CompiledRateLimitGuidanceFormat::UNIX_SECONDS,
+	        "v3 coverage recovered rate-limit bindings from rendered keys instead of typed compiled facts");
 }
 
 void TestFixtureDiagnosticVocabulary() {
@@ -272,6 +346,7 @@ int main(int argc, char **argv) {
 		TestGithubCoverageMatchesAcceptedMapping(argv[1]);
 		TestCoverageIsCompiledFactDriven(argv[1]);
 		TestRetryV2CoverageUsesTheSameOfflineContract(argv[1]);
+		TestRateLimitV3CoverageIsTypedAndClosed(argv[1]);
 		TestCompleteCorporaAndPreProviderBoundaries(argv[1]);
 		std::cout << "package fixture coverage tests passed" << std::endl;
 		return 0;

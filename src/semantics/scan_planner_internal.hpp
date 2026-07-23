@@ -55,6 +55,40 @@ inline PlannedCredentialPlacement PlanCredentialPlacement(CompiledCredentialPlac
 	throw std::logic_error("compiled connector contains an unknown credential placement");
 }
 
+inline PlannedRateLimitMode PlanRateLimitMode(CompiledRateLimitMode mode) {
+	switch (mode) {
+	case CompiledRateLimitMode::FAIL:
+		return PlannedRateLimitMode::FAIL;
+	case CompiledRateLimitMode::WAIT:
+		return PlannedRateLimitMode::WAIT;
+	case CompiledRateLimitMode::WAIT_IF_DEADLINE_ALLOWS:
+		return PlannedRateLimitMode::WAIT_IF_DEADLINE_ALLOWS;
+	}
+	throw std::logic_error("compiled operation contains an unknown rate-limit mode");
+}
+
+inline PlannedRateLimitPrincipalScope PlanRateLimitPrincipalScope(CompiledRateLimitPrincipalScope scope) {
+	switch (scope) {
+	case CompiledRateLimitPrincipalScope::CREDENTIAL_AUTHORITY:
+		return PlannedRateLimitPrincipalScope::CREDENTIAL_AUTHORITY;
+	case CompiledRateLimitPrincipalScope::SHARED:
+		return PlannedRateLimitPrincipalScope::SHARED;
+	}
+	throw std::logic_error("compiled operation contains an unknown rate-limit principal scope");
+}
+
+inline PlannedRateLimitGuidanceFormat PlanRateLimitGuidanceFormat(CompiledRateLimitGuidanceFormat format) {
+	switch (format) {
+	case CompiledRateLimitGuidanceFormat::RETRY_AFTER:
+		return PlannedRateLimitGuidanceFormat::RETRY_AFTER;
+	case CompiledRateLimitGuidanceFormat::DELTA_SECONDS:
+		return PlannedRateLimitGuidanceFormat::DELTA_SECONDS;
+	case CompiledRateLimitGuidanceFormat::UNIX_SECONDS:
+		return PlannedRateLimitGuidanceFormat::UNIX_SECONDS;
+	}
+	throw std::logic_error("compiled operation contains an unknown rate-limit guidance format");
+}
+
 inline PlannedProtocol PlanProtocol(CompiledProtocol protocol) {
 	switch (protocol) {
 	case CompiledProtocol::REST:
@@ -186,6 +220,7 @@ inline PlannedPaginationStrategy PlanPaginationStrategy(CompiledPaginationStrate
 }
 
 std::uint64_t BoundedProduct(std::uint64_t left, std::uint64_t right, std::uint64_t ceiling, const char *field);
+std::uint64_t BoundedSum(std::uint64_t left, std::uint64_t right, std::uint64_t ceiling, const char *field);
 
 // Complete, side-effect-free selection result. The operation pointer is always
 // one member of relation->Operations(); plural relations never reach plan

@@ -93,6 +93,9 @@
         "src/runtime/generation/generation_snapshot.cpp",
         "src/runtime/generation/generation_publication.cpp",
         "src/runtime/generation/generation_registry.cpp",
+        "src/runtime/execution/rate_limit_clock.cpp",
+        "src/runtime/execution/rate_limit_guidance.cpp",
+        "src/runtime/execution/rate_limit_coordinator.cpp",
         "src/runtime/pagination/uri_reference.cpp",
         "src/runtime/pagination/link_header.cpp",
         "src/runtime/pagination/link_pagination.cpp",
@@ -219,6 +222,9 @@
         "src/runtime/generation/generation_snapshot.cpp",
         "src/runtime/generation/generation_publication.cpp",
         "src/runtime/generation/generation_registry.cpp",
+        "src/runtime/execution/rate_limit_clock.cpp",
+        "src/runtime/execution/rate_limit_guidance.cpp",
+        "src/runtime/execution/rate_limit_coordinator.cpp",
         "src/runtime/pagination/uri_reference.cpp",
         "src/runtime/pagination/link_header.cpp",
         "src/runtime/pagination/link_pagination.cpp",
@@ -282,7 +288,7 @@
         "test/cpp/runtime/support/loopback_curl_runtime.cpp",
         "test/cpp/runtime/support/loopback_curl_runtime.hpp"
       ],
-      "sha256": "015b0ee69f36f8c09a19002ca3068a1cf3141267bbb0fbaae727f7d7e8a0df05"
+      "sha256": "1b9aafc9ef635935761654869a38c0fe04e33622efd2e5b0b63ff212943db574"
     },
     "native_product_sources": {
       "algorithm": "sha256-length-prefixed-path-and-bytes-v1",
@@ -301,6 +307,8 @@
         "src/connector/package/assets/connector-package-v1.schema.json",
         "src/connector/package/assets/connector-package-v2.schema.inc",
         "src/connector/package/assets/connector-package-v2.schema.json",
+        "src/connector/package/assets/connector-package-v3.schema.inc",
+        "src/connector/package/assets/connector-package-v3.schema.json",
         "src/connector/package/assets/fixture-coverage-v1.inc",
         "src/connector/package/assets/fixture-coverage-v1.json",
         "src/connector/package/assets/fixture-index-v1.schema.inc",
@@ -402,6 +410,10 @@
         "src/include/duckdb_api/internal/runtime/execution/http_plan_admission.hpp",
         "src/include/duckdb_api/internal/runtime/execution/http_retry_controller.hpp",
         "src/include/duckdb_api/internal/runtime/execution/http_scan_executor.hpp",
+        "src/include/duckdb_api/internal/runtime/execution/rate_limit_clock.hpp",
+        "src/include/duckdb_api/internal/runtime/execution/rate_limit_coordinator.hpp",
+        "src/include/duckdb_api/internal/runtime/execution/rate_limit_guidance.hpp",
+        "src/include/duckdb_api/internal/runtime/execution/rate_limit_policy_admission.hpp",
         "src/include/duckdb_api/internal/runtime/execution/rest_authority_admission.hpp",
         "src/include/duckdb_api/internal/runtime/execution/rest_pagination_admission.hpp",
         "src/include/duckdb_api/internal/runtime/execution/rest_relational_admission.hpp",
@@ -493,6 +505,9 @@
         "src/runtime/execution/http_paginated_scan.cpp",
         "src/runtime/execution/http_plan_admission.cpp",
         "src/runtime/execution/http_scan_executor.cpp",
+        "src/runtime/execution/rate_limit_clock.cpp",
+        "src/runtime/execution/rate_limit_coordinator.cpp",
+        "src/runtime/execution/rate_limit_guidance.cpp",
         "src/runtime/execution/rest_authority_admission.cpp",
         "src/runtime/execution/rest_pagination_admission.cpp",
         "src/runtime/execution/rest_relational_admission.cpp",
@@ -543,7 +558,7 @@
         "src/semantics/sources.cmake",
         "src/semantics/targets.cmake"
       ],
-      "sha256": "b9cd3acb97824cf0f06f4dd6e24c2f913b393586cce7d129b768912a8b2052e2"
+      "sha256": "594fa7f588fc6820c29bd2e3ee315c4aa8702326ce5f61ebda9036e9030512d5"
     },
     "public_contract": {
       "canonical_json_sha256": "8d6c37d0071717c25a9822a76dd2b9e51a2ab5600cf7f00ec2a0750324a6e8cb",

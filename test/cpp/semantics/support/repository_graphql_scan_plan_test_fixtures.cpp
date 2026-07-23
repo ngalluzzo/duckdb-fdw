@@ -66,6 +66,22 @@ duckdb_api::ScanPlan BuildRetryV2PackageGraphqlPlan(const std::string &absolute_
 	return planning.Plan(generation.QueryRegistration().GenerationHandle(), request);
 }
 
+duckdb_api::ScanPlan BuildRateLimitV3PackageRestPlan(const std::string &absolute_repository_root) {
+	const auto generation = CompileRateLimitV3GenerationFixture(absolute_repository_root);
+	const duckdb_api::PackageBoundScanPlanningService planning(generation);
+	auto request = duckdb_api::BuildConservativeScanRequest(generation.Connector(), "duplicate_events",
+	                                                        duckdb_api::LogicalSecretReference());
+	return planning.Plan(generation.QueryRegistration().GenerationHandle(), request);
+}
+
+duckdb_api::ScanPlan BuildRateLimitV3PackageGraphqlPlan(const std::string &absolute_repository_root) {
+	const auto generation = CompileRateLimitV3GenerationFixture(absolute_repository_root);
+	const duckdb_api::PackageBoundScanPlanningService planning(generation);
+	auto request = duckdb_api::BuildConservativeScanRequest(generation.Connector(), "duplicate_graphql_events",
+	                                                        duckdb_api::LogicalSecretReference());
+	return planning.Plan(generation.QueryRegistration().GenerationHandle(), request);
+}
+
 duckdb_api::ScanPlan
 BuildNonGithubPackageGraphqlUnreachableBodyAuthorityCounterexample(const std::string &absolute_repository_root) {
 	return ScanPlanTestAccess::PackageGraphqlUnreachableBodyAuthority(

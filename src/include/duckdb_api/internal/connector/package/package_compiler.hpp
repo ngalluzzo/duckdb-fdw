@@ -37,6 +37,8 @@ const char *ConnectorPackageV1SchemaDigest();
 bool VerifyConnectorPackageV1SchemaAsset();
 const char *ConnectorPackageV2SchemaDigest();
 bool VerifyConnectorPackageV2SchemaAsset();
+const char *ConnectorPackageV3SchemaDigest();
+bool VerifyConnectorPackageV3SchemaAsset();
 
 } // namespace connector
 } // namespace duckdb_api

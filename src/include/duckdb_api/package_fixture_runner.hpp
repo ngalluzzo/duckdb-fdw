@@ -34,6 +34,7 @@ enum class PackageFixtureCoverageScope {
 	RUNTIME_CANCELLATION,
 	SOURCE_IDENTITY,
 	RELOAD,
+	RATE_LIMIT,
 	DIAGNOSTIC
 };
 
@@ -51,6 +52,9 @@ struct PackageFixtureCoverageEntry {
 	std::string predicate;
 	std::string resource;
 	std::string diagnostic;
+	std::uint16_t rate_limit_status;
+	std::string rate_limit_header;
+	CompiledRateLimitGuidanceFormat rate_limit_format;
 };
 
 // Immutable result of the project-owned fixture-coverage mapping. Required

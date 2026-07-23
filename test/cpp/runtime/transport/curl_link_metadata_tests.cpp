@@ -1,9 +1,14 @@
+#include "duckdb_api/internal/runtime/transport/curl_response_accumulator.hpp"
+#include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
+#include "duckdb_api/internal/runtime/pagination/link_pagination.hpp"
 #include "runtime/support/controlled_socket_service.hpp"
 #include "runtime/support/private_curl_probe.hpp"
 #include "support/require.hpp"
 #include "runtime/support/runtime_http_test_support.hpp"
+#include "semantics/support/scan_plan_test_fixtures.hpp"
 
 #include <csignal>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -35,7 +40,9 @@ duckdb_api_test::PrivateCurlProbeOptions Options(uint16_t port, uint64_t *policy
 	        "",
 	        duckdb_api_test::PrivateCurlSocketPolicy::ALLOW_LOOPBACK_PORT,
 	        2000,
-	        policy_checks};
+	        policy_checks,
+	        nullptr,
+	        nullptr};
 }
 
 void TestPhysicalLinkCaptureOrderAndNormalization() {
@@ -102,6 +109,86 @@ void TestTrailerCannotGrantContinuationAuthority() {
 	                         "trailer exclusion changed one-attempt socket policy");
 }
 
+void FeedHeader(duckdb_api::internal::CurlTransferState &state, const std::string &line) {
+	auto mutable_line = line;
+	duckdb_api_test::Require(duckdb_api::internal::ReadCurlHeader(&mutable_line[0], 1, mutable_line.size(), &state) ==
+	                             mutable_line.size(),
+	                         "curl accumulator rejected a bounded regression header");
+}
+
+void TestTargetedFoldAndProtocolRoleOverlap() {
+	duckdb_api_test::ManualControl control;
+	const duckdb_api::internal::CurlTransferProfile profile {"",      "",      nullptr, nullptr, nullptr,
+	                                                         nullptr, nullptr, nullptr, nullptr, nullptr};
+	{
+		const duckdb_api::internal::HttpLimits limits {
+		    0, 4096, 4096, 4096, 4096, std::chrono::steady_clock::now() + std::chrono::seconds(1), {"x-reset"}, false};
+		duckdb_api::internal::CurlTransferState state(control, limits, profile);
+		FeedHeader(state, "HTTP/1.1 429 Too Many Requests\r\n");
+		FeedHeader(state, "X-Reset: 10\r\n");
+		FeedHeader(state, " 0\r\n");
+		duckdb_api_test::Require(state.rate_limit_fields.size() == 1 && state.rate_limit_fields[0].name == "x-reset" &&
+		                             state.rate_limit_fields[0].value == "10 0" && state.metadata_bytes != 0,
+		                         "folded targeted guidance discarded bytes and could become valid early guidance");
+	}
+	{
+		const duckdb_api::internal::HttpLimits limits {0,
+		                                               4096,
+		                                               4096,
+		                                               4096,
+		                                               4096,
+		                                               std::chrono::steady_clock::now() + std::chrono::seconds(1),
+		                                               {"transfer-encoding", "content-encoding", "link"},
+		                                               false};
+		duckdb_api::internal::CurlTransferState state(control, limits, profile);
+		const std::string link = "<https://api.github.com/user/repos?page=2>; rel=next";
+		FeedHeader(state, "HTTP/1.1 429 Too Many Requests\r\n");
+		FeedHeader(state, "Transfer-Encoding: chunked\r\n");
+		FeedHeader(state, "Content-Encoding: identity\r\n");
+		FeedHeader(state, "Link: " + link + "\r\n");
+		duckdb_api_test::Require(
+		    state.transfer_chunked && !state.transfer_encoding_unsupported && !state.content_encoded &&
+		        state.rate_limit_fields.size() == 3 && state.rate_limit_fields[0].value == "chunked" &&
+		        state.rate_limit_fields[1].value == "identity" && state.rate_limit_fields[2].value == link &&
+		        state.link_field_values == std::vector<std::string> {link},
+		    "targeted protocol fields were not retained in every authoritative typed role");
+	}
+	{
+		const duckdb_api::internal::HttpLimits limits {
+		    0, 4096, 4096, 4096, 4096, std::chrono::steady_clock::now() + std::chrono::seconds(1), {"link"}, false};
+		duckdb_api::internal::CurlTransferState state(control, limits, profile);
+		const std::string target = "<https://api.github.com/user/repos?per_page=100&page=2>";
+		const std::string unfolded = target + " ; rel=next";
+		FeedHeader(state, "HTTP/1.1 200 OK\r\n");
+		FeedHeader(state, "Link: " + target + "\r\n");
+		FeedHeader(state, " ; rel=next\r\n");
+		duckdb_api_test::Require(state.rate_limit_fields.size() == 1 && state.rate_limit_fields[0].value == unfolded &&
+		                             state.link_field_values == std::vector<std::string> {unfolded},
+		                         "folded dual-role Link metadata diverged between rate-limit and pagination copies");
+
+		const duckdb_api::internal::HttpExecutionProfile execution_profile {
+		    duckdb_api::PlannedUrlScheme::HTTPS,
+		    "api.github.com",
+		    443,
+		    false,
+		    false,
+		    false,
+		    duckdb_api::MAX_EXECUTION_MILLISECONDS,
+		    100,
+		    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+		    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+		    duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+		    duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
+		auto admitted = duckdb_api::internal::TryAdmitPaginatedRestPlan(
+		    duckdb_api_test::BuildValidAuthenticatedRepositoriesPlanFixture("fixture_secret"), execution_profile);
+		duckdb_api_test::Require(admitted != nullptr, "folded Link regression fixture did not pass admission");
+		duckdb_api::internal::LinkPaginationState pagination(*admitted);
+		const auto transition = pagination.Advance(state.link_field_values);
+		duckdb_api_test::Require(transition.has_next && transition.next_page == 2,
+		                         "folded dual-role Link metadata silently truncated pagination");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -111,6 +198,7 @@ int main() {
 		TestMetadataCapacityGrowthIsCharged();
 		TestInterimMetadataResetAndFailureCleanup();
 		TestTrailerCannotGrantContinuationAuthority();
+		TestTargetedFoldAndProtocolRoleOverlap();
 		std::cout << "curl Link metadata tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

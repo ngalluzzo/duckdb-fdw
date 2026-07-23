@@ -1,5 +1,5 @@
 #include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
-#include "duckdb_api/internal/runtime/execution/retry_policy_admission.hpp"
+#include "duckdb_api/internal/runtime/execution/rate_limit_policy_admission.hpp"
 
 #include "duckdb_api/content_digest.hpp"
 #include "duckdb_api/internal/runtime/execution/graphql_recipe_admission.hpp"
@@ -11,6 +11,7 @@
 #include <limits>
 #include <new>
 #include <set>
+#include <utility>
 
 namespace duckdb_api {
 namespace internal {
@@ -226,7 +227,7 @@ bool HasBudgets(const ScanPlan &plan, const HttpExecutionProfile &profile) {
 	if (package_generated) {
 		// Recompute Semantics' reachable aggregate instead of trusting either the
 		// declared operation ceiling or the plan's copied scan budget.
-		const auto attempts_per_step = plan.RetryPolicy().max_attempts_per_step;
+		const auto attempts_per_step = plan.ResiliencePolicy().max_attempts_per_step;
 		if (operation.cursor.max_pages_per_scan == 0 || attempts_per_step == 0 ||
 		    operation.cursor.max_pages_per_scan > std::numeric_limits<std::uint64_t>::max() / attempts_per_step) {
 			return false;
@@ -334,7 +335,8 @@ bool HasKnownExecutionProfile(const ScanPlan &plan) {
 	return false;
 }
 
-bool HasAuthority(const ScanPlan &plan, const HttpExecutionProfile &profile, bool &requires_bearer, RetryPlan &retry) {
+bool HasAuthority(const ScanPlan &plan, const HttpExecutionProfile &profile, bool &requires_bearer, RetryPlan &retry,
+                  AdmittedRateLimitPolicy &rate_limit, AdmittedResiliencePolicy &resilience) {
 	const auto &operation = plan.Operation().Graphql();
 	const auto &obligation = plan.AuthenticationObligation();
 	const auto *destination = obligation.Destination();
@@ -354,10 +356,11 @@ bool HasAuthority(const ScanPlan &plan, const HttpExecutionProfile &profile, boo
 	requires_bearer = bearer;
 	return plan.Providers() == FeatureState::DISABLED && plan.Cache() == FeatureState::DISABLED &&
 	       (bearer || anonymous) && HasExactNetworkCapability(network, operation.origin, profile) &&
-	       TryAdmitRetryPolicy(plan, profile, retry);
+	       TryAdmitResiliencePolicies(plan, profile, retry, rate_limit, resilience);
 }
 
-bool IsAdmissible(const ScanPlan &plan, const HttpExecutionProfile &profile, bool &requires_bearer, RetryPlan &retry) {
+bool IsAdmissible(const ScanPlan &plan, const HttpExecutionProfile &profile, bool &requires_bearer, RetryPlan &retry,
+                  AdmittedRateLimitPolicy &rate_limit, AdmittedResiliencePolicy &resilience) {
 	if (plan.Operation().Protocol() != PlannedProtocol::GRAPHQL ||
 	    plan.Pagination().Strategy() != PlannedPaginationStrategy::GRAPHQL_CURSOR) {
 		return false;
@@ -382,22 +385,24 @@ bool IsAdmissible(const ScanPlan &plan, const HttpExecutionProfile &profile, boo
 		return false;
 	}
 	return HasBudgets(plan, profile) && HasRelationalEnvelope(plan) &&
-	       HasAuthority(plan, profile, requires_bearer, retry);
+	       HasAuthority(plan, profile, requires_bearer, retry, rate_limit, resilience);
 }
 
 } // namespace
 
 AdmittedGraphqlRequestProfile::AdmittedGraphqlRequestProfile(const ScanPlan &plan, bool requires_bearer_p,
-                                                             RetryPlan retry_p)
+                                                             RetryPlan retry_p, AdmittedRateLimitPolicy rate_limit_p,
+                                                             AdmittedResiliencePolicy resilience_p)
     : method("POST"), scheme("https"), port(plan.Operation().Graphql().origin.port),
       page_size(plan.Operation().Graphql().cursor.page_size),
       max_pages(plan.Operation().Graphql().cursor.max_pages_per_scan),
       max_request_body_bytes(plan.Pagination().PageBudgets().serialized_request_body_bytes),
       max_scan_body_bytes(plan.Pagination().ScanBudgets().serialized_request_body_bytes),
       requires_bearer(requires_bearer_p), page_budgets(plan.Pagination().PageBudgets()),
-      scan_budgets(plan.Pagination().ScanBudgets()), retry(retry_p) {
-	page_budgets.request_attempts = retry.max_attempts_per_step;
-	scan_budgets.request_attempts = retry.max_attempts_per_scan;
+      scan_budgets(plan.Pagination().ScanBudgets()), retry(retry_p), rate_limit(std::move(rate_limit_p)),
+      resilience(resilience_p) {
+	page_budgets.request_attempts = resilience.max_attempts_per_step;
+	scan_budgets.request_attempts = resilience.max_attempts_per_scan;
 	const auto &operation = plan.Operation().Graphql();
 	host = operation.origin.host;
 	path = operation.path;
@@ -487,17 +492,25 @@ const ScanResourceBudgets &AdmittedGraphqlRequestProfile::ScanBudgets() const {
 const RetryPlan &AdmittedGraphqlRequestProfile::RetryPolicy() const {
 	return retry;
 }
+const AdmittedRateLimitPolicy &AdmittedGraphqlRequestProfile::RateLimitPolicy() const {
+	return rate_limit;
+}
+const AdmittedResiliencePolicy &AdmittedGraphqlRequestProfile::ResiliencePolicy() const {
+	return resilience;
+}
 
 std::unique_ptr<const AdmittedGraphqlRequestProfile> TryAdmitGraphqlPlan(const ScanPlan &plan,
                                                                          const HttpExecutionProfile &profile) {
 	try {
 		bool requires_bearer = false;
 		RetryPlan retry {};
-		if (!IsAdmissible(plan, profile, requires_bearer, retry)) {
+		AdmittedRateLimitPolicy rate_limit {};
+		AdmittedResiliencePolicy resilience {};
+		if (!IsAdmissible(plan, profile, requires_bearer, retry, rate_limit, resilience)) {
 			return {};
 		}
 		return std::unique_ptr<const AdmittedGraphqlRequestProfile>(
-		    new AdmittedGraphqlRequestProfile(plan, requires_bearer, retry));
+		    new AdmittedGraphqlRequestProfile(plan, requires_bearer, retry, std::move(rate_limit), resilience));
 	} catch (const std::bad_alloc &) {
 		throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 		                     "GraphQL request profile could not be allocated within its memory budget");

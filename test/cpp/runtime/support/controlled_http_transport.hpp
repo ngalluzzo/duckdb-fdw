@@ -28,6 +28,8 @@ struct ControlledHttpResponse {
 	uint64_t wire_response_bytes;
 	uint64_t decompressed_response_bytes;
 	bool retry_after_present;
+	std::vector<duckdb_api::internal::HttpObservedHeader> rate_limit_fields;
+	std::vector<std::string> date_field_values;
 	duckdb_api::internal::HttpTransportFailureKind transport_failure_kind;
 	uint32_t transport_response_status;
 };

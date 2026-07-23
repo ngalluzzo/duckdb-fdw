@@ -59,7 +59,7 @@ Four version domains remain distinct:
 | Domain | Contract |
 | --- | --- |
 | Project and extension version | SemVer for the documented duckdb-fdw product surface and observable behavior |
-| Connector specification version | Compatibility identifier for the declarative language: frozen one-attempt `duckdb_api/v1` and retry-capable `duckdb_api/v2` |
+| Connector specification version | Compatibility identifier for the declarative language: frozen one-attempt `duckdb_api/v1`, retry-capable `duckdb_api/v2`, and bounded reactive rate-limit-capable `duckdb_api/v3` |
 | Connector package version | Independent SemVer for one connector's relations, inputs, policies, schemas, and upstream adaptations |
 | DuckDB compatibility | Tested matrix of DuckDB release, integration profile, platform, architecture, and installation mode |
 
@@ -521,6 +521,26 @@ after full response, decode, schema, continuation, resource, and buffer
 acceptance; exposed rows are never replayed. V1 remains one-attempt, while
 `429`, server-directed waiting, writes, caching, parallel pages, and resume
 remain excluded.
+
+### `0.17.0` — bounded reactive rate-limit handling
+
+An author may publish a package-major `duckdb_api/v3` generation that declares
+which complete remote statuses are quota responses, how bounded response
+fields express the next eligible time, and whether a proved replayable read
+fails, waits, or waits only when the scan deadline permits. Runtime reacts only
+after an observed matching response, uses the same unaccepted-step attempt
+loop and immutable credential snapshot as ordinary retry, and keeps per-step
+attempt authority at the maximum—not the sum—of the two mechanisms.
+
+Streams in one DuckDB `DatabaseInstance` coordinate equal exact destination,
+package-major, operation-family, credential-authority/shared-scope, and remote
+bucket identities through an executor-local bounded FIFO service with one
+in-flight permit per key. Waiting is cancellable, deadline-aware, separately
+accounted, capped by declared and hard policy, and fully redacted. Independent
+principals, operation families, connectors, database instances, and processes
+do not block one another. Successful responses never trigger proactive pacing;
+distributed coordination, caching, parallel pages, and circuit breaking remain
+excluded.
 
 ### `1.0.0-rc.N` — compatibility rehearsal
 

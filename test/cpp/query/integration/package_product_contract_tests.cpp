@@ -42,6 +42,13 @@ void LoadRetryV2Package(duckdb::Connection &connection, const std::string &repos
 	        "actual DuckDB did not load the retry-v2 package");
 }
 
+void LoadRateLimitV3Package(duckdb::Connection &connection, const std::string &repository_root) {
+	auto load = connection.Query("CALL system.main.duckdb_api_load_connector(package_root := '" + repository_root +
+	                             "/test/fixtures/package_rate_limit_v3')");
+	Require(!load->HasError() && load->RowCount() == 1 && load->GetValue(4, 0).GetValue<std::uint64_t>() == 4,
+	        "actual DuckDB did not load the rate-limit-v3 package");
+}
+
 void CreatePackageRuntimeSecret(duckdb::Connection &connection) {
 	auto secret = connection.Query("CREATE TEMPORARY SECRET package_runtime "
 	                               "(TYPE duckdb_api, PROVIDER config, TOKEN 'package-runtime-token')");
@@ -292,6 +299,45 @@ void TestShortPageReachesRealExplainOutput(const std::string &repository_root) {
 	        "offline EXPLAIN of a short_page relation entered Runtime");
 }
 
+void TestRateLimitPlanReachesRealExplainOutput(const std::string &repository_root) {
+	auto executor = std::shared_ptr<PlanEchoExecutor>(new PlanEchoExecutor());
+	duckdb::DuckDB database(nullptr);
+	duckdb_api_test::ConfigureIsolatedCredentialRoot(database);
+	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_rate_limit_explain_test");
+	duckdb::RegisterDuckdbApiSecrets(loader);
+	duckdb::RegisterDuckdbApiPackageSurface(loader, duckdb_api::BuildPackageGenerationComposition(executor));
+	duckdb::Connection connection(database);
+	LoadRateLimitV3Package(connection, repository_root);
+
+	std::string explanation;
+	for (const auto *relation : {"rate_limit_demo_duplicate_events()", "rate_limit_demo_duplicate_graphql_events()"}) {
+		// JSON preserves complete typed extra-info values; the text renderer may
+		// insert width-dependent line breaks inside a single policy fact.
+		auto explained = connection.Query("EXPLAIN (FORMAT JSON) SELECT * FROM system.main." + std::string(relation));
+		if (explained->HasError()) {
+			throw std::runtime_error("rate-limit relation failed offline EXPLAIN: " + explained->GetError());
+		}
+		for (duckdb::idx_t row = 0; row < explained->RowCount(); row++) {
+			for (duckdb::idx_t column = 0; column < explained->ColumnCount(); column++) {
+				explanation += explained->GetValue(column, row).ToString();
+				explanation.push_back('\n');
+			}
+		}
+	}
+	for (const auto *marker :
+	     {"planned[mode:wait_if_deadline_allows,statuses:[429,503]", "operation_family:core_requests",
+	      "principal_scope:credential_authority", "retry-after:retry_after", "x-ratelimit-reset:unix_seconds",
+	      "remaining:x-ratelimit-remaining", "remote_bucket:x-ratelimit-resource", "planned[mode:wait,statuses:[429]",
+	      "operation_family:graph_requests", "principal_scope:shared", "x-ratelimit-reset-after:delta_seconds",
+	      "package_major_version:3", "max_cumulative_waiting_milliseconds_per_scan:2025"}) {
+		Require(explanation.find(marker) != std::string::npos,
+		        "real DuckDB EXPLAIN omitted a normalized planned rate-limit fact: " + std::string(marker));
+	}
+	Require(executor->anonymous_opens.load(std::memory_order_relaxed) == 0 &&
+	            executor->authenticated_opens.load(std::memory_order_relaxed) == 0,
+	        "offline EXPLAIN of rate-limit plans entered Runtime");
+}
+
 // RFC 0020, Query Experience review requirement: prove DOUBLE reaches real
 // DuckDB output end to end, not merely an internal LogicalTypeForKind-style
 // unit call. DESCRIBE is the oracle this repository already uses to assert a
@@ -505,6 +551,7 @@ int main(int argc, char **argv) {
 		}
 		TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(argv[1]);
 		TestShortPageReachesRealExplainOutput(argv[1]);
+		TestRateLimitPlanReachesRealExplainOutput(argv[1]);
 		TestDoubleColumnReachesRealDescribeAndSelectOutput(argv[1]);
 		TestGeneratedRelationsExecuteThroughRuntime(argv[1]);
 		TestRetryRecoveryPreservesActualDuckdbRelationalResults(argv[1]);

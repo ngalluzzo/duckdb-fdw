@@ -294,6 +294,40 @@ const char *FeatureName(FeatureState state) {
 	throw std::logic_error("scan plan contains an unknown feature state");
 }
 
+const char *RateLimitModeName(PlannedRateLimitMode mode) {
+	switch (mode) {
+	case PlannedRateLimitMode::FAIL:
+		return "fail";
+	case PlannedRateLimitMode::WAIT:
+		return "wait";
+	case PlannedRateLimitMode::WAIT_IF_DEADLINE_ALLOWS:
+		return "wait_if_deadline_allows";
+	}
+	throw std::logic_error("scan plan contains an unknown rate-limit mode");
+}
+
+const char *RateLimitScopeName(PlannedRateLimitPrincipalScope scope) {
+	switch (scope) {
+	case PlannedRateLimitPrincipalScope::CREDENTIAL_AUTHORITY:
+		return "credential_authority";
+	case PlannedRateLimitPrincipalScope::SHARED:
+		return "shared";
+	}
+	throw std::logic_error("scan plan contains an unknown rate-limit principal scope");
+}
+
+const char *RateLimitGuidanceFormatName(PlannedRateLimitGuidanceFormat format) {
+	switch (format) {
+	case PlannedRateLimitGuidanceFormat::RETRY_AFTER:
+		return "retry_after";
+	case PlannedRateLimitGuidanceFormat::DELTA_SECONDS:
+		return "delta_seconds";
+	case PlannedRateLimitGuidanceFormat::UNIX_SECONDS:
+		return "unix_seconds";
+	}
+	throw std::logic_error("scan plan contains an unknown rate-limit guidance format");
+}
+
 const char *RequirementName(PlannedCredentialRequirement requirement) {
 	switch (requirement) {
 	case PlannedCredentialRequirement::NONE:
@@ -344,6 +378,32 @@ void AppendStrings(std::ostringstream &result, const std::vector<std::string> &v
 		}
 		result << values[index];
 	}
+}
+
+void AppendRateLimitPolicy(std::ostringstream &result, const RateLimitPlan &policy) {
+	result << "[planned:mode:" << RateLimitModeName(policy.mode) << ",statuses:[";
+	for (std::size_t index = 0; index < policy.statuses.size(); index++) {
+		if (index > 0) {
+			result << ',';
+		}
+		result << policy.statuses[index];
+	}
+	result << "],operation_family:" << policy.operation_family
+	       << ",principal_scope:" << RateLimitScopeName(policy.scope) << ",guidance:[";
+	for (std::size_t index = 0; index < policy.guidance.size(); index++) {
+		if (index > 0) {
+			result << ',';
+		}
+		result << policy.guidance[index].header_name << ':'
+		       << RateLimitGuidanceFormatName(policy.guidance[index].format);
+	}
+	result << "],remaining:" << (policy.remaining_quota_header.empty() ? "none" : policy.remaining_quota_header)
+	       << ",remote_bucket:" << (policy.remote_bucket_header.empty() ? "none" : policy.remote_bucket_header)
+	       << ",package_major_version:" << policy.package_major_version
+	       << ",max_attempts_per_step:" << policy.max_attempts_per_step
+	       << ",max_delay_milliseconds:" << policy.max_delay_milliseconds
+	       << ",max_cumulative_waiting_milliseconds_per_scan:" << policy.max_cumulative_waiting_milliseconds_per_scan
+	       << ']';
 }
 
 void AppendQuery(std::ostringstream &result, const std::vector<PlannedQueryParameter> &query) {
@@ -514,8 +574,15 @@ std::string ScanPlan::Snapshot() const {
 		       << ",max_delay_ms:" << retry_policy.max_delay_milliseconds
 		       << ",max_wait_ms:" << retry_policy.max_cumulative_waiting_milliseconds_per_scan << ']';
 	}
-	result << ",cache:" << FeatureName(cache) << ",authentication:" << FeatureName(authentication)
-	       << ";secret-reference=" << secret_reference.Snapshot()
+	result << ",rate_limit:" << FeatureName(rate_limit);
+	if (rate_limit == FeatureState::ENABLED) {
+		AppendRateLimitPolicy(result, rate_limit_policy);
+	}
+	result << ",resilience:[planned:max_attempts_per_step:" << resilience_policy.max_attempts_per_step
+	       << ",max_attempts_per_scan:" << resilience_policy.max_attempts_per_scan
+	       << ",max_cumulative_waiting_milliseconds_per_scan:"
+	       << resilience_policy.max_cumulative_waiting_milliseconds_per_scan << ']' << ",cache:" << FeatureName(cache)
+	       << ",authentication:" << FeatureName(authentication) << ";secret-reference=" << secret_reference.Snapshot()
 	       << ";auth-obligation=requirement:" << RequirementName(authentication_obligation.Requirement())
 	       << ",logical_credential:"
 	       << (authentication_obligation.LogicalCredential().empty() ? "none"

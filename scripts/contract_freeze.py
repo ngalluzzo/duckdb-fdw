@@ -22,17 +22,19 @@ class FreezeError(Exception):
 
 EXPECTED_FREEZE_VERSION = "1.0.0-candidate"
 
-EXPECTED_SCHEMA_AUTHORITY = "src/connector/package/assets/connector-package-v2.schema.json"
+EXPECTED_SCHEMA_AUTHORITY = "src/connector/package/assets/connector-package-v3.schema.json"
 EXPECTED_CONNECTOR_SPEC_CONTRACT = {
-    "identifiers": ["duckdb_api/v1", "duckdb_api/v2"],
-    "latest_identifier": "duckdb_api/v2",
-    "authority": "RFC 0013; RFC 0024",
+    "identifiers": ["duckdb_api/v1", "duckdb_api/v2", "duckdb_api/v3"],
+    "latest_identifier": "duckdb_api/v3",
+    "authority": "RFC 0013; RFC 0024; RFC 0025",
     "syntax_authority": "docs/CONNECTOR_SPECIFICATIONS.md",
     "schema_authorities": {
         "duckdb_api/v1": "src/connector/package/assets/connector-package-v1.schema.json",
-        "duckdb_api/v2": EXPECTED_SCHEMA_AUTHORITY,
+        "duckdb_api/v2": "src/connector/package/assets/connector-package-v2.schema.json",
+        "duckdb_api/v3": EXPECTED_SCHEMA_AUTHORITY,
     },
-    "compatibility": "v1 remains frozen and one-attempt; v2 is a complete v1 grammar plus optional bounded retry",
+    "compatibility": "v1 remains frozen and one-attempt; v2 is a complete v1 grammar plus optional bounded retry; "
+    "v3 retains v2 and adds optional bounded reactive rate-limit policy",
 }
 
 EXPECTED_REJECTED_DIAGNOSTIC = {
@@ -71,6 +73,7 @@ EXPECTED_RFC_AUTHORITIES = frozenset(
         "RFC 0022",
         "RFC 0023",
         "RFC 0024",
+        "RFC 0025",
     }
 )
 
@@ -147,7 +150,7 @@ MANDATORY_EXCLUSIONS = frozenset(
         "central_connector_discovery_or_distribution_registry",
         "connector_package_signing_or_trust_infrastructure",
         "authenticators_beyond_anonymous_bearer_and_static_api_key",
-        "rate_limit_waiting_or_proactive_quota_scheduling",
+        "proactive_or_distributed_quota_scheduling",
         "author_configurable_cache_or_single_flight",
         "dynamic_schemas",
         "write_back_transactions_or_continuous_streams",
@@ -156,10 +159,10 @@ MANDATORY_EXCLUSIONS = frozenset(
     }
 )
 
-# Closed resilience vocabulary established by RFC 0021 and consumed by RFC
-# 0024's bounded retry controller. Layered additively on the existing
+# Closed resilience vocabulary established by RFC 0021 and consumed by the
+# RFC 0024/RFC 0025 resilience controller. Layered additively on the existing
 # ErrorStage classification; existing rendered diagnostic strings remain
-# stable and rate-limit waiting/cache remain disabled.
+# stable and cache remains disabled.
 EXPECTED_FAILURE_PRIMARY_CLASSES = frozenset(
     {
         "configuration",
@@ -180,7 +183,7 @@ EXPECTED_FAILURE_PRIMARY_CLASSES = frozenset(
 )
 
 EXPECTED_FAILURE_TAXONOMY_AUTHORITY = (
-    "RFC 0021; RFC 0024; docs/RUNTIME_CONTRACTS.md Error ownership and redaction"
+    "RFC 0021; RFC 0024; RFC 0025; docs/RUNTIME_CONTRACTS.md Error ownership and redaction"
 )
 
 EXPECTED_REPLAY_CLASSIFICATIONS = frozenset(
@@ -218,6 +221,44 @@ EXPECTED_BOUNDED_RETRY_CONTRACT = {
     "acceptance": "complete_transport_decode_schema_continuation_resource_and_buffer_commit",
     "page_replay_after_exposure": False,
     "diagnostics": ["attempt", "cumulative_delay_milliseconds", "exposure_state"],
+}
+
+EXPECTED_BOUNDED_REACTIVE_RATE_LIMIT_CONTRACT = {
+    "authority": "RFC 0025; docs/RUNTIME_CONTRACTS.md Resource accounting",
+    "connector_spec": "duckdb_api/v3_opt_in_only",
+    "modes": ["fail", "wait", "wait_if_deadline_allows"],
+    "principal_scopes": ["credential_authority", "shared"],
+    "guidance_formats": ["retry_after", "delta_seconds", "unix_seconds"],
+    "max_statuses": 8,
+    "max_guidance_fields": 4,
+    "max_attempts_per_step": 3,
+    "max_attempts_per_scan": 96,
+    "max_delay_milliseconds": 30000,
+    "max_cumulative_rate_waiting_milliseconds_per_scan": 30000,
+    "max_combined_waiting_milliseconds_per_scan": 30000,
+    "per_step_attempt_composition": "maximum_not_sum",
+    "aggregate_wait_composition": "checked_sum",
+    "partial_response": "terminal",
+    "coordination_domain": "one_runtime_executor_per_duckdb_database_instance",
+    "max_queued_or_permitted_per_key": 64,
+    "max_queued_or_permitted_per_executor": 4096,
+    "remaining_quota": "reactive_classification_only",
+    "proactive_pacing": False,
+    "distributed_coordination": False,
+    "diagnostic_reasons": [
+        "none",
+        "policy_fail",
+        "guidance_missing",
+        "malformed_guidance",
+        "guidance_exceeds_policy",
+        "deadline_insufficient",
+        "waiting_exhausted",
+        "attempts_exhausted",
+        "queue_saturated",
+        "scheduler_closed",
+        "repeated_immediate",
+        "bucket_changed",
+    ],
 }
 
 
@@ -500,7 +541,7 @@ def verify_freeze(
         raise FreezeError("freeze status must be candidate or frozen")
 
     if freeze.get("connector_spec") != EXPECTED_CONNECTOR_SPEC_CONTRACT:
-        raise FreezeError("freeze connector-spec contract disagrees with the accepted v1/v2 contract")
+        raise FreezeError("freeze connector-spec contract disagrees with the accepted v1/v2/v3 contract")
 
     declared_schema_authority = {
         _require_freeze_field(freeze, "pagination_strategies", "schema_authority"),
@@ -514,9 +555,9 @@ def verify_freeze(
         )
 
     schema_identifier = _schema_connector_identifier(schema)
-    if schema_identifier != "duckdb_api/v2":
+    if schema_identifier != "duckdb_api/v3":
         raise FreezeError(
-            f"v2 connector schema identifier {schema_identifier!r} disagrees with 'duckdb_api/v2'"
+            f"v3 connector schema identifier {schema_identifier!r} disagrees with 'duckdb_api/v3'"
         )
     if v1_schema is None:
         v1_schema = load_json(
@@ -528,6 +569,15 @@ def verify_freeze(
         raise FreezeError("v1 connector schema unexpectedly enables retry")
     if "retry" in _schema_value(v1_schema, ("$defs", "graphqlOperation", "properties")):
         raise FreezeError("v1 connector GraphQL schema unexpectedly enables retry")
+    v2_schema = load_json(
+        repository_root / EXPECTED_CONNECTOR_SPEC_CONTRACT["schema_authorities"]["duckdb_api/v2"]
+    )
+    if _schema_connector_identifier(v2_schema) != "duckdb_api/v2":
+        raise FreezeError("v2 connector schema identifier drifted")
+    if "rate_limit" in _schema_value(v2_schema, ("$defs", "restOperation", "properties")):
+        raise FreezeError("v2 connector REST schema unexpectedly enables rate-limit policy")
+    if "rate_limit" in _schema_value(v2_schema, ("$defs", "graphqlOperation", "properties")):
+        raise FreezeError("v2 connector GraphQL schema unexpectedly enables rate-limit policy")
 
     view = _inventory_release_view(inventory, freeze["sql_surface"]["release_view"])
     active = set(freeze["sql_surface"]["active"])
@@ -582,6 +632,8 @@ def verify_freeze(
 
     if freeze.get("bounded_retry") != EXPECTED_BOUNDED_RETRY_CONTRACT:
         raise FreezeError("freeze bounded-retry contract disagrees with graduated RFC 0024")
+    if freeze.get("bounded_reactive_rate_limit") != EXPECTED_BOUNDED_REACTIVE_RATE_LIMIT_CONTRACT:
+        raise FreezeError("freeze bounded reactive rate-limit contract disagrees with graduated RFC 0025")
 
     column_shapes = freeze["column_shapes"]
     if set(column_shapes.get("authored", [])) != _schema_column_shapes(schema):

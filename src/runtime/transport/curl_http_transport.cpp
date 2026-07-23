@@ -155,6 +155,8 @@ private:
 		                                   nullptr,
 		                                   nullptr,
 		                                   nullptr,
+		                                   nullptr,
+		                                   nullptr,
 		                                   nullptr
 #endif
 		};

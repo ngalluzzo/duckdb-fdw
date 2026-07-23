@@ -47,6 +47,9 @@ void RequireDuckDbRelationalOwnership(const duckdb_api::ScanPlan &plan) {
 	            plan.RuntimeOffset() == duckdb_api::RelationalDelegation::NONE &&
 	            plan.Providers() == duckdb_api::FeatureState::DISABLED &&
 	            plan.Retry() == duckdb_api::FeatureState::DISABLED &&
+	            plan.RateLimit() == duckdb_api::FeatureState::DISABLED &&
+	            plan.ResiliencePolicy().max_attempts_per_step == plan.Budgets().request_attempts &&
+	            plan.ResiliencePolicy().max_attempts_per_scan == plan.Pagination().ScanBudgets().request_attempts &&
 	            plan.Cache() == duckdb_api::FeatureState::DISABLED,
 	        "pagination moved a relational operator or enabled an excluded execution feature");
 }
@@ -238,7 +241,7 @@ void TestPaginationCounterexamplesAreIsolated() {
 		            plan.OutputColumns().size() == baseline.OutputColumns().size() &&
 		            plan.SecretReference().Name() == baseline.SecretReference().Name() &&
 		            plan.Providers() == baseline.Providers() && plan.Retry() == baseline.Retry() &&
-		            plan.Cache() == baseline.Cache(),
+		            plan.RateLimit() == baseline.RateLimit() && plan.Cache() == baseline.Cache(),
 		        "pagination counterexample changed a non-pagination plan fact");
 		if (variant == PaginationPlanCounterexample::STRATEGY_DISABLED) {
 			RequireDisabledPayloadInaccessible(plan.Pagination());

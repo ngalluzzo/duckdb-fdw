@@ -15,6 +15,7 @@ typedef bool (*CurlSocketPolicy)(const sockaddr *address, socklen_t address_leng
 
 #ifdef DUCKDB_API_PRIVATE_CURL_TESTS
 typedef void (*CurlOptionObserver)(CURLoption option, const char *normalized_value, void *context);
+typedef void (*CurlBodyObserver)(void *context);
 #endif
 
 // Inputs fixed by an admitted-request composition wrapper, never by SQL,
@@ -33,6 +34,11 @@ struct CurlTransferProfile {
 	const char *resolve_entry;
 	CurlOptionObserver option_observer;
 	void *option_observer_context;
+	// Test-only callback invoked after a received body fragment is retained.
+	// Implementations must not throw. It exists solely for deterministic
+	// cancellation/accounting tests and is absent from installed objects.
+	CurlBodyObserver body_observer;
+	void *body_observer_context;
 #endif
 };
 

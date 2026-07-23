@@ -226,6 +226,35 @@ bool IsHeaderName(const std::string &value) {
 	return true;
 }
 
+bool IsRateLimitHeaderName(const std::string &value) {
+	if (value.empty() || value.size() > 64 || value == "date") {
+		return false;
+	}
+	for (const auto character : value) {
+		const bool alphanumeric = (character >= 'a' && character <= 'z') || IsAsciiDigit(character);
+		const bool punctuation = character == '!' || character == '#' || character == '$' || character == '%' ||
+		                         character == '&' || character == '\'' || character == '*' || character == '+' ||
+		                         character == '-' || character == '.' || character == '^' || character == '_' ||
+		                         character == '`' || character == '|' || character == '~';
+		if (!alphanumeric && !punctuation) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool IsRateLimitOperationFamily(const std::string &value) {
+	if (value.empty() || value.size() > 64 || value.front() < 'a' || value.front() > 'z') {
+		return false;
+	}
+	for (const auto character : value) {
+		if (!((character >= 'a' && character <= 'z') || IsAsciiDigit(character) || character == '_')) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool IsHeaderValue(const std::string &value) {
 	if (value.size() > 1024 || (!value.empty() && (value.front() == ' ' || value.front() == '\t' ||
 	                                               value.back() == ' ' || value.back() == '\t'))) {

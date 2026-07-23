@@ -51,6 +51,37 @@ BuildPaginationCompatibilityGeneration(const std::string &version, char digest_f
 	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
 }
 
+duckdb_api::CompiledPackageGeneration BuildRateLimitCompatibilityGeneration(const std::string &version,
+                                                                            char digest_fill, std::uint16_t status) {
+	const duckdb_api::CompiledHttpOrigin origin {duckdb_api::CompiledUrlScheme::HTTPS,
+	                                             duckdb_api::CompiledHttpHost("api.example.com"), 443};
+	duckdb_api::CompiledRateLimitPolicy policy;
+	policy.declared = true;
+	policy.mode = duckdb_api::CompiledRateLimitMode::FAIL;
+	policy.statuses = {status};
+	policy.operation_family = "records";
+	policy.scope = duckdb_api::CompiledRateLimitPrincipalScope::CREDENTIAL_AUTHORITY;
+	std::vector<duckdb_api::CompiledOperation> operations;
+	operations.push_back(CompiledModelBuilder::RestOperationWithPolicies(
+	    "records", true, duckdb_api::CompiledOperationCardinality::ZERO_TO_MANY,
+	    CompiledModelBuilder::DisabledPagination(), {origin, "/records", {}, {}},
+	    duckdb_api::CompiledResponseSource::ROOT_ARRAY, "$", {}, CompiledModelBuilder::V1OperationSelector({}),
+	    {0, 0, 0}, std::move(policy), true));
+	std::vector<duckdb_api::CompiledColumn> columns;
+	columns.push_back(
+	    CompiledModelBuilder::Column("id", duckdb_api::CompiledScalarType::BIGINT, false, "$.id", {"id"}));
+	std::vector<duckdb_api::CompiledRelation> relations;
+	relations.push_back(CompiledModelBuilder::Relation("records", std::move(columns), {}, {}, std::move(operations),
+	                                                   CompiledModelBuilder::AnonymousAuthentication(),
+	                                                   CompiledModelBuilder::UnpaginatedResources(8, 64)));
+	const auto digest = "sha256." + std::string(64, digest_fill);
+	auto identity = CompiledModelBuilder::PackageIdentity("duckdb_api/v3", "rate_limit_package", version, digest);
+	auto connector = CompiledModelBuilder::Connector(
+	    duckdb_api::CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA, "rate_limit_package", version,
+	    std::move(relations), {{"https"}, {"api.example.com"}, false, false, false, false, 4096});
+	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
+}
+
 template <class Exception, class Callable>
 void RequireThrows(Callable callable, const std::string &message) {
 	try {
@@ -494,6 +525,19 @@ void TestStructuralRejections() {
 	                      "a stable increment-two descriptor was not compatibility-comparable");
 }
 
+void TestRateLimitChangesRequireAnIncompatibleReload() {
+	const auto active = BuildRateLimitCompatibilityGeneration("1.2.3", 'a', 429);
+	RequireClassification(active, BuildRateLimitCompatibilityGeneration("1.2.4", 'b', 429),
+	                      PackageReloadClassification::COMPATIBLE_PROVENANCE_PATCH,
+	                      "unchanged v3 rate-limit policy was not structurally comparable");
+	RequireClassification(active, BuildRateLimitCompatibilityGeneration("1.3.0", 'c', 503),
+	                      PackageReloadClassification::INCOMPATIBLE_RELOAD,
+	                      "changed v3 rate-limit status escaped the package-major compatibility boundary");
+	RequireClassification(active, BuildRateLimitCompatibilityGeneration("2.0.0", 'd', 503),
+	                      PackageReloadClassification::INCOMPATIBLE_RELOAD,
+	                      "package-major v3 policy migration was treated as an in-place compatible reload");
+}
+
 } // namespace
 
 int main() {
@@ -505,6 +549,7 @@ int main() {
 		TestReloadDecisionsBindExactGenerationPairs();
 		TestIdentityAndVersionRejections();
 		TestStructuralRejections();
+		TestRateLimitChangesRequireAnIncompatibleReload();
 		std::cout << "package compatibility contract tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

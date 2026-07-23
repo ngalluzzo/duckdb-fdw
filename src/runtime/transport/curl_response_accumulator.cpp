@@ -7,29 +7,55 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace duckdb_api {
 namespace internal {
 namespace {
 
-bool TryRetainedMetadataBytes(const std::vector<std::string> &values, uint64_t limit, uint64_t &result) noexcept {
+bool TryAddStringBytes(const std::string &value, uint64_t limit, uint64_t &result) noexcept {
+	const auto object_begin = reinterpret_cast<std::uintptr_t>(&value);
+	const auto object_end = object_begin + sizeof(value);
+	const auto data = reinterpret_cast<std::uintptr_t>(value.data());
+	if (data >= object_begin && data < object_end) {
+		return true;
+	}
+	const auto allocation = static_cast<uint64_t>(value.capacity()) + 1;
+	if (result > limit || allocation > limit - result) {
+		return false;
+	}
+	result += allocation;
+	return true;
+}
+
+bool TryRetainedMetadataBytes(const CurlTransferState &state, uint64_t limit, uint64_t &result) noexcept {
+	const auto &values = state.link_field_values;
 	if (values.capacity() > limit / sizeof(std::string)) {
 		return false;
 	}
 	result = static_cast<uint64_t>(values.capacity()) * sizeof(std::string);
 	for (const auto &value : values) {
-		const auto object_begin = reinterpret_cast<std::uintptr_t>(&value);
-		const auto object_end = object_begin + sizeof(value);
-		const auto data = reinterpret_cast<std::uintptr_t>(value.data());
-		// Inline string storage is already part of sizeof(std::string). External
-		// storage retains capacity()+1 bytes for the terminating NUL.
-		if (data < object_begin || data >= object_end) {
-			const auto allocation = static_cast<uint64_t>(value.capacity()) + 1;
-			if (result > limit || allocation > limit - result) {
-				return false;
-			}
-			result += allocation;
+		if (!TryAddStringBytes(value, limit, result)) {
+			return false;
+		}
+	}
+	if (state.rate_limit_fields.capacity() > (limit - result) / sizeof(HttpObservedHeader)) {
+		return false;
+	}
+	result += static_cast<uint64_t>(state.rate_limit_fields.capacity()) * sizeof(HttpObservedHeader);
+	for (const auto &field : state.rate_limit_fields) {
+		if (!TryAddStringBytes(field.name, limit, result) || !TryAddStringBytes(field.value, limit, result)) {
+			return false;
+		}
+	}
+	if (state.date_field_values.capacity() > (limit - result) / sizeof(std::string)) {
+		return false;
+	}
+	result += static_cast<uint64_t>(state.date_field_values.capacity()) * sizeof(std::string);
+	for (const auto &value : state.date_field_values) {
+		if (!TryAddStringBytes(value, limit, result)) {
+			return false;
 		}
 	}
 	return result <= limit;
@@ -109,7 +135,8 @@ CurlTransferState::CurlTransferState(ExecutionControl &control_p, const HttpLimi
       metadata_oversized(false), body_allocation_failed(false), metadata_allocation_failed(false),
       address_denied(false), socket_attempted(false), metadata_bytes(0), header_section_complete(false),
       retry_after_present(false), transfer_encoding_seen(false), transfer_chunked(false),
-      transfer_encoding_unsupported(false), content_encoded(false), easy_handle(nullptr) {
+      transfer_encoding_unsupported(false), content_encoded(false), retained_header_kind(RetainedHeaderKind::NONE),
+      retained_header_index(0), retained_link_index(0), easy_handle(nullptr) {
 }
 
 bool CurlTransferState::ShouldContinue() noexcept {
@@ -126,6 +153,14 @@ bool CurlTransferState::ShouldContinue() noexcept {
 
 void ReleaseCurlLinkMetadata(CurlTransferState &state) noexcept {
 	std::vector<std::string>().swap(state.link_field_values);
+	uint64_t retained = 0;
+	state.metadata_bytes = TryRetainedMetadataBytes(state, state.limits.max_metadata_bytes, retained) ? retained : 0;
+}
+
+void ReleaseAllCurlMetadata(CurlTransferState &state) noexcept {
+	std::vector<std::string>().swap(state.link_field_values);
+	std::vector<HttpObservedHeader>().swap(state.rate_limit_fields);
+	std::vector<std::string>().swap(state.date_field_values);
 	state.metadata_bytes = 0;
 }
 
@@ -160,6 +195,11 @@ std::size_t WriteCurlBody(char *data, std::size_t size, std::size_t count, void 
 		state.body_allocation_failed = true;
 		return 0;
 	}
+#ifdef DUCKDB_API_PRIVATE_CURL_TESTS
+	if (state.profile.body_observer) {
+		state.profile.body_observer(state.profile.body_observer_context);
+	}
+#endif
 	return length;
 }
 
@@ -183,17 +223,23 @@ std::size_t ReadCurlHeader(char *data, std::size_t size, std::size_t count, void
 	// candidate values here ensures 1xx/interim metadata cannot influence the
 	// terminal response. Redirect following remains disabled independently.
 	if (IsStatusLine(data, length)) {
-		ReleaseCurlLinkMetadata(state);
+		ReleaseAllCurlMetadata(state);
 		state.header_section_complete = false;
 		state.retry_after_present = false;
 		state.transfer_encoding_seen = false;
 		state.transfer_chunked = false;
 		state.transfer_encoding_unsupported = false;
 		state.content_encoded = false;
+		state.retained_header_kind = CurlTransferState::RetainedHeaderKind::NONE;
+		state.retained_header_index = 0;
+		state.retained_link_index = 0;
 		return length;
 	}
 	if (IsHeaderSectionEnd(data, length)) {
 		state.header_section_complete = true;
+		state.retained_header_kind = CurlTransferState::RetainedHeaderKind::NONE;
+		state.retained_header_index = 0;
+		state.retained_link_index = 0;
 		return length;
 	}
 	// libcurl sends HTTP trailers through the header callback after the blank
@@ -202,7 +248,45 @@ std::size_t ReadCurlHeader(char *data, std::size_t size, std::size_t count, void
 	if (state.header_section_complete) {
 		return length;
 	}
+	if (length != 0 && (data[0] == ' ' || data[0] == '\t')) {
+		if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::NONE) {
+			return length;
+		}
+		std::size_t value_end = length;
+		while (value_end > 0 && (data[value_end - 1] == '\r' || data[value_end - 1] == '\n')) {
+			value_end--;
+		}
+		try {
+			if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::RATE_LIMIT ||
+			    state.retained_header_kind == CurlTransferState::RetainedHeaderKind::RATE_LIMIT_LINK) {
+				state.rate_limit_fields.at(state.retained_header_index).value.append(data, value_end);
+			} else if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::DATE) {
+				state.date_field_values.at(state.retained_header_index).append(data, value_end);
+			}
+			if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::LINK) {
+				state.link_field_values.at(state.retained_header_index).append(data, value_end);
+			} else if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::RATE_LIMIT_LINK) {
+				state.link_field_values.at(state.retained_link_index).append(data, value_end);
+			}
+			uint64_t retained = 0;
+			if (!TryRetainedMetadataBytes(state, state.limits.max_metadata_bytes, retained)) {
+				state.metadata_oversized = true;
+				ReleaseAllCurlMetadata(state);
+				return 0;
+			}
+			state.metadata_bytes = retained;
+		} catch (...) {
+			state.metadata_allocation_failed = true;
+			ReleaseAllCurlMetadata(state);
+			return 0;
+		}
+		return length;
+	}
+	state.retained_header_kind = CurlTransferState::RetainedHeaderKind::NONE;
+	state.retained_header_index = 0;
+	state.retained_link_index = 0;
 	std::size_t value_offset = 0;
+	bool transport_field = false;
 	if (IsNamedField(data, length, "transfer-encoding", value_offset)) {
 		if (state.transfer_encoding_seen) {
 			state.transfer_encoding_unsupported = true;
@@ -211,17 +295,71 @@ std::size_t ReadCurlHeader(char *data, std::size_t size, std::size_t count, void
 		state.transfer_encoding_seen = true;
 		state.transfer_chunked = EqualsFieldValue(data, value_offset, length, "chunked");
 		state.transfer_encoding_unsupported = !state.transfer_chunked;
-		return state.transfer_encoding_unsupported ? 0 : length;
+		if (state.transfer_encoding_unsupported) {
+			return 0;
+		}
+		transport_field = true;
 	}
 	if (IsNamedField(data, length, "content-encoding", value_offset)) {
 		state.content_encoded = !EqualsFieldValue(data, value_offset, length, "identity");
-		return length;
+		transport_field = true;
 	}
 	if (IsNamedField(data, length, "retry-after", value_offset)) {
 		state.retry_after_present = true;
+	}
+	const std::string *retained_name = nullptr;
+	for (const auto &name : state.limits.retained_header_names) {
+		if (IsNamedField(data, length, name.c_str(), value_offset)) {
+			retained_name = &name;
+			break;
+		}
+	}
+	const bool retain_date = state.limits.retain_date && IsNamedField(data, length, "date", value_offset);
+	const bool retain_link = IsNamedField(data, length, "link", value_offset);
+	if (retained_name != nullptr || retain_date) {
+		if (state.limits.max_metadata_bytes == 0) {
+			state.metadata_oversized = true;
+			return 0;
+		}
+		while (value_offset < length && (data[value_offset] == ' ' || data[value_offset] == '\t')) {
+			value_offset++;
+		}
+		std::size_t value_end = length;
+		while (value_end > value_offset && (data[value_end - 1] == '\r' || data[value_end - 1] == '\n' ||
+		                                    data[value_end - 1] == ' ' || data[value_end - 1] == '\t')) {
+			value_end--;
+		}
+		try {
+			const std::string value(data + value_offset, value_end - value_offset);
+			if (retained_name != nullptr) {
+				state.rate_limit_fields.push_back({*retained_name, value});
+				state.retained_header_index = state.rate_limit_fields.size() - 1;
+				state.retained_header_kind = retain_link ? CurlTransferState::RetainedHeaderKind::RATE_LIMIT_LINK
+				                                         : CurlTransferState::RetainedHeaderKind::RATE_LIMIT;
+			} else {
+				state.date_field_values.push_back(value);
+				state.retained_header_kind = CurlTransferState::RetainedHeaderKind::DATE;
+				state.retained_header_index = state.date_field_values.size() - 1;
+			}
+			if (retain_link) {
+				state.link_field_values.push_back(value);
+				state.retained_link_index = state.link_field_values.size() - 1;
+			}
+			uint64_t retained = 0;
+			if (!TryRetainedMetadataBytes(state, state.limits.max_metadata_bytes, retained)) {
+				state.metadata_oversized = true;
+				ReleaseAllCurlMetadata(state);
+				return 0;
+			}
+			state.metadata_bytes = retained;
+		} catch (...) {
+			state.metadata_allocation_failed = true;
+			ReleaseAllCurlMetadata(state);
+			return 0;
+		}
 		return length;
 	}
-	if (!IsNamedField(data, length, "link", value_offset)) {
+	if (transport_field || !retain_link) {
 		return length;
 	}
 	if (state.limits.max_metadata_bytes == 0) {
@@ -242,8 +380,10 @@ std::size_t ReadCurlHeader(char *data, std::size_t size, std::size_t count, void
 	}
 	try {
 		state.link_field_values.push_back(std::string(data + value_offset, value_length));
+		state.retained_header_kind = CurlTransferState::RetainedHeaderKind::LINK;
+		state.retained_header_index = state.link_field_values.size() - 1;
 		uint64_t retained = 0;
-		if (!TryRetainedMetadataBytes(state.link_field_values, state.limits.max_metadata_bytes, retained)) {
+		if (!TryRetainedMetadataBytes(state, state.limits.max_metadata_bytes, retained)) {
 			state.metadata_oversized = true;
 			ReleaseCurlLinkMetadata(state);
 			return 0;

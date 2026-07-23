@@ -18,6 +18,7 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -80,12 +81,17 @@ ScanResourceProfile BuildResourceProfile(const AdmittedPaginatedRestRequestProfi
                                          uint64_t max_wall_milliseconds) {
 	const auto &page = profile.PageBudgets();
 	const auto &scan = profile.ScanBudgets();
-	return {{page.request_attempts, page.header_bytes, page.response_bytes, page.decompressed_bytes,
-	         page.decoded_records, page.decoded_memory_bytes, page.concurrency, page.serialized_request_body_bytes},
-	        {scan.request_attempts, scan.pages, scan.header_bytes, scan.response_bytes, scan.decompressed_bytes,
-	         scan.decoded_records, scan.decoded_memory_bytes, std::min(scan.wall_milliseconds, max_wall_milliseconds),
-	         scan.concurrency, scan.serialized_request_body_bytes,
-	         profile.RetryPolicy().max_cumulative_waiting_milliseconds_per_scan}};
+	return {{profile.ResiliencePolicy().max_attempts_per_step, page.header_bytes, page.response_bytes,
+	         page.decompressed_bytes, page.decoded_records, page.decoded_memory_bytes, page.concurrency,
+	         page.serialized_request_body_bytes},
+	        {profile.ResiliencePolicy().max_attempts_per_scan, scan.pages, scan.header_bytes, scan.response_bytes,
+	         scan.decompressed_bytes, scan.decoded_records, scan.decoded_memory_bytes,
+	         std::min(scan.wall_milliseconds, max_wall_milliseconds), scan.concurrency,
+	         scan.serialized_request_body_bytes,
+	         profile.ResiliencePolicy().max_cumulative_waiting_milliseconds_per_scan,
+	         profile.RetryPolicy().max_cumulative_waiting_milliseconds_per_scan,
+	         profile.RateLimitPolicy().max_cumulative_waiting_milliseconds_per_scan,
+	         std::min(scan.wall_milliseconds, max_wall_milliseconds)}};
 }
 
 void CheckState(ExecutionControl &control, std::chrono::steady_clock::time_point deadline) {
@@ -159,7 +165,7 @@ class PaginatedBatchStream final : public BatchStream {
 public:
 	PaginatedBatchStream(std::unique_ptr<const AdmittedPaginatedRestRequestProfile> admitted_profile_p,
 	                     ScanAuthorization authorization_p, std::shared_ptr<const HttpTransport> transport_p,
-	                     uint64_t max_wall_milliseconds_p)
+	                     uint64_t max_wall_milliseconds_p, RateLimitRuntimeContext rate_limit_runtime_p)
 	    : admitted_profile(std::move(admitted_profile_p)), transport(std::move(transport_p)),
 	      authorization(new ScanAuthorization(std::move(authorization_p))),
 	      column_types(BuildColumnTypes(*admitted_profile)),
@@ -169,6 +175,7 @@ public:
 	      rows_emitted(0),
 	      retry_seed(static_cast<uint64_t>(reinterpret_cast<std::uintptr_t>(this)) ^
 	                 static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())),
+	      rate_limit_runtime(std::move(rate_limit_runtime_p)), resilience_state(),
 	      current_step_exposure(ExposureState::UNACCEPTED), terminal_exposure(ExposureState::UNACCEPTED),
 	      has_terminal_exposure(false) {
 	}
@@ -228,21 +235,29 @@ public:
 		} catch (const ExecutionError &error) {
 			FailWithExecutionError(
 			    error.Stage(), error.Field(), error.SafeMessage(),
-			    EnrichRetryFailureProperties(FailurePropertiesFromError(error), accounting.Counters().pages,
-			                                 accounting.CurrentAttempt(), rows_emitted,
-			                                 accounting.Counters().cumulative_waiting_milliseconds, CurrentExposure()));
+			    EnrichRateLimitFailureProperties(
+			        EnrichRetryFailureProperties(
+			            FailurePropertiesFromError(error), accounting.Counters().pages, accounting.CurrentAttempt(),
+			            rows_emitted, accounting.Counters().cumulative_retry_waiting_milliseconds, CurrentExposure()),
+			        accounting.Counters(), resilience_state));
 		} catch (const LinkPaginationError &error) {
 			FailWithExecutionError(
 			    ErrorStage::POLICY, error.Field(), error.SafeMessage(),
-			    EnrichRetryFailureProperties(LinkPaginationFailureProperties(error.Kind()), accounting.Counters().pages,
-			                                 accounting.CurrentAttempt(), rows_emitted,
-			                                 accounting.Counters().cumulative_waiting_milliseconds, CurrentExposure()));
+			    EnrichRateLimitFailureProperties(
+			        EnrichRetryFailureProperties(LinkPaginationFailureProperties(error.Kind()),
+			                                     accounting.Counters().pages, accounting.CurrentAttempt(), rows_emitted,
+			                                     accounting.Counters().cumulative_retry_waiting_milliseconds,
+			                                     CurrentExposure()),
+			        accounting.Counters(), resilience_state));
 		} catch (const ScanResourceError &error) {
 			FailWithExecutionError(
 			    ErrorStage::RESOURCE, error.Field(), error.SafeMessage(),
-			    EnrichRetryFailureProperties(ResourceBudgetFailureProperties(error.Field()),
-			                                 accounting.Counters().pages, accounting.CurrentAttempt(), rows_emitted,
-			                                 accounting.Counters().cumulative_waiting_milliseconds, CurrentExposure()));
+			    EnrichRateLimitFailureProperties(
+			        EnrichRetryFailureProperties(ResourceBudgetFailureProperties(error.Field()),
+			                                     accounting.Counters().pages, accounting.CurrentAttempt(), rows_emitted,
+			                                     accounting.Counters().cumulative_retry_waiting_milliseconds,
+			                                     CurrentExposure()),
+			        accounting.Counters(), resilience_state));
 		} catch (const std::bad_alloc &) {
 			FailWithExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                       "execution could not be allocated within its memory budget");
@@ -277,17 +292,20 @@ public:
 
 	ExecutionSnapshot Diagnostics() const noexcept override {
 		try {
-			std::lock_guard<std::mutex> guard(mutex);
-			const auto &policy = admitted_profile->RetryPolicy();
-			const auto &counters = accounting.Counters();
-			return {policy.max_attempts_per_step,
-			        policy.max_attempts_per_scan,
-			        policy.max_delay_milliseconds,
-			        policy.max_cumulative_waiting_milliseconds_per_scan,
-			        counters.request_attempts,
-			        counters.cumulative_waiting_milliseconds,
-			        counters.pages,
-			        CurrentExposure()};
+			for (;;) {
+				ExecutionSnapshot waiting {};
+				if (rate_limit_runtime.wait_diagnostics->TryRead(&waiting)) {
+					return waiting;
+				}
+				std::unique_lock<std::mutex> guard(mutex, std::try_to_lock);
+				if (guard.owns_lock()) {
+					const auto &counters = accounting.Counters();
+					return BuildExecutionSnapshot(admitted_profile->RetryPolicy(), admitted_profile->RateLimitPolicy(),
+					                              admitted_profile->ResiliencePolicy(), counters, resilience_state,
+					                              CurrentExposure());
+				}
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
 		} catch (...) {
 			return BatchStream::Diagnostics();
 		}
@@ -331,7 +349,8 @@ private:
 	void FetchPage(ExecutionControl &control) {
 		const auto current_page = pagination->CurrentPage();
 		auto attempted = ExecuteHttpStepWithRetry(
-		    admitted_profile->RetryPolicy(), accounting, transport,
+		    admitted_profile->RetryPolicy(), admitted_profile->RateLimitPolicy(), rate_limit_runtime, resilience_state,
+		    accounting, transport,
 		    std::min(admitted_profile->PageBudgets().header_bytes,
 		             admitted_profile->PageBudgets().decoded_memory_bytes),
 		    retry_seed,
@@ -451,6 +470,8 @@ private:
 	// RFC 0021: cumulative rows emitted to DuckDB across pages, for rows_exposed.
 	uint64_t rows_emitted;
 	const uint64_t retry_seed;
+	RateLimitRuntimeContext rate_limit_runtime;
+	ResilienceExecutionState resilience_state;
 	ExposureState current_step_exposure;
 	ExposureState terminal_exposure;
 	bool has_terminal_exposure;
@@ -461,7 +482,8 @@ private:
 std::unique_ptr<BatchStream>
 OpenPaginatedRestScan(std::unique_ptr<const AdmittedPaginatedRestRequestProfile> admitted_profile,
                       ScanAuthorization authorization, std::shared_ptr<const HttpTransport> transport,
-                      uint64_t max_wall_milliseconds, ExecutionControl &control) {
+                      uint64_t max_wall_milliseconds, RateLimitRuntimeContext rate_limit_runtime,
+                      ExecutionControl &control) {
 	if (control.IsCancellationRequested()) {
 		throw ExecutionCancelled();
 	}
@@ -469,8 +491,9 @@ OpenPaginatedRestScan(std::unique_ptr<const AdmittedPaginatedRestRequestProfile>
 		throw ExecutionError(ErrorStage::POLICY, "", "paginated REST request profile was not admitted");
 	}
 	try {
-		return std::unique_ptr<BatchStream>(new PaginatedBatchStream(
-		    std::move(admitted_profile), std::move(authorization), std::move(transport), max_wall_milliseconds));
+		return std::unique_ptr<BatchStream>(
+		    new PaginatedBatchStream(std::move(admitted_profile), std::move(authorization), std::move(transport),
+		                             max_wall_milliseconds, std::move(rate_limit_runtime)));
 	} catch (const ExecutionError &) {
 		throw;
 	} catch (const ScanResourceError &error) {

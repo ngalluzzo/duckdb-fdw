@@ -48,6 +48,16 @@ struct HttpLimits {
 	// for operations that have no pagination semantics.
 	uint64_t max_metadata_bytes;
 	std::chrono::steady_clock::time_point deadline;
+	// Exact canonical field names copied from the admitted v3 plan. Transport
+	// retains only these values, plus Date when requested; this is not a general
+	// response-header map.
+	std::vector<std::string> retained_header_names;
+	bool retain_date;
+};
+
+struct HttpObservedHeader {
+	std::string name;
+	std::string value;
 };
 
 // Narrow protocol metadata returned by one attempt. Transport preserves only
@@ -58,6 +68,8 @@ struct HttpResponseMetadata {
 	std::vector<std::string> link_field_values;
 	uint64_t retained_bytes;
 	bool retry_after_present;
+	std::vector<HttpObservedHeader> rate_limit_fields;
+	std::vector<std::string> date_field_values;
 };
 
 struct HttpResponse {
@@ -111,6 +123,27 @@ private:
 	HttpTransportFailureKind kind;
 	HttpAttemptFacts facts;
 	ExecutionError error;
+};
+
+// Cancellation after an attempt has observed response bytes must preserve both
+// cancellation semantics and the scan-owned byte ledger. This Runtime-private,
+// content-free carrier is consumed only by the retry controller, which commits
+// the facts once and then rethrows the public cancellation marker. Cancellation
+// before transport I/O continues to use ExecutionCancelled directly.
+class HttpAttemptCancelled : public std::exception {
+public:
+	explicit HttpAttemptCancelled(HttpAttemptFacts facts) : facts(facts) {
+	}
+
+	const char *what() const noexcept override {
+		return "HTTP attempt cancelled";
+	}
+	const HttpAttemptFacts &Facts() const noexcept {
+		return facts;
+	}
+
+private:
+	HttpAttemptFacts facts;
 };
 
 // Private protocol-neutral transport boundary. Execute performs one synchronous

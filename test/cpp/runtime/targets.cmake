@@ -84,6 +84,35 @@ target_link_libraries(
   PRIVATE duckdb_api_runtime_executor_service)
 
 add_executable(
+  duckdb_api_rate_limit_guidance_tests
+  test/cpp/runtime/execution/rate_limit_guidance_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_rate_limit_guidance_tests)
+target_include_directories(duckdb_api_rate_limit_guidance_tests PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_rate_limit_guidance_tests
+  PRIVATE duckdb_api_runtime_resilience_service)
+
+add_executable(
+  duckdb_api_rate_limit_coordinator_tests
+  test/cpp/runtime/execution/rate_limit_coordinator_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_rate_limit_coordinator_tests)
+target_include_directories(duckdb_api_rate_limit_coordinator_tests PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_rate_limit_coordinator_tests
+  PRIVATE duckdb_api_runtime_resilience_service
+          Threads::Threads)
+
+add_executable(
+  duckdb_api_rate_limit_execution_tests
+  test/cpp/runtime/execution/rate_limit_execution_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_rate_limit_execution_tests)
+target_include_directories(duckdb_api_rate_limit_execution_tests PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_rate_limit_execution_tests
+  PRIVATE duckdb_api_runtime_executor_service
+          Threads::Threads)
+
+add_executable(
   duckdb_api_http_transport_contract_tests
   test/cpp/runtime/transport/http_transport_contract_tests.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_http_transport_contract_tests)

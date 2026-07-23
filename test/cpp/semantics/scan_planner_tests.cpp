@@ -3,13 +3,16 @@
 #include "connector/support/package_compiler_test_fixtures.hpp"
 #include "duckdb_api/package_bound_scan_planner.hpp"
 #include "query/support/live_scan_request.hpp"
+#include "scan_planner_internal.hpp"
 #include "support/require.hpp"
 #include "semantics/support/scan_plan_contract_test_support.hpp"
 
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 void RunPredicateCompositionLawTests();
 void RunInputResolutionLawTests();
@@ -292,6 +295,79 @@ void TestFixedSourceInputsRemainNonRelational() {
 	        "fixed source query fields were reclassified as predicate or limit pushdown");
 }
 
+duckdb_api::ScanPlan PlanRateLimitFixtureRelation(const duckdb_api::CompiledPackageGeneration &generation,
+                                                  const std::string &relation_name) {
+	const auto request = duckdb_api::BuildConservativeScanRequest(generation.Connector(), relation_name,
+	                                                              duckdb_api::LogicalSecretReference());
+	return duckdb_api::BuildConservativeScanPlan(generation.Connector(), request);
+}
+
+void TestRateLimitPolicyCopyAndCombinedResilienceAlgebra() {
+	const auto generation = duckdb_api_test::CompileRateLimitV3GenerationFixture(DUCKDB_API_SOURCE_ROOT);
+	const auto rest = PlanRateLimitFixtureRelation(generation, "duplicate_events");
+	const auto &rest_policy = rest.RateLimitPolicy();
+	Require(rest.ConnectorVersion() == "3.0.0" && rest.RateLimit() == duckdb_api::FeatureState::ENABLED &&
+	            rest_policy.Declared() && rest_policy.IsWithinHardBounds() &&
+	            rest_policy.mode == duckdb_api::PlannedRateLimitMode::WAIT_IF_DEADLINE_ALLOWS &&
+	            rest_policy.statuses == std::vector<std::uint16_t>({429, 503}) &&
+	            rest_policy.operation_family == "core_requests" &&
+	            rest_policy.scope == duckdb_api::PlannedRateLimitPrincipalScope::CREDENTIAL_AUTHORITY &&
+	            rest_policy.guidance.size() == 2 && rest_policy.guidance[0].header_name == "retry-after" &&
+	            rest_policy.guidance[0].format == duckdb_api::PlannedRateLimitGuidanceFormat::RETRY_AFTER &&
+	            rest_policy.guidance[1].header_name == "x-ratelimit-reset" &&
+	            rest_policy.guidance[1].format == duckdb_api::PlannedRateLimitGuidanceFormat::UNIX_SECONDS &&
+	            rest_policy.remaining_quota_header == "x-ratelimit-remaining" &&
+	            rest_policy.remote_bucket_header == "x-ratelimit-resource" && rest_policy.max_attempts_per_step == 3 &&
+	            rest_policy.max_delay_milliseconds == 30000 &&
+	            rest_policy.max_cumulative_waiting_milliseconds_per_scan == 30000 &&
+	            rest_policy.package_major_version == 3,
+	        "REST rate-limit compiled facts did not copy exactly into the immutable plan");
+	Require(rest.RetryPolicy().max_attempts_per_step == 3 && rest.RetryPolicy().max_attempts_per_scan == 3 &&
+	            rest.RetryPolicy().max_cumulative_waiting_milliseconds_per_scan == 25 &&
+	            rest.ResiliencePolicy().max_attempts_per_step == 3 &&
+	            rest.ResiliencePolicy().max_attempts_per_scan == 3 &&
+	            rest.ResiliencePolicy().max_cumulative_waiting_milliseconds_per_scan == 30000 &&
+	            rest.Budgets().request_attempts == 3,
+	        "REST resilience plan added attempt pools or failed to cap aggregate waiting");
+
+	const auto graphql = PlanRateLimitFixtureRelation(generation, "duplicate_graphql_events");
+	const auto &graphql_policy = graphql.RateLimitPolicy();
+	Require(graphql_policy.mode == duckdb_api::PlannedRateLimitMode::WAIT &&
+	            graphql_policy.statuses == std::vector<std::uint16_t>({429}) &&
+	            graphql_policy.operation_family == "graph_requests" &&
+	            graphql_policy.scope == duckdb_api::PlannedRateLimitPrincipalScope::SHARED &&
+	            graphql_policy.guidance.size() == 1 &&
+	            graphql_policy.guidance[0].header_name == "x-ratelimit-reset-after" &&
+	            graphql_policy.guidance[0].format == duckdb_api::PlannedRateLimitGuidanceFormat::DELTA_SECONDS &&
+	            graphql_policy.remaining_quota_header.empty() && graphql_policy.remote_bucket_header.empty() &&
+	            graphql_policy.max_attempts_per_step == 3 && graphql_policy.max_delay_milliseconds == 1000 &&
+	            graphql_policy.max_cumulative_waiting_milliseconds_per_scan == 2000,
+	        "GraphQL rate-limit compiled facts did not copy exactly into the immutable plan");
+	Require(graphql.RetryPolicy().max_attempts_per_step == 2 && graphql.ResiliencePolicy().max_attempts_per_step == 3 &&
+	            graphql.Pagination().PageBudgets().request_attempts == 3 &&
+	            graphql.ResiliencePolicy().max_attempts_per_scan == 6 &&
+	            graphql.Pagination().ScanBudgets().request_attempts == 6 &&
+	            graphql.ResiliencePolicy().max_cumulative_waiting_milliseconds_per_scan == 2025 &&
+	            graphql.Pagination().PageBudgets().serialized_request_body_bytes == 4096 &&
+	            graphql.Pagination().ScanBudgets().serialized_request_body_bytes == 24576,
+	        "GraphQL resilience algebra summed attempts or lost reachable request-body authority");
+	Require(graphql.Snapshot() == duckdb_api::ScanPlan(graphql).Snapshot() &&
+	            graphql.Snapshot().find("rate_limit:enabled[planned:mode:wait,statuses:[429]") != std::string::npos &&
+	            graphql.Snapshot().find("package_major_version:3") != std::string::npos &&
+	            graphql.Snapshot().find("max_cumulative_waiting_milliseconds_per_scan:2025") != std::string::npos,
+	        "rate-limit plan copy or deterministic safe snapshot lost normalized planned facts");
+
+	Require(duckdb_api::scan_planner_internal::BoundedSum(25, 30000, 30000, "test waiting scope") == 30000 &&
+	            duckdb_api::scan_planner_internal::BoundedProduct(32, 3, 96, "test attempt scope") == 96,
+	        "checked resilience algebra did not cap exact finite sums and products");
+	RequireThrows<std::logic_error>(
+	    []() {
+		    (void)duckdb_api::scan_planner_internal::BoundedSum(std::numeric_limits<std::uint64_t>::max(), 1, 30000,
+		                                                        "test waiting scope");
+	    },
+	    "checked resilience waiting algebra accepted uint64 overflow");
+}
+
 void TestResourceEnvelopeBounds() {
 	const auto connector = duckdb_api_test::BuildDistinctSchemaConnectorCatalogFixture();
 	const auto &anonymous = FindRelation(connector, duckdb_api_test::DISTINCT_SCHEMA_ANONYMOUS_RELATION);
@@ -445,6 +521,7 @@ int main() {
 		TestUnavailableRelationalCounterexamples();
 		TestResponseSourceCardinalityAndLimitAreIndependent();
 		TestFixedSourceInputsRemainNonRelational();
+		TestRateLimitPolicyCopyAndCombinedResilienceAlgebra();
 		TestResourceEnvelopeBounds();
 		TestPaginationRequiresExplicitSupportedProfile();
 		TestPackageAcceptsUnpaginatedRootArray();

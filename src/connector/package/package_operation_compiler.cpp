@@ -2,6 +2,7 @@
 
 #include "duckdb_api/content_digest.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <set>
 
@@ -119,6 +120,46 @@ CompiledRetryRecommendation CompileRetry(const RetryDeclaration &source) {
 	        ParseUnsigned(source.max_cumulative_waiting_milliseconds_per_scan)};
 }
 
+CompiledRateLimitPolicy CompileRateLimit(const RateLimitDeclaration &source) {
+	CompiledRateLimitPolicy policy;
+	if (!source.present) {
+		return policy;
+	}
+	policy.declared = true;
+	policy.mode = source.mode.value == "fail"
+	                  ? CompiledRateLimitMode::FAIL
+	                  : (source.mode.value == "wait" ? CompiledRateLimitMode::WAIT
+	                                                 : CompiledRateLimitMode::WAIT_IF_DEADLINE_ALLOWS);
+	for (const auto &status : source.statuses) {
+		policy.statuses.push_back(static_cast<std::uint16_t>(ParseUnsigned(status)));
+	}
+	std::sort(policy.statuses.begin(), policy.statuses.end());
+	policy.operation_family = source.operation_family.value;
+	policy.scope = source.principal_scope.value == "shared" ? CompiledRateLimitPrincipalScope::SHARED
+	                                                        : CompiledRateLimitPrincipalScope::CREDENTIAL_AUTHORITY;
+	for (const auto &guidance : source.guidance) {
+		const auto format =
+		    guidance.format.value == "retry_after"
+		        ? CompiledRateLimitGuidanceFormat::RETRY_AFTER
+		        : (guidance.format.value == "delta_seconds" ? CompiledRateLimitGuidanceFormat::DELTA_SECONDS
+		                                                    : CompiledRateLimitGuidanceFormat::UNIX_SECONDS);
+		policy.guidance.push_back({guidance.header.value, format});
+	}
+	if (source.remaining_present) {
+		policy.remaining_quota_header = source.remaining_header.value;
+	}
+	if (source.remote_bucket_present) {
+		policy.remote_bucket_header = source.remote_bucket_header.value;
+	}
+	if (policy.WaitingEnabled()) {
+		policy.max_attempts_per_step = ParseUnsigned(source.max_attempts_per_step);
+		policy.max_delay_milliseconds = ParseUnsigned(source.max_delay_milliseconds);
+		policy.max_cumulative_waiting_milliseconds_per_scan =
+		    ParseUnsigned(source.max_cumulative_waiting_milliseconds_per_scan);
+	}
+	return policy;
+}
+
 std::vector<CompiledQueryParameter> CompileQuery(const RelationDeclaration &relation,
                                                  const OperationDeclaration &operation,
                                                  const RestPaginationDeclaration &pagination,
@@ -233,16 +274,11 @@ bool CompileRestOperation(const RelationDeclaration &relation, const OperationDe
 	if (diagnostics.Revision() != revision) {
 		return false;
 	}
-	if (source.retry.present) {
-		result.reset(new CompiledOperation(duckdb_api::internal::CompiledModelBuilder::RestOperationWithRetry(
-		    source.id.value, source.selector.fallback, cardinality, std::move(pagination), std::move(request),
-		    response_source, std::move(extractor), std::move(extractor_segments), std::move(selector),
-		    CompileRetry(source.retry))));
-	} else {
-		result.reset(new CompiledOperation(duckdb_api::internal::CompiledModelBuilder::RestOperation(
-		    source.id.value, source.selector.fallback, cardinality, std::move(pagination), std::move(request),
-		    response_source, std::move(extractor), std::move(extractor_segments), std::move(selector))));
-	}
+	result.reset(new CompiledOperation(duckdb_api::internal::CompiledModelBuilder::RestOperationWithPolicies(
+	    source.id.value, source.selector.fallback, cardinality, std::move(pagination), std::move(request),
+	    response_source, std::move(extractor), std::move(extractor_segments), std::move(selector),
+	    CompileRetry(source.retry), CompileRateLimit(source.rate_limit),
+	    relation.api_version.value == "duckdb_api/v3")));
 	return true;
 }
 
@@ -281,14 +317,10 @@ bool CompileGraphqlOperation(const RelationDeclaration &relation, const Operatio
 	if (diagnostics.Revision() != revision) {
 		return false;
 	}
-	if (source.retry.present) {
-		result.reset(new CompiledOperation(duckdb_api::internal::CompiledModelBuilder::GraphqlOperationWithRetry(
-		    source.id.value, source.selector.fallback, std::move(operation), std::move(selector),
-		    CompileRetry(source.retry))));
-	} else {
-		result.reset(new CompiledOperation(duckdb_api::internal::CompiledModelBuilder::GraphqlOperation(
-		    source.id.value, source.selector.fallback, std::move(operation), std::move(selector))));
-	}
+	result.reset(new CompiledOperation(duckdb_api::internal::CompiledModelBuilder::GraphqlOperationWithPolicies(
+	    source.id.value, source.selector.fallback, std::move(operation), std::move(selector),
+	    CompileRetry(source.retry), CompileRateLimit(source.rate_limit),
+	    relation.api_version.value == "duckdb_api/v3")));
 	return true;
 }
 

@@ -114,6 +114,8 @@ public:
 		                                                         nullptr,
 		                                                         nullptr,
 		                                                         nullptr,
+		                                                         nullptr,
+		                                                         nullptr,
 		                                                         nullptr
 #endif
 		};
@@ -137,6 +139,8 @@ public:
 		                                                         state.get()
 #ifdef DUCKDB_API_PRIVATE_CURL_TESTS
 		                                                             ,
+		                                                         nullptr,
+		                                                         nullptr,
 		                                                         nullptr,
 		                                                         nullptr,
 		                                                         nullptr,

@@ -149,7 +149,9 @@ void TestExactCurlOptionInventory() {
 	    "",
 	    duckdb_api_test::PrivateCurlSocketPolicy::ALLOW_LOOPBACK_PORT,
 	    1000,
-	    &policy_checks};
+	    &policy_checks,
+	    nullptr,
+	    nullptr};
 	const auto result = duckdb_api_test::PerformPrivateCurlProbe(options, control);
 	const CURLoption expected[] = {CURLOPT_URL,
 	                               CURLOPT_HTTPGET,
@@ -253,7 +255,9 @@ void TestDeniedAddressCallbackPreventsAuthorizedConnection() {
 	                                                        "",
 	                                                        duckdb_api_test::PrivateCurlSocketPolicy::DENY_ALL,
 	                                                        1000,
-	                                                        &policy_checks};
+	                                                        &policy_checks,
+	                                                        nullptr,
+	                                                        nullptr};
 	auto token = duckdb_api_test::RuntimeCurlBearerToken(90);
 	const auto credential_canary = token;
 	RequireExecutionError(
@@ -278,7 +282,9 @@ void TestOneSocketAcrossMultipleResolvedAddresses() {
 	    "multi.test:" + port + ":[::1],127.0.0.1",
 	    duckdb_api_test::PrivateCurlSocketPolicy::ALLOW_LOOPBACK_PORT,
 	    1000,
-	    &policy_checks};
+	    &policy_checks,
+	    nullptr,
+	    nullptr};
 	RequireExecutionError([&]() { (void)duckdb_api_test::PerformPrivateCurlProbe(options, control); },
 	                      duckdb_api::ErrorStage::TRANSPORT);
 	Require(policy_checks == 1 && service.ConnectionCount() == 0,

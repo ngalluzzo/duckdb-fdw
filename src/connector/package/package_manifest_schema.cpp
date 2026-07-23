@@ -176,7 +176,8 @@ bool DecodeManifestSchema(const std::string &file, const FailsafeYamlNode &root,
 	manifest.relations = reader.TextSequence("relations", 1, 64);
 	manifest.mark = reader.Mark();
 
-	if (manifest.api_version.value != "duckdb_api/v1" && manifest.api_version.value != "duckdb_api/v2") {
+	if (manifest.api_version.value != "duckdb_api/v1" && manifest.api_version.value != "duckdb_api/v2" &&
+	    manifest.api_version.value != "duckdb_api/v3") {
 		diagnostics.Add(PackageDiagnosticCode::UNSUPPORTED_SPEC, PackageDiagnosticPhase::SCHEMA,
 		                manifest.api_version.mark);
 	}

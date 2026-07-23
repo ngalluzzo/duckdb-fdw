@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb_api/execution.hpp"
+#include "duckdb_api/internal/runtime/execution/rate_limit_policy_admission.hpp"
 #include "duckdb_api/internal/runtime/transport/http_transport.hpp"
 
 #include <cstdint>
@@ -61,11 +62,14 @@ public:
 	const ResourceBudgets &PageBudgets() const;
 	const ScanResourceBudgets &ScanBudgets() const;
 	const RetryPlan &RetryPolicy() const;
+	const AdmittedRateLimitPolicy &RateLimitPolicy() const;
+	const AdmittedResiliencePolicy &ResiliencePolicy() const;
 
 private:
 	friend std::unique_ptr<const AdmittedGraphqlRequestProfile> TryAdmitGraphqlPlan(const ScanPlan &,
 	                                                                                const HttpExecutionProfile &);
-	AdmittedGraphqlRequestProfile(const ScanPlan &plan, bool requires_bearer, RetryPlan retry);
+	AdmittedGraphqlRequestProfile(const ScanPlan &plan, bool requires_bearer, RetryPlan retry,
+	                              AdmittedRateLimitPolicy rate_limit, AdmittedResiliencePolicy resilience);
 
 	std::string method;
 	std::string scheme;
@@ -90,6 +94,8 @@ private:
 	ResourceBudgets page_budgets;
 	ScanResourceBudgets scan_budgets;
 	RetryPlan retry;
+	AdmittedRateLimitPolicy rate_limit;
+	AdmittedResiliencePolicy resilience;
 };
 
 std::unique_ptr<const AdmittedGraphqlRequestProfile> TryAdmitGraphqlPlan(const ScanPlan &plan,

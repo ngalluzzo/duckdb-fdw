@@ -1,5 +1,6 @@
 #include "duckdb_api/scan_plan.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
@@ -38,6 +39,49 @@ PlannedColumnScalarKind ScalarKindFromLogicalType(const std::string &logical_typ
 		return PlannedColumnScalarKind::VARCHAR;
 	}
 	throw std::logic_error("planned column contains an unsupported legacy logical type");
+}
+
+bool IsRateLimitModeKnown(PlannedRateLimitMode mode) {
+	return mode == PlannedRateLimitMode::FAIL || mode == PlannedRateLimitMode::WAIT ||
+	       mode == PlannedRateLimitMode::WAIT_IF_DEADLINE_ALLOWS;
+}
+
+bool IsRateLimitScopeKnown(PlannedRateLimitPrincipalScope scope) {
+	return scope == PlannedRateLimitPrincipalScope::CREDENTIAL_AUTHORITY ||
+	       scope == PlannedRateLimitPrincipalScope::SHARED;
+}
+
+bool IsRateLimitFormatKnown(PlannedRateLimitGuidanceFormat format) {
+	return format == PlannedRateLimitGuidanceFormat::RETRY_AFTER ||
+	       format == PlannedRateLimitGuidanceFormat::DELTA_SECONDS ||
+	       format == PlannedRateLimitGuidanceFormat::UNIX_SECONDS;
+}
+
+bool IsOperationFamilyCharacter(char value, bool first) {
+	return (value >= 'a' && value <= 'z') || (!first && ((value >= '0' && value <= '9') || value == '_'));
+}
+
+bool IsCanonicalOperationFamily(const std::string &value) {
+	if (value.empty() || value.size() > 64) {
+		return false;
+	}
+	for (std::size_t index = 0; index < value.size(); index++) {
+		if (!IsOperationFamilyCharacter(value[index], index == 0)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool IsHttpTokenCharacter(char value) {
+	return (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9') || value == '!' || value == '#' ||
+	       value == '$' || value == '%' || value == '&' || value == '\'' || value == '*' || value == '+' ||
+	       value == '-' || value == '.' || value == '^' || value == '_' || value == '`' || value == '|' || value == '~';
+}
+
+bool IsCanonicalRateLimitHeaderName(const std::string &value) {
+	return !value.empty() && value.size() <= 64 && value != "date" &&
+	       std::all_of(value.begin(), value.end(), IsHttpTokenCharacter);
 }
 
 PlannedColumnScalarKind LegacyScalarKind(const std::string &logical_type) {
@@ -229,6 +273,68 @@ bool RetryPlan::IsWithinHardBounds() const noexcept {
 	       max_cumulative_waiting_milliseconds_per_scan <= RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN;
 }
 
+bool RateLimitPlan::Declared() const noexcept {
+	return declared;
+}
+
+bool RateLimitPlan::WaitingEnabled() const noexcept {
+	return declared && (mode == PlannedRateLimitMode::WAIT || mode == PlannedRateLimitMode::WAIT_IF_DEADLINE_ALLOWS);
+}
+
+bool RateLimitPlan::IsWithinHardBounds() const noexcept {
+	if (!declared) {
+		return statuses.empty() && operation_family.empty() && guidance.empty() && remaining_quota_header.empty() &&
+		       remote_bucket_header.empty() && max_attempts_per_step == 0 && max_delay_milliseconds == 0 &&
+		       max_cumulative_waiting_milliseconds_per_scan == 0;
+	}
+	if (!IsRateLimitModeKnown(mode) || !IsRateLimitScopeKnown(scope) || statuses.empty() || statuses.size() > 8 ||
+	    !IsCanonicalOperationFamily(operation_family)) {
+		return false;
+	}
+	for (std::size_t index = 0; index < statuses.size(); index++) {
+		const auto status = statuses[index];
+		if (status < 400 || status > 599 || status == 401 || status == 403 || status == 407 ||
+		    (index > 0 && statuses[index - 1] >= status)) {
+			return false;
+		}
+	}
+	for (std::size_t index = 0; index < guidance.size(); index++) {
+		const auto &field = guidance[index];
+		if (!IsRateLimitFormatKnown(field.format) || !IsCanonicalRateLimitHeaderName(field.header_name) ||
+		    (!remaining_quota_header.empty() && field.header_name == remaining_quota_header) ||
+		    (!remote_bucket_header.empty() && field.header_name == remote_bucket_header)) {
+			return false;
+		}
+		for (std::size_t previous = 0; previous < index; previous++) {
+			if (guidance[previous].header_name == field.header_name) {
+				return false;
+			}
+		}
+	}
+	if ((!remaining_quota_header.empty() && !IsCanonicalRateLimitHeaderName(remaining_quota_header)) ||
+	    (!remote_bucket_header.empty() && !IsCanonicalRateLimitHeaderName(remote_bucket_header)) ||
+	    (!remaining_quota_header.empty() && remaining_quota_header == remote_bucket_header)) {
+		return false;
+	}
+	if (mode == PlannedRateLimitMode::FAIL) {
+		return guidance.empty() && remaining_quota_header.empty() && remote_bucket_header.empty() &&
+		       max_attempts_per_step == 0 && max_delay_milliseconds == 0 &&
+		       max_cumulative_waiting_milliseconds_per_scan == 0;
+	}
+	return WaitingEnabled() && !guidance.empty() && guidance.size() <= 4 && max_attempts_per_step >= 2 &&
+	       max_attempts_per_step <= RATE_LIMIT_MAX_REQUEST_ATTEMPTS_PER_STEP && max_delay_milliseconds > 0 &&
+	       max_delay_milliseconds <= RATE_LIMIT_MAX_DELAY_MILLISECONDS &&
+	       max_cumulative_waiting_milliseconds_per_scan > 0 &&
+	       max_cumulative_waiting_milliseconds_per_scan <= RATE_LIMIT_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN;
+}
+
+bool ResiliencePlan::IsWithinHardBounds() const noexcept {
+	return max_attempts_per_step > 0 && max_attempts_per_step <= RESILIENCE_MAX_REQUEST_ATTEMPTS_PER_STEP &&
+	       max_attempts_per_scan >= max_attempts_per_step &&
+	       max_attempts_per_scan <= RESILIENCE_MAX_REQUEST_ATTEMPTS_PER_SCAN &&
+	       max_cumulative_waiting_milliseconds_per_scan <= RESILIENCE_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN;
+}
+
 PaginationPlan::PaginationPlan()
     : strategy(PlannedPaginationStrategy::DISABLED), dependency(PlannedPageDependency::SEQUENTIAL),
       consistency(PlannedPageConsistency::MUTABLE), link_relation(PlannedLinkRelation::NEXT),
@@ -386,7 +492,21 @@ std::string PlannedSecretReference::Snapshot() const {
 	return result;
 }
 
-ScanPlan::ScanPlan() : replay_class(PlannedOperationReplayClass::REPLAYABLE_READ), retry_policy {1, 1, 0, 0} {
+ScanPlan::ScanPlan()
+    : replay_class(PlannedOperationReplayClass::REPLAYABLE_READ), retry_policy {1, 1, 0, 0},
+      rate_limit(FeatureState::DISABLED), rate_limit_policy {false,
+                                                             PlannedRateLimitMode::FAIL,
+                                                             {},
+                                                             "",
+                                                             PlannedRateLimitPrincipalScope::CREDENTIAL_AUTHORITY,
+                                                             {},
+                                                             "",
+                                                             "",
+                                                             0,
+                                                             0,
+                                                             0,
+                                                             0},
+      resilience_policy {1, 1, 0} {
 }
 
 const std::string &ScanPlan::ConnectorName() const {
@@ -512,6 +632,18 @@ PlannedOperationReplayClass ScanPlan::ReplayClass() const noexcept {
 
 const RetryPlan &ScanPlan::RetryPolicy() const noexcept {
 	return retry_policy;
+}
+
+FeatureState ScanPlan::RateLimit() const noexcept {
+	return rate_limit;
+}
+
+const RateLimitPlan &ScanPlan::RateLimitPolicy() const noexcept {
+	return rate_limit_policy;
+}
+
+const ResiliencePlan &ScanPlan::ResiliencePolicy() const noexcept {
+	return resilience_policy;
 }
 
 FeatureState ScanPlan::Cache() const {

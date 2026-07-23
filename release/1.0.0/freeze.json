@@ -9,7 +9,7 @@
     "ROADMAP.md section '1.0.0 - narrow stable contract' states the public outcome.",
     "RFC 0009 sets the intended stable boundary and the six SemVer-governed categories.",
     "docs/ARCHITECTURE.md, docs/CONNECTOR_SPECIFICATIONS.md, docs/RUNTIME_CONTRACTS.md define current behavior.",
-    "Accepted RFCs 0010, 0011, 0012, 0013, 0014, 0021, 0022, 0023, and 0024 bind specific decisions propagated into those contracts.",
+    "Accepted RFCs 0010, 0011, 0012, 0013, 0014, 0021, 0022, 0023, 0024, and 0025 bind specific decisions propagated into those contracts.",
     "release/public-surface/inventory.json is the SQL-surface compatibility oracle.",
     "release/<version>/pins.json and public_contract.json are per-release identity and contract evidence."
   ],
@@ -24,10 +24,11 @@
       "contract": "Compatibility identifier for the declarative authoring language.",
       "values": [
         "duckdb_api/v1",
-        "duckdb_api/v2"
+        "duckdb_api/v2",
+        "duckdb_api/v3"
       ],
-      "latest": "duckdb_api/v2",
-      "authority": "RFC 0013; RFC 0024"
+      "latest": "duckdb_api/v3",
+      "authority": "RFC 0013; RFC 0024; RFC 0025"
     },
     {
       "domain": "connector_package",
@@ -43,16 +44,18 @@
   "connector_spec": {
     "identifiers": [
       "duckdb_api/v1",
-      "duckdb_api/v2"
+      "duckdb_api/v2",
+      "duckdb_api/v3"
     ],
-    "latest_identifier": "duckdb_api/v2",
-    "authority": "RFC 0013; RFC 0024",
+    "latest_identifier": "duckdb_api/v3",
+    "authority": "RFC 0013; RFC 0024; RFC 0025",
     "syntax_authority": "docs/CONNECTOR_SPECIFICATIONS.md",
     "schema_authorities": {
       "duckdb_api/v1": "src/connector/package/assets/connector-package-v1.schema.json",
-      "duckdb_api/v2": "src/connector/package/assets/connector-package-v2.schema.json"
+      "duckdb_api/v2": "src/connector/package/assets/connector-package-v2.schema.json",
+      "duckdb_api/v3": "src/connector/package/assets/connector-package-v3.schema.json"
     },
-    "compatibility": "v1 remains frozen and one-attempt; v2 is a complete v1 grammar plus optional bounded retry"
+    "compatibility": "v1 remains frozen and one-attempt; v2 is a complete v1 grammar plus optional bounded retry; v3 retains v2 and adds optional bounded reactive rate-limit policy"
   },
   "integration_profile": {
     "profile": "native_cpp_duckdb_table_function_extension",
@@ -87,7 +90,7 @@
       "VARCHAR",
       "DOUBLE"
     ],
-    "schema_authority": "src/connector/package/assets/connector-package-v2.schema.json",
+    "schema_authority": "src/connector/package/assets/connector-package-v3.schema.json",
     "syntax_authority": "docs/CONNECTOR_SPECIFICATIONS.md",
     "rejected_diagnostic": {
       "code": "DUCKDB_API_INVALID_TYPE",
@@ -107,7 +110,7 @@
     ],
     "array_nesting": "flat_only",
     "array_usage": "output_columns_only",
-    "schema_authority": "src/connector/package/assets/connector-package-v2.schema.json"
+    "schema_authority": "src/connector/package/assets/connector-package-v3.schema.json"
   },
   "pagination_strategies": {
     "rest": [
@@ -119,7 +122,7 @@
     "graphql": [
       "relay_forward"
     ],
-    "schema_authority": "src/connector/package/assets/connector-package-v2.schema.json",
+    "schema_authority": "src/connector/package/assets/connector-package-v3.schema.json",
     "syntax_authority": "docs/CONNECTOR_SPECIFICATIONS.md",
     "rejected_diagnostic": {
       "code": "DUCKDB_API_UNSUPPORTED_DECLARATION",
@@ -131,7 +134,7 @@
     "redaction": "Absolute roots, source scalar content, credentials, generated documents, request/response bodies, rows, cursors, and remote messages are never diagnostic fields."
   },
   "failure_taxonomy": {
-    "authority": "RFC 0021; RFC 0024; docs/RUNTIME_CONTRACTS.md Error ownership and redaction",
+    "authority": "RFC 0021; RFC 0024; RFC 0025; docs/RUNTIME_CONTRACTS.md Error ownership and redaction",
     "primary_classes": [
       "configuration",
       "authorization",
@@ -156,7 +159,7 @@
       "indeterminate"
     ],
     "indeterminate_replay_is_non_replayable": true,
-    "binding": "The closed primary-class and replay-classification sets are layered additively on the existing ErrorStage classification. RFC 0024's bounded retry controller consumes these facts without enabling rate-limit waiting, caching, or circuit breaking."
+    "binding": "The closed primary-class and replay-classification sets are layered additively on the existing ErrorStage classification. RFC 0024 and RFC 0025 share one bounded resilience controller; caching and circuit breaking remain disabled."
   },
   "bounded_retry": {
     "authority": "RFC 0024; docs/RUNTIME_CONTRACTS.md Replay-safe retry",
@@ -190,6 +193,54 @@
       "attempt",
       "cumulative_delay_milliseconds",
       "exposure_state"
+    ]
+  },
+  "bounded_reactive_rate_limit": {
+    "authority": "RFC 0025; docs/RUNTIME_CONTRACTS.md Resource accounting",
+    "connector_spec": "duckdb_api/v3_opt_in_only",
+    "modes": [
+      "fail",
+      "wait",
+      "wait_if_deadline_allows"
+    ],
+    "principal_scopes": [
+      "credential_authority",
+      "shared"
+    ],
+    "guidance_formats": [
+      "retry_after",
+      "delta_seconds",
+      "unix_seconds"
+    ],
+    "max_statuses": 8,
+    "max_guidance_fields": 4,
+    "max_attempts_per_step": 3,
+    "max_attempts_per_scan": 96,
+    "max_delay_milliseconds": 30000,
+    "max_cumulative_rate_waiting_milliseconds_per_scan": 30000,
+    "max_combined_waiting_milliseconds_per_scan": 30000,
+    "per_step_attempt_composition": "maximum_not_sum",
+    "aggregate_wait_composition": "checked_sum",
+    "partial_response": "terminal",
+    "coordination_domain": "one_runtime_executor_per_duckdb_database_instance",
+    "max_queued_or_permitted_per_key": 64,
+    "max_queued_or_permitted_per_executor": 4096,
+    "remaining_quota": "reactive_classification_only",
+    "proactive_pacing": false,
+    "distributed_coordination": false,
+    "diagnostic_reasons": [
+      "none",
+      "policy_fail",
+      "guidance_missing",
+      "malformed_guidance",
+      "guidance_exceeds_policy",
+      "deadline_insufficient",
+      "waiting_exhausted",
+      "attempts_exhausted",
+      "queue_saturated",
+      "scheduler_closed",
+      "repeated_immediate",
+      "bucket_changed"
     ]
   },
   "credential_providers": {
@@ -241,7 +292,7 @@
     "tier3_native_or_wasm_custom_code",
     "column_providers",
     "partitions",
-    "rate_limit_waiting_or_proactive_quota_scheduling",
+    "proactive_or_distributed_quota_scheduling",
     "author_configurable_cache_or_single_flight",
     "openapi_or_graphql_introspection_importers",
     "authenticators_beyond_anonymous_bearer_and_static_api_key",
@@ -287,7 +338,8 @@
       "RFC 0021",
       "RFC 0022",
       "RFC 0023",
-      "RFC 0024"
+      "RFC 0024",
+      "RFC 0025"
     ]
   }
 }

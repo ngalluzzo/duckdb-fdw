@@ -15,6 +15,14 @@ bool CompiledRetryRecommendation::Enabled() const noexcept {
 	return max_attempts_per_step > 1;
 }
 
+bool CompiledRateLimitPolicy::Declared() const noexcept {
+	return declared;
+}
+
+bool CompiledRateLimitPolicy::WaitingEnabled() const noexcept {
+	return declared && (mode == CompiledRateLimitMode::WAIT || mode == CompiledRateLimitMode::WAIT_IF_DEADLINE_ALLOWS);
+}
+
 namespace internal {
 
 bool IsCompiledQueryName(const std::string &value) {
@@ -285,6 +293,178 @@ void ValidateRetryRecommendation(const CompiledOperation &operation, bool protoc
 	}
 }
 
+bool IsRateLimitHeaderName(const std::string &value) {
+	if (value.empty() || value.size() > 64 || value == "date") {
+		return false;
+	}
+	for (const auto character : value) {
+		const bool alphanumeric = (character >= 'a' && character <= 'z') || IsAsciiDigit(character);
+		const bool punctuation = character == '!' || character == '#' || character == '$' || character == '%' ||
+		                         character == '&' || character == '\'' || character == '*' || character == '+' ||
+		                         character == '-' || character == '.' || character == '^' || character == '_' ||
+		                         character == '`' || character == '|' || character == '~';
+		if (!alphanumeric && !punctuation) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool IsRateLimitOperationFamily(const std::string &value) {
+	if (value.empty() || value.size() > 64 || value.front() < 'a' || value.front() > 'z') {
+		return false;
+	}
+	for (const auto character : value) {
+		if (!((character >= 'a' && character <= 'z') || IsAsciiDigit(character) || character == '_')) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void ValidateRateLimitPolicy(const CompiledOperation &operation) {
+	const auto &policy = operation.RateLimitPolicy();
+	if (!policy.Declared()) {
+		if (policy.mode != CompiledRateLimitMode::FAIL || !policy.statuses.empty() ||
+		    !policy.operation_family.empty() || policy.scope != CompiledRateLimitPrincipalScope::CREDENTIAL_AUTHORITY ||
+		    !policy.guidance.empty() || !policy.remaining_quota_header.empty() ||
+		    !policy.remote_bucket_header.empty() || policy.max_attempts_per_step != 0 ||
+		    policy.max_delay_milliseconds != 0 || policy.max_cumulative_waiting_milliseconds_per_scan != 0) {
+			throw std::invalid_argument("undeclared rate-limit policy contains behavioral authority");
+		}
+		return;
+	}
+	if (!operation.SupportsRateLimitPolicy()) {
+		throw std::invalid_argument("declared rate-limit policy is unavailable for this compiled operation");
+	}
+	if (operation.ReplayClass() != CompiledOperationReplayClass::REPLAYABLE_READ || policy.statuses.empty() ||
+	    policy.statuses.size() > 8 || !IsRateLimitOperationFamily(policy.operation_family)) {
+		throw std::invalid_argument("compiled rate-limit policy has invalid replay or identity facts");
+	}
+	for (std::size_t index = 0; index < policy.statuses.size(); index++) {
+		const auto status = policy.statuses[index];
+		if (status < 400 || status > 599 || status == 401 || status == 403 || status == 407 ||
+		    (index > 0 && policy.statuses[index - 1] >= status)) {
+			throw std::invalid_argument("compiled rate-limit policy has an invalid or unsorted status set");
+		}
+	}
+	switch (policy.scope) {
+	case CompiledRateLimitPrincipalScope::CREDENTIAL_AUTHORITY:
+	case CompiledRateLimitPrincipalScope::SHARED:
+		break;
+	default:
+		throw std::invalid_argument("compiled rate-limit policy has an unknown principal scope");
+	}
+	std::vector<std::string> role_headers;
+	for (const auto &field : policy.guidance) {
+		if (!IsRateLimitHeaderName(field.header_name)) {
+			throw std::invalid_argument("compiled rate-limit policy has an invalid guidance header");
+		}
+		switch (field.format) {
+		case CompiledRateLimitGuidanceFormat::RETRY_AFTER:
+		case CompiledRateLimitGuidanceFormat::DELTA_SECONDS:
+		case CompiledRateLimitGuidanceFormat::UNIX_SECONDS:
+			break;
+		default:
+			throw std::invalid_argument("compiled rate-limit policy has an unknown guidance format");
+		}
+		role_headers.push_back(field.header_name);
+	}
+	for (const auto *header : {&policy.remaining_quota_header, &policy.remote_bucket_header}) {
+		if (!header->empty()) {
+			if (!IsRateLimitHeaderName(*header)) {
+				throw std::invalid_argument("compiled rate-limit policy has an invalid optional response header");
+			}
+			role_headers.push_back(*header);
+		}
+	}
+	for (std::size_t index = 0; index < role_headers.size(); index++) {
+		for (std::size_t other = index + 1; other < role_headers.size(); other++) {
+			if (role_headers[index] == role_headers[other]) {
+				throw std::invalid_argument("compiled rate-limit policy reuses a response header across roles");
+			}
+		}
+	}
+	switch (policy.mode) {
+	case CompiledRateLimitMode::FAIL:
+		if (!policy.guidance.empty() || !policy.remaining_quota_header.empty() ||
+		    !policy.remote_bucket_header.empty() || policy.max_attempts_per_step != 0 ||
+		    policy.max_delay_milliseconds != 0 || policy.max_cumulative_waiting_milliseconds_per_scan != 0) {
+			throw std::invalid_argument("fail rate-limit policy contains waiting authority");
+		}
+		return;
+	case CompiledRateLimitMode::WAIT:
+	case CompiledRateLimitMode::WAIT_IF_DEADLINE_ALLOWS:
+		if (policy.guidance.empty() || policy.guidance.size() > 4 || policy.max_attempts_per_step < 2 ||
+		    policy.max_attempts_per_step > 3 || policy.max_delay_milliseconds == 0 ||
+		    policy.max_delay_milliseconds > 30000 || policy.max_cumulative_waiting_milliseconds_per_scan == 0 ||
+		    policy.max_cumulative_waiting_milliseconds_per_scan > 30000) {
+			throw std::invalid_argument("waiting rate-limit policy is outside the v3 contract");
+		}
+		return;
+	}
+	throw std::invalid_argument("compiled rate-limit policy has an unknown mode");
+}
+
+const char *RateLimitModeName(CompiledRateLimitMode mode) {
+	switch (mode) {
+	case CompiledRateLimitMode::FAIL:
+		return "fail";
+	case CompiledRateLimitMode::WAIT:
+		return "wait";
+	case CompiledRateLimitMode::WAIT_IF_DEADLINE_ALLOWS:
+		return "wait_if_deadline_allows";
+	}
+	throw std::logic_error("compiled rate-limit policy has an unknown mode");
+}
+
+const char *RateLimitPrincipalScopeName(CompiledRateLimitPrincipalScope scope) {
+	switch (scope) {
+	case CompiledRateLimitPrincipalScope::CREDENTIAL_AUTHORITY:
+		return "credential_authority";
+	case CompiledRateLimitPrincipalScope::SHARED:
+		return "shared";
+	}
+	throw std::logic_error("compiled rate-limit policy has an unknown principal scope");
+}
+
+const char *RateLimitGuidanceFormatName(CompiledRateLimitGuidanceFormat format) {
+	switch (format) {
+	case CompiledRateLimitGuidanceFormat::RETRY_AFTER:
+		return "retry_after";
+	case CompiledRateLimitGuidanceFormat::DELTA_SECONDS:
+		return "delta_seconds";
+	case CompiledRateLimitGuidanceFormat::UNIX_SECONDS:
+		return "unix_seconds";
+	}
+	throw std::logic_error("compiled rate-limit policy has an unknown guidance format");
+}
+
+void AppendRateLimitPolicyValue(std::ostream &result, const CompiledRateLimitPolicy &policy, bool supported) {
+	if (!supported) {
+		return;
+	}
+	result << ",rate_limit=";
+	if (!policy.Declared()) {
+		result << "disabled";
+		return;
+	}
+	result << "mode:" << RateLimitModeName(policy.mode) << ",statuses:[";
+	for (std::size_t index = 0; index < policy.statuses.size(); index++) {
+		result << (index == 0 ? "" : ",") << policy.statuses[index];
+	}
+	result << "],operation_family:" << policy.operation_family
+	       << ",principal_scope:" << RateLimitPrincipalScopeName(policy.scope) << ",guidance:[";
+	for (std::size_t index = 0; index < policy.guidance.size(); index++) {
+		result << (index == 0 ? "" : ",") << policy.guidance[index].header_name << ':'
+		       << RateLimitGuidanceFormatName(policy.guidance[index].format);
+	}
+	result << "],remaining:" << (policy.remaining_quota_header.empty() ? "absent" : policy.remaining_quota_header)
+	       << ",remote_bucket:" << (policy.remote_bucket_header.empty() ? "absent" : policy.remote_bucket_header)
+	       << ",attempts_per_step:" << policy.max_attempts_per_step << ",max_delay_ms:" << policy.max_delay_milliseconds
+	       << ",max_wait_ms:" << policy.max_cumulative_waiting_milliseconds_per_scan;
+}
+
 const char *ResponseSourceName(CompiledResponseSource source) {
 	switch (source) {
 	case CompiledResponseSource::JSON_PATH_MANY:
@@ -380,6 +560,7 @@ void ValidateRestOperation(const CompiledOperation &operation) {
 	(void)MethodName(rest.method);
 	(void)ReplaySafetyName(rest.replay_safety);
 	ValidateRetryRecommendation(operation, rest.retry_enabled);
+	ValidateRateLimitPolicy(operation);
 	if (rest.request.origin.port == 0 || rest.request.path.empty() || rest.request.path.front() != '/' ||
 	    rest.request.path.find_first_of("?#\r\n") != std::string::npos) {
 		throw std::invalid_argument("compiled REST operation contains unsupported authority, path, or retry behavior");
@@ -631,6 +812,32 @@ CompiledOperation::CompiledOperation(std::string name_p, bool fallback_p, Compil
 }
 
 CompiledOperation::CompiledOperation(std::string name_p, bool fallback_p, CompiledOperationCardinality cardinality_p,
+                                     CompiledPagination pagination, CompiledRestRequest request,
+                                     CompiledResponseSource response_source, std::string records_extractor,
+                                     std::vector<std::string> records_extractor_segments,
+                                     CompiledOperationSelector selector_p,
+                                     CompiledRetryRecommendation retry_recommendation_p,
+                                     CompiledRateLimitPolicy rate_limit_policy_p, bool rate_limit_policy_supported_p)
+    : name(std::move(name_p)), fallback(fallback_p), cardinality(cardinality_p), selector(std::move(selector_p)),
+      protocol_operation(CompiledProtocolOperation::FromRest(CompiledRestOperation {
+          CompiledHttpMethod::GET, CompiledReplaySafety::SAFE, retry_recommendation_p.Enabled(), std::move(pagination),
+          std::move(request), response_source, std::move(records_extractor), std::move(records_extractor_segments)})),
+      replay_class(CompiledOperationReplayClass::REPLAYABLE_READ), retry_recommendation(retry_recommendation_p),
+      rate_limit_policy(std::move(rate_limit_policy_p)), rate_limit_policy_supported(rate_limit_policy_supported_p) {
+}
+
+CompiledOperation::CompiledOperation(std::string name_p, bool fallback_p, CompiledOperationCardinality cardinality_p,
+                                     CompiledGraphqlOperation operation, CompiledOperationSelector selector_p,
+                                     CompiledRetryRecommendation retry_recommendation_p,
+                                     CompiledRateLimitPolicy rate_limit_policy_p, bool rate_limit_policy_supported_p)
+    : name(std::move(name_p)), fallback(fallback_p), cardinality(cardinality_p), selector(std::move(selector_p)),
+      protocol_operation(CompiledProtocolOperation::FromGraphql(
+          retry_recommendation_p.Enabled() ? EnableGraphqlRetry(std::move(operation)) : std::move(operation))),
+      replay_class(CompiledOperationReplayClass::REPLAYABLE_READ), retry_recommendation(retry_recommendation_p),
+      rate_limit_policy(std::move(rate_limit_policy_p)), rate_limit_policy_supported(rate_limit_policy_supported_p) {
+}
+
+CompiledOperation::CompiledOperation(std::string name_p, bool fallback_p, CompiledOperationCardinality cardinality_p,
                                      CompiledGraphqlOperation operation, CompiledOperationSelector selector_p,
                                      CompiledRetryRecommendation retry_recommendation_p)
     : name(std::move(name_p)), fallback(fallback_p), cardinality(cardinality_p), selector(std::move(selector_p)),
@@ -662,7 +869,19 @@ const CompiledRetryRecommendation &CompiledOperation::RetryRecommendation() cons
 	return retry_recommendation;
 }
 
+const CompiledRateLimitPolicy &CompiledOperation::RateLimitPolicy() const noexcept {
+	return rate_limit_policy;
+}
+
+bool CompiledOperation::SupportsRateLimitPolicy() const noexcept {
+	return rate_limit_policy_supported;
+}
+
 namespace internal {
+
+void AppendRateLimitPolicy(std::ostream &result, const CompiledOperation &operation) {
+	AppendRateLimitPolicyValue(result, operation.RateLimitPolicy(), operation.SupportsRateLimitPolicy());
+}
 
 std::vector<std::string> ParseLegacyJsonExtractorSegments(const std::string &extractor) {
 	return StructuralRecordSegments(extractor);
@@ -687,11 +906,15 @@ void ValidateProtocolOperation(const CompiledOperation &operation) {
 		}
 		ValidateHeaders(operation.Graphql().headers, "GraphQL");
 		ValidateRetryRecommendation(operation, operation.Graphql().retry_enabled);
+		ValidateRateLimitPolicy(operation);
 		ValidateGraphqlOperationValue(operation.Graphql());
 		{
 			const auto &graphql = operation.Graphql();
-			const auto attempts =
+			const auto retry_attempts =
 			    operation.RetryRecommendation().Enabled() ? operation.RetryRecommendation().max_attempts_per_step : 1;
+			const auto rate_limit_attempts =
+			    operation.RateLimitPolicy().WaitingEnabled() ? operation.RateLimitPolicy().max_attempts_per_step : 1;
+			const auto attempts = retry_attempts > rate_limit_attempts ? retry_attempts : rate_limit_attempts;
 			const auto per_page = graphql.max_serialized_request_body_bytes_per_request;
 			if (per_page > std::numeric_limits<std::uint64_t>::max() / graphql.cursor.max_pages_per_scan) {
 				throw std::invalid_argument("compiled GraphQL request-body scope overflows its page sequence");
@@ -737,6 +960,7 @@ void AppendProtocolOperation(std::ostream &result, const CompiledOperation &oper
 		       << ",max_delay_ms:" << retry.max_delay_milliseconds
 		       << ",max_wait_ms:" << retry.max_cumulative_waiting_milliseconds_per_scan << ']';
 	}
+	AppendRateLimitPolicy(result, operation);
 	result << ",pagination:";
 	AppendPagination(result, rest.pagination);
 }

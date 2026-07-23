@@ -1,4 +1,5 @@
 #include "duckdb_api/internal/connector/graphql_operation_declaration.hpp"
+#include "duckdb_api/internal/connector/protocol_operation_declaration.hpp"
 #include "duckdb_api/content_digest.hpp"
 #include "duckdb_api/internal/connector/compiled_model_builder.hpp"
 #include "duckdb_api/internal/connector/graphql_query_recipe.hpp"
@@ -490,6 +491,7 @@ void AppendGraphqlOperation(std::ostream &result, const CompiledOperation &compi
 			       << ",max_delay_ms:" << retry.max_delay_milliseconds
 			       << ",max_wait_ms:" << retry.max_cumulative_waiting_milliseconds_per_scan << ']';
 		}
+		AppendRateLimitPolicy(result, compiled_operation);
 		result << ",cache:disabled,providers:disabled";
 		return;
 	}

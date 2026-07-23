@@ -64,6 +64,9 @@ struct ScanResourceLimits {
 	uint64_t active_requests;
 	uint64_t serialized_request_body_bytes;
 	uint64_t cumulative_waiting_milliseconds;
+	uint64_t cumulative_retry_waiting_milliseconds;
+	uint64_t cumulative_rate_limit_waiting_milliseconds;
+	uint64_t cumulative_remote_transport_milliseconds;
 };
 
 struct ScanResourceProfile {
@@ -109,6 +112,9 @@ struct ScanResourceCounters {
 	uint64_t active_requests;
 	uint64_t serialized_request_body_bytes;
 	uint64_t cumulative_waiting_milliseconds;
+	uint64_t cumulative_retry_waiting_milliseconds;
+	uint64_t cumulative_rate_limit_waiting_milliseconds;
+	uint64_t cumulative_remote_transport_milliseconds;
 };
 
 enum class ScanResourceState : uint8_t {
@@ -163,6 +169,9 @@ public:
 	// is enabled — so the counter remains zero. A future waiting mechanism calls
 	// this instead of owning a private, resettable counter.
 	void CommitWait(uint64_t milliseconds);
+	void CommitRetryWait(uint64_t milliseconds);
+	void CommitRateLimitWait(uint64_t milliseconds);
+	void CommitRemoteTransportTime(uint64_t milliseconds);
 
 	const ScanResourceProfile &Profile() const noexcept;
 	const ScanResourceCounters &Counters() const noexcept;

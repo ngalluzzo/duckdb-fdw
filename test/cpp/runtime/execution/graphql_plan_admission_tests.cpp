@@ -149,8 +149,9 @@ void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 	using duckdb_api::internal::ScanResourceError;
 	using duckdb_api::internal::ScanResourceProfile;
 	const auto now = std::chrono::steady_clock::time_point();
-	const ScanResourceProfile exact_profile {{1, 16384, 1024, 1024, 100, 1024, 1, body_bytes},
-	                                         {2, 2, 32768, 2048, 2048, 200, 1024, 30000, 1, body_bytes * 2, 0}};
+	const ScanResourceProfile exact_profile {
+	    {1, 16384, 1024, 1024, 100, 1024, 1, body_bytes},
+	    {2, 2, 32768, 2048, 2048, 200, 1024, 30000, 1, body_bytes * 2, 0, 0, 0, 0}};
 	ScanResourceAccounting exact(exact_profile);
 	for (std::size_t page = 0; page < 2; page++) {
 		const auto allowance = exact.BeginPage(now);

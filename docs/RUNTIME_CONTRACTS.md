@@ -171,6 +171,12 @@ One compiled relation owns:
 Operations are a closed REST-or-GraphQL value. Accessing the wrong variant
 fails; no implicit fallback converts one protocol into another.
 
+A v3 operation additionally owns one immutable disabled-or-declared
+rate-limit policy: sorted status set, mode, operation family, principal scope,
+ordered unique guidance field names and closed formats, optional remaining and
+remote-bucket field names, and exact maxima. It contains no response values,
+clock state, quota key, credential identity, or scheduler handle.
+
 REST plans contain method, exact origin and path, ordered fixed headers,
 ordered typed query bindings, response source, replay declaration, cardinality,
 and disabled or exact-target Link pagination.
@@ -315,12 +321,23 @@ ScanPlan
 ├── authentication obligation and logical secret reference
 ├── pagination contract
 ├── page and scan resource budgets
-├── replay/cache/provider feature states
+├── replay, retry, rate-limit, cache, and provider feature states
+├── mechanism-specific retry and rate-limit policy
+├── combined resilience attempt and waiting authority
 └── safe generation provenance and explanation facts
 ```
 
 The plan contains everything Runtime needs for validation and execution. Runtime
 does not look up Connector metadata or ask Semantics to complete a decision.
+
+Semantics copies v3 policy fields into distinct planned closed values and
+derives only checked resource algebra. Combined per-step attempts are
+`max(retry attempts, rate-limit attempts)`, never a sum; scan attempts are the
+checked product with reachable pages capped at 96. Combined waiting is the
+checked sum of retry and rate-limit cumulative maxima capped at 30000
+milliseconds. Each mechanism retains its own ordinal and waiting ceiling.
+Planning performs no response parsing, clock access, credential resolution, or
+scheduler work.
 
 `NetworkCapability` is the selected operation's exact origin authority: one
 scheme, one host, and the explicit selected port, plus the denied-or-narrowed
@@ -511,6 +528,23 @@ names are not request authority.
 An unsupported profile fails before authorization materialization, DNS, socket
 creation, or controlled-transport observation. Runtime neither repairs a plan
 nor downgrades invalid state to fallback.
+
+Each concrete executor owns one `RateLimitCoordinator`. The installed product
+constructs one executor for one DuckDB `DatabaseInstance`; another executor,
+database instance, or process is an independent coordination domain. The
+coordinator has no worker thread and stores no authorization, credential,
+request, response, plan, URL, or DuckDB object. It admits at most 64
+queued-or-permitted tickets per exact key and 4096 across the executor; an
+operator may narrow either limit, and zero never means unlimited.
+
+After complete plan and credential admission, Runtime constructs a
+non-renderable quota key from the exact scheme, host, and explicit port;
+connector ID and package major; operation family; opaque credential authority,
+anonymous tag, or explicit shared tag; and the first matching response's exact
+bounded remote bucket or absent tag. Credential revision and secret bytes are
+not key dimensions. A later bucket change, appearance, or disappearance within
+the same traversal step is terminal `bucket_changed` and cannot transfer
+queue state to another key.
 
 ## REST execution
 
@@ -714,9 +748,9 @@ Runtime owns one scan ledger with checked unsigned counters for:
 - extracted string bytes;
 - serialized GraphQL document/body bytes;
 - retained response/page memory;
-- elapsed time; and
-- cumulative waiting (zero for v1; v2 safe-read retry may debit the admitted
-  connector/operator/hard minimum; rate-limit waiting remains disabled).
+- elapsed and remote-transport time;
+- ordinary retry delay and rate-limit waiting as separate counters; and
+- their one checked cumulative-waiting total (zero for v1).
 
 It debits actual use against the minimum of host and compiled ceilings. Every
 increment and multiplication is checked before state mutation. Exceeded or
@@ -737,25 +771,50 @@ independently requires the same value. A plan never advertises body authority
 that page and attempt exhaustion make unreachable.
 
 One request/page is the replay unit; v1 performs one attempt. An opted-in v2
-safe read admits at most three attempts per step and 96 per scan. This ledger
+safe read admits at most three attempts per step and 96 per scan. V3 may use
+the same combined attempt ledger for both ordinary retry and a declared
+rate-limit repeat, but cannot obtain a second attempt pool. This ledger
 is the authoritative aggregate scan resilience budget: attempts,
 pages, bytes, records, memory, elapsed time, and cumulative waiting all debit
 one checked aggregate, and a retry or wait never resets a counter, deadline, or
-budget (the no-reset invariant). The single protocol-neutral retry controller
+budget (the no-reset invariant). The single protocol-neutral resilience controller
 rebuilds an exact admitted request from one immutable credential snapshot,
-uses a fresh transport attempt that rechecks destination policy, and retries
-only closed no-response resolution/connect/send/empty/receive failures or a
-fully received `502`/`503`/`504` without `Retry-After`. Partial responses,
-`429`, any `Retry-After`, auth/policy/resource/decode/schema/pagination errors,
-cancellation, and deadline expiry are terminal. Rate-limit waiting, cache,
-parallel-page, and progress states remain disabled; unknown enums fail
-admission.
+uses a fresh transport attempt that rechecks destination policy, commits all
+attempt bytes and the ordinal, applies a declared matching v3 rate-limit
+policy, then applies ordinary retry only for closed no-response
+resolution/connect/send/empty/receive failures or a fully received
+`502`/`503`/`504` without `Retry-After`. Partial responses and
+auth/policy/resource/decode/schema/pagination errors remain terminal. An
+unlisted `429` or any unlisted `Retry-After` retains RFC 0024's terminal
+server-directed-delay classification. Cache, parallel-page, and proactive
+quota pacing remain disabled; unknown enums fail admission.
 
 After retryable failure `n`, nominal delay is
 `min(10 * 2^(n-1), effective_max_delay)` milliseconds. Stream-local jitter is
 bounded to 75%-125%, then clamped to the one-delay and remaining aggregate-wait
 ceilings. Waiting debits at most five-millisecond slices and checks the one
 deadline plus host/stream cancellation before another attempt.
+
+For a complete response with a declared status, `fail` terminates immediately
+as `policy_fail`. A waiting mode observes only its targeted singleton fields.
+Strict `retry_after`, `delta_seconds`, and `unix_seconds` parsing converts the
+latest declared minimum at response receipt into one steady-clock eligible
+time. Absolute guidance uses a valid response `Date`, otherwise the paired
+local wall clock captured at receipt. Malformed/duplicate/overflowing data,
+missing guidance, excessive delay, deadline insufficiency, exhausted attempts
+or waiting, repeated immediate guidance, bucket drift, queue saturation, and
+scheduler close are distinct closed reasons. Remote values are discarded after
+typed observation.
+
+The coordinator maintains FIFO tickets and at most one move-only in-flight
+permit per exact key. A later response may extend but never shorten the key's
+embargo. Eligibility grants only the queue head; another matching response
+releases the permit and re-enqueues that stream at the tail only while its
+unchanged step and budgets authorize another attempt. Success or another
+terminal result releases the next head. Cancellation removes a queued ticket;
+cancellation during transport retains the permit until terminal cleanup.
+Close wakes and drains all queued waiters and makes future acquisition fail as
+`scheduler_closed`.
 
 ## Cancellation, close, and failure
 
@@ -776,15 +835,25 @@ exhaustion or partial success.
 
 Each terminal failure carries additive structured resilience facts (RFC 0021):
 a primary failure class, the execution phase, a final attempt ordinal,
-cumulative retry delay, current exposure state, the count of rows exposed to
+cumulative retry delay, cumulative rate-limit wait, cumulative remote
+transport time, current exposure state, the count of rows exposed to
 DuckDB before the failure, the observed remote-status class, the terminating
-budget dimension, and a replay classification. `BatchStream::Diagnostics`
+budget dimension, a replay classification, rate-limit event and wait counts,
+the current-wait flag, and the last closed `RateLimitReason`.
+`BatchStream::Diagnostics`
 provides the same content-free effective policy and progress snapshot after
 successful recovery as well as terminal failure. These are closed
 codes, ordinals, and counts — never content — layered on the boundary's error
 stage without changing the rendered string. Cancellation, scan-deadline expiry
 (the `time` budget), a reserved transport-timeout class, and local resource
 exhaustion (`memory`/`bytes`/`records`/`pages`) remain distinguishable.
+
+`RateLimitReason` is closed at `none`, `policy_fail`, `guidance_missing`,
+`malformed_guidance`, `guidance_exceeds_policy`, `deadline_insufficient`,
+`waiting_exhausted`, `attempts_exhausted`, `queue_saturated`,
+`scheduler_closed`, `repeated_immediate`, and `bucket_changed`. It is safe to
+render; field values, remote bucket text, authority identity, URLs, wall or
+steady timestamps, and queue keys are not.
 
 Executor instances are immutable services. Each open creates isolated mutable
 stream state. Failure or cancellation of one stream cannot poison another.
@@ -896,12 +965,14 @@ plan, request-body, result, failure, explanation, registration, reload,
 transaction, prepared-plan, cancellation, and lifecycle differentials. Live
 service tests remain compatibility-only evidence.
 
-## Closed v1/v2 boundary
+## Closed v1/v2/v3 boundary
 
 These contracts implement the exact frozen `duckdb_api/v1` family, the
-retry-only `duckdb_api/v2` addition, and RFC 0012 SQL surface. Providers,
-partitions, connection profiles, retries outside RFC 0024's closed matrix, caches,
-rate-limit waiting, remote projection/order/limit, raw GraphQL, custom code,
+retry-only `duckdb_api/v2` addition, the bounded reactive `duckdb_api/v3`
+addition, and RFC 0012 SQL surface. Providers,
+partitions, connection profiles, retries outside RFC 0024/RFC 0025's closed
+matrix, caches, proactive or distributed quota scheduling, remote
+projection/order/limit, raw GraphQL, custom code,
 dynamic schemas, write operations, a public plugin ABI, and DSO unload are not
 latent optional branches. Unknown or unsupported state fails before authority
 or side effects.

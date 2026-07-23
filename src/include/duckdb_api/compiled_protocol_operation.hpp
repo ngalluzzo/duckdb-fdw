@@ -47,6 +47,36 @@ struct CompiledRetryRecommendation {
 	bool Enabled() const noexcept;
 };
 
+enum class CompiledRateLimitMode { FAIL, WAIT, WAIT_IF_DEADLINE_ALLOWS };
+enum class CompiledRateLimitPrincipalScope { CREDENTIAL_AUTHORITY, SHARED };
+enum class CompiledRateLimitGuidanceFormat { RETRY_AFTER, DELTA_SECONDS, UNIX_SECONDS };
+
+struct CompiledRateLimitGuidance {
+	std::string header_name;
+	CompiledRateLimitGuidanceFormat format;
+};
+
+// Immutable Connector-owned reactive rate-limit declaration. Header names are
+// canonical structural facts; received values, clocks, quota identities, and
+// mutable scheduling state are deliberately absent. An undeclared policy has
+// no behavioral authority and every other field remains empty or zero.
+struct CompiledRateLimitPolicy {
+	bool declared = false;
+	CompiledRateLimitMode mode = CompiledRateLimitMode::FAIL;
+	std::vector<std::uint16_t> statuses;
+	std::string operation_family;
+	CompiledRateLimitPrincipalScope scope = CompiledRateLimitPrincipalScope::CREDENTIAL_AUTHORITY;
+	std::vector<CompiledRateLimitGuidance> guidance;
+	std::string remaining_quota_header;
+	std::string remote_bucket_header;
+	std::uint64_t max_attempts_per_step = 0;
+	std::uint64_t max_delay_milliseconds = 0;
+	std::uint64_t max_cumulative_waiting_milliseconds_per_scan = 0;
+
+	bool Declared() const noexcept;
+	bool WaitingEnabled() const noexcept;
+};
+
 // Explicit renderer identity. Native and package documents never infer their
 // profile from connector, relation, operation, or provenance spellings.
 enum class CompiledGraphqlDocumentIdentity { GITHUB_VIEWER_REPOSITORY_METRICS_V1, PACKAGE_QUERY_GENERATOR_V1 };
@@ -620,6 +650,8 @@ public:
 	const CompiledGraphqlOperation &Graphql() const;
 	CompiledOperationReplayClass ReplayClass() const noexcept;
 	const CompiledRetryRecommendation &RetryRecommendation() const noexcept;
+	const CompiledRateLimitPolicy &RateLimitPolicy() const noexcept;
+	bool SupportsRateLimitPolicy() const noexcept;
 
 	std::string name;
 	bool fallback;
@@ -645,10 +677,22 @@ private:
 	CompiledOperation(std::string name, bool fallback, CompiledOperationCardinality cardinality,
 	                  CompiledGraphqlOperation operation, CompiledOperationSelector selector,
 	                  CompiledRetryRecommendation retry_recommendation);
+	CompiledOperation(std::string name, bool fallback, CompiledOperationCardinality cardinality,
+	                  CompiledPagination pagination, CompiledRestRequest request,
+	                  CompiledResponseSource response_source, std::string records_extractor,
+	                  std::vector<std::string> records_extractor_segments, CompiledOperationSelector selector,
+	                  CompiledRetryRecommendation retry_recommendation, CompiledRateLimitPolicy rate_limit_policy,
+	                  bool rate_limit_policy_supported);
+	CompiledOperation(std::string name, bool fallback, CompiledOperationCardinality cardinality,
+	                  CompiledGraphqlOperation operation, CompiledOperationSelector selector,
+	                  CompiledRetryRecommendation retry_recommendation, CompiledRateLimitPolicy rate_limit_policy,
+	                  bool rate_limit_policy_supported);
 
 	CompiledProtocolOperation protocol_operation;
 	CompiledOperationReplayClass replay_class;
 	CompiledRetryRecommendation retry_recommendation;
+	CompiledRateLimitPolicy rate_limit_policy;
+	bool rate_limit_policy_supported = false;
 };
 
 } // namespace duckdb_api

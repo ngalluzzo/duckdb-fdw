@@ -18,6 +18,8 @@ namespace internal {
 // classification after curl_easy_perform returns; received bytes never enter a
 // diagnostic. No field outlives PerformCurlTransfer.
 struct CurlTransferState {
+	enum class RetainedHeaderKind : uint8_t { NONE, RATE_LIMIT, DATE, LINK, RATE_LIMIT_LINK };
+
 	CurlTransferState(ExecutionControl &control, const HttpLimits &limits, const CurlTransferProfile &profile);
 
 	bool ShouldContinue() noexcept;
@@ -29,6 +31,8 @@ struct CurlTransferState {
 	uint64_t response_bytes;
 	std::string body;
 	std::vector<std::string> link_field_values;
+	std::vector<HttpObservedHeader> rate_limit_fields;
+	std::vector<std::string> date_field_values;
 	bool cancelled;
 	bool timed_out;
 	bool header_oversized;
@@ -46,6 +50,9 @@ struct CurlTransferState {
 	bool transfer_chunked;
 	bool transfer_encoding_unsupported;
 	bool content_encoded;
+	RetainedHeaderKind retained_header_kind;
+	std::size_t retained_header_index;
+	std::size_t retained_link_index;
 	CURL *easy_handle;
 };
 

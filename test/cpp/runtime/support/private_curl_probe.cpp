@@ -101,7 +101,9 @@ PrivateCurlProbeResult PerformProbe(const PrivateCurlProbeOptions &options, duck
 	                                               duckdb_api::HOST_MAX_DECOMPRESSED_BYTES,
 	                                               duckdb_api::HOST_MAX_HEADER_BYTES,
 	                                               std::chrono::steady_clock::now() +
-	                                                   std::chrono::milliseconds(options.wall_milliseconds)};
+	                                                   std::chrono::milliseconds(options.wall_milliseconds),
+	                                               {},
+	                                               false};
 	const duckdb_api::internal::CurlTransferProfile profile {
 	    options.url.c_str(),
 	    options.protocols.c_str(),
@@ -110,7 +112,9 @@ PrivateCurlProbeResult PerformProbe(const PrivateCurlProbeOptions &options, duck
 	    options.trusted_ca_file.empty() ? nullptr : options.trusted_ca_file.c_str(),
 	    options.resolve_entry.empty() ? nullptr : options.resolve_entry.c_str(),
 	    ObserveOption,
-	    &option_observations};
+	    &option_observations,
+	    options.body_observer,
+	    options.body_observer_context};
 	auto response = duckdb_api::internal::PerformCurlTransfer(profile, request, limits, control);
 	return {std::move(response), authority.checks.load(std::memory_order_relaxed), std::move(option_observations)};
 }

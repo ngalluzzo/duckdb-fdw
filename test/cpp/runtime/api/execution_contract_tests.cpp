@@ -250,6 +250,10 @@ void TestFailureClassification() {
 	Require(std::string(duckdb_api::RemoteStatusClassName(duckdb_api::RemoteStatusClass::RATE_LIMITED)) ==
 	            "rate_limited",
 	        "RemoteStatusClassName drifted");
+	Require(std::string(duckdb_api::RateLimitReasonName(duckdb_api::RateLimitReason::POLICY_FAIL)) == "policy_fail" &&
+	            std::string(duckdb_api::RateLimitReasonName(duckdb_api::RateLimitReason::BUCKET_CHANGED)) ==
+	                "bucket_changed",
+	        "RateLimitReasonName drifted from the freeze strings");
 
 	// ClassifyReplay: the AGENTS.md retry invariant (declared safety AND uncommitted
 	// replay unit) as a truth table.
@@ -302,7 +306,13 @@ void TestFailureClassification() {
 	                                                duckdb_api::RemoteStatusClass::NONE,
 	                                                duckdb_api::BudgetDimension::PAGES,
 	                                                0,
-	                                                duckdb_api::ExposureState::UNACCEPTED};
+	                                                duckdb_api::ExposureState::UNACCEPTED,
+	                                                0,
+	                                                0,
+	                                                0,
+	                                                0,
+	                                                duckdb_api::RateLimitReason::NONE,
+	                                                false};
 	const duckdb_api::ExecutionError classified(duckdb_api::ErrorStage::RESOURCE, "pages",
 	                                            "scan exhausted its page budget", properties);
 	Require(classified.Classified() &&
@@ -353,7 +363,8 @@ void TestStructuredFieldRedaction() {
 	     {duckdb_api::FailureClassName(properties.failure_class), duckdb_api::FailurePhaseName(properties.phase),
 	      duckdb_api::ReplayClassificationName(properties.replay_classification),
 	      duckdb_api::RemoteStatusClassName(properties.remote_status_class),
-	      duckdb_api::BudgetDimensionName(properties.terminating_budget)}) {
+	      duckdb_api::BudgetDimensionName(properties.terminating_budget),
+	      duckdb_api::RateLimitReasonName(properties.rate_limit_reason)}) {
 		Require(std::string(name).find(canary) == std::string::npos,
 		        "a structured failure field echoed redacted content");
 	}

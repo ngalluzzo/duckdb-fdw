@@ -95,6 +95,17 @@ public:
 	                                                   CompiledGraphqlOperation operation,
 	                                                   CompiledOperationSelector selector,
 	                                                   CompiledRetryRecommendation retry_recommendation);
+	static CompiledOperation
+	RestOperationWithPolicies(std::string name, bool fallback, CompiledOperationCardinality cardinality,
+	                          CompiledPagination pagination, CompiledRestRequest request,
+	                          CompiledResponseSource response_source, std::string records_extractor,
+	                          std::vector<std::string> records_extractor_segments, CompiledOperationSelector selector,
+	                          CompiledRetryRecommendation retry_recommendation,
+	                          CompiledRateLimitPolicy rate_limit_policy, bool rate_limit_policy_supported);
+	static CompiledOperation
+	GraphqlOperationWithPolicies(std::string name, bool fallback, CompiledGraphqlOperation operation,
+	                             CompiledOperationSelector selector, CompiledRetryRecommendation retry_recommendation,
+	                             CompiledRateLimitPolicy rate_limit_policy, bool rate_limit_policy_supported);
 	static CompiledPredicateMapping PackagePredicate(std::string name, std::string column_name,
 	                                                 CompiledScalarValue literal, std::string operation_name,
 	                                                 std::string remote_input_name, std::string encoded_remote_value,

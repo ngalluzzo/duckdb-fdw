@@ -121,6 +121,94 @@ const char *CapabilityName(bool available) {
 	return available ? "available" : "unavailable";
 }
 
+const char *RateLimitModeName(duckdb_api::PlannedRateLimitMode mode) {
+	switch (mode) {
+	case duckdb_api::PlannedRateLimitMode::FAIL:
+		return "fail";
+	case duckdb_api::PlannedRateLimitMode::WAIT:
+		return "wait";
+	case duckdb_api::PlannedRateLimitMode::WAIT_IF_DEADLINE_ALLOWS:
+		return "wait_if_deadline_allows";
+	}
+	throw InternalException("duckdb_api scan plan contains an unknown rate-limit mode");
+}
+
+const char *RateLimitScopeName(duckdb_api::PlannedRateLimitPrincipalScope scope) {
+	switch (scope) {
+	case duckdb_api::PlannedRateLimitPrincipalScope::CREDENTIAL_AUTHORITY:
+		return "credential_authority";
+	case duckdb_api::PlannedRateLimitPrincipalScope::SHARED:
+		return "shared";
+	}
+	throw InternalException("duckdb_api scan plan contains an unknown rate-limit principal scope");
+}
+
+const char *RateLimitGuidanceFormatName(duckdb_api::PlannedRateLimitGuidanceFormat format) {
+	switch (format) {
+	case duckdb_api::PlannedRateLimitGuidanceFormat::RETRY_AFTER:
+		return "retry_after";
+	case duckdb_api::PlannedRateLimitGuidanceFormat::DELTA_SECONDS:
+		return "delta_seconds";
+	case duckdb_api::PlannedRateLimitGuidanceFormat::UNIX_SECONDS:
+		return "unix_seconds";
+	}
+	throw InternalException("duckdb_api scan plan contains an unknown rate-limit guidance format");
+}
+
+std::string PlannedRetryPolicy(const duckdb_api::ScanPlan &plan) {
+	if (plan.Retry() == duckdb_api::FeatureState::DISABLED) {
+		return "disabled";
+	}
+	const auto &policy = plan.RetryPolicy();
+	std::ostringstream result;
+	result << "planned[attempts_per_step:" << policy.max_attempts_per_step
+	       << ",attempts_per_scan:" << policy.max_attempts_per_scan << ",max_delay_ms:" << policy.max_delay_milliseconds
+	       << ",max_wait_ms:" << policy.max_cumulative_waiting_milliseconds_per_scan << ']';
+	return result.str();
+}
+
+std::string PlannedRateLimitPolicy(const duckdb_api::ScanPlan &plan) {
+	if (plan.RateLimit() == duckdb_api::FeatureState::DISABLED) {
+		return "disabled";
+	}
+	const auto &policy = plan.RateLimitPolicy();
+	std::ostringstream result;
+	result << "planned[mode:" << RateLimitModeName(policy.mode) << ",statuses:[";
+	for (std::size_t index = 0; index < policy.statuses.size(); index++) {
+		if (index > 0) {
+			result << ',';
+		}
+		result << policy.statuses[index];
+	}
+	result << "],operation_family:" << policy.operation_family
+	       << ",principal_scope:" << RateLimitScopeName(policy.scope) << ",guidance:[";
+	for (std::size_t index = 0; index < policy.guidance.size(); index++) {
+		if (index > 0) {
+			result << ',';
+		}
+		result << policy.guidance[index].header_name << ':'
+		       << RateLimitGuidanceFormatName(policy.guidance[index].format);
+	}
+	result << "],remaining:" << (policy.remaining_quota_header.empty() ? "none" : policy.remaining_quota_header)
+	       << ",remote_bucket:" << (policy.remote_bucket_header.empty() ? "none" : policy.remote_bucket_header)
+	       << ",package_major_version:" << policy.package_major_version
+	       << ",max_attempts_per_step:" << policy.max_attempts_per_step
+	       << ",max_delay_milliseconds:" << policy.max_delay_milliseconds
+	       << ",max_cumulative_waiting_milliseconds_per_scan:" << policy.max_cumulative_waiting_milliseconds_per_scan
+	       << ']';
+	return result.str();
+}
+
+std::string PlannedResiliencePolicy(const duckdb_api::ScanPlan &plan) {
+	const auto &policy = plan.ResiliencePolicy();
+	std::ostringstream result;
+	result << "planned[max_attempts_per_step:" << policy.max_attempts_per_step
+	       << ",max_attempts_per_scan:" << policy.max_attempts_per_scan
+	       << ",max_cumulative_waiting_milliseconds_per_scan:" << policy.max_cumulative_waiting_milliseconds_per_scan
+	       << ']';
+	return result.str();
+}
+
 const char *ReplaySafetyName(duckdb_api::PlannedReplaySafety safety) {
 	switch (safety) {
 	case duckdb_api::PlannedReplaySafety::SAFE:
@@ -362,8 +450,9 @@ InsertionOrderPreservingMap<string> ExplainSelectedScan(const duckdb_api::ScanRe
 	result["Classification Reason"] = ReasonName(plan.PredicateReason());
 	result["Classification Detail"] = plan.ClassificationReason();
 	result["Declared Replay Safety"] = ReplaySafetyName(OperationReplaySafety(plan.Operation()));
-	result["Retry"] = "disabled";
-	result["Rate-Limit Waiting"] = "disabled";
+	result["Retry"] = PlannedRetryPolicy(plan);
+	result["Rate-Limit Waiting"] = PlannedRateLimitPolicy(plan);
+	result["Resilience"] = PlannedResiliencePolicy(plan);
 	result["Cache"] = "disabled";
 	return result;
 }

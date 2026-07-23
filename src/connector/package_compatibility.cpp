@@ -221,9 +221,34 @@ bool SameRetry(const CompiledOperation &left, const CompiledOperation &right) {
 	           right_retry.max_cumulative_waiting_milliseconds_per_scan;
 }
 
+bool SameRateLimit(const CompiledOperation &left, const CompiledOperation &right) {
+	const auto &left_policy = left.RateLimitPolicy();
+	const auto &right_policy = right.RateLimitPolicy();
+	if (left.SupportsRateLimitPolicy() != right.SupportsRateLimitPolicy() ||
+	    left_policy.declared != right_policy.declared || left_policy.mode != right_policy.mode ||
+	    left_policy.statuses != right_policy.statuses ||
+	    left_policy.operation_family != right_policy.operation_family || left_policy.scope != right_policy.scope ||
+	    left_policy.guidance.size() != right_policy.guidance.size() ||
+	    left_policy.remaining_quota_header != right_policy.remaining_quota_header ||
+	    left_policy.remote_bucket_header != right_policy.remote_bucket_header ||
+	    left_policy.max_attempts_per_step != right_policy.max_attempts_per_step ||
+	    left_policy.max_delay_milliseconds != right_policy.max_delay_milliseconds ||
+	    left_policy.max_cumulative_waiting_milliseconds_per_scan !=
+	        right_policy.max_cumulative_waiting_milliseconds_per_scan) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left_policy.guidance.size(); index++) {
+		if (left_policy.guidance[index].header_name != right_policy.guidance[index].header_name ||
+		    left_policy.guidance[index].format != right_policy.guidance[index].format) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool SameOperation(const CompiledOperation &left, const CompiledOperation &right) {
 	if (left.name != right.name || left.fallback != right.fallback || left.cardinality != right.cardinality ||
-	    left.Protocol() != right.Protocol() || !SameRetry(left, right) ||
+	    left.Protocol() != right.Protocol() || !SameRetry(left, right) || !SameRateLimit(left, right) ||
 	    !internal::SameOperationSelectorStructure(left.selector, right.selector)) {
 		return false;
 	}

@@ -37,6 +37,10 @@ uint64_t FixedProjectHeaderBytesWithoutToken() {
 	       (sizeof("Authorization") - 1) + (sizeof("Bearer ") - 1) + line_framing;
 }
 
+void CancelAfterBody(void *context) {
+	static_cast<ManualControl *>(context)->Cancel();
+}
+
 void TestOutboundHeaderBoundaries() {
 	const auto limit = duckdb_api::ScanAuthorization::GithubUserBearerTokenByteLimit();
 	Require(limit == 8 * 1024, "real-curl bearer-token boundary drifted");
@@ -92,7 +96,9 @@ void TestOutboundHeaderBoundaries() {
 		    "",
 		    duckdb_api_test::PrivateCurlSocketPolicy::ALLOW_LOOPBACK_PORT,
 		    1000,
-		    &policy_checks};
+		    &policy_checks,
+		    nullptr,
+		    nullptr};
 		const auto fixed_header_bytes = FixedProjectHeaderBytesWithoutToken();
 		Require(fixed_header_bytes == 125, "fixed project request-header byte accounting drifted");
 		auto oversized_project_header =
@@ -187,6 +193,38 @@ void TestChunkDecoderHonorsCallScopedControlAndDeadline() {
 	Require(saw_deadline, "chunk framing decode ignored the retained page deadline");
 }
 
+void TestPartialResponseCancellationCarriesAttemptFacts() {
+	ControlledSocketService service(ControlledSocketMode::PARTIAL_RESPONSE_BLOCK);
+	ManualControl control;
+	uint64_t policy_checks = 0;
+	const duckdb_api_test::PrivateCurlProbeOptions options {
+	    "http://127.0.0.1:" + std::to_string(service.Port()) + "/search/users?q=duckdb+in%3Alogin&per_page=3",
+	    "http",
+	    "http",
+	    "127.0.0.1",
+	    service.Port(),
+	    "",
+	    "",
+	    duckdb_api_test::PrivateCurlSocketPolicy::ALLOW_LOOPBACK_PORT,
+	    2000,
+	    &policy_checks,
+	    CancelAfterBody,
+	    &control};
+	bool typed_cancelled = false;
+	duckdb_api::internal::HttpAttemptFacts facts {0, 0, 0, 0};
+	try {
+		(void)duckdb_api_test::PerformPrivateCurlProbe(options, control);
+	} catch (const duckdb_api::internal::HttpAttemptCancelled &cancelled) {
+		typed_cancelled = true;
+		facts = cancelled.Facts();
+	}
+	Require(typed_cancelled && facts.response_status == 200 && facts.header_bytes != 0 && facts.response_bytes != 0 &&
+	            facts.decompressed_response_bytes != 0,
+	        "partial real-curl cancellation discarded observed attempt facts");
+	Require(policy_checks == 1 && service.ConnectionCount() == 1,
+	        "partial cancellation changed one-attempt socket policy");
+}
+
 void TestChunkDecoderGrammarBoundaries() {
 	ManualControl control;
 	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
@@ -242,6 +280,7 @@ int main() {
 		TestCompressedWireBodyAtExactDecompressedLimit();
 		TestChunkedBodyIsBoundedBeforeDecoding();
 		TestChunkDecoderHonorsCallScopedControlAndDeadline();
+		TestPartialResponseCancellationCarriesAttemptFacts();
 		TestChunkDecoderGrammarBoundaries();
 		TestCompressedWireBodyOverDecompressedLimit();
 		std::cout << "curl HTTP budget tests passed" << std::endl;

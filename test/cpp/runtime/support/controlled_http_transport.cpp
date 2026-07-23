@@ -5,6 +5,7 @@
 #include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 #include "duckdb_api/internal/runtime/transport/http_transport.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -59,6 +60,15 @@ uint64_t RetainedMetadataBytes(const std::vector<std::string> &values) {
 	return result;
 }
 
+uint64_t RetainedMetadataBytes(const std::vector<duckdb_api::internal::HttpObservedHeader> &fields) {
+	uint64_t result = static_cast<uint64_t>(fields.capacity()) * sizeof(duckdb_api::internal::HttpObservedHeader);
+	for (const auto &field : fields) {
+		result += static_cast<uint64_t>(field.name.capacity()) + 1;
+		result += static_cast<uint64_t>(field.value.capacity()) + 1;
+	}
+	return result;
+}
+
 class ControlledTransport final : public duckdb_api::internal::HttpTransport {
 public:
 	explicit ControlledTransport(std::shared_ptr<ControlledHttpRuntime::State> state_p) : state(std::move(state_p)) {
@@ -85,6 +95,8 @@ private:
 		std::string body;
 		std::string diagnostic;
 		std::vector<std::string> link_field_values;
+		std::vector<duckdb_api::internal::HttpObservedHeader> rate_limit_fields;
+		std::vector<std::string> date_field_values;
 		uint64_t header_bytes = 64;
 		uint64_t wire_response_bytes = 0;
 		uint64_t decompressed_response_bytes = 0;
@@ -152,6 +164,15 @@ private:
 					wire_response_bytes = scripted.wire_response_bytes;
 					decompressed_response_bytes = scripted.decompressed_response_bytes;
 					retry_after_present = scripted.retry_after_present;
+					for (const auto &field : scripted.rate_limit_fields) {
+						if (std::find(limits.retained_header_names.begin(), limits.retained_header_names.end(),
+						              field.name) != limits.retained_header_names.end()) {
+							rate_limit_fields.push_back(field);
+						}
+					}
+					if (limits.retain_date) {
+						date_field_values = scripted.date_field_values;
+					}
 					transport_failure_kind = scripted.transport_failure_kind;
 					transport_response_status = scripted.transport_response_status;
 				}
@@ -218,7 +239,8 @@ private:
 		if (limits.max_metadata_bytes == 0) {
 			std::vector<std::string>().swap(link_field_values);
 		}
-		const auto metadata_bytes = RetainedMetadataBytes(link_field_values);
+		const auto metadata_bytes = RetainedMetadataBytes(link_field_values) +
+		                            RetainedMetadataBytes(rate_limit_fields) + RetainedMetadataBytes(date_field_values);
 		if (metadata_bytes > limits.max_metadata_bytes) {
 			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                                 "HTTP response metadata exceeded its memory budget");
@@ -229,7 +251,8 @@ private:
 		        wire_response_bytes,
 		        decompressed_response_bytes,
 		        std::move(body),
-		        {std::move(link_field_values), metadata_bytes, retry_after_present}};
+		        {std::move(link_field_values), metadata_bytes, retry_after_present, std::move(rate_limit_fields),
+		         std::move(date_field_values)}};
 	}
 
 	const std::shared_ptr<ControlledHttpRuntime::State> state;
@@ -342,21 +365,20 @@ ControlledHttpResponse ControlledResponse(uint32_t status, std::string body,
 	        0,
 	        0,
 	        false,
+	        {},
+	        {},
 	        duckdb_api::internal::HttpTransportFailureKind::OTHER,
 	        0};
 }
 
 ControlledHttpResponse ControlledTransportFailure(std::string dependency_diagnostic) {
-	return {0,     "",
-	        {},    0,
-	        true,  std::move(dependency_diagnostic),
-	        0,     0,
-	        false, duckdb_api::internal::HttpTransportFailureKind::OTHER,
+	return {0, "", {},    0,  true, std::move(dependency_diagnostic),
+	        0, 0,  false, {}, {},   duckdb_api::internal::HttpTransportFailureKind::OTHER,
 	        0};
 }
 
 ControlledHttpResponse ControlledTransientTransportFailure(duckdb_api::internal::HttpTransportFailureKind kind) {
-	return {0, "", {}, 0, true, "private transient transport canary", 0, 0, false, kind, 0};
+	return {0, "", {}, 0, true, "private transient transport canary", 0, 0, false, {}, {}, kind, 0};
 }
 
 bool ControlledHttpRuntime::WaitForRequestCount(uint64_t count, std::chrono::milliseconds timeout) {

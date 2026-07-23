@@ -627,7 +627,7 @@ void TestStableIdentityValidation() {
 	            identity.PackageVersion() == "1.2.3" && identity.PackageDigest() == Digest(),
 	        "compiled package identity changed accepted bytes");
 
-	for (const auto &spec : {"", "duckdb_api/draft", "duckdb_api/v3"}) {
+	for (const auto &spec : {"", "duckdb_api/draft", "duckdb_api/v4"}) {
 		RequireThrows<std::invalid_argument>(
 		    [spec]() { (void)CompiledModelBuilder::PackageIdentity(spec, "acme", "1.2.3", Digest()); },
 		    "unsupported spec identifier entered a package generation");

@@ -301,68 +301,88 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 		options.Set(CURLOPT_OPENSOCKETDATA, &state);
 
 		const auto transfer_result = curl_easy_perform(handle);
-		if (state.cancelled || control.IsCancellationRequested()) {
-			throw ExecutionCancelled();
-		}
+		uint32_t response_status = 0;
+		const auto observed_facts = [&]() {
+			return HttpAttemptFacts {response_status, state.header_bytes, state.response_bytes,
+			                         static_cast<uint64_t>(state.body.size())};
+		};
+		const auto fail_attempt = [&](ExecutionError error) {
+			throw HttpAttemptFailure(HttpTransportFailureKind::OTHER, observed_facts(), std::move(error));
+		};
 		long response_status_long = 0;
-		RequireCurlOption(curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &response_status_long));
+		if (curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &response_status_long) != CURLE_OK) {
+			fail_attempt(ExecutionError(ErrorStage::TRANSPORT, "", "HTTP transport returned invalid metadata"));
+		}
 		if (response_status_long < 0 || static_cast<unsigned long>(response_status_long) >
 		                                    static_cast<unsigned long>(std::numeric_limits<uint32_t>::max())) {
-			throw ExecutionError(ErrorStage::TRANSPORT, "", "HTTP transport returned invalid metadata");
+			fail_attempt(ExecutionError(ErrorStage::TRANSPORT, "", "HTTP transport returned invalid metadata"));
 		}
-		const auto response_status = static_cast<uint32_t>(response_status_long);
+		response_status = static_cast<uint32_t>(response_status_long);
+		if (state.cancelled || control.IsCancellationRequested()) {
+			throw HttpAttemptCancelled(observed_facts());
+		}
 		if (state.address_denied) {
-			throw ExecutionError(ErrorStage::POLICY, "", "resolved address is outside network policy");
+			fail_attempt(ExecutionError(ErrorStage::POLICY, "", "resolved address is outside network policy"));
 		}
 		if (state.timed_out || transfer_result == CURLE_OPERATION_TIMEDOUT) {
-			throw ExecutionError(ErrorStage::RESOURCE, "wall_milliseconds", "execution exceeded its wall-time budget");
+			fail_attempt(
+			    ExecutionError(ErrorStage::RESOURCE, "wall_milliseconds", "execution exceeded its wall-time budget"));
 		}
 		if (state.header_oversized) {
-			throw ExecutionError(ErrorStage::RESOURCE, "header_bytes", "HTTP response exceeded its header budget");
+			fail_attempt(
+			    ExecutionError(ErrorStage::RESOURCE, "header_bytes", "HTTP response exceeded its header budget"));
 		}
 		if (state.response_oversized || transfer_result == CURLE_FILESIZE_EXCEEDED) {
-			throw ExecutionError(ErrorStage::RESOURCE, "response_bytes", "HTTP response exceeded its byte budget");
+			fail_attempt(
+			    ExecutionError(ErrorStage::RESOURCE, "response_bytes", "HTTP response exceeded its byte budget"));
 		}
 		if (state.transfer_encoding_unsupported) {
-			throw ExecutionError(ErrorStage::TRANSPORT, "", "HTTP response used unsupported transfer framing");
+			fail_attempt(ExecutionError(ErrorStage::TRANSPORT, "", "HTTP response used unsupported transfer framing"));
 		}
 		if (state.decompressed_oversized) {
-			throw ExecutionError(ErrorStage::RESOURCE, "decompressed_bytes",
-			                     "HTTP response exceeded its decompressed-byte budget");
+			fail_attempt(ExecutionError(ErrorStage::RESOURCE, "decompressed_bytes",
+			                            "HTTP response exceeded its decompressed-byte budget"));
 		}
 		if (state.metadata_oversized) {
-			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
-			                     "HTTP response metadata exceeded its memory budget");
+			fail_attempt(ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                            "HTTP response metadata exceeded its memory budget"));
 		}
 		if (state.body_allocation_failed) {
-			throw ExecutionError(ErrorStage::RESOURCE, "decompressed_bytes",
-			                     "HTTP response could not be buffered within its budget");
+			fail_attempt(ExecutionError(ErrorStage::RESOURCE, "decompressed_bytes",
+			                            "HTTP response could not be buffered within its budget"));
 		}
 		if (state.metadata_allocation_failed) {
-			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
-			                     "HTTP response metadata could not be retained within its memory budget");
+			fail_attempt(ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                            "HTTP response metadata could not be retained within its memory budget"));
 		}
 		if (transfer_result != CURLE_OK) {
-			throw HttpAttemptFailure(
-			    ClassifyCurlFailure(transfer_result),
-			    {response_status, state.header_bytes, state.response_bytes, static_cast<uint64_t>(state.body.size())},
-			    ExecutionError(ErrorStage::TRANSPORT, "", "HTTP request failed"));
+			throw HttpAttemptFailure(ClassifyCurlFailure(transfer_result), observed_facts(),
+			                         ExecutionError(ErrorStage::TRANSPORT, "", "HTTP request failed"));
 		}
 		if (state.transfer_chunked) {
 			if (state.content_encoded) {
-				throw ExecutionError(ErrorStage::TRANSPORT, "",
-				                     "HTTP chunked response used unsupported content encoding");
+				fail_attempt(ExecutionError(ErrorStage::TRANSPORT, "",
+				                            "HTTP chunked response used unsupported content encoding"));
 			}
 			try {
 				state.response_bytes = static_cast<uint64_t>(state.body.size());
 				state.body = DecodeHttpChunkedBody(state.body, limits.max_decompressed_bytes, control, limits.deadline);
+			} catch (const ExecutionCancelled &) {
+				throw HttpAttemptCancelled(observed_facts());
 			} catch (const HttpChunkDecodeError &) {
-				throw ExecutionError(ErrorStage::TRANSPORT, "", "HTTP response used malformed chunk framing");
+				fail_attempt(ExecutionError(ErrorStage::TRANSPORT, "", "HTTP response used malformed chunk framing"));
+			} catch (const ExecutionError &error) {
+				fail_attempt(ExecutionError(error.Stage(), error.Field(), error.SafeMessage()));
+			} catch (const std::bad_alloc &) {
+				fail_attempt(ExecutionError(ErrorStage::RESOURCE, "", "HTTP transport exceeded available memory"));
+			} catch (...) {
+				fail_attempt(ExecutionError(ErrorStage::TRANSPORT, "", "HTTP response decoding failed"));
 			}
 		}
 
 		if (state.response_bytes > limits.max_response_bytes) {
-			throw ExecutionError(ErrorStage::RESOURCE, "response_bytes", "HTTP response exceeded its byte budget");
+			fail_attempt(
+			    ExecutionError(ErrorStage::RESOURCE, "response_bytes", "HTTP response exceeded its byte budget"));
 		}
 		const auto decompressed_response_bytes = static_cast<uint64_t>(state.body.size());
 		if (response_status < 200 || response_status >= 300) {
@@ -374,7 +394,10 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 		        state.response_bytes,
 		        decompressed_response_bytes,
 		        std::move(state.body),
-		        {std::move(state.link_field_values), state.metadata_bytes, state.retry_after_present}};
+		        {std::move(state.link_field_values), state.metadata_bytes, state.retry_after_present,
+		         std::move(state.rate_limit_fields), std::move(state.date_field_values)}};
+	} catch (const HttpAttemptCancelled &) {
+		throw;
 	} catch (const ExecutionCancelled &) {
 		throw;
 	} catch (const HttpAttemptFailure &) {

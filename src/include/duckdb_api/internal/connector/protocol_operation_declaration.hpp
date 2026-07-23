@@ -15,6 +15,7 @@ namespace internal {
 void ValidateProtocolOperation(const CompiledOperation &operation);
 const CompiledHttpOrigin &OperationOrigin(const CompiledOperation &operation);
 void AppendProtocolOperation(std::ostream &result, const CompiledOperation &operation);
+void AppendRateLimitPolicy(std::ostream &result, const CompiledOperation &operation);
 
 // Every emitted REST query key, including pagination keys, uses one bounded
 // ASCII grammar. Keeping the validator here prevents protocol and pagination

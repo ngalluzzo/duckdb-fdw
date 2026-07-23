@@ -63,7 +63,13 @@ void TestLocalRootSourceFailuresStayDiagnosticOnly() {
 void TestSchemaAssetIdentity() {
 	Require(std::string(duckdb_api::connector::ConnectorPackageV1SchemaDigest()) ==
 	                "sha256.589774ff75876c13d6bd52a243fd470c172e67d8121bc6ba8f11e2af0b451d41" &&
-	            duckdb_api::connector::VerifyConnectorPackageV1SchemaAsset(),
+	            duckdb_api::connector::VerifyConnectorPackageV1SchemaAsset() &&
+	            std::string(duckdb_api::connector::ConnectorPackageV2SchemaDigest()) ==
+	                "sha256.cc932d2db340f8de6ad462749287177ac6ad54879742d30db3d8eb5df07e10c5" &&
+	            duckdb_api::connector::VerifyConnectorPackageV2SchemaAsset() &&
+	            std::string(duckdb_api::connector::ConnectorPackageV3SchemaDigest()) ==
+	                "sha256.1f076cd2c6f186d6bd005ae93ecbbec24f17d466a4000b575ac9d2000569ad25" &&
+	            duckdb_api::connector::VerifyConnectorPackageV3SchemaAsset(),
 	        "permanent connector schema asset drifted from RFC 0022");
 }
 
