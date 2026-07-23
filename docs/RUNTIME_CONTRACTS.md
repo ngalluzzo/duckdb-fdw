@@ -715,8 +715,8 @@ Runtime owns one scan ledger with checked unsigned counters for:
 - serialized GraphQL document/body bytes;
 - retained response/page memory;
 - elapsed time; and
-- cumulative waiting (RFC 0021; zero in v1 — no retry or rate-limit-waiting
-  mechanism is enabled).
+- cumulative waiting (zero for v1; v2 safe-read retry may debit the admitted
+  connector/operator/hard minimum; rate-limit waiting remains disabled).
 
 It debits actual use against the minimum of host and compiled ceilings. Every
 increment and multiplication is checked before state mutation. Exceeded or
@@ -730,19 +730,32 @@ that co-live handoff exactly; one byte below the checked sum fails before the
 batch allocation or publication.
 
 For GraphQL, the aggregate serialized-request-body ceiling is no greater than
-the checked product of the effective per-request body ceiling and the maximum
-page count. Semantics intersects that reachable total with the declared and
-host scan ceilings, and Runtime admission independently requires the same
-value. A plan never advertises body authority that page exhaustion makes
-unreachable.
+the checked product of the effective per-request body ceiling, maximum page
+count, and admitted attempts per step. Semantics intersects that reachable
+total with the declared and host scan ceilings, and Runtime admission
+independently requires the same value. A plan never advertises body authority
+that page and attempt exhaustion make unreachable.
 
-One request/page is the replay unit, but v1 performs one attempt. This ledger
-is the authoritative aggregate scan resilience budget (RFC 0021): attempts,
+One request/page is the replay unit; v1 performs one attempt. An opted-in v2
+safe read admits at most three attempts per step and 96 per scan. This ledger
+is the authoritative aggregate scan resilience budget: attempts,
 pages, bytes, records, memory, elapsed time, and cumulative waiting all debit
 one checked aggregate, and a retry or wait never resets a counter, deadline, or
-budget (the no-reset invariant). Retry, rate-limit waiting, cache, provider,
-parallel-page, and progress states are disabled and unknown enum values fail
+budget (the no-reset invariant). The single protocol-neutral retry controller
+rebuilds an exact admitted request from one immutable credential snapshot,
+uses a fresh transport attempt that rechecks destination policy, and retries
+only closed no-response resolution/connect/send/empty/receive failures or a
+fully received `502`/`503`/`504` without `Retry-After`. Partial responses,
+`429`, any `Retry-After`, auth/policy/resource/decode/schema/pagination errors,
+cancellation, and deadline expiry are terminal. Rate-limit waiting, cache,
+parallel-page, and progress states remain disabled; unknown enums fail
 admission.
+
+After retryable failure `n`, nominal delay is
+`min(10 * 2^(n-1), effective_max_delay)` milliseconds. Stream-local jitter is
+bounded to 75%-125%, then clamped to the one-delay and remaining aggregate-wait
+ceilings. Waiting debits at most five-millisecond slices and checks the one
+deadline plus host/stream cancellation before another attempt.
 
 ## Cancellation, close, and failure
 
@@ -762,9 +775,12 @@ failure classification on later pulls; it is never converted to clean
 exhaustion or partial success.
 
 Each terminal failure carries additive structured resilience facts (RFC 0021):
-a primary failure class, the execution phase, an attempt ordinal, the count of
-rows exposed to DuckDB before the failure, the observed remote-status class, the
-terminating budget dimension, and a replay classification. These are closed
+a primary failure class, the execution phase, a final attempt ordinal,
+cumulative retry delay, current exposure state, the count of rows exposed to
+DuckDB before the failure, the observed remote-status class, the terminating
+budget dimension, and a replay classification. `BatchStream::Diagnostics`
+provides the same content-free effective policy and progress snapshot after
+successful recovery as well as terminal failure. These are closed
 codes, ordinals, and counts — never content — layered on the boundary's error
 stage without changing the rendered string. Cancellation, scan-deadline expiry
 (the `time` budget), a reserved transport-timeout class, and local resource
@@ -880,10 +896,11 @@ plan, request-body, result, failure, explanation, registration, reload,
 transaction, prepared-plan, cancellation, and lifecycle differentials. Live
 service tests remain compatibility-only evidence.
 
-## Closed v1 boundary
+## Closed v1/v2 boundary
 
-These contracts implement the exact `duckdb_api/v1` package family and RFC
-0012 SQL surface. Providers, partitions, connection profiles, retries, caches,
+These contracts implement the exact frozen `duckdb_api/v1` family, the
+retry-only `duckdb_api/v2` addition, and RFC 0012 SQL surface. Providers,
+partitions, connection profiles, retries outside RFC 0024's closed matrix, caches,
 rate-limit waiting, remote projection/order/limit, raw GraphQL, custom code,
 dynamic schemas, write operations, a public plugin ABI, and DSO unload are not
 latent optional branches. Unknown or unsupported state fails before authority

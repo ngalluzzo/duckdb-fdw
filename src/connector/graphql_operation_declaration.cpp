@@ -297,9 +297,7 @@ void ValidateGeneratedGraphqlOperation(const CompiledGraphqlOperation &operation
 	        operation.max_serialized_request_body_bytes_per_request ||
 	    operation.max_serialized_request_body_bytes_per_request >
 	        std::numeric_limits<std::uint64_t>::max() / operation.cursor.max_pages_per_scan ||
-	    operation.max_serialized_request_body_bytes_per_scan >
-	        operation.max_serialized_request_body_bytes_per_request * operation.cursor.max_pages_per_scan ||
-	    operation.retry_enabled || operation.cache_enabled || operation.providers_enabled) {
+	    operation.cache_enabled || operation.providers_enabled) {
 		throw std::invalid_argument("compiled package GraphQL response, cursor, or resource profile is contradictory");
 	}
 }
@@ -410,7 +408,7 @@ void ValidateGraphqlOperationValue(const CompiledGraphqlOperation &operation) {
 	        std::numeric_limits<std::uint64_t>::max() / cursor.max_pages_per_scan ||
 	    operation.max_serialized_request_body_bytes_per_scan !=
 	        operation.max_serialized_request_body_bytes_per_request * cursor.max_pages_per_scan ||
-	    operation.retry_enabled || operation.cache_enabled || operation.providers_enabled) {
+	    operation.cache_enabled || operation.providers_enabled) {
 		throw std::invalid_argument("compiled GraphQL body envelope or disabled feature profile drifted");
 	}
 }
@@ -474,7 +472,8 @@ void ValidateCanonicalGraphqlRelation(const std::string &relation_name, const st
 	ValidateGraphqlOperationValue(operation.Graphql());
 }
 
-void AppendGraphqlOperation(std::ostream &result, const CompiledGraphqlOperation &operation) {
+void AppendGraphqlOperation(std::ostream &result, const CompiledOperation &compiled_operation) {
+	const auto &operation = compiled_operation.Graphql();
 	if (operation.document_identity == CompiledGraphqlDocumentIdentity::PACKAGE_QUERY_GENERATOR_V1) {
 		result << "GRAPHQL:identity:package_query_generator_v1:sha256:" << operation.document_digest
 		       << ";endpoint=origin:[scheme:" << SchemeName(operation.endpoint_origin.scheme)
@@ -483,7 +482,15 @@ void AppendGraphqlOperation(std::ostream &result, const CompiledGraphqlOperation
 		       << ":Int!:fixed_page_size=" << operation.variables[0].integer_value << ',' << operation.variables[1].name
 		       << ":String:runtime_cursor];result_columns:" << operation.result_columns.size()
 		       << ";pagination=forward:sequential:mutable,concurrency:1,max_pages:"
-		       << operation.cursor.max_pages_per_scan << ";features=retry:disabled,cache:disabled,providers:disabled";
+		       << operation.cursor.max_pages_per_scan
+		       << ";features=retry:" << (operation.retry_enabled ? "enabled" : "disabled");
+		if (operation.retry_enabled) {
+			const auto &retry = compiled_operation.RetryRecommendation();
+			result << "[attempts_per_step:" << retry.max_attempts_per_step
+			       << ",max_delay_ms:" << retry.max_delay_milliseconds
+			       << ",max_wait_ms:" << retry.max_cumulative_waiting_milliseconds_per_scan << ']';
+		}
+		result << ",cache:disabled,providers:disabled";
 		return;
 	}
 	result << "GRAPHQL:identity:github_viewer_repository_metrics_v1:sha256:" << operation.document_digest

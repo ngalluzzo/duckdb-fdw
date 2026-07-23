@@ -183,6 +183,23 @@ void BuildHeaders(const HttpRequest &request, CurlHeaderList &headers) {
 	}
 }
 
+HttpTransportFailureKind ClassifyCurlFailure(CURLcode code) noexcept {
+	switch (code) {
+	case CURLE_COULDNT_RESOLVE_HOST:
+		return HttpTransportFailureKind::COULD_NOT_RESOLVE_HOST;
+	case CURLE_COULDNT_CONNECT:
+		return HttpTransportFailureKind::COULD_NOT_CONNECT;
+	case CURLE_SEND_ERROR:
+		return HttpTransportFailureKind::SEND_FAILED;
+	case CURLE_GOT_NOTHING:
+		return HttpTransportFailureKind::EMPTY_RESPONSE;
+	case CURLE_RECV_ERROR:
+		return HttpTransportFailureKind::RECEIVE_FAILED;
+	default:
+		return HttpTransportFailureKind::OTHER;
+	}
+}
+
 } // namespace
 
 #ifdef DUCKDB_API_PRIVATE_CURL_TESTS
@@ -287,6 +304,13 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 		if (state.cancelled || control.IsCancellationRequested()) {
 			throw ExecutionCancelled();
 		}
+		long response_status_long = 0;
+		RequireCurlOption(curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &response_status_long));
+		if (response_status_long < 0 || static_cast<unsigned long>(response_status_long) >
+		                                    static_cast<unsigned long>(std::numeric_limits<uint32_t>::max())) {
+			throw ExecutionError(ErrorStage::TRANSPORT, "", "HTTP transport returned invalid metadata");
+		}
+		const auto response_status = static_cast<uint32_t>(response_status_long);
 		if (state.address_denied) {
 			throw ExecutionError(ErrorStage::POLICY, "", "resolved address is outside network policy");
 		}
@@ -319,7 +343,10 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 			                     "HTTP response metadata could not be retained within its memory budget");
 		}
 		if (transfer_result != CURLE_OK) {
-			throw ExecutionError(ErrorStage::TRANSPORT, "", "HTTP request failed");
+			throw HttpAttemptFailure(
+			    ClassifyCurlFailure(transfer_result),
+			    {response_status, state.header_bytes, state.response_bytes, static_cast<uint64_t>(state.body.size())},
+			    ExecutionError(ErrorStage::TRANSPORT, "", "HTTP request failed"));
 		}
 		if (state.transfer_chunked) {
 			if (state.content_encoded) {
@@ -334,25 +361,23 @@ HttpResponse PerformCurlTransfer(const CurlTransferProfile &profile, const HttpR
 			}
 		}
 
-		long response_status = 0;
-		RequireCurlOption(curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &response_status));
 		if (state.response_bytes > limits.max_response_bytes) {
 			throw ExecutionError(ErrorStage::RESOURCE, "response_bytes", "HTTP response exceeded its byte budget");
 		}
-		if (response_status < 0 || static_cast<unsigned long>(response_status) >
-		                               static_cast<unsigned long>(std::numeric_limits<uint32_t>::max())) {
-			throw ExecutionError(ErrorStage::TRANSPORT, "", "HTTP transport returned invalid metadata");
-		}
+		const auto decompressed_response_bytes = static_cast<uint64_t>(state.body.size());
 		if (response_status < 200 || response_status >= 300) {
 			std::string().swap(state.body);
 			ReleaseCurlLinkMetadata(state);
 		}
-		return {static_cast<uint32_t>(response_status),
+		return {response_status,
 		        state.header_bytes,
 		        state.response_bytes,
+		        decompressed_response_bytes,
 		        std::move(state.body),
-		        {std::move(state.link_field_values), state.metadata_bytes}};
+		        {std::move(state.link_field_values), state.metadata_bytes, state.retry_after_present}};
 	} catch (const ExecutionCancelled &) {
+		throw;
+	} catch (const HttpAttemptFailure &) {
 		throw;
 	} catch (const ExecutionError &) {
 		throw;

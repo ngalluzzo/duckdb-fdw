@@ -471,7 +471,18 @@ void TestCursorTransferExactDecodedMemoryBoundary() {
 	const auto body = Page(1, 1, true, cursor_value);
 	const auto baseline_plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("boundary_secret");
 	const duckdb_api::internal::HttpExecutionProfile profile {
-	    duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443, false, false, false, 30000, 100};
+	    duckdb_api::PlannedUrlScheme::HTTPS,
+	    "api.github.com",
+	    443,
+	    false,
+	    false,
+	    false,
+	    30000,
+	    100,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	    duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+	    duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 	auto admitted = duckdb_api::internal::TryAdmitGraphqlPlan(baseline_plan, profile);
 	Require(static_cast<bool>(admitted), "GraphQL cursor boundary fixture did not admit its baseline plan");
 	const duckdb_api::internal::GraphqlDecodeLimits limits {
@@ -549,6 +560,73 @@ void TestMidScanFailureExposure() {
 	Require(failed, "page two 429 did not terminate the scan");
 }
 
+void TestSameGraphqlPagePostExposureFailureIsNeverReplayable() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime(100);
+	runtime->Respond(200, Page(1, 100, false, ""));
+	ManualHttpExecutionControl control;
+	auto stream = Open(runtime, control, 901);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 64 &&
+	            stream->Diagnostics().exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "GraphQL fixture did not cross its same-page emission boundary");
+	std::this_thread::sleep_for(std::chrono::milliseconds(120));
+	bool failed = false;
+	try {
+		(void)stream->Next(control, batch);
+	} catch (const duckdb_api::ExecutionError &error) {
+		failed = error.Stage() == duckdb_api::ErrorStage::RESOURCE && error.Classified() &&
+		         error.Properties().exposure_state == duckdb_api::ExposureState::EXPOSED &&
+		         error.Properties().rows_exposed == 64 &&
+		         error.Properties().replay_classification == duckdb_api::ReplayClassification::NEVER_REPLAYABLE;
+	}
+	Require(failed && stream->Diagnostics().exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "same-page post-exposure GraphQL failure retained replay authority or regressed diagnostics");
+}
+
+void TestRetryEnabledGraphqlUsesOneCredentialSnapshotAndAtomicPage() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({ControlledResponse(503, ""),
+	                          duckdb_api_test::ControlledTransientTransportFailure(
+	                              duckdb_api::internal::HttpTransportFailureKind::EMPTY_RESPONSE),
+	                          ControlledResponse(200, Page(1, 2, false, ""))});
+	ManualHttpExecutionControl control;
+	const std::string token = "graphql_retry_snapshot_token";
+	runtime->ExpectBearer("Bearer " + token);
+	auto stream = OpenPlanWithToken(runtime, control,
+	                                duckdb_api_test::BuildRetryEnabledGraphqlScanPlanFixture("retry_secret"), token);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 2 && runtime->Observations().size() == 3 &&
+	            runtime->ConsumeBearerExpectation(3),
+	        "GraphQL retry did not rebuild three attempts from one credential snapshot");
+	const auto diagnostics = stream->Diagnostics();
+	Require(diagnostics.aggregate_attempts == 3 && diagnostics.current_step == 1 &&
+	            diagnostics.cumulative_delay_milliseconds > 0 &&
+	            diagnostics.exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "GraphQL recovery did not preserve atomic-page structured diagnostics");
+	Require(!stream->Next(control, batch) && stream->Diagnostics().exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "GraphQL exhaustion regressed the terminal step's exposed diagnostics");
+	stream->Cancel();
+	Require(stream->Diagnostics().exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "post-exhaustion GraphQL cancellation regressed exposed diagnostics");
+
+	const auto malformed_runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	malformed_runtime->Respond(200, "{");
+	const std::string malformed_token = "graphql_retry_decode_token";
+	malformed_runtime->ExpectBearer("Bearer " + malformed_token);
+	auto malformed = OpenPlanWithToken(malformed_runtime, control,
+	                                   duckdb_api_test::BuildRetryEnabledGraphqlScanPlanFixture("retry_decode_secret"),
+	                                   malformed_token);
+	bool failed = false;
+	try {
+		(void)malformed->Next(control, batch);
+	} catch (const duckdb_api::ExecutionError &error) {
+		failed = error.Stage() == duckdb_api::ErrorStage::DECODE && error.Classified() &&
+		         error.Properties().exposure_state == duckdb_api::ExposureState::UNACCEPTED;
+	}
+	Require(failed && malformed_runtime->Observations().size() == 1 && malformed_runtime->ConsumeBearerExpectation(1),
+	        "GraphQL decode failure replayed an unaccepted but ambiguous response");
+}
+
 } // namespace
 
 int main() {
@@ -566,6 +644,8 @@ int main() {
 		TestIntegratedThirtyTwoPageBoundary();
 		TestCursorTransferExactDecodedMemoryBoundary();
 		TestMidScanFailureExposure();
+		TestSameGraphqlPagePostExposureFailureIsNeverReplayable();
+		TestRetryEnabledGraphqlUsesOneCredentialSnapshotAndAtomicPage();
 		std::cout << "GraphQL paginated scan tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

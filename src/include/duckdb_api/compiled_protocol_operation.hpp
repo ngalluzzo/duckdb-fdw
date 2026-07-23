@@ -29,6 +29,24 @@ enum class CompiledProtocol { REST, GRAPHQL };
 enum class CompiledHttpMethod { GET };
 enum class CompiledReplaySafety { SAFE };
 
+// Connector-owned operation meaning is separate from Runtime's dynamic
+// exposure classification. Only REPLAYABLE_READ can carry the v2 retry
+// recommendation; the other alternatives remain closed fail-closed values.
+enum class CompiledOperationReplayClass {
+	NON_REPLAYABLE,
+	REPLAYABLE_READ,
+	REPLAYABLE_WITH_IDEMPOTENCY_MECHANISM,
+	UNKNOWN
+};
+
+struct CompiledRetryRecommendation {
+	std::uint64_t max_attempts_per_step;
+	std::uint64_t max_delay_milliseconds;
+	std::uint64_t max_cumulative_waiting_milliseconds_per_scan;
+
+	bool Enabled() const noexcept;
+};
+
 // Explicit renderer identity. Native and package documents never infer their
 // profile from connector, relation, operation, or provenance spellings.
 enum class CompiledGraphqlDocumentIdentity { GITHUB_VIEWER_REPOSITORY_METRICS_V1, PACKAGE_QUERY_GENERATOR_V1 };
@@ -600,6 +618,8 @@ public:
 	const CompiledProtocolOperation &ProtocolOperation() const;
 	const CompiledRestOperation &Rest() const;
 	const CompiledGraphqlOperation &Graphql() const;
+	CompiledOperationReplayClass ReplayClass() const noexcept;
+	const CompiledRetryRecommendation &RetryRecommendation() const noexcept;
 
 	std::string name;
 	bool fallback;
@@ -617,8 +637,18 @@ private:
 	                  CompiledPagination pagination, CompiledRestRequest request,
 	                  CompiledResponseSource response_source, std::string records_extractor,
 	                  std::vector<std::string> records_extractor_segments, CompiledOperationSelector selector);
+	CompiledOperation(std::string name, bool fallback, CompiledOperationCardinality cardinality,
+	                  CompiledPagination pagination, CompiledRestRequest request,
+	                  CompiledResponseSource response_source, std::string records_extractor,
+	                  std::vector<std::string> records_extractor_segments, CompiledOperationSelector selector,
+	                  CompiledRetryRecommendation retry_recommendation);
+	CompiledOperation(std::string name, bool fallback, CompiledOperationCardinality cardinality,
+	                  CompiledGraphqlOperation operation, CompiledOperationSelector selector,
+	                  CompiledRetryRecommendation retry_recommendation);
 
 	CompiledProtocolOperation protocol_operation;
+	CompiledOperationReplayClass replay_class;
+	CompiledRetryRecommendation retry_recommendation;
 };
 
 } // namespace duckdb_api

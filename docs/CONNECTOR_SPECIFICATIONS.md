@@ -1,10 +1,12 @@
 # Connector package specification
 
 This document is the author-facing contract for local declarative connector
-packages. The only accepted specification identifier is
-`duckdb_api/v1`. [RFC 0013](rfcs/0013-define-connector-package-v1-contract.md)
-accepted this compatibility family; the schemas below close every source
-shape.
+packages. The accepted specification identifiers are the frozen
+`duckdb_api/v1` family and the additive `duckdb_api/v2` family.
+[RFC 0013](rfcs/0013-define-connector-package-v1-contract.md) accepted v1;
+[RFC 0024](rfcs/0024-enable-bounded-replay-safe-retry.md) accepted v2 solely
+to add an explicit bounded safe-read retry recommendation. The schemas below
+close every source shape.
 
 The specification describes immutable metadata. It does not grant network or
 credential authority by itself, and it does not contain DuckDB catalog state,
@@ -32,7 +34,7 @@ Four identities remain distinct:
 
 | Identity | Value |
 | --- | --- |
-| Specification | Exact `duckdb_api/v1` in every machine-readable source file |
+| Specification | Exact matching `duckdb_api/v1` or `duckdb_api/v2` in every machine-readable source file |
 | Project | The extension release version |
 | Package | Canonical author SemVer `MAJOR.MINOR.PATCH` in `connector.yaml` |
 | Generation | Specification, connector ID, package version, and package digest |
@@ -89,6 +91,7 @@ their documented canonical decimal grammar.
 The exact decoded source schemas are:
 
 - [`connector-package-v1.schema.json`](rfcs/evidence/0013/connector-package-v1.schema.json)
+- [`connector-package-v2.schema.json`](../src/connector/package/assets/connector-package-v2.schema.json)
 - [`fixture-index-v1.schema.json`](rfcs/evidence/0013/fixture-index-v1.schema.json)
 
 Unknown fields fail. Schema validation is followed by identifier, reference,
@@ -352,6 +355,26 @@ breaks a tie. The fallback is considered only when no non-fallback is eligible.
 Alternative input sets, forbidden-input selectors, author priority, and
 declaration-order precedence are not part of `duckdb_api/v1`.
 
+## V2 bounded retry recommendation
+
+`duckdb_api/v2` retains the complete v1 grammar and permits one additional
+operation field only for a compiled `replayable_read`:
+
+```yaml
+retry:
+  max_attempts_per_step: 3
+  max_delay_milliseconds: 100
+  max_cumulative_waiting_milliseconds_per_scan: 250
+```
+
+All three fields are required. Attempts are `2..3`, one delay is `1..100`
+milliseconds, and aggregate scan waiting is `1..250` milliseconds. Partial or
+unknown fields, unsafe/unknown replay semantics, writes, and idempotency-key
+profiles fail compilation. Absence means one attempt and zero retry waiting.
+V1 rejects `retry` as an unknown field and retains byte-for-byte one-attempt
+behavior. Moving to v2 or changing a retry block requires a package-major
+version because it changes request amplification and failure behavior.
+
 ## REST operations
 
 REST v1 admits replay-safe HTTPS `GET` with a fixed origin and path:
@@ -398,8 +421,9 @@ a body-embedded next-page URL (`response_next`), or count-terminated with no
 continuation signal at all (`short_page`). An accepted continuation must
 remain on the exact operation origin and path. Pagination is pull-driven, one
 page at a time, bounded by positive page and scan ceilings, and does not
-grant ordering, snapshot, parallelism, resume, deduplication, retry, or cache
-guarantees.
+grant ordering, snapshot, parallelism, resume, deduplication, or cache
+guarantees. Automatic retry occurs only for an explicitly opted-in v2 safe
+read and remains page-atomic and bounded by the Runtime contract.
 
 The REST pagination strategy set is closed at `{disabled, link_next,
 response_next, short_page}`. Common real-world shapes outside this set are
@@ -544,6 +568,13 @@ typed rows, predicate occurrence laws, error stage, and safe explanation.
 They cannot grant network or credential authority and do not replace the host
 policy or Runtime admission checks.
 
+V2 packages use this same offline fixture contract and coverage derivation.
+Authors provide the ordinary success, duplicate, and terminal-response bags;
+the project-owned Runtime suite supplies transient gateway and zero-response
+transport failures, retry exhaustion, cancellation, and byte-boundary probes.
+The fixture grammar does not let an author manufacture transport facts or
+assert that a retry occurred.
+
 Each declared `covers` key selects a closed project-owned variant executor in
 addition to identifying its compiled scope. The case transcript and expected
 value describe the base execution; source mutation, diagnostics, planning
@@ -614,11 +645,13 @@ host and specification ceilings; zero never means unlimited.
 
 ## Compatibility boundary
 
-`duckdb_api/v1` contains exactly the behavior above and the byte-copied
-schemas. It does not contain author-chosen SQL names, automatic discovery,
+`duckdb_api/v1` contains exactly its frozen byte-copied schemas and remains
+one-attempt. `duckdb_api/v2` adds only the bounded safe-read retry block above.
+Neither family contains author-chosen SQL names, automatic discovery,
 URLs as package roots, OpenAPI or GraphQL introspection import, raw GraphQL
 documents, dynamic schemas, write operations, connection profiles,
-partitions, providers, enrichment, retries, caching, rate-limit waiting,
+partitions, providers, enrichment, retry of writes or unclassified failures,
+caching, rate-limit waiting,
 remote projection/order/limit declarations, an opaque body-embedded cursor
 used directly to build the next request, reverse or bidirectional traversal,
 custom native code, WASM, or a public C++ ABI.

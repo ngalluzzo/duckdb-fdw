@@ -204,6 +204,7 @@ duckdb_api::ScanPlan BuildValidPaginatedPlanFixture(const std::string &exact_log
 // exercising LinkPaginationState::AdvanceByCount directly.
 duckdb_api::ScanPlan BuildValidShortPagePlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::string &exact_logical_secret_name);
+duckdb_api::ScanPlan BuildRetryEnabledPaginatedRestPlanFixture(const std::string &exact_logical_secret_name);
 // Bounded package-like REST query/path provider for Runtime consumer tests. It
 // contains fixed, relation-input, conditional-input, page-size, and page-number
 // query bindings plus multi-segment record and result-column paths. A generic

@@ -6,6 +6,7 @@
 #include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
 #include "duckdb_api/internal/runtime/execution/http_paginated_scan.hpp"
 #include "duckdb_api/internal/runtime/execution/http_plan_admission.hpp"
+#include "duckdb_api/internal/runtime/execution/http_retry_controller.hpp"
 #include "duckdb_api/internal/runtime/decoding/decoded_page_buffer.hpp"
 #include "duckdb_api/internal/runtime/decoding/json_decoder.hpp"
 #include "duckdb_api/internal/runtime/policy/request_validation.hpp"
@@ -52,6 +53,18 @@ JsonDecodePlan BuildDecodePlan(const AdmittedRestRequestProfile &profile,
 	return result;
 }
 
+ScanResourceProfile BuildSingleResourceProfile(const AdmittedRestRequestProfile &profile,
+                                               uint64_t max_wall_milliseconds) {
+	const auto &budget = profile.Budgets();
+	return {{budget.request_attempts, budget.header_bytes, budget.response_bytes, budget.decompressed_bytes,
+	         budget.decoded_records, budget.decoded_memory_bytes, budget.concurrency,
+	         budget.serialized_request_body_bytes},
+	        {profile.RetryPolicy().max_attempts_per_scan, 1, budget.header_bytes, budget.response_bytes,
+	         budget.decompressed_bytes, budget.decoded_records, budget.decoded_memory_bytes,
+	         std::min(budget.wall_milliseconds, max_wall_milliseconds), budget.concurrency,
+	         budget.serialized_request_body_bytes, profile.RetryPolicy().max_cumulative_waiting_milliseconds_per_scan}};
+}
+
 void CheckCancellation(ExecutionControl &control) {
 	if (control.IsCancellationRequested()) {
 		throw ExecutionCancelled();
@@ -89,10 +102,14 @@ public:
 	                ScanAuthorization authorization_p, std::shared_ptr<const HttpTransport> transport_p,
 	                uint64_t max_wall_milliseconds_p)
 	    : admitted_profile(std::move(admitted_profile_p)), transport(std::move(transport_p)),
-	      max_wall_milliseconds(max_wall_milliseconds_p),
 	      authorization(new ScanAuthorization(std::move(authorization_p))), cancelled(false), closed(false),
-	      attempted(false), exhausted(false), deadline_initialized(false), decoded_memory_bytes(0), offset(0),
-	      rows_emitted(0) {
+	      attempted(false), exhausted(false),
+	      accounting(BuildSingleResourceProfile(*admitted_profile, max_wall_milliseconds_p)), decoded_memory_bytes(0),
+	      offset(0), rows_emitted(0),
+	      retry_seed(static_cast<uint64_t>(reinterpret_cast<std::uintptr_t>(this)) ^
+	                 static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())),
+	      current_step_exposure(ExposureState::UNACCEPTED), terminal_exposure(ExposureState::UNACCEPTED),
+	      has_terminal_exposure(false) {
 		for (const auto &column : admitted_profile->Columns()) {
 			column_types.push_back(column.type);
 		}
@@ -123,58 +140,58 @@ public:
 			throw ExecutionCancelled();
 		}
 		CombinedExecutionControl combined(control, cancelled);
-		if (!deadline_initialized) {
-			deadline = std::chrono::steady_clock::now() +
-			           std::chrono::milliseconds(
-			               std::min(admitted_profile->Budgets().wall_milliseconds, max_wall_milliseconds));
-			deadline_initialized = true;
-		}
 		try {
-			CheckExecutionState(combined, deadline);
+			if (accounting.DeadlineStarted()) {
+				CheckExecutionState(combined, accounting.Deadline());
+			} else {
+				CheckCancellation(combined);
+			}
 			if (!attempted) {
 				attempted = true;
-				const HttpLimits limits {0,
-				                         admitted_profile->Budgets().header_bytes,
-				                         admitted_profile->Budgets().response_bytes,
-				                         admitted_profile->Budgets().decompressed_bytes,
-				                         0,
-				                         deadline};
-				auto request = BuildAdmittedRestRequest(*admitted_profile);
-				if (admitted_profile->RequiresBearer()) {
-					request = BearerAuthenticator::AuthorizeRest(*admitted_profile, std::move(request), *authorization);
-				} else if (admitted_profile->RequiresApiKey()) {
-					request = ApiKeyAuthenticator::AuthorizeRest(*admitted_profile, std::move(request), *authorization);
-				}
-				auto response = transport->Execute(request, limits, combined);
+				auto attempted_response = ExecuteHttpStepWithRetry(
+				    admitted_profile->RetryPolicy(), accounting, transport, 0, retry_seed,
+				    [this]() {
+					    auto request = BuildAdmittedRestRequest(*admitted_profile);
+					    if (admitted_profile->RequiresBearer()) {
+						    request = BearerAuthenticator::AuthorizeRest(*admitted_profile, std::move(request),
+						                                                 *authorization);
+					    } else if (admitted_profile->RequiresApiKey()) {
+						    request = ApiKeyAuthenticator::AuthorizeRest(*admitted_profile, std::move(request),
+						                                                 *authorization);
+					    }
+					    return request;
+				    },
+				    combined);
+				auto response = std::move(attempted_response.response);
+				const auto deadline = attempted_response.allowance.deadline;
 				CheckExecutionState(combined, deadline);
-				if (response.header_bytes > limits.max_header_bytes ||
-				    response.response_bytes > limits.max_response_bytes ||
-				    static_cast<uint64_t>(response.body.size()) > limits.max_decompressed_bytes ||
-				    response.metadata.retained_bytes > limits.max_metadata_bytes) {
-					throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP response exceeded an execution budget");
-				}
 				const bool authenticated = admitted_profile->RequiresBearer() || admitted_profile->RequiresApiKey();
 				if (authenticated && response.status == 401) {
-					throw ExecutionError(ErrorStage::AUTHENTICATION, "http_status",
-					                     "HTTP endpoint rejected authentication",
-					                     HttpStatusFailureProperties(response.status, true));
+					throw ExecutionError(
+					    ErrorStage::AUTHENTICATION, "http_status", "HTTP endpoint rejected authentication",
+					    HttpStatusFailureProperties(response.status, true, response.metadata.retry_after_present));
 				}
 				if (authenticated && response.status == 403) {
-					throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status", "HTTP endpoint denied authorization",
-					                     HttpStatusFailureProperties(response.status, true));
+					throw ExecutionError(
+					    ErrorStage::AUTHORIZATION, "http_status", "HTTP endpoint denied authorization",
+					    HttpStatusFailureProperties(response.status, true, response.metadata.retry_after_present));
 				}
 				if (response.status < 200 || response.status >= 300) {
-					throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status",
-					                     HttpStatusFailureProperties(response.status, false));
+					throw ExecutionError(
+					    ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status",
+					    HttpStatusFailureProperties(response.status, false, response.metadata.retry_after_present));
 				}
 				auto page = DecodeJsonPage(response.body, BuildDecodePlan(*admitted_profile, deadline), combined);
 				decoded_memory_bytes = page.retained_memory_bytes;
+				accounting.CommitDecodedPage({static_cast<uint64_t>(page.rows.size()), page.retained_memory_bytes});
 				decoded = std::move(page.rows);
+				current_step_exposure = ExposureState::ACCEPTED_UNEXPOSED;
 				CheckExecutionState(combined, deadline);
 			}
 
-			CheckExecutionState(combined, deadline);
+			CheckExecutionState(combined, accounting.Deadline());
 			if (offset >= decoded.size()) {
+				accounting.CompletePage(false, std::chrono::steady_clock::now());
 				exhausted = true;
 				authorization.reset();
 				return false;
@@ -189,24 +206,34 @@ public:
 			RequireTypedBatchHandoffMemory(decoded_memory_bytes, admitted_profile->Budgets().decoded_memory_bytes,
 			                               produced.rows.capacity(), produced.column_types.capacity());
 			for (std::size_t index = 0; index < count; index++) {
-				CheckExecutionState(combined, deadline);
+				CheckExecutionState(combined, accounting.Deadline());
 				produced.rows.push_back(std::move(decoded[offset + index]));
 			}
-			CheckExecutionState(combined, deadline);
+			CheckExecutionState(combined, accounting.Deadline());
 			if (produced.rows.empty() || !produced.IsSchemaAligned(combined)) {
 				throw ExecutionError(ErrorStage::INTERNAL, "", "runtime produced a misaligned or empty typed batch");
 			}
-			CheckExecutionState(combined, deadline);
+			CheckExecutionState(combined, accounting.Deadline());
 			offset += count;
 			rows_emitted += static_cast<uint64_t>(count);
 			batch = std::move(produced);
+			current_step_exposure = ExposureState::EXPOSED;
 			return true;
 		} catch (const ExecutionCancelled &) {
 			RememberCurrentFailure();
 			throw;
 		} catch (const ExecutionError &error) {
-			FailWithExecutionError(error.Stage(), error.Field(), error.SafeMessage(),
-			                       EnrichFailureProperties(FailurePropertiesFromError(error), 1, rows_emitted));
+			FailWithExecutionError(
+			    error.Stage(), error.Field(), error.SafeMessage(),
+			    EnrichRetryFailureProperties(FailurePropertiesFromError(error), accounting.Counters().pages,
+			                                 accounting.CurrentAttempt(), rows_emitted,
+			                                 accounting.Counters().cumulative_waiting_milliseconds, CurrentExposure()));
+		} catch (const ScanResourceError &error) {
+			FailWithExecutionError(
+			    ErrorStage::RESOURCE, error.Field(), error.SafeMessage(),
+			    EnrichRetryFailureProperties(ResourceBudgetFailureProperties(error.Field()),
+			                                 accounting.Counters().pages, accounting.CurrentAttempt(), rows_emitted,
+			                                 accounting.Counters().cumulative_waiting_milliseconds, CurrentExposure()));
 		} catch (const std::bad_alloc &) {
 			FailWithExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                       "execution could not be allocated within its memory budget");
@@ -239,8 +266,35 @@ public:
 		}
 	}
 
+	ExecutionSnapshot Diagnostics() const noexcept override {
+		try {
+			std::lock_guard<std::mutex> state_guard(state_mutex);
+			const auto &policy = admitted_profile->RetryPolicy();
+			const auto &counters = accounting.Counters();
+			return {policy.max_attempts_per_step,
+			        policy.max_attempts_per_scan,
+			        policy.max_delay_milliseconds,
+			        policy.max_cumulative_waiting_milliseconds_per_scan,
+			        counters.request_attempts,
+			        counters.cumulative_waiting_milliseconds,
+			        counters.pages,
+			        CurrentExposure()};
+		} catch (...) {
+			return BatchStream::Diagnostics();
+		}
+	}
+
 private:
+	ExposureState CurrentExposure() const noexcept {
+		if (has_terminal_exposure) {
+			return terminal_exposure;
+		}
+		return current_step_exposure;
+	}
 	void ReleasePrivateState() noexcept {
+		if (accounting.State() != ScanResourceState::EXHAUSTED) {
+			accounting.AbortPage();
+		}
 		authorization.reset();
 		std::vector<TypedRow>().swap(decoded);
 		decoded_memory_bytes = 0;
@@ -253,6 +307,8 @@ private:
 	}
 
 	void RememberCurrentFailure() noexcept {
+		terminal_exposure = CurrentExposure();
+		has_terminal_exposure = true;
 		terminal_exception = std::current_exception();
 		Fail();
 	}
@@ -278,7 +334,6 @@ private:
 
 	const std::unique_ptr<const AdmittedRestRequestProfile> admitted_profile;
 	const std::shared_ptr<const HttpTransport> transport;
-	const uint64_t max_wall_milliseconds;
 	std::unique_ptr<ScanAuthorization> authorization;
 	std::vector<OutputValueType> column_types;
 	mutable std::mutex state_mutex;
@@ -287,13 +342,16 @@ private:
 	bool attempted;
 	bool exhausted;
 	std::exception_ptr terminal_exception;
-	bool deadline_initialized;
-	std::chrono::steady_clock::time_point deadline;
+	ScanResourceAccounting accounting;
 	std::vector<TypedRow> decoded;
 	uint64_t decoded_memory_bytes;
 	std::size_t offset;
 	// RFC 0021: cumulative rows emitted to DuckDB, for rows_exposed.
 	uint64_t rows_emitted;
+	const uint64_t retry_seed;
+	ExposureState current_step_exposure;
+	ExposureState terminal_exposure;
+	bool has_terminal_exposure;
 };
 
 class HttpScanExecutor final : public ScanExecutor {
@@ -469,9 +527,18 @@ private:
 } // namespace
 
 std::shared_ptr<const ScanExecutor> BuildHttpScanExecutor(std::unique_ptr<HttpTransport> transport) {
-	const HttpExecutionProfile public_profile {
-	    PlannedUrlScheme::HTTPS,        "", 0, false, false, false, PAGINATION_MAX_EXECUTION_MILLISECONDS,
-	    V1_MAX_DECODED_RECORDS_PER_PAGE};
+	const HttpExecutionProfile public_profile {PlannedUrlScheme::HTTPS,
+	                                           "",
+	                                           0,
+	                                           false,
+	                                           false,
+	                                           false,
+	                                           PAGINATION_MAX_EXECUTION_MILLISECONDS,
+	                                           V1_MAX_DECODED_RECORDS_PER_PAGE,
+	                                           RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	                                           RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	                                           RETRY_MAX_DELAY_MILLISECONDS,
+	                                           RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 	return BuildHttpScanExecutorForProfile(std::move(transport), public_profile);
 }
 
@@ -488,7 +555,13 @@ std::shared_ptr<const ScanExecutor> BuildHttpScanExecutorForProfile(std::unique_
 		throw ExecutionError(ErrorStage::POLICY, "", "HTTP executor profile is invalid");
 	}
 	if (profile.max_wall_milliseconds == 0 || profile.max_wall_milliseconds > PAGINATION_MAX_EXECUTION_MILLISECONDS ||
-	    profile.max_decoded_records == 0 || profile.max_decoded_records > V1_MAX_DECODED_RECORDS_PER_PAGE) {
+	    profile.max_decoded_records == 0 || profile.max_decoded_records > V1_MAX_DECODED_RECORDS_PER_PAGE ||
+	    profile.max_retry_attempts_per_step == 0 ||
+	    profile.max_retry_attempts_per_step > RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP ||
+	    profile.max_retry_attempts_per_scan == 0 ||
+	    profile.max_retry_attempts_per_scan > RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN ||
+	    profile.max_retry_delay_milliseconds > RETRY_MAX_DELAY_MILLISECONDS ||
+	    profile.max_retry_waiting_milliseconds_per_scan > RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN) {
 		throw ExecutionError(ErrorStage::INTERNAL, "", "HTTP executor profile is invalid");
 	}
 	try {

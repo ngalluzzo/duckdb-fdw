@@ -21,7 +21,18 @@ void Require(bool condition, const char *message) {
 }
 
 duckdb_api::internal::HttpExecutionProfile PublicProfile() {
-	return {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443, false, false, false, 30000, 100};
+	return {duckdb_api::PlannedUrlScheme::HTTPS,
+	        "api.github.com",
+	        443,
+	        false,
+	        false,
+	        false,
+	        30000,
+	        100,
+	        duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	        duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	        duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+	        duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 }
 
 void TestValidPlanProducesClosedProfileAndCanonicalBodies() {

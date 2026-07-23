@@ -111,6 +111,14 @@ CompiledPagination CompilePagination(const RestPaginationDeclaration &source) {
 	return duckdb_api::internal::CompiledModelBuilder::DisabledPagination();
 }
 
+CompiledRetryRecommendation CompileRetry(const RetryDeclaration &source) {
+	if (!source.present) {
+		return {0, 0, 0};
+	}
+	return {ParseUnsigned(source.max_attempts_per_step), ParseUnsigned(source.max_delay_milliseconds),
+	        ParseUnsigned(source.max_cumulative_waiting_milliseconds_per_scan)};
+}
+
 std::vector<CompiledQueryParameter> CompileQuery(const RelationDeclaration &relation,
                                                  const OperationDeclaration &operation,
                                                  const RestPaginationDeclaration &pagination,
@@ -225,9 +233,16 @@ bool CompileRestOperation(const RelationDeclaration &relation, const OperationDe
 	if (diagnostics.Revision() != revision) {
 		return false;
 	}
-	result.reset(new CompiledOperation(duckdb_api::internal::CompiledModelBuilder::RestOperation(
-	    source.id.value, source.selector.fallback, cardinality, std::move(pagination), std::move(request),
-	    response_source, std::move(extractor), std::move(extractor_segments), std::move(selector))));
+	if (source.retry.present) {
+		result.reset(new CompiledOperation(duckdb_api::internal::CompiledModelBuilder::RestOperationWithRetry(
+		    source.id.value, source.selector.fallback, cardinality, std::move(pagination), std::move(request),
+		    response_source, std::move(extractor), std::move(extractor_segments), std::move(selector),
+		    CompileRetry(source.retry))));
+	} else {
+		result.reset(new CompiledOperation(duckdb_api::internal::CompiledModelBuilder::RestOperation(
+		    source.id.value, source.selector.fallback, cardinality, std::move(pagination), std::move(request),
+		    response_source, std::move(extractor), std::move(extractor_segments), std::move(selector))));
+	}
 	return true;
 }
 
@@ -266,8 +281,14 @@ bool CompileGraphqlOperation(const RelationDeclaration &relation, const Operatio
 	if (diagnostics.Revision() != revision) {
 		return false;
 	}
-	result.reset(new CompiledOperation(duckdb_api::internal::CompiledModelBuilder::GraphqlOperation(
-	    source.id.value, source.selector.fallback, std::move(operation), std::move(selector))));
+	if (source.retry.present) {
+		result.reset(new CompiledOperation(duckdb_api::internal::CompiledModelBuilder::GraphqlOperationWithRetry(
+		    source.id.value, source.selector.fallback, std::move(operation), std::move(selector),
+		    CompileRetry(source.retry))));
+	} else {
+		result.reset(new CompiledOperation(duckdb_api::internal::CompiledModelBuilder::GraphqlOperation(
+		    source.id.value, source.selector.fallback, std::move(operation), std::move(selector))));
+	}
 	return true;
 }
 

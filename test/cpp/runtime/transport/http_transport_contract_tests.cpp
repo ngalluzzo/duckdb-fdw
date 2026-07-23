@@ -34,7 +34,7 @@ public:
 	                                       const duckdb_api::internal::HttpLimits &,
 	                                       duckdb_api::ExecutionControl &) const override {
 		get_count++;
-		return {200, 0, 0, "", {{}, 0}};
+		return {200, 0, 0, 0, "", {{}, 0, false}};
 	}
 
 	mutable uint64_t get_count;
@@ -49,14 +49,14 @@ public:
 	                                       const duckdb_api::internal::HttpLimits &,
 	                                       duckdb_api::ExecutionControl &) const override {
 		get_count++;
-		return {200, 0, 0, "", {{}, 0}};
+		return {200, 0, 0, 0, "", {{}, 0, false}};
 	}
 
 	duckdb_api::internal::HttpResponse Post(const duckdb_api::internal::HttpRequest &,
 	                                        const duckdb_api::internal::HttpLimits &,
 	                                        duckdb_api::ExecutionControl &) const override {
 		post_count++;
-		return {200, 0, 0, "", {{}, 0}};
+		return {200, 0, 0, 0, "", {{}, 0, false}};
 	}
 
 	mutable uint64_t get_count;

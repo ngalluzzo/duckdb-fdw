@@ -41,6 +41,7 @@ struct CurlTransferState {
 	bool socket_attempted;
 	uint64_t metadata_bytes;
 	bool header_section_complete;
+	bool retry_after_present;
 	bool transfer_encoding_seen;
 	bool transfer_chunked;
 	bool transfer_encoding_unsupported;

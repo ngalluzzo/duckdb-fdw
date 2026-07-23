@@ -35,6 +35,8 @@ PackageCompileResult CompileLocalPackageRoot(const std::string &absolute_root, c
 // schema. Compilation refuses to run if the embedded product asset drifts.
 const char *ConnectorPackageV1SchemaDigest();
 bool VerifyConnectorPackageV1SchemaAsset();
+const char *ConnectorPackageV2SchemaDigest();
+bool VerifyConnectorPackageV2SchemaAsset();
 
 } // namespace connector
 } // namespace duckdb_api

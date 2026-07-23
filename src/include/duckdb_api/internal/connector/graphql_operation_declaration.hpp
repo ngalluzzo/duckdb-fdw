@@ -26,7 +26,7 @@ void ValidateCanonicalGraphqlRelation(const std::string &relation_name, const st
 
 // Safe deterministic explanation. It excludes document bytes, runtime variable
 // and cursor values, credentials, request bodies, response data, and runtime state.
-void AppendGraphqlOperation(std::ostream &result, const CompiledGraphqlOperation &operation);
+void AppendGraphqlOperation(std::ostream &result, const CompiledOperation &operation);
 
 } // namespace internal
 } // namespace duckdb_api

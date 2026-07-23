@@ -73,6 +73,32 @@ bool FitsBigintPageSequence(std::uint64_t first_page, std::uint64_t page_increme
 	return first_page <= bigint_max && max_pages_per_scan - 1 <= (bigint_max - first_page) / page_increment;
 }
 
+void ValidateRetryContract(const CompiledOperation &operation) {
+	const auto &retry = operation.RetryRecommendation();
+	const bool protocol_enabled = operation.Protocol() == CompiledProtocol::REST ? operation.Rest().retry_enabled
+	                                                                             : operation.Graphql().retry_enabled;
+	if (operation.ReplayClass() != CompiledOperationReplayClass::REPLAYABLE_READ) {
+		if (protocol_enabled || retry.Enabled()) {
+			throw std::logic_error("non-read operation cannot carry retry authority");
+		}
+		return;
+	}
+	if (!retry.Enabled()) {
+		if (protocol_enabled || retry.max_attempts_per_step != 0 || retry.max_delay_milliseconds != 0 ||
+		    retry.max_cumulative_waiting_milliseconds_per_scan != 0) {
+			throw std::logic_error("disabled retry recommendation is contradictory");
+		}
+		return;
+	}
+	if (!protocol_enabled || retry.max_attempts_per_step < 2 ||
+	    retry.max_attempts_per_step > RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP || retry.max_delay_milliseconds == 0 ||
+	    retry.max_delay_milliseconds > RETRY_MAX_DELAY_MILLISECONDS ||
+	    retry.max_cumulative_waiting_milliseconds_per_scan == 0 ||
+	    retry.max_cumulative_waiting_milliseconds_per_scan > RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN) {
+		throw std::logic_error("retry recommendation exceeds planner authority");
+	}
+}
+
 std::vector<std::string> ProjectedColumnNames(const std::vector<CompiledColumn> &columns) {
 	std::vector<std::string> result;
 	result.reserve(columns.size());
@@ -144,7 +170,7 @@ void ValidatePagination(const CompiledOperation &operation, const CompiledResour
 	    PlanPageConsistency(pagination.Consistency()) != PlannedPageConsistency::MUTABLE ||
 	    PlanLinkRelation(pagination.LinkRelation()) != PlannedLinkRelation::NEXT ||
 	    PlanTargetScope(pagination.TargetScope()) != PlannedContinuationTargetScope::EXACT_OPERATION_ORIGIN_AND_PATH ||
-	    pagination.SupportsTotal() || pagination.SupportsResume() || rest.retry_enabled ||
+	    pagination.SupportsTotal() || pagination.SupportsResume() ||
 	    operation.cardinality != CompiledOperationCardinality::ZERO_TO_MANY ||
 	    (rest.response_source != CompiledResponseSource::JSON_PATH_MANY &&
 	     rest.response_source != CompiledResponseSource::ROOT_ARRAY)) {
@@ -282,6 +308,7 @@ void ValidateOperation(CompiledConnectorOrigin connector_origin, const CompiledR
 		throw std::logic_error("selected relation contains an unsupported base operation or resource declaration");
 	}
 	if (operation.Protocol() == CompiledProtocol::GRAPHQL) {
+		ValidateRetryContract(operation);
 		ValidateGraphqlOperationProfile(relation, operation, network_policy);
 		return;
 	}
@@ -289,7 +316,8 @@ void ValidateOperation(CompiledConnectorOrigin connector_origin, const CompiledR
 		throw std::logic_error("selected relation contains an unknown protocol alternative");
 	}
 	const auto &rest = operation.Rest();
-	if (rest.retry_enabled || rest.request.path.empty() || rest.request.path.front() != '/' ||
+	ValidateRetryContract(operation);
+	if (rest.request.path.empty() || rest.request.path.front() != '/' ||
 	    (!network_policy.allowed_origins.empty() && !IsFixedPackagePath(rest.request.path))) {
 		throw std::logic_error("selected REST operation contains an unsupported request or retry declaration");
 	}

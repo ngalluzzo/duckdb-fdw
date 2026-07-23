@@ -158,14 +158,14 @@ FailureClass ClassifyFailureClass(ErrorStage stage) {
 	throw std::logic_error("unknown ErrorStage");
 }
 
-FailureProperties HttpStatusFailureProperties(uint32_t status, bool auth_rejected) {
+FailureProperties HttpStatusFailureProperties(uint32_t status, bool auth_rejected, bool retry_after_present) {
 	FailureProperties properties {};
 	properties.phase = FailurePhase::REQUEST;
 	properties.step = 0;
 	properties.attempt = 1;
 	properties.rows_exposed = 0;
 	properties.terminating_budget = BudgetDimension::NONE;
-	if (status == 429 || status == 503) {
+	if (status == 429 || ((status == 502 || status == 503 || status == 504) && retry_after_present)) {
 		properties.failure_class = FailureClass::RATE_LIMIT;
 		properties.remote_status_class = RemoteStatusClass::RATE_LIMITED;
 		properties.replay_classification = ReplayClassification::SERVER_DIRECTED_DELAY;
@@ -209,7 +209,8 @@ BudgetDimension BudgetDimensionFromField(const std::string &field) {
 	if (field == "cumulative_waiting_milliseconds") {
 		return BudgetDimension::WAITING;
 	}
-	if (field == "response_bytes" || field == "header_bytes" || field == "decompressed_bytes") {
+	if (field == "response_bytes" || field == "header_bytes" || field == "decompressed_bytes" ||
+	    field == "request_body_bytes") {
 		return BudgetDimension::RESPONSE_BYTES;
 	}
 	return BudgetDimension::NONE;
@@ -242,6 +243,20 @@ FailureProperties EnrichFailureProperties(FailureProperties base, uint64_t step,
 	base.step = step;
 	base.attempt = 1;
 	base.rows_exposed = rows_exposed;
+	return base;
+}
+
+FailureProperties EnrichRetryFailureProperties(FailureProperties base, uint64_t step, uint64_t attempt,
+                                               uint64_t rows_exposed, uint64_t cumulative_delay_milliseconds,
+                                               ExposureState exposure_state) {
+	base.step = step;
+	base.attempt = attempt;
+	base.rows_exposed = rows_exposed;
+	base.cumulative_delay_milliseconds = cumulative_delay_milliseconds;
+	base.exposure_state = exposure_state;
+	if (exposure_state != ExposureState::UNACCEPTED) {
+		base.replay_classification = ReplayClassification::NEVER_REPLAYABLE;
+	}
 	return base;
 }
 
@@ -357,6 +372,18 @@ const char *RemoteStatusClassName(RemoteStatusClass status_class) {
 		return "graphql_errors";
 	}
 	throw std::logic_error("unknown RemoteStatusClass");
+}
+
+const char *ExposureStateName(ExposureState state) {
+	switch (state) {
+	case ExposureState::UNACCEPTED:
+		return "unaccepted";
+	case ExposureState::ACCEPTED_UNEXPOSED:
+		return "accepted_unexposed";
+	case ExposureState::EXPOSED:
+		return "exposed";
+	}
+	throw std::logic_error("unknown ExposureState");
 }
 
 OutputValueType::OutputValueType()
@@ -514,6 +541,10 @@ ExecutionControl::~ExecutionControl() noexcept {
 }
 
 BatchStream::~BatchStream() noexcept {
+}
+
+ExecutionSnapshot BatchStream::Diagnostics() const noexcept {
+	return {1, 1, 0, 0, 0, 0, 0, ExposureState::UNACCEPTED};
 }
 
 ScanExecutor::~ScanExecutor() noexcept {

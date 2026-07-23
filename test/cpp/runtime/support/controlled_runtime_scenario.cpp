@@ -60,9 +60,14 @@ ControlledRuntimeScenarioObservation ControlledRuntimeScenario::Observation() co
 }
 
 std::shared_ptr<ControlledRuntimeScenario> BuildControlledRuntimeScenario(ControlledRuntimeScenarioId scenario) {
-	auto runtime = scenario == ControlledRuntimeScenarioId::RICKANDMORTY_CHARACTER_EPISODES
-	                   ? BuildControlledHttpRuntimeForHost("rickandmortyapi.com")
-	                   : BuildControlledHttpRuntime();
+	std::shared_ptr<ControlledHttpRuntime> runtime;
+	if (scenario == ControlledRuntimeScenarioId::RICKANDMORTY_CHARACTER_EPISODES) {
+		runtime = BuildControlledHttpRuntimeForHost("rickandmortyapi.com");
+	} else if (scenario == ControlledRuntimeScenarioId::REST_RETRY_TRANSIENT_DUPLICATE) {
+		runtime = BuildControlledPackageHttpRuntime();
+	} else {
+		runtime = BuildControlledHttpRuntime();
+	}
 	uint64_t expected_request_count = 1;
 	bool has_terminal_stage = false;
 	auto terminal_stage = duckdb_api::ErrorStage::INTERNAL;
@@ -119,6 +124,17 @@ std::shared_ptr<ControlledRuntimeScenario> BuildControlledRuntimeScenario(Contro
 		    {ControlledResponse(200, GraphqlPage(GraphqlNode("null"), true, "\"runtime-owned-late\"")),
 		     ControlledResponse(429, "runtime-owned private status body")});
 		break;
+	case ControlledRuntimeScenarioId::REST_RETRY_TRANSIENT_DUPLICATE: {
+		expected_request_count = 6;
+		const auto transient =
+		    ControlledTransientTransportFailure(duckdb_api::internal::HttpTransportFailureKind::RECEIVE_FAILED);
+		const auto page =
+		    ControlledResponse(200, "[{\"id\":\"duplicate\",\"ordinal\":1},{\"id\":\"duplicate\",\"ordinal\":1},"
+		                            "{\"id\":\"other\",\"ordinal\":2}]");
+		runtime->RespondSequence(
+		    {ControlledResponse(503, ""), transient, page, ControlledResponse(503, ""), transient, page});
+		break;
+	}
 	case ControlledRuntimeScenarioId::BLOCK_UNTIL_CANCEL:
 		runtime->BlockUntilCancelled();
 		break;

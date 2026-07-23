@@ -50,6 +50,10 @@ static const uint64_t PAGINATION_OUTPUT_BATCH_ROWS = 64;
 static const uint64_t PAGINATION_MAX_EXECUTION_MILLISECONDS = 30000;
 static const uint64_t PAGINATION_MAX_CONCURRENCY = 1;
 static const uint64_t PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN = 256 * 1024;
+static const uint64_t RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP = 3;
+static const uint64_t RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN = 96;
+static const uint64_t RETRY_MAX_DELAY_MILLISECONDS = 100;
+static const uint64_t RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN = 250;
 
 // The base domain names the complete row-producing source before DuckDB-owned
 // relational operators. ROOT_ARRAY_RECORDS is one complete unpaginated
@@ -116,6 +120,25 @@ enum class PlannedOccurrencePreservation {
 enum class RelationalOwner { DUCKDB };
 enum class RelationalDelegation { NONE };
 enum class FeatureState { DISABLED, ENABLED };
+
+enum class PlannedOperationReplayClass {
+	NON_REPLAYABLE,
+	REPLAYABLE_READ,
+	REPLAYABLE_WITH_IDEMPOTENCY_MECHANISM,
+	UNKNOWN
+};
+
+// Immutable Connector recommendation plus Semantics-derived aggregate attempt
+// authority. Runtime may only narrow these fields during admission.
+struct RetryPlan {
+	uint64_t max_attempts_per_step;
+	uint64_t max_attempts_per_scan;
+	uint64_t max_delay_milliseconds;
+	uint64_t max_cumulative_waiting_milliseconds_per_scan;
+
+	bool Enabled() const noexcept;
+	bool IsWithinHardBounds() const noexcept;
+};
 
 // One package-independent typed equality and its occurrence proof. This value
 // describes relational meaning and preserves the exact conditional source ID;
@@ -462,6 +485,8 @@ public:
 	const PaginationPlan &Pagination() const;
 	FeatureState Providers() const;
 	FeatureState Retry() const;
+	PlannedOperationReplayClass ReplayClass() const noexcept;
+	const RetryPlan &RetryPolicy() const noexcept;
 	FeatureState Cache() const;
 	FeatureState Authentication() const;
 
@@ -513,6 +538,8 @@ private:
 	PaginationPlan pagination;
 	FeatureState providers;
 	FeatureState retry;
+	PlannedOperationReplayClass replay_class;
+	RetryPlan retry_policy;
 	FeatureState cache;
 	FeatureState authentication;
 	PlannedSecretReference secret_reference;

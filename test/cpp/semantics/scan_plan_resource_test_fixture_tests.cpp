@@ -39,7 +39,7 @@ void TestResourceCounterexamples(const std::string &canary) {
 	const std::vector<Case> cases = {
 	    {ResourcePlanCounterexample::REQUEST_ATTEMPTS_ZERO, &duckdb_api::ResourceBudgets::request_attempts, 0},
 	    {ResourcePlanCounterexample::REQUEST_ATTEMPTS_WIDENED, &duckdb_api::ResourceBudgets::request_attempts,
-	     duckdb_api::HOST_MAX_REQUEST_ATTEMPTS + 1},
+	     duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP + 1},
 	    {ResourcePlanCounterexample::RESPONSE_BYTES_ZERO, &duckdb_api::ResourceBudgets::response_bytes, 0},
 	    {ResourcePlanCounterexample::RESPONSE_BYTES_WIDENED, &duckdb_api::ResourceBudgets::response_bytes,
 	     duckdb_api::HOST_MAX_RESPONSE_BYTES + 1},

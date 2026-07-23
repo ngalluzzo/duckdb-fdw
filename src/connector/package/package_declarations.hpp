@@ -218,10 +218,19 @@ struct SelectorDeclaration {
 	SourceMark mark;
 };
 
+struct RetryDeclaration {
+	bool present;
+	LocatedText max_attempts_per_step;
+	LocatedText max_delay_milliseconds;
+	LocatedText max_cumulative_waiting_milliseconds_per_scan;
+	SourceMark mark;
+};
+
 struct OperationDeclaration {
 	LocatedText id;
 	LocatedText cardinality;
 	LocatedText replay_safety;
+	RetryDeclaration retry;
 	SelectorDeclaration selector;
 	bool graphql;
 	RestRequestDeclaration rest;

@@ -176,8 +176,10 @@ bool DecodeManifestSchema(const std::string &file, const FailsafeYamlNode &root,
 	manifest.relations = reader.TextSequence("relations", 1, 64);
 	manifest.mark = reader.Mark();
 
-	RequireValue(manifest.api_version, "duckdb_api/v1", PackageDiagnosticCode::UNSUPPORTED_SPEC,
-	             PackageDiagnosticPhase::SCHEMA, diagnostics);
+	if (manifest.api_version.value != "duckdb_api/v1" && manifest.api_version.value != "duckdb_api/v2") {
+		diagnostics.Add(PackageDiagnosticCode::UNSUPPORTED_SPEC, PackageDiagnosticPhase::SCHEMA,
+		                manifest.api_version.mark);
+	}
 	RequireValue(manifest.kind, "connector", PackageDiagnosticCode::UNSUPPORTED_DECLARATION,
 	             PackageDiagnosticPhase::SCHEMA, diagnostics);
 	RequireIdentifier(manifest.id, diagnostics);

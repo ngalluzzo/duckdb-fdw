@@ -60,11 +60,12 @@ public:
 	bool RequiresBearer() const;
 	const ResourceBudgets &PageBudgets() const;
 	const ScanResourceBudgets &ScanBudgets() const;
+	const RetryPlan &RetryPolicy() const;
 
 private:
 	friend std::unique_ptr<const AdmittedGraphqlRequestProfile> TryAdmitGraphqlPlan(const ScanPlan &,
 	                                                                                const HttpExecutionProfile &);
-	AdmittedGraphqlRequestProfile(const ScanPlan &plan, bool requires_bearer);
+	AdmittedGraphqlRequestProfile(const ScanPlan &plan, bool requires_bearer, RetryPlan retry);
 
 	std::string method;
 	std::string scheme;
@@ -88,6 +89,7 @@ private:
 	bool requires_bearer;
 	ResourceBudgets page_budgets;
 	ScanResourceBudgets scan_budgets;
+	RetryPlan retry;
 };
 
 std::unique_ptr<const AdmittedGraphqlRequestProfile> TryAdmitGraphqlPlan(const ScanPlan &plan,

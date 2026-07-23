@@ -293,11 +293,11 @@ void TestEquivalentMalformedInputProducesEquivalentDiagnostics(const std::string
 }
 
 void TestUnsupportedSpecFailsIdenticallyAcrossPackages(const std::string &repository_root) {
-	// duckdb_api/v2 is not an accepted spec identifier. The manifest schema
+	// duckdb_api/v3 is not an accepted spec identifier. The manifest schema
 	// rejects it at the SCHEMA phase regardless of which package profile the
 	// envelope was derived from.
 	const std::vector<MigrationReplacement> unsupported_spec {
-	    {"api_version: duckdb_api/v1", "api_version: duckdb_api/v2"}};
+	    {"api_version: duckdb_api/v1", "api_version: duckdb_api/v3"}};
 	const auto github = duckdb_api_test::CompileMigrationEnvelopeWithMutation(repository_root, MigrationProfile::GITHUB,
 	                                                                          unsupported_spec, {});
 	const auto rickandmorty = duckdb_api_test::CompileMigrationEnvelopeWithMutation(

@@ -9,13 +9,14 @@ namespace duckdb_api {
 namespace internal {
 
 AdmittedRestRequestProfile::AdmittedRestRequestProfile(const ScanPlan &plan, MaterializedRestRequest &&request,
-                                                       RequiredCredential credential_p)
+                                                       RequiredCredential credential_p, RetryPlan retry_p)
     : method("GET"), scheme(RestSchemeName(plan.Operation().Rest().origin.scheme)),
       host(plan.Operation().Rest().origin.host), port(plan.Operation().Rest().origin.port),
       path(plan.Operation().Rest().path), query_parameters(std::move(request.query)),
       headers(std::move(request.headers)), columns(std::move(request.columns)),
       response_source(plan.Operation().Rest().response_source), records_path(std::move(request.records_path)),
-      credential(std::move(credential_p)), budgets(plan.Budgets()) {
+      credential(std::move(credential_p)), budgets(plan.Budgets()), retry(retry_p) {
+	budgets.request_attempts = retry.max_attempts_per_step;
 }
 
 const std::string &AdmittedRestRequestProfile::Method() const {
@@ -63,10 +64,14 @@ const std::string &AdmittedRestRequestProfile::ApiKeyPlacementName() const {
 const ResourceBudgets &AdmittedRestRequestProfile::Budgets() const {
 	return budgets;
 }
+const RetryPlan &AdmittedRestRequestProfile::RetryPolicy() const {
+	return retry;
+}
 
 AdmittedPaginatedRestRequestProfile::AdmittedPaginatedRestRequestProfile(const ScanPlan &plan,
                                                                          MaterializedRestRequest &&request,
-                                                                         RequiredCredential credential_p)
+                                                                         RequiredCredential credential_p,
+                                                                         RetryPlan retry_p)
     : method("GET"), scheme(RestSchemeName(plan.Operation().Rest().origin.scheme)),
       host(plan.Operation().Rest().origin.host), port(plan.Operation().Rest().origin.port),
       path(plan.Operation().Rest().path), query_parameters(std::move(request.query)),
@@ -84,7 +89,9 @@ AdmittedPaginatedRestRequestProfile::AdmittedPaginatedRestRequestProfile(const S
       conditional_input(plan.ConditionalInput() == PlannedConditionalInput::VISIBILITY_PRIVATE
                             ? AdmittedPaginatedRestConditionalInput::LEGACY_VISIBILITY_PRIVATE
                             : AdmittedPaginatedRestConditionalInput::NONE),
-      page_budgets(plan.Pagination().PageBudgets()), scan_budgets(plan.Pagination().ScanBudgets()) {
+      page_budgets(plan.Pagination().PageBudgets()), scan_budgets(plan.Pagination().ScanBudgets()), retry(retry_p) {
+	page_budgets.request_attempts = retry.max_attempts_per_step;
+	scan_budgets.request_attempts = retry.max_attempts_per_scan;
 }
 
 const std::string &AdmittedPaginatedRestRequestProfile::Method() const {
@@ -161,6 +168,9 @@ const ResourceBudgets &AdmittedPaginatedRestRequestProfile::PageBudgets() const 
 }
 const ScanResourceBudgets &AdmittedPaginatedRestRequestProfile::ScanBudgets() const {
 	return scan_budgets;
+}
+const RetryPlan &AdmittedPaginatedRestRequestProfile::RetryPolicy() const {
+	return retry;
 }
 
 HttpRequest BuildAdmittedRestRequest(const AdmittedRestRequestProfile &profile) {

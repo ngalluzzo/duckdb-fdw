@@ -33,6 +33,10 @@ struct HttpExecutionProfile {
 	// Per-response record authority. The installed compatibility profile admits
 	// up to the v1 per-page ceiling; private fixtures may narrow this value.
 	uint64_t max_decoded_records;
+	uint64_t max_retry_attempts_per_step;
+	uint64_t max_retry_attempts_per_scan;
+	uint64_t max_retry_delay_milliseconds;
+	uint64_t max_retry_waiting_milliseconds_per_scan;
 };
 
 // Shared origin/network intersection used by protocol-specific admission. It

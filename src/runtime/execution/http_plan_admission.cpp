@@ -5,6 +5,7 @@
 #include "duckdb_api/internal/runtime/execution/rest_pagination_admission.hpp"
 #include "duckdb_api/internal/runtime/execution/rest_relational_admission.hpp"
 #include "duckdb_api/internal/runtime/execution/rest_request_materialization.hpp"
+#include "duckdb_api/internal/runtime/execution/retry_policy_admission.hpp"
 #include "duckdb_api/internal/runtime/policy/request_validation.hpp"
 
 #include <new>
@@ -33,7 +34,7 @@ BaseDomain ExpectedRestDomain(const PlannedRestOperation &operation, PlannedPagi
 }
 
 bool HasCommonRestPlan(const ScanPlan &plan, const HttpExecutionProfile &profile, MaterializedRestRequest &request,
-                       RequiredCredential &credential) {
+                       RequiredCredential &credential, RetryPlan &retry) {
 	if (plan.Operation().Protocol() != PlannedProtocol::REST) {
 		return false;
 	}
@@ -46,12 +47,12 @@ bool HasCommonRestPlan(const ScanPlan &plan, const HttpExecutionProfile &profile
 	       IsSafeRequestPath(operation.path) && TryAdmitRestRelationalEnvelope(plan, conditional) &&
 	       TryMaterializeRestRequest(plan, conditional, request) &&
 	       HasSupportedRestAuthority(plan, profile, credential) && plan.Providers() == FeatureState::DISABLED &&
-	       plan.Retry() == FeatureState::DISABLED && plan.Cache() == FeatureState::DISABLED;
+	       plan.Cache() == FeatureState::DISABLED && TryAdmitRetryPolicy(plan, profile, retry);
 }
 
 bool HasSingleResponseShape(const ScanPlan &plan, const HttpExecutionProfile &profile, MaterializedRestRequest &request,
-                            RequiredCredential &credential) {
-	if (!HasCommonRestPlan(plan, profile, request, credential) ||
+                            RequiredCredential &credential, RetryPlan &retry) {
+	if (!HasCommonRestPlan(plan, profile, request, credential, retry) ||
 	    plan.Pagination().Strategy() != PlannedPaginationStrategy::DISABLED ||
 	    !plan.Budgets().IsWithinLiveRestBounds() || plan.Budgets().decoded_records > profile.max_decoded_records ||
 	    plan.ConditionalInput() == PlannedConditionalInput::VISIBILITY_PRIVATE) {
@@ -66,8 +67,8 @@ bool HasSingleResponseShape(const ScanPlan &plan, const HttpExecutionProfile &pr
 }
 
 bool HasPaginatedShape(const ScanPlan &plan, const HttpExecutionProfile &profile, MaterializedRestRequest &request,
-                       RequiredCredential &credential) {
-	return HasCommonRestPlan(plan, profile, request, credential) &&
+                       RequiredCredential &credential, RetryPlan &retry) {
+	return HasCommonRestPlan(plan, profile, request, credential, retry) &&
 	       HasSupportedRestPagination(plan, profile, request.query);
 }
 
@@ -78,11 +79,12 @@ std::unique_ptr<const AdmittedRestRequestProfile> TryAdmitSingleResponseHttpPlan
 	try {
 		MaterializedRestRequest request;
 		RequiredCredential credential;
-		if (!HasSingleResponseShape(plan, profile, request, credential)) {
+		RetryPlan retry {};
+		if (!HasSingleResponseShape(plan, profile, request, credential, retry)) {
 			return {};
 		}
 		return std::unique_ptr<const AdmittedRestRequestProfile>(
-		    new AdmittedRestRequestProfile(plan, std::move(request), credential));
+		    new AdmittedRestRequestProfile(plan, std::move(request), credential, retry));
 	} catch (const std::bad_alloc &) {
 		throw ExecutionError(ErrorStage::RESOURCE, "request_profile",
 		                     "REST request profile could not be allocated within its memory budget");
@@ -98,11 +100,12 @@ TryAdmitPaginatedRestPlan(const ScanPlan &plan, const HttpExecutionProfile &prof
 	try {
 		MaterializedRestRequest request;
 		RequiredCredential credential;
-		if (!HasPaginatedShape(plan, profile, request, credential)) {
+		RetryPlan retry {};
+		if (!HasPaginatedShape(plan, profile, request, credential, retry)) {
 			return {};
 		}
 		return std::unique_ptr<const AdmittedPaginatedRestRequestProfile>(
-		    new AdmittedPaginatedRestRequestProfile(plan, std::move(request), credential));
+		    new AdmittedPaginatedRestRequestProfile(plan, std::move(request), credential, retry));
 	} catch (const std::bad_alloc &) {
 		throw ExecutionError(ErrorStage::RESOURCE, "request_profile",
 		                     "paginated REST request profile could not be allocated within its memory budget");

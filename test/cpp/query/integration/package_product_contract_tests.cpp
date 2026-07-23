@@ -35,6 +35,13 @@ void LoadRickAndMortyPackage(duckdb::Connection &connection, const std::string &
 	        "actual DuckDB did not load the Rick and Morty repository package");
 }
 
+void LoadRetryV2Package(duckdb::Connection &connection, const std::string &repository_root) {
+	auto load = connection.Query("CALL system.main.duckdb_api_load_connector(package_root := '" + repository_root +
+	                             "/test/fixtures/package_retry_v2')");
+	Require(!load->HasError() && load->RowCount() == 1 && load->GetValue(4, 0).GetValue<std::uint64_t>() == 2,
+	        "actual DuckDB did not load the retry-v2 package");
+}
+
 void CreatePackageRuntimeSecret(duckdb::Connection &connection) {
 	auto secret = connection.Query("CREATE TEMPORARY SECRET package_runtime "
 	                               "(TYPE duckdb_api, PROVIDER config, TOKEN 'package-runtime-token')");
@@ -447,6 +454,48 @@ void TestGeneratedRelationsExecuteThroughRuntime(const std::string &repository_r
 	}
 }
 
+void TestRetryRecoveryPreservesActualDuckdbRelationalResults(const std::string &repository_root) {
+	auto scenario = duckdb_api_test::BuildControlledRuntimeScenario(
+	    duckdb_api_test::ControlledRuntimeScenarioId::REST_RETRY_TRANSIENT_DUPLICATE);
+	duckdb::DuckDB database(nullptr);
+	duckdb_api_test::ConfigureIsolatedCredentialRoot(database);
+	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_retry_relational_product_test");
+	duckdb::RegisterDuckdbApiSecrets(loader);
+	duckdb::RegisterDuckdbApiPackageSurface(loader,
+	                                        duckdb_api::BuildPackageGenerationComposition(scenario->Executor()));
+	duckdb::Connection connection(database);
+	LoadRetryV2Package(connection, repository_root);
+	const std::string query = "SELECT e.event_id, e.ordinal, labels.label "
+	                          "FROM system.main.retry_demo_duplicate_events() e "
+	                          "JOIN (VALUES (1, 'one'), (2, 'two')) labels(ordinal, label) USING (ordinal) "
+	                          "WHERE e.ordinal >= 1 ORDER BY e.ordinal, e.event_id, labels.label LIMIT 3";
+	auto optimized = connection.Query(query);
+	if (optimized->HasError()) {
+		throw std::runtime_error("optimized actual-DuckDB retry query failed: " + optimized->GetError());
+	}
+	Require(optimized->RowCount() == 3,
+	        "optimized actual-DuckDB retry query did not return its duplicate-bearing joined bag");
+	auto disable = connection.Query("PRAGMA disable_optimizer");
+	Require(!disable->HasError(), "actual DuckDB could not select the forced-local optimizer path");
+	auto forced_local = connection.Query(query);
+	Require(!forced_local->HasError() && forced_local->RowCount() == optimized->RowCount(),
+	        "forced-local actual-DuckDB retry query changed result cardinality");
+	for (duckdb::idx_t row = 0; row < optimized->RowCount(); row++) {
+		for (duckdb::idx_t column = 0; column < optimized->ColumnCount(); column++) {
+			Require(optimized->GetValue(column, row) == forced_local->GetValue(column, row),
+			        "optimized and forced-local retry paths returned different ordered values");
+		}
+	}
+	Require(optimized->GetValue(0, 0).ToString() == "duplicate" &&
+	            optimized->GetValue(0, 1).ToString() == "duplicate" &&
+	            optimized->GetValue(0, 2).ToString() == "other" && optimized->GetValue(2, 0).ToString() == "one" &&
+	            optimized->GetValue(2, 2).ToString() == "two",
+	        "actual-DuckDB retry equivalence oracle lost duplicates, ordering, limit, filter, or join semantics");
+	const auto observation = scenario->Observation();
+	Require(observation.request_count == observation.expected_request_count && observation.request_count == 6,
+	        "actual-DuckDB equivalence queries did not each execute the 503/reset/success retry transcript");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -458,6 +507,7 @@ int main(int argc, char **argv) {
 		TestShortPageReachesRealExplainOutput(argv[1]);
 		TestDoubleColumnReachesRealDescribeAndSelectOutput(argv[1]);
 		TestGeneratedRelationsExecuteThroughRuntime(argv[1]);
+		TestRetryRecoveryPreservesActualDuckdbRelationalResults(argv[1]);
 		std::cout << "actual-DuckDB package product contract tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

@@ -95,6 +95,9 @@ duckdb_api::ScanPlan BuildRepositoryGithubPackageAnonymousSearchPlan(const std::
 duckdb_api::ScanPlan BuildNonGithubPackageGraphqlPlan(const std::string &absolute_repository_root);
 duckdb_api::ScanPlan BuildNonGithubPackageRestPlan(const std::string &absolute_repository_root);
 
+duckdb_api::ScanPlan BuildRetryV2PackageRestPlan(const std::string &absolute_repository_root);
+duckdb_api::ScanPlan BuildRetryV2PackageGraphqlPlan(const std::string &absolute_repository_root);
+
 // Closed one-byte widening of the otherwise valid package GraphQL plan's
 // aggregate serialized-body budget. Runtime must reject it before credential
 // placement or transport because page exhaustion cannot debit that authority.

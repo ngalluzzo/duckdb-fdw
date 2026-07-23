@@ -43,16 +43,55 @@ SelectorDeclaration DecodeSelector(const SchemaReader &reader) {
 	return selector;
 }
 
+RetryDeclaration DecodeRetry(const SchemaReader &reader) {
+	RetryDeclaration retry;
+	retry.present = true;
+	retry.mark = reader.Mark();
+	reader.RequireMapping(
+	    {"max_attempts_per_step", "max_delay_milliseconds", "max_cumulative_waiting_milliseconds_per_scan"},
+	    {"max_attempts_per_step", "max_delay_milliseconds", "max_cumulative_waiting_milliseconds_per_scan"});
+	retry.max_attempts_per_step = reader.Text("max_attempts_per_step");
+	retry.max_delay_milliseconds = reader.Text("max_delay_milliseconds");
+	retry.max_cumulative_waiting_milliseconds_per_scan = reader.Text("max_cumulative_waiting_milliseconds_per_scan");
+	std::uint64_t attempts = 0;
+	std::uint64_t delay = 0;
+	std::uint64_t waiting = 0;
+	if (!IsCanonicalUnsigned(retry.max_attempts_per_step, attempts) || attempts < 2 || attempts > 3) {
+		reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+		                         retry.max_attempts_per_step.mark);
+	}
+	if (!IsCanonicalUnsigned(retry.max_delay_milliseconds, delay) || delay == 0 || delay > 100) {
+		reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+		                         retry.max_delay_milliseconds.mark);
+	}
+	if (!IsCanonicalUnsigned(retry.max_cumulative_waiting_milliseconds_per_scan, waiting) || waiting == 0 ||
+	    waiting > 250) {
+		reader.Diagnostics().Add(PackageDiagnosticCode::UNSUPPORTED_DECLARATION, PackageDiagnosticPhase::SCHEMA,
+		                         retry.max_cumulative_waiting_milliseconds_per_scan.mark);
+	}
+	return retry;
+}
+
 } // namespace
 
-OperationDeclaration DecodeOperationSchema(const SchemaReader &reader) {
+OperationDeclaration DecodeOperationSchema(const SchemaReader &reader, bool retry_supported) {
 	OperationDeclaration operation;
-	reader.RequireMapping(
-	    {"id", "fallback", "when", "cardinality", "replay_safety", "request", "response", "pagination"},
-	    {"id", "cardinality", "replay_safety", "request"});
+	if (retry_supported) {
+		reader.RequireMapping(
+		    {"id", "fallback", "when", "cardinality", "replay_safety", "retry", "request", "response", "pagination"},
+		    {"id", "cardinality", "replay_safety", "request"});
+	} else {
+		reader.RequireMapping(
+		    {"id", "fallback", "when", "cardinality", "replay_safety", "request", "response", "pagination"},
+		    {"id", "cardinality", "replay_safety", "request"});
+	}
 	operation.id = reader.Text("id");
 	operation.cardinality = reader.Text("cardinality");
 	operation.replay_safety = reader.Text("replay_safety");
+	operation.retry.present = false;
+	if (retry_supported && reader.Field("retry") != nullptr) {
+		operation.retry = DecodeRetry(reader.Child("retry"));
+	}
 	operation.selector = DecodeSelector(reader);
 	operation.mark = reader.Mark();
 	RequireIdentifier(operation.id, reader.Diagnostics());

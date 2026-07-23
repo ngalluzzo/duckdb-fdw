@@ -40,7 +40,18 @@ duckdb_api::internal::HttpRequest InstalledRepositoryRequest(std::string target)
 
 duckdb_api::internal::HttpRequest InstalledGraphqlRequest() {
 	const duckdb_api::internal::HttpExecutionProfile host {
-	    duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443, false, false, false, 30000, 100};
+	    duckdb_api::PlannedUrlScheme::HTTPS,
+	    "api.github.com",
+	    443,
+	    false,
+	    false,
+	    false,
+	    30000,
+	    100,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	    duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+	    duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 	const auto plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("curl_policy_secret");
 	auto admitted = duckdb_api::internal::TryAdmitGraphqlPlan(plan, host);
 	if (!admitted) {

@@ -2,26 +2,42 @@
 #include "duckdb_api/execution.hpp"
 #include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
 #include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
+#include "duckdb_api/internal/runtime/execution/http_retry_controller.hpp"
 #include "runtime/support/controlled_http_transport.hpp"
 #include "semantics/support/repository_graphql_scan_plan_test_fixtures.hpp"
 #include "semantics/support/scan_plan_test_fixtures.hpp"
 #include "support/require.hpp"
 
 #include <cstdlib>
+#include <atomic>
+#include <exception>
 #include <iostream>
 #include <string>
 #include <utility>
 #include <vector>
+#include <thread>
 
 namespace {
 
 using duckdb_api_test::ControlledResponse;
+using duckdb_api_test::ControlledTransientTransportFailure;
 using duckdb_api_test::PackageGraphqlRuntimeRecipeCounterexample;
 using duckdb_api_test::PackageHttpNumericOriginCounterexample;
 using duckdb_api_test::Require;
 
 duckdb_api::internal::HttpExecutionProfile NonGithubProfile() {
-	return {duckdb_api::PlannedUrlScheme::HTTPS, "api.example.com", 8443, false, false, false, 30000, 250};
+	return {duckdb_api::PlannedUrlScheme::HTTPS,
+	        "api.example.com",
+	        8443,
+	        false,
+	        false,
+	        false,
+	        30000,
+	        250,
+	        duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	        duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	        duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+	        duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 }
 
 class NeverCancelled final : public duckdb_api::ExecutionControl {
@@ -31,12 +47,33 @@ public:
 	}
 };
 
+class AtomicCancellation final : public duckdb_api::ExecutionControl {
+public:
+	AtomicCancellation() : cancelled(false) {
+	}
+	bool IsCancellationRequested() const noexcept override {
+		return cancelled.load(std::memory_order_acquire);
+	}
+	void Request() noexcept {
+		cancelled.store(true, std::memory_order_release);
+	}
+
+private:
+	std::atomic<bool> cancelled;
+};
+
 std::string GraphqlPage(const std::string &id, bool active, bool more, const std::string &cursor) {
 	return std::string("{\"data\":{\"organization\":{\"eventFeed\":{\"nodes\":[{\"id\":\"") + id +
 	       "\",\"active\":" + (active ? "true" : "false") + ",\"stats\":{\"attendance\":" + (active ? "120" : "25") +
 	       "},\"classification\":" + (active ? "{\"label\":\"public\"}" : "null") +
 	       "}],\"pagination\":{\"more\":" + (more ? "true" : "false") +
 	       ",\"next\":" + (cursor.empty() ? "null" : "\"" + cursor + "\"") + "}}}},\"errors\":[]}";
+}
+
+std::string RetryGraphqlDuplicatePage() {
+	return "{\"data\":{\"events\":{\"nodes\":[{\"id\":\"duplicate\",\"ordinal\":1},"
+	       "{\"id\":\"duplicate\",\"ordinal\":1}],\"pageInfo\":{\"hasNextPage\":false,"
+	       "\"endCursor\":null}}},\"errors\":[]}";
 }
 
 std::string RestPage(const std::string &id, bool active) {
@@ -223,6 +260,195 @@ void TestNumericOriginsFailBeforeCredentialOrTransport(const std::string &reposi
 	}
 }
 
+void TestRetryV2RecoversDuplicateBagWithStructuredDiagnostics(const std::string &repository_root) {
+	const auto plan = duckdb_api_test::BuildRetryV2PackageRestPlan(repository_root);
+	Require(plan.Retry() == duckdb_api::FeatureState::ENABLED &&
+	            plan.ReplayClass() == duckdb_api::PlannedOperationReplayClass::REPLAYABLE_READ &&
+	            plan.RetryPolicy().max_attempts_per_step == 3 && plan.RetryPolicy().max_attempts_per_scan == 3,
+	        "compiled v2 retry recommendation did not reach the immutable scan plan");
+	const std::string duplicate_page = "[{\"id\":\"duplicate\",\"ordinal\":1},{\"id\":\"duplicate\",\"ordinal\":1}]";
+	const auto runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	runtime->RespondSequence(
+	    {ControlledResponse(503, ""),
+	     ControlledTransientTransportFailure(duckdb_api::internal::HttpTransportFailureKind::RECEIVE_FAILED),
+	     ControlledResponse(200, duplicate_page)});
+	NeverCancelled control;
+	auto stream = runtime->Executor()->Open(plan, control);
+	duckdb_api::TypedBatch recovered;
+	Require(stream->Next(control, recovered) && recovered.rows.size() == 2 &&
+	            recovered.rows[0].values[0].varchar_value == "duplicate" &&
+	            recovered.rows[1].values[0].varchar_value == "duplicate" &&
+	            recovered.rows[0].values[1].bigint_value == 1 && recovered.rows[1].values[1].bigint_value == 1,
+	        "503 -> pre-response reset -> valid page did not preserve the duplicate-bearing result bag");
+	const auto diagnostics = stream->Diagnostics();
+	Require(runtime->Observations().size() == 3 && diagnostics.effective_max_attempts_per_step == 3 &&
+	            diagnostics.effective_max_attempts_per_scan == 3 && diagnostics.aggregate_attempts == 3 &&
+	            diagnostics.cumulative_delay_milliseconds > 0 && diagnostics.cumulative_delay_milliseconds <= 25 &&
+	            diagnostics.current_step == 1 && diagnostics.exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "successful recovery did not expose admission-effective attempt, delay, step, and exposure diagnostics");
+
+	const auto baseline_runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	baseline_runtime->Respond(200, duplicate_page);
+	auto baseline_stream = baseline_runtime->Executor()->Open(plan, control);
+	duckdb_api::TypedBatch baseline;
+	Require(baseline_stream->Next(control, baseline) && baseline.rows.size() == recovered.rows.size(),
+	        "failure-free retry-v2 baseline did not produce the same bag cardinality");
+	for (std::size_t index = 0; index < baseline.rows.size(); index++) {
+		Require(baseline.rows[index].values[0].varchar_value == recovered.rows[index].values[0].varchar_value &&
+		            baseline.rows[index].values[1].bigint_value == recovered.rows[index].values[1].bigint_value,
+		        "recovered retry-v2 row differed from the fixed failure-free transcript");
+	}
+	Require(!stream->Next(control, recovered) &&
+	            stream->Diagnostics().exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "successful REST exhaustion regressed the current step's exposed diagnostics");
+	stream->Cancel();
+	Require(stream->Diagnostics().exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "post-exhaustion REST cancellation regressed exposed diagnostics");
+}
+
+void TestRetryV2CompilerGeneratedGraphqlRecovery(const std::string &repository_root) {
+	const auto plan = duckdb_api_test::BuildRetryV2PackageGraphqlPlan(repository_root);
+	auto admitted = duckdb_api::internal::TryAdmitGraphqlPlan(plan, NonGithubProfile());
+	Require(admitted && admitted->RetryPolicy().max_attempts_per_step == 3 &&
+	            admitted->RetryPolicy().max_attempts_per_scan == 6 && admitted->MaxPages() == 2 &&
+	            admitted->MaxRequestBodyBytes() == 4096 && admitted->MaxScanBodyBytes() == 24576,
+	        "compiler-generated v2 GraphQL retry/body authority was not admitted exactly");
+	const auto runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	runtime->RespondSequence(
+	    {ControlledResponse(503, ""),
+	     ControlledTransientTransportFailure(duckdb_api::internal::HttpTransportFailureKind::RECEIVE_FAILED),
+	     ControlledResponse(200, RetryGraphqlDuplicatePage())});
+	NeverCancelled control;
+	auto stream = runtime->Executor()->Open(plan, control);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 2 &&
+	            batch.rows[0].values[0].varchar_value == "duplicate" &&
+	            batch.rows[1].values[0].varchar_value == "duplicate" && batch.rows[0].values[1].bigint_value == 1 &&
+	            batch.rows[1].values[1].bigint_value == 1,
+	        "compiler-generated v2 GraphQL retry did not preserve its duplicate-bearing atomic page");
+	const auto observations = runtime->Observations();
+	Require(observations.size() == 3 && observations[0].target == "/v2/graphql" &&
+	            observations[0].body == observations[1].body && observations[1].body == observations[2].body &&
+	            observations[0].max_request_body_bytes == 4096 && stream->Diagnostics().aggregate_attempts == 3 &&
+	            stream->Diagnostics().exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "GraphQL retry changed the admitted request body, attempt ledger, or exposure state");
+	Require(!stream->Next(control, batch) && stream->Diagnostics().exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "successful GraphQL exhaustion regressed the current step's exposed diagnostics");
+}
+
+void TestRetryV2TerminalMatrixAndCancellation(const std::string &repository_root) {
+	const auto plan = duckdb_api_test::BuildRetryV2PackageRestPlan(repository_root);
+	NeverCancelled control;
+	auto require_one_attempt_failure = [&](std::vector<duckdb_api_test::ControlledHttpResponse> responses,
+	                                       duckdb_api::ErrorStage expected_stage, const std::string &label) {
+		const auto runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+		runtime->RespondSequence(std::move(responses));
+		auto stream = runtime->Executor()->Open(plan, control);
+		duckdb_api::TypedBatch batch;
+		bool failed = false;
+		try {
+			(void)stream->Next(control, batch);
+		} catch (const duckdb_api::ExecutionError &error) {
+			failed = error.Stage() == expected_stage;
+		}
+		Require(failed && runtime->Observations().size() == 1, label + " started an unsafe second attempt");
+	};
+
+	require_one_attempt_failure({ControlledResponse(429, "")}, duckdb_api::ErrorStage::HTTP_STATUS, "HTTP 429");
+	auto retry_after = ControlledResponse(503, "");
+	retry_after.retry_after_present = true;
+	require_one_attempt_failure({retry_after}, duckdb_api::ErrorStage::HTTP_STATUS, "Retry-After gateway status");
+	auto partial = ControlledTransientTransportFailure(duckdb_api::internal::HttpTransportFailureKind::RECEIVE_FAILED);
+	partial.header_bytes = 1;
+	partial.wire_response_bytes = 3;
+	partial.decompressed_response_bytes = 3;
+	partial.transport_response_status = 200;
+	const auto partial_runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	partial_runtime->RespondSequence({partial});
+	auto partial_stream = partial_runtime->Executor()->Open(plan, control);
+	duckdb_api::TypedBatch partial_batch;
+	bool partial_failed = false;
+	try {
+		(void)partial_stream->Next(control, partial_batch);
+	} catch (const duckdb_api::ExecutionError &error) {
+		partial_failed = error.Stage() == duckdb_api::ErrorStage::TRANSPORT && error.Classified() &&
+		                 error.Properties().phase == duckdb_api::FailurePhase::TRANSPORT &&
+		                 error.Properties().remote_status_class == duckdb_api::RemoteStatusClass::SUCCESS &&
+		                 error.Properties().replay_classification == duckdb_api::ReplayClassification::NEVER_REPLAYABLE;
+	}
+	Require(partial_failed && partial_runtime->Observations().size() == 1,
+	        "ambiguous partial response lost transport/status facts or started an unsafe second attempt");
+	require_one_attempt_failure({ControlledResponse(200, "{")}, duckdb_api::ErrorStage::DECODE,
+	                            "malformed response decode");
+
+	const auto exhausted_runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	exhausted_runtime->RespondSequence(
+	    {ControlledResponse(503, ""), ControlledResponse(503, ""), ControlledResponse(503, "")});
+	auto exhausted_stream = exhausted_runtime->Executor()->Open(plan, control);
+	duckdb_api::TypedBatch batch;
+	bool exhausted = false;
+	try {
+		(void)exhausted_stream->Next(control, batch);
+	} catch (const duckdb_api::ExecutionError &error) {
+		exhausted = error.Classified() && error.Properties().attempt == 3 &&
+		            error.Properties().terminating_budget == duckdb_api::BudgetDimension::ATTEMPTS &&
+		            error.Properties().cumulative_delay_milliseconds > 0 &&
+		            error.Properties().exposure_state == duckdb_api::ExposureState::UNACCEPTED;
+	}
+	Require(exhausted && exhausted_runtime->Observations().size() == 3,
+	        "retry exhaustion did not preserve the final cause and exact attempt budget");
+
+	auto header_exhausted = ControlledResponse(503, "");
+	header_exhausted.header_bytes = plan.Budgets().header_bytes;
+	const auto header_runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	header_runtime->RespondSequence({header_exhausted, ControlledResponse(200, "[]")});
+	auto header_stream = header_runtime->Executor()->Open(plan, control);
+	bool header_failed = false;
+	try {
+		(void)header_stream->Next(control, batch);
+	} catch (const duckdb_api::ExecutionError &error) {
+		header_failed = error.Stage() == duckdb_api::ErrorStage::RESOURCE && error.Field() == "header_bytes" &&
+		                error.Classified() &&
+		                error.Properties().terminating_budget == duckdb_api::BudgetDimension::RESPONSE_BYTES &&
+		                error.Properties().attempt == 1 && error.Properties().cumulative_delay_milliseconds == 0;
+	}
+	Require(header_failed && header_runtime->Observations().size() == 1,
+	        "byte-exhausted retry waited, debited, or invoked a second transport attempt");
+
+	for (uint64_t seed = 0; seed < 64; seed++) {
+		const auto delay = duckdb_api::internal::ComputeRetryDelayMilliseconds(1, 100, seed);
+		Require(delay >= 8 && delay <= 12, "deterministic retry jitter escaped the inclusive 75%-125% bound");
+	}
+
+	const auto cancelled_runtime = duckdb_api_test::BuildControlledPackageHttpRuntime();
+	cancelled_runtime->RespondSequence({ControlledResponse(503, ""), ControlledResponse(200, "[]")});
+	AtomicCancellation cancellation;
+	auto cancelled_stream = cancelled_runtime->Executor()->Open(plan, cancellation);
+	std::exception_ptr terminal;
+	std::thread worker([&]() {
+		try {
+			duckdb_api::TypedBatch ignored;
+			(void)cancelled_stream->Next(cancellation, ignored);
+		} catch (...) {
+			terminal = std::current_exception();
+		}
+	});
+	Require(cancelled_runtime->WaitForRequestCount(1, std::chrono::milliseconds(1000)),
+	        "cancellation oracle did not observe the first failed attempt");
+	cancellation.Request();
+	worker.join();
+	bool was_cancelled = false;
+	try {
+		if (terminal) {
+			std::rethrow_exception(terminal);
+		}
+	} catch (const duckdb_api::ExecutionCancelled &) {
+		was_cancelled = true;
+	}
+	Require(was_cancelled && cancelled_runtime->Observations().size() == 1,
+	        "cancellation during retry backoff started another request");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -235,6 +461,9 @@ int main(int argc, char **argv) {
 		TestPackageRecipeCounterexamplesIssueZeroRequests(repository_root);
 		TestDestinationAndAddressWideningIssueZeroRequests();
 		TestNumericOriginsFailBeforeCredentialOrTransport(repository_root);
+		TestRetryV2RecoversDuplicateBagWithStructuredDiagnostics(repository_root);
+		TestRetryV2CompilerGeneratedGraphqlRecovery(repository_root);
+		TestRetryV2TerminalMatrixAndCancellation(repository_root);
 		std::cout << "package HTTP execution tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const duckdb_api::ExecutionError &error) {

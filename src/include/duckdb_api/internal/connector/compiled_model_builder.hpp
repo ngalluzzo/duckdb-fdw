@@ -83,8 +83,18 @@ public:
 	                                       CompiledResponseSource response_source, std::string records_extractor,
 	                                       std::vector<std::string> records_extractor_segments,
 	                                       CompiledOperationSelector selector);
+	static CompiledOperation
+	RestOperationWithRetry(std::string name, bool fallback, CompiledOperationCardinality cardinality,
+	                       CompiledPagination pagination, CompiledRestRequest request,
+	                       CompiledResponseSource response_source, std::string records_extractor,
+	                       std::vector<std::string> records_extractor_segments, CompiledOperationSelector selector,
+	                       CompiledRetryRecommendation retry_recommendation);
 	static CompiledOperation GraphqlOperation(std::string name, bool fallback, CompiledGraphqlOperation operation,
 	                                          CompiledOperationSelector selector);
+	static CompiledOperation GraphqlOperationWithRetry(std::string name, bool fallback,
+	                                                   CompiledGraphqlOperation operation,
+	                                                   CompiledOperationSelector selector,
+	                                                   CompiledRetryRecommendation retry_recommendation);
 	static CompiledPredicateMapping PackagePredicate(std::string name, std::string column_name,
 	                                                 CompiledScalarValue literal, std::string operation_name,
 	                                                 std::string remote_input_name, std::string encoded_remote_value,

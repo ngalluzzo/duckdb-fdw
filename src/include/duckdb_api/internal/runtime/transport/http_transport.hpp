@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace duckdb_api {
@@ -56,14 +57,60 @@ struct HttpLimits {
 struct HttpResponseMetadata {
 	std::vector<std::string> link_field_values;
 	uint64_t retained_bytes;
+	bool retry_after_present;
 };
 
 struct HttpResponse {
 	uint32_t status;
 	uint64_t header_bytes;
 	uint64_t response_bytes;
+	uint64_t decompressed_response_bytes;
 	std::string body;
 	HttpResponseMetadata metadata;
+};
+
+enum class HttpTransportFailureKind : uint8_t {
+	COULD_NOT_RESOLVE_HOST,
+	COULD_NOT_CONNECT,
+	SEND_FAILED,
+	EMPTY_RESPONSE,
+	RECEIVE_FAILED,
+	OTHER
+};
+
+struct HttpAttemptFacts {
+	uint32_t response_status;
+	uint64_t header_bytes;
+	uint64_t response_bytes;
+	uint64_t decompressed_response_bytes;
+};
+
+// Typed, content-free one-attempt failure crossing only the Runtime-private
+// transport boundary. Retry classification consumes the closed kind and
+// structural counters; dependency strings and CURLcode ordinals never escape.
+class HttpAttemptFailure : public std::exception {
+public:
+	HttpAttemptFailure(HttpTransportFailureKind kind, HttpAttemptFacts facts, ExecutionError error)
+	    : kind(kind), facts(facts), error(std::move(error)) {
+	}
+
+	const char *what() const noexcept override {
+		return error.what();
+	}
+	HttpTransportFailureKind Kind() const noexcept {
+		return kind;
+	}
+	const HttpAttemptFacts &Facts() const noexcept {
+		return facts;
+	}
+	const ExecutionError &Error() const noexcept {
+		return error;
+	}
+
+private:
+	HttpTransportFailureKind kind;
+	HttpAttemptFacts facts;
+	ExecutionError error;
 };
 
 // Private protocol-neutral transport boundary. Execute performs one synchronous

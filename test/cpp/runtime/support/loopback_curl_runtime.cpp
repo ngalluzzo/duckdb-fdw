@@ -175,14 +175,19 @@ std::shared_ptr<LoopbackCurlRuntime> BuildLoopbackCurlRuntime(uint16_t port) {
 	auto state = std::make_shared<LoopbackCurlRuntime::State>(port);
 	(void)duckdb_api::internal::AcquireCurlProcessLifetime();
 	std::unique_ptr<duckdb_api::internal::HttpTransport> transport(new LoopbackCurlTransport(state));
-	const duckdb_api::internal::HttpExecutionProfile profile {duckdb_api::PlannedUrlScheme::HTTPS,
-	                                                          "api.github.com",
-	                                                          443,
-	                                                          false,
-	                                                          false,
-	                                                          false,
-	                                                          duckdb_api::MAX_EXECUTION_MILLISECONDS,
-	                                                          duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE};
+	const duckdb_api::internal::HttpExecutionProfile profile {
+	    duckdb_api::PlannedUrlScheme::HTTPS,
+	    "api.github.com",
+	    443,
+	    false,
+	    false,
+	    false,
+	    duckdb_api::MAX_EXECUTION_MILLISECONDS,
+	    duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	    duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+	    duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 	auto executor = duckdb_api::internal::BuildHttpScanExecutorForProfile(std::move(transport), profile);
 	return std::shared_ptr<LoopbackCurlRuntime>(new LoopbackCurlRuntime(std::move(state), std::move(executor)));
 }

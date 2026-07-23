@@ -22,14 +22,19 @@ using duckdb_api_test::Require;
 const std::string CANARY = "private-repository-canary";
 
 AdmittedPaginatedRestRequestProfile AdmitPaginatedRestProfile(bool selective) {
-	const duckdb_api::internal::HttpExecutionProfile execution_profile {duckdb_api::PlannedUrlScheme::HTTPS,
-	                                                                    "api.github.com",
-	                                                                    443,
-	                                                                    false,
-	                                                                    false,
-	                                                                    false,
-	                                                                    duckdb_api::MAX_EXECUTION_MILLISECONDS,
-	                                                                    100};
+	const duckdb_api::internal::HttpExecutionProfile execution_profile {
+	    duckdb_api::PlannedUrlScheme::HTTPS,
+	    "api.github.com",
+	    443,
+	    false,
+	    false,
+	    false,
+	    duckdb_api::MAX_EXECUTION_MILLISECONDS,
+	    100,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	    duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+	    duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 	auto admitted = duckdb_api::internal::TryAdmitPaginatedRestPlan(
 	    selective ? duckdb_api_test::BuildVisibilityPrivatePlanFixture("fixture_secret")
 	              : duckdb_api_test::BuildValidAuthenticatedRepositoriesPlanFixture("fixture_secret"),
@@ -440,14 +445,19 @@ void TestBodyDifferentialParity() {
 }
 
 AdmittedPaginatedRestRequestProfile ShortPageProfile() {
-	const duckdb_api::internal::HttpExecutionProfile execution_profile {duckdb_api::PlannedUrlScheme::HTTPS,
-	                                                                    "api.github.com",
-	                                                                    443,
-	                                                                    false,
-	                                                                    false,
-	                                                                    false,
-	                                                                    duckdb_api::MAX_EXECUTION_MILLISECONDS,
-	                                                                    100};
+	const duckdb_api::internal::HttpExecutionProfile execution_profile {
+	    duckdb_api::PlannedUrlScheme::HTTPS,
+	    "api.github.com",
+	    443,
+	    false,
+	    false,
+	    false,
+	    duckdb_api::MAX_EXECUTION_MILLISECONDS,
+	    100,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	    duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+	    duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 	auto admitted = duckdb_api::internal::TryAdmitPaginatedRestPlan(
 	    duckdb_api_test::BuildValidShortPagePlanFixture("fixture_secret"), execution_profile);
 	Require(admitted != nullptr, "short_page fixture did not pass admission");

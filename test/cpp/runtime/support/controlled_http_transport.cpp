@@ -87,6 +87,11 @@ private:
 		std::vector<std::string> link_field_values;
 		uint64_t header_bytes = 64;
 		uint64_t wire_response_bytes = 0;
+		uint64_t decompressed_response_bytes = 0;
+		bool retry_after_present = false;
+		duckdb_api::internal::HttpTransportFailureKind transport_failure_kind =
+		    duckdb_api::internal::HttpTransportFailureKind::OTHER;
+		uint32_t transport_response_status = 0;
 		bool scripted_transport_failure = false;
 		bool wait_for_bearer_barrier = false;
 		{
@@ -145,6 +150,10 @@ private:
 					scripted_transport_failure = scripted.transport_failure;
 					diagnostic = scripted.dependency_diagnostic;
 					wire_response_bytes = scripted.wire_response_bytes;
+					decompressed_response_bytes = scripted.decompressed_response_bytes;
+					retry_after_present = scripted.retry_after_present;
+					transport_failure_kind = scripted.transport_failure_kind;
+					transport_response_status = scripted.transport_response_status;
 				}
 			} else {
 				body = state->body;
@@ -174,6 +183,12 @@ private:
 		}
 
 		if (mode == ControlledHttpMode::TRANSPORT_FAILURE || scripted_transport_failure) {
+			if (scripted_transport_failure) {
+				throw duckdb_api::internal::HttpAttemptFailure(
+				    transport_failure_kind,
+				    {transport_response_status, header_bytes, wire_response_bytes, decompressed_response_bytes},
+				    duckdb_api::ExecutionError(duckdb_api::ErrorStage::TRANSPORT, "", "HTTP request failed"));
+			}
 			throw std::runtime_error(diagnostic);
 		}
 		if (mode == ControlledHttpMode::BLOCK_UNTIL_CANCEL) {
@@ -188,6 +203,9 @@ private:
 		}
 		if (wire_response_bytes == 0) {
 			wire_response_bytes = static_cast<uint64_t>(body.size());
+		}
+		if (decompressed_response_bytes == 0) {
+			decompressed_response_bytes = static_cast<uint64_t>(body.size());
 		}
 		if (wire_response_bytes > limits.max_response_bytes) {
 			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "response_bytes",
@@ -206,8 +224,12 @@ private:
 			                                 "HTTP response metadata exceeded its memory budget");
 		}
 		NotifyRuntimeFixtureResponseReady(control);
-		return {
-		    status, header_bytes, wire_response_bytes, std::move(body), {std::move(link_field_values), metadata_bytes}};
+		return {status,
+		        header_bytes,
+		        wire_response_bytes,
+		        decompressed_response_bytes,
+		        std::move(body),
+		        {std::move(link_field_values), metadata_bytes, retry_after_present}};
 	}
 
 	const std::shared_ptr<ControlledHttpRuntime::State> state;
@@ -311,11 +333,30 @@ void ControlledHttpRuntime::BlockUntilCancelled() {
 
 ControlledHttpResponse ControlledResponse(uint32_t status, std::string body,
                                           std::vector<std::string> link_field_values) {
-	return {status, std::move(body), std::move(link_field_values), 64, false, "", 0};
+	return {status,
+	        std::move(body),
+	        std::move(link_field_values),
+	        64,
+	        false,
+	        "",
+	        0,
+	        0,
+	        false,
+	        duckdb_api::internal::HttpTransportFailureKind::OTHER,
+	        0};
 }
 
 ControlledHttpResponse ControlledTransportFailure(std::string dependency_diagnostic) {
-	return {0, "", {}, 0, true, std::move(dependency_diagnostic), 0};
+	return {0,     "",
+	        {},    0,
+	        true,  std::move(dependency_diagnostic),
+	        0,     0,
+	        false, duckdb_api::internal::HttpTransportFailureKind::OTHER,
+	        0};
+}
+
+ControlledHttpResponse ControlledTransientTransportFailure(duckdb_api::internal::HttpTransportFailureKind kind) {
+	return {0, "", {}, 0, true, "private transient transport canary", 0, 0, false, kind, 0};
 }
 
 bool ControlledHttpRuntime::WaitForRequestCount(uint64_t count, std::chrono::milliseconds timeout) {
@@ -345,14 +386,19 @@ std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntime(uint64_t max_w
                                                                   uint64_t max_decoded_records) {
 	auto state = std::make_shared<ControlledHttpRuntime::State>();
 	std::unique_ptr<duckdb_api::internal::HttpTransport> transport(new ControlledTransport(state));
-	const duckdb_api::internal::HttpExecutionProfile profile {duckdb_api::PlannedUrlScheme::HTTPS,
-	                                                          "api.github.com",
-	                                                          443,
-	                                                          false,
-	                                                          false,
-	                                                          false,
-	                                                          max_wall_milliseconds,
-	                                                          max_decoded_records};
+	const duckdb_api::internal::HttpExecutionProfile profile {
+	    duckdb_api::PlannedUrlScheme::HTTPS,
+	    "api.github.com",
+	    443,
+	    false,
+	    false,
+	    false,
+	    max_wall_milliseconds,
+	    max_decoded_records,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	    duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+	    duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 	auto executor = duckdb_api::internal::BuildHttpScanExecutorForProfile(std::move(transport), profile);
 	return std::shared_ptr<ControlledHttpRuntime>(new ControlledHttpRuntime(std::move(state), std::move(executor)));
 }
@@ -360,14 +406,19 @@ std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntime(uint64_t max_w
 std::shared_ptr<ControlledHttpRuntime> BuildControlledHttpRuntimeForHost(std::string host) {
 	auto state = std::make_shared<ControlledHttpRuntime::State>();
 	std::unique_ptr<duckdb_api::internal::HttpTransport> transport(new ControlledTransport(state));
-	const duckdb_api::internal::HttpExecutionProfile profile {duckdb_api::PlannedUrlScheme::HTTPS,
-	                                                          std::move(host),
-	                                                          443,
-	                                                          false,
-	                                                          false,
-	                                                          false,
-	                                                          duckdb_api::MAX_EXECUTION_MILLISECONDS,
-	                                                          duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE};
+	const duckdb_api::internal::HttpExecutionProfile profile {
+	    duckdb_api::PlannedUrlScheme::HTTPS,
+	    std::move(host),
+	    443,
+	    false,
+	    false,
+	    false,
+	    duckdb_api::MAX_EXECUTION_MILLISECONDS,
+	    duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	    duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+	    duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 	auto executor = duckdb_api::internal::BuildHttpScanExecutorForProfile(std::move(transport), profile);
 	return std::shared_ptr<ControlledHttpRuntime>(new ControlledHttpRuntime(std::move(state), std::move(executor)));
 }

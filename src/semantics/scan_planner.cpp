@@ -36,6 +36,20 @@ PlannedColumnShape PlanColumnShape(CompiledColumnShape shape) {
 	throw std::logic_error("compiled output column contains an unknown shape");
 }
 
+PlannedOperationReplayClass PlanReplayClass(CompiledOperationReplayClass replay_class) {
+	switch (replay_class) {
+	case CompiledOperationReplayClass::NON_REPLAYABLE:
+		return PlannedOperationReplayClass::NON_REPLAYABLE;
+	case CompiledOperationReplayClass::REPLAYABLE_READ:
+		return PlannedOperationReplayClass::REPLAYABLE_READ;
+	case CompiledOperationReplayClass::REPLAYABLE_WITH_IDEMPOTENCY_MECHANISM:
+		return PlannedOperationReplayClass::REPLAYABLE_WITH_IDEMPOTENCY_MECHANISM;
+	case CompiledOperationReplayClass::UNKNOWN:
+		return PlannedOperationReplayClass::UNKNOWN;
+	}
+	throw std::logic_error("compiled operation contains an unknown replay class");
+}
+
 } // namespace
 
 PlanningError::PlanningError(PlanningErrorCode code_p, std::string safe_message)
@@ -113,7 +127,14 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 	result.runtime_limit = RelationalDelegation::NONE;
 	result.runtime_offset = RelationalDelegation::NONE;
 	result.providers = FeatureState::DISABLED;
-	result.retry = FeatureState::DISABLED;
+	result.replay_class = PlanReplayClass(operation.ReplayClass());
+	const auto &retry_recommendation = operation.RetryRecommendation();
+	const auto attempts_per_step = retry_recommendation.Enabled() ? retry_recommendation.max_attempts_per_step : 1;
+	result.retry = retry_recommendation.Enabled() ? FeatureState::ENABLED : FeatureState::DISABLED;
+	result.retry_policy = {
+	    attempts_per_step, attempts_per_step,
+	    retry_recommendation.Enabled() ? retry_recommendation.max_delay_milliseconds : 0,
+	    retry_recommendation.Enabled() ? retry_recommendation.max_cumulative_waiting_milliseconds_per_scan : 0};
 	result.cache = FeatureState::DISABLED;
 	result.secret_reference = request.secret_reference.IsPresent()
 	                              ? PlannedSecretReference(request.secret_reference.Name())
@@ -150,7 +171,7 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    ceilings.HasResponseByteNarrowing()
 		        ? std::min(ceilings.MaxResponseBytesPerPage(), connector.NetworkPolicy().max_response_bytes)
 		        : connector.NetworkPolicy().max_response_bytes;
-		result.budgets = {HOST_MAX_REQUEST_ATTEMPTS,
+		result.budgets = {attempts_per_step,
 		                  std::min(response_bytes, HOST_MAX_RESPONSE_BYTES),
 		                  HOST_MAX_HEADER_BYTES,
 		                  HOST_MAX_DECOMPRESSED_BYTES,
@@ -165,6 +186,7 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		if (!result.budgets.IsWithinLiveRestBounds()) {
 			throw std::logic_error("selected relation produced an invalid single-response resource envelope");
 		}
+		result.retry_policy.max_attempts_per_scan = attempts_per_step;
 	} else if (operation.Protocol() == CompiledProtocol::REST) {
 		const auto &rest = operation.Rest();
 		const auto &compiled_pagination = rest.pagination;
@@ -191,7 +213,7 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    std::min(std::min(ceilings.MaxResponseBytesPerPage(), connector.NetworkPolicy().max_response_bytes),
 		             PAGINATION_MAX_RESPONSE_BYTES_PER_PAGE);
 		result.pagination.page_budgets = {
-		    PAGINATION_MAX_REQUEST_ATTEMPTS_PER_PAGE,
+		    attempts_per_step,
 		    page_response_bytes,
 		    PAGINATION_MAX_HEADER_BYTES_PER_PAGE,
 		    PAGINATION_MAX_DECOMPRESSED_BYTES_PER_PAGE,
@@ -205,8 +227,11 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    0};
 
 		const auto max_pages = compiled_pagination.MaxPagesPerScan();
+		const auto aggregate_attempts = BoundedProduct(
+		    max_pages, attempts_per_step, RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN, "aggregate request-attempt scope");
+		result.retry_policy.max_attempts_per_scan = aggregate_attempts;
 		result.pagination.scan_budgets = {
-		    max_pages,
+		    aggregate_attempts,
 		    max_pages,
 		    std::min(ceilings.MaxResponseBytesPerScan(), PAGINATION_MAX_RESPONSE_BYTES_PER_SCAN),
 		    BoundedProduct(PAGINATION_MAX_HEADER_BYTES_PER_PAGE, max_pages, PAGINATION_MAX_HEADER_BYTES_PER_SCAN,
@@ -240,13 +265,16 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		const auto max_pages = graphql.cursor.max_pages_per_scan;
 		const auto page_serialized_body_bytes =
 		    std::min(graphql.max_serialized_request_body_bytes_per_request, HOST_MAX_SERIALIZED_REQUEST_BODY_BYTES);
+		const auto aggregate_attempts = BoundedProduct(
+		    max_pages, attempts_per_step, RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN, "aggregate request-attempt scope");
+		result.retry_policy.max_attempts_per_scan = aggregate_attempts;
 		// A narrower effective page cannot spend the declared scan ceiling after
 		// the cursor reaches its page limit. Keep aggregate authority reachable.
-		const auto reachable_scan_serialized_body_bytes =
-		    BoundedProduct(page_serialized_body_bytes, max_pages, PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN,
-		                   "aggregate serialized request-body scope");
+		const auto reachable_scan_serialized_body_bytes = BoundedProduct(
+		    page_serialized_body_bytes, aggregate_attempts, PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN,
+		    "aggregate serialized request-body scope");
 		result.pagination.page_budgets = {
-		    PAGINATION_MAX_REQUEST_ATTEMPTS_PER_PAGE,
+		    attempts_per_step,
 		    page_response_bytes,
 		    PAGINATION_MAX_HEADER_BYTES_PER_PAGE,
 		    PAGINATION_MAX_DECOMPRESSED_BYTES_PER_PAGE,
@@ -259,7 +287,7 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		    PAGINATION_MAX_CONCURRENCY,
 		    page_serialized_body_bytes};
 		result.pagination.scan_budgets = {
-		    max_pages,
+		    aggregate_attempts,
 		    max_pages,
 		    std::min(ceilings.MaxResponseBytesPerScan(), PAGINATION_MAX_RESPONSE_BYTES_PER_SCAN),
 		    BoundedProduct(PAGINATION_MAX_HEADER_BYTES_PER_PAGE, max_pages, PAGINATION_MAX_HEADER_BYTES_PER_SCAN,
@@ -317,6 +345,14 @@ ScanPlan ScanPlanBuilder::Build(const CompiledConnector &connector, const ScanRe
 		result.classification_reason =
 		    predicate_decision.reason +
 		    "; selected JSON-path records define the complete base domain; DuckDB retains all relational operators";
+	}
+	if (!result.retry_policy.IsWithinHardBounds() ||
+	    (result.retry == FeatureState::ENABLED) != result.retry_policy.Enabled() ||
+	    result.replay_class != PlannedOperationReplayClass::REPLAYABLE_READ ||
+	    result.retry_policy.max_attempts_per_step != result.Budgets().request_attempts ||
+	    (result.pagination.Strategy() != PlannedPaginationStrategy::DISABLED &&
+	     result.retry_policy.max_attempts_per_scan != result.pagination.ScanBudgets().request_attempts)) {
+		throw std::logic_error("selected operation produced an incoherent retry plan");
 	}
 	result.ValidatePredicateMaterialization();
 	return result;

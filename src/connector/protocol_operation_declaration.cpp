@@ -4,11 +4,16 @@
 #include "duckdb_api/internal/connector/pagination_declaration.hpp"
 
 #include <cstdio>
+#include <limits>
 #include <ostream>
 #include <stdexcept>
 #include <utility>
 
 namespace duckdb_api {
+
+bool CompiledRetryRecommendation::Enabled() const noexcept {
+	return max_attempts_per_step > 1;
+}
 
 namespace internal {
 
@@ -50,6 +55,11 @@ bool IsFixedHeaderValue(const std::string &value) {
 		}
 	}
 	return true;
+}
+
+CompiledGraphqlOperation EnableGraphqlRetry(CompiledGraphqlOperation operation) {
+	operation.retry_enabled = true;
+	return operation;
 }
 
 bool IsAsciiLower(char value) {
@@ -255,6 +265,26 @@ const char *ReplaySafetyName(CompiledReplaySafety safety) {
 	throw std::logic_error("compiled REST operation contains an unknown replay-safety declaration");
 }
 
+void ValidateRetryRecommendation(const CompiledOperation &operation, bool protocol_retry_enabled) {
+	if (operation.ReplayClass() != CompiledOperationReplayClass::REPLAYABLE_READ) {
+		throw std::invalid_argument("compiled operation has an unsupported replay class");
+	}
+	const auto &retry = operation.RetryRecommendation();
+	if (!retry.Enabled()) {
+		if (protocol_retry_enabled || retry.max_attempts_per_step != 0 || retry.max_delay_milliseconds != 0 ||
+		    retry.max_cumulative_waiting_milliseconds_per_scan != 0) {
+			throw std::invalid_argument("disabled retry recommendation is contradictory");
+		}
+		return;
+	}
+	if (!protocol_retry_enabled || retry.max_attempts_per_step < 2 || retry.max_attempts_per_step > 3 ||
+	    retry.max_delay_milliseconds == 0 || retry.max_delay_milliseconds > 100 ||
+	    retry.max_cumulative_waiting_milliseconds_per_scan == 0 ||
+	    retry.max_cumulative_waiting_milliseconds_per_scan > 250) {
+		throw std::invalid_argument("compiled retry recommendation is outside the v2 contract");
+	}
+}
+
 const char *ResponseSourceName(CompiledResponseSource source) {
 	switch (source) {
 	case CompiledResponseSource::JSON_PATH_MANY:
@@ -349,8 +379,9 @@ void ValidateRestOperation(const CompiledOperation &operation) {
 	const auto &rest = operation.Rest();
 	(void)MethodName(rest.method);
 	(void)ReplaySafetyName(rest.replay_safety);
-	if (rest.retry_enabled || rest.request.origin.port == 0 || rest.request.path.empty() ||
-	    rest.request.path.front() != '/' || rest.request.path.find_first_of("?#\r\n") != std::string::npos) {
+	ValidateRetryRecommendation(operation, rest.retry_enabled);
+	if (rest.request.origin.port == 0 || rest.request.path.empty() || rest.request.path.front() != '/' ||
+	    rest.request.path.find_first_of("?#\r\n") != std::string::npos) {
 		throw std::invalid_argument("compiled REST operation contains unsupported authority, path, or retry behavior");
 	}
 	ValidateQueryParameters(rest.request.query_parameters);
@@ -560,7 +591,8 @@ CompiledOperation::CompiledOperation(std::string name_p, bool fallback_p, Compil
     : name(std::move(name_p)), fallback(fallback_p), cardinality(cardinality_p), selector(std::move(selector_p)),
       protocol_operation(CompiledProtocolOperation::FromRest(
           CompiledRestOperation {method, replay_safety, retry_enabled, std::move(pagination), std::move(request),
-                                 response_source, records_extractor, StructuralRecordSegments(records_extractor)})) {
+                                 response_source, records_extractor, StructuralRecordSegments(records_extractor)})),
+      replay_class(CompiledOperationReplayClass::REPLAYABLE_READ), retry_recommendation {0, 0, 0} {
 	if (protocol_p != CompiledProtocol::REST) {
 		throw std::invalid_argument("REST operation construction requires the REST protocol tag");
 	}
@@ -574,13 +606,36 @@ CompiledOperation::CompiledOperation(std::string name_p, bool fallback_p, Compil
     : name(std::move(name_p)), fallback(fallback_p), cardinality(cardinality_p), selector(std::move(selector_p)),
       protocol_operation(CompiledProtocolOperation::FromRest(CompiledRestOperation {
           CompiledHttpMethod::GET, CompiledReplaySafety::SAFE, false, std::move(pagination), std::move(request),
-          response_source, std::move(records_extractor), std::move(records_extractor_segments)})) {
+          response_source, std::move(records_extractor), std::move(records_extractor_segments)})),
+      replay_class(CompiledOperationReplayClass::REPLAYABLE_READ), retry_recommendation {0, 0, 0} {
 }
 
 CompiledOperation::CompiledOperation(std::string name_p, bool fallback_p, CompiledOperationCardinality cardinality_p,
                                      CompiledGraphqlOperation operation, CompiledOperationSelector selector_p)
     : name(std::move(name_p)), fallback(fallback_p), cardinality(cardinality_p), selector(std::move(selector_p)),
-      protocol_operation(CompiledProtocolOperation::FromGraphql(std::move(operation))) {
+      protocol_operation(CompiledProtocolOperation::FromGraphql(std::move(operation))),
+      replay_class(CompiledOperationReplayClass::REPLAYABLE_READ), retry_recommendation {0, 0, 0} {
+}
+
+CompiledOperation::CompiledOperation(std::string name_p, bool fallback_p, CompiledOperationCardinality cardinality_p,
+                                     CompiledPagination pagination, CompiledRestRequest request,
+                                     CompiledResponseSource response_source, std::string records_extractor,
+                                     std::vector<std::string> records_extractor_segments,
+                                     CompiledOperationSelector selector_p,
+                                     CompiledRetryRecommendation retry_recommendation_p)
+    : name(std::move(name_p)), fallback(fallback_p), cardinality(cardinality_p), selector(std::move(selector_p)),
+      protocol_operation(CompiledProtocolOperation::FromRest(CompiledRestOperation {
+          CompiledHttpMethod::GET, CompiledReplaySafety::SAFE, true, std::move(pagination), std::move(request),
+          response_source, std::move(records_extractor), std::move(records_extractor_segments)})),
+      replay_class(CompiledOperationReplayClass::REPLAYABLE_READ), retry_recommendation(retry_recommendation_p) {
+}
+
+CompiledOperation::CompiledOperation(std::string name_p, bool fallback_p, CompiledOperationCardinality cardinality_p,
+                                     CompiledGraphqlOperation operation, CompiledOperationSelector selector_p,
+                                     CompiledRetryRecommendation retry_recommendation_p)
+    : name(std::move(name_p)), fallback(fallback_p), cardinality(cardinality_p), selector(std::move(selector_p)),
+      protocol_operation(CompiledProtocolOperation::FromGraphql(EnableGraphqlRetry(std::move(operation)))),
+      replay_class(CompiledOperationReplayClass::REPLAYABLE_READ), retry_recommendation(retry_recommendation_p) {
 }
 
 CompiledProtocol CompiledOperation::Protocol() const {
@@ -597,6 +652,14 @@ const CompiledRestOperation &CompiledOperation::Rest() const {
 
 const CompiledGraphqlOperation &CompiledOperation::Graphql() const {
 	return protocol_operation.Graphql();
+}
+
+CompiledOperationReplayClass CompiledOperation::ReplayClass() const noexcept {
+	return replay_class;
+}
+
+const CompiledRetryRecommendation &CompiledOperation::RetryRecommendation() const noexcept {
+	return retry_recommendation;
 }
 
 namespace internal {
@@ -623,7 +686,22 @@ void ValidateProtocolOperation(const CompiledOperation &operation) {
 			throw std::invalid_argument("compiled GraphQL operation requires zero-to-many cardinality");
 		}
 		ValidateHeaders(operation.Graphql().headers, "GraphQL");
+		ValidateRetryRecommendation(operation, operation.Graphql().retry_enabled);
 		ValidateGraphqlOperationValue(operation.Graphql());
+		{
+			const auto &graphql = operation.Graphql();
+			const auto attempts =
+			    operation.RetryRecommendation().Enabled() ? operation.RetryRecommendation().max_attempts_per_step : 1;
+			const auto per_page = graphql.max_serialized_request_body_bytes_per_request;
+			if (per_page > std::numeric_limits<std::uint64_t>::max() / graphql.cursor.max_pages_per_scan) {
+				throw std::invalid_argument("compiled GraphQL request-body scope overflows its page sequence");
+			}
+			const auto per_scan_without_retry = per_page * graphql.cursor.max_pages_per_scan;
+			if (per_scan_without_retry > std::numeric_limits<std::uint64_t>::max() / attempts ||
+			    graphql.max_serialized_request_body_bytes_per_scan > per_scan_without_retry * attempts) {
+				throw std::invalid_argument("compiled GraphQL request-body scope exceeds its retry sequence");
+			}
+		}
 		return;
 	}
 	throw std::invalid_argument("compiled relation contains an unknown protocol alternative");
@@ -641,7 +719,7 @@ const CompiledHttpOrigin &OperationOrigin(const CompiledOperation &operation) {
 
 void AppendProtocolOperation(std::ostream &result, const CompiledOperation &operation) {
 	if (operation.Protocol() == CompiledProtocol::GRAPHQL) {
-		AppendGraphqlOperation(result, operation.Graphql());
+		AppendGraphqlOperation(result, operation);
 		return;
 	}
 	const auto &rest = operation.Rest();
@@ -652,7 +730,14 @@ void AppendProtocolOperation(std::ostream &result, const CompiledOperation &oper
 	result << "],headers:[";
 	AppendHeaders(result, rest.request.headers);
 	result << "];response=source:" << ResponseSourceName(rest.response_source) << ",records:" << rest.records_extractor
-	       << ";features=retry:" << (rest.retry_enabled ? "enabled" : "disabled") << ",pagination:";
+	       << ";features=retry:" << (rest.retry_enabled ? "enabled" : "disabled");
+	if (rest.retry_enabled) {
+		const auto &retry = operation.RetryRecommendation();
+		result << "[attempts_per_step:" << retry.max_attempts_per_step
+		       << ",max_delay_ms:" << retry.max_delay_milliseconds
+		       << ",max_wait_ms:" << retry.max_cumulative_waiting_milliseconds_per_scan << ']';
+	}
+	result << ",pagination:";
 	AppendPagination(result, rest.pagination);
 }
 

@@ -21,17 +21,21 @@ class ContractFreezeTests(unittest.TestCase):
         cls.freeze = load_json(REPOSITORY_ROOT / "release" / "1.0.0" / "freeze.json")
         cls.inventory = load_json(REPOSITORY_ROOT / "release" / "public-surface" / "inventory.json")
         cls.schema = load_json(
+            REPOSITORY_ROOT / "src" / "connector" / "package" / "assets" / "connector-package-v2.schema.json"
+        )
+        cls.v1_schema = load_json(
             REPOSITORY_ROOT / "src" / "connector" / "package" / "assets" / "connector-package-v1.schema.json"
         )
         cls.rfc_directory = REPOSITORY_ROOT / "docs" / "rfcs"
 
-    def verify(self, freeze, schema=None) -> None:
+    def verify(self, freeze, schema=None, v1_schema=None) -> None:
         verify_freeze(
             freeze,
             inventory=self.inventory,
             schema=self.schema if schema is None else schema,
             rfc_directory=self.rfc_directory,
             repository_root=REPOSITORY_ROOT,
+            v1_schema=self.v1_schema if v1_schema is None else v1_schema,
         )
 
     def require_rejected(self, mutation, fragment: str) -> None:
@@ -48,16 +52,24 @@ class ContractFreezeTests(unittest.TestCase):
 
     def test_connector_spec_identifier_drift_fails(self) -> None:
         self.require_rejected(
-            lambda value: value["connector_spec"].__setitem__("identifier", "duckdb_api/v2"),
-            "connector-spec identifier",
+            lambda value: value["connector_spec"].__setitem__("latest_identifier", "duckdb_api/v1"),
+            "connector-spec contract",
         )
+
+    def test_v1_graphql_retry_widening_fails(self) -> None:
+        v1_schema = copy.deepcopy(self.v1_schema)
+        v1_schema["$defs"]["graphqlOperation"]["properties"]["retry"] = {
+            "$ref": "#/$defs/retryRecommendation"
+        }
+        with self.assertRaisesRegex(FreezeError, "v1 connector GraphQL schema unexpectedly enables retry"):
+            self.verify(copy.deepcopy(self.freeze), v1_schema=v1_schema)
 
     def test_declared_schema_authority_drift_fails(self) -> None:
         self.require_rejected(
-            lambda value: value["connector_spec"].__setitem__(
-                "schema_authority", "src/connector/package/assets/old.schema.json"
+            lambda value: value["connector_spec"]["schema_authorities"].__setitem__(
+                "duckdb_api/v2", "src/connector/package/assets/old.schema.json"
             ),
-            "schema_authority",
+            "connector-spec contract",
         )
 
     def test_pagination_schema_authority_drift_fails(self) -> None:
@@ -182,6 +194,18 @@ class ContractFreezeTests(unittest.TestCase):
         self.require_rejected(
             lambda value: value["failure_taxonomy"].__setitem__("indeterminate_replay_is_non_replayable", False),
             "indeterminate replay is non-replayable",
+        )
+
+    def test_bounded_retry_attempt_ceiling_drift_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["bounded_retry"].__setitem__("max_attempts_per_step", 4),
+            "bounded-retry contract",
+        )
+
+    def test_bounded_retry_partial_response_widening_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["bounded_retry"].__setitem__("partial_response", "retryable"),
+            "bounded-retry contract",
         )
 
     def test_column_shape_omission_fails(self) -> None:

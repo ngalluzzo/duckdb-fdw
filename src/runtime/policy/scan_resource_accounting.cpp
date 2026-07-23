@@ -29,7 +29,8 @@ uint64_t AddChecked(uint64_t current, uint64_t amount, uint64_t limit) {
 void ValidateProfile(const ScanResourceProfile &profile) {
 	const auto &page = profile.page;
 	const auto &scan = profile.scan;
-	if (page.request_attempts != 1 || page.active_requests != 1 || scan.active_requests != 1 ||
+	if (page.request_attempts == 0 || page.request_attempts > 3 || page.active_requests != 1 ||
+	    scan.active_requests != 1 || scan.request_attempts < scan.pages || scan.request_attempts > 96 ||
 	    page.header_bytes == 0 || page.wire_response_bytes == 0 || page.decompressed_response_bytes == 0 ||
 	    page.decoded_records == 0 || page.decoded_memory_bytes == 0 || scan.request_attempts == 0 || scan.pages == 0 ||
 	    scan.header_bytes == 0 || scan.wire_response_bytes == 0 || scan.decompressed_response_bytes == 0 ||
@@ -72,7 +73,7 @@ const std::string &ScanResourceError::SafeMessage() const noexcept {
 
 ScanResourceAccounting::ScanResourceAccounting(const ScanResourceProfile &profile_p)
     : profile(profile_p), counters {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, state(ScanResourceState::READY),
-      deadline_started(false), deadline(), active_allowance {0, 0, 0, 0, 0, 0, {}} {
+      deadline_started(false), deadline(), active_allowance {0, 0, 0, 0, 0, 0, {}}, current_step_attempts(0) {
 	ValidateProfile(profile);
 }
 
@@ -130,6 +131,27 @@ PageResourceAllowance ScanResourceAccounting::BeginPage(std::chrono::steady_cloc
 
 	try {
 		counters.pages = AddChecked(counters.pages, 1, profile.scan.pages);
+		current_step_attempts = 0;
+		state = ScanResourceState::STEP_ACTIVE;
+		return BeginAttempt(now);
+	} catch (const ScanResourceError &error) {
+		Fail(error.Field(), error.SafeMessage());
+	}
+}
+
+PageResourceAllowance ScanResourceAccounting::BeginAttempt(std::chrono::steady_clock::time_point now) {
+	if (state != ScanResourceState::STEP_ACTIVE) {
+		Fail("resource_state", "scan resource state cannot begin an attempt");
+	}
+	if (now >= deadline) {
+		Fail("wall_milliseconds", "scan exceeded its wall-time budget");
+	}
+	if (current_step_attempts >= profile.page.request_attempts ||
+	    counters.request_attempts >= profile.scan.request_attempts) {
+		Fail("request_attempts", "scan exhausted its request-attempt budget");
+	}
+	try {
+		current_step_attempts = AddChecked(current_step_attempts, 1, profile.page.request_attempts);
 		counters.request_attempts = AddChecked(counters.request_attempts, 1, profile.scan.request_attempts);
 		counters.active_requests = AddChecked(counters.active_requests, 1, profile.scan.active_requests);
 		active_allowance.header_bytes =
@@ -158,6 +180,10 @@ PageResourceAllowance ScanResourceAccounting::BeginPage(std::chrono::steady_cloc
 	}
 }
 
+PageResourceAllowance ScanResourceAccounting::BeginRetryAttempt(std::chrono::steady_clock::time_point now) {
+	return BeginAttempt(now);
+}
+
 void ScanResourceAccounting::CommitRequestBody(uint64_t serialized_request_body_bytes) {
 	if (state != ScanResourceState::REQUEST_ACTIVE || profile.page.serialized_request_body_bytes == 0) {
 		Fail("resource_state", "scan resource state cannot commit a request body");
@@ -177,7 +203,7 @@ void ScanResourceAccounting::CommitRequestBody(uint64_t serialized_request_body_
 	}
 }
 
-void ScanResourceAccounting::CommitTransport(const TransportResourceUsage &usage) {
+void ScanResourceAccounting::CommitAttemptUsage(const TransportResourceUsage &usage, ScanResourceState next_state) {
 	const bool bodyless_ready =
 	    state == ScanResourceState::REQUEST_ACTIVE && profile.page.serialized_request_body_bytes == 0;
 	const bool body_ready =
@@ -197,10 +223,18 @@ void ScanResourceAccounting::CommitTransport(const TransportResourceUsage &usage
 		    AddChecked(counters.decompressed_response_bytes, usage.decompressed_response_bytes,
 		               profile.scan.decompressed_response_bytes);
 		counters.active_requests = 0;
-		state = ScanResourceState::TRANSPORT_COMMITTED;
+		state = next_state;
 	} catch (const ScanResourceError &error) {
 		Fail(error.Field(), error.SafeMessage());
 	}
+}
+
+void ScanResourceAccounting::CommitAttemptFailure(const TransportResourceUsage &usage) {
+	CommitAttemptUsage(usage, ScanResourceState::STEP_ACTIVE);
+}
+
+void ScanResourceAccounting::CommitTransport(const TransportResourceUsage &usage) {
+	CommitAttemptUsage(usage, ScanResourceState::TRANSPORT_COMMITTED);
 }
 
 void ScanResourceAccounting::CommitDecodedPage(const DecodedPageResourceUsage &usage) {
@@ -230,15 +264,17 @@ void ScanResourceAccounting::CompletePage(bool has_next, std::chrono::steady_clo
 		Fail("wall_milliseconds", "scan exceeded its wall-time budget");
 	}
 	if (!has_next) {
+		current_step_attempts = 0;
 		state = ScanResourceState::EXHAUSTED;
 		return;
 	}
 	state = ScanResourceState::READY;
+	current_step_attempts = 0;
 	RequireReadyForNext(now);
 }
 
 void ScanResourceAccounting::CommitWait(uint64_t milliseconds) {
-	if (state == ScanResourceState::FAILED || state == ScanResourceState::EXHAUSTED) {
+	if (state != ScanResourceState::STEP_ACTIVE) {
 		Fail("resource_state", "scan resource state cannot commit a wait");
 	}
 	try {
@@ -276,6 +312,43 @@ std::chrono::steady_clock::time_point ScanResourceAccounting::Deadline() const {
 		throw ScanResourceError("resource_state", "scan deadline has not started");
 	}
 	return deadline;
+}
+
+bool ScanResourceAccounting::CanBeginRetryAttempt() const noexcept {
+	return state == ScanResourceState::STEP_ACTIVE && current_step_attempts < profile.page.request_attempts &&
+	       counters.request_attempts < profile.scan.request_attempts;
+}
+
+void ScanResourceAccounting::RequireRetryAttemptResources(uint64_t serialized_request_body_bytes) const {
+	if (!CanBeginRetryAttempt()) {
+		throw ScanResourceError("request_attempts", "scan exhausted its request-attempt budget");
+	}
+	if (counters.header_bytes >= profile.scan.header_bytes) {
+		throw ScanResourceError("header_bytes", "scan exhausted its response-header budget");
+	}
+	if (counters.wire_response_bytes >= profile.scan.wire_response_bytes) {
+		throw ScanResourceError("response_bytes", "scan exhausted its wire-response budget");
+	}
+	if (counters.decompressed_response_bytes >= profile.scan.decompressed_response_bytes) {
+		throw ScanResourceError("decompressed_bytes", "scan exhausted its decompressed-response budget");
+	}
+	if (profile.page.serialized_request_body_bytes == 0) {
+		if (serialized_request_body_bytes != 0) {
+			throw ScanResourceError("request_body_bytes", "bodyless scan cannot begin a body-bearing retry");
+		}
+		return;
+	}
+	if (serialized_request_body_bytes == 0 ||
+	    serialized_request_body_bytes > profile.page.serialized_request_body_bytes ||
+	    counters.serialized_request_body_bytes > profile.scan.serialized_request_body_bytes ||
+	    serialized_request_body_bytes >
+	        profile.scan.serialized_request_body_bytes - counters.serialized_request_body_bytes) {
+		throw ScanResourceError("request_body_bytes", "scan exhausted its serialized-request-body budget");
+	}
+}
+
+uint64_t ScanResourceAccounting::CurrentAttempt() const noexcept {
+	return current_step_attempts;
 }
 
 } // namespace internal

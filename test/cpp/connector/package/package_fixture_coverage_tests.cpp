@@ -175,6 +175,18 @@ void TestCoverageIsCompiledFactDriven(const std::string &repository_root) {
 	        "controlled package lost exact/superset proof facts or its distinct GraphQL recipe identity");
 }
 
+void TestRetryV2CoverageUsesTheSameOfflineContract(const std::string &repository_root) {
+	const auto generation = duckdb_api_test::CompileRetryV2GenerationFixture(repository_root);
+	const auto coverage = duckdb_api::connector::DerivePackageFixtureCoverage(generation);
+	Require(generation.Identity().SpecIdentifier() == "duckdb_api/v2" &&
+	            Contains(coverage, "operation_duplicate_events_list_duplicate_events_success") &&
+	            Contains(coverage, "operation_duplicate_graphql_events_list_duplicate_graphql_events_success") &&
+	            Contains(coverage, "pagination_duplicate_events_list_duplicate_events_single_page_termination") &&
+	            Contains(coverage, "graphql_duplicate_graphql_events_list_duplicate_graphql_events_"
+	                               "serialized_body_identity"),
+	        "duckdb_api/v2 retry operations were rejected or omitted by offline fixture coverage derivation");
+}
+
 void TestFixtureDiagnosticVocabulary() {
 	const duckdb_api::connector::PackageDiagnostic diagnostic(
 	    duckdb_api::connector::PackageDiagnosticCode::FIXTURE_MISMATCH,
@@ -259,6 +271,7 @@ int main(int argc, char **argv) {
 		TestFixtureContractAssetsAreByteLocked(argv[1]);
 		TestGithubCoverageMatchesAcceptedMapping(argv[1]);
 		TestCoverageIsCompiledFactDriven(argv[1]);
+		TestRetryV2CoverageUsesTheSameOfflineContract(argv[1]);
 		TestCompleteCorporaAndPreProviderBoundaries(argv[1]);
 		std::cout << "package fixture coverage tests passed" << std::endl;
 		return 0;

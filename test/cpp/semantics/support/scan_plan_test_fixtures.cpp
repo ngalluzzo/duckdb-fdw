@@ -1,4 +1,5 @@
 #include "semantics/support/scan_plan_test_fixtures.hpp"
+#include "semantics/support/scan_plan_test_access.hpp"
 #include "semantics/support/graphql_scan_plan_test_fixtures.hpp"
 
 #include <algorithm>
@@ -209,6 +210,7 @@ void ScanPlanFixtureBuilder::EnablePagination(duckdb_api::ScanPlan &plan,
 	                                duckdb_api::PAGINATION_MAX_CONCURRENCY,
 	                                0};
 	plan.budgets = plan.pagination.page_budgets;
+	plan.retry_policy = {1, max_pages, 0, 0};
 }
 
 duckdb_api::ScanPlan ScanPlanFixtureBuilder::Anonymous() {
@@ -709,6 +711,7 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string *secret_n
 	    32,    32, 64 * 1024 * 1024, 512 * 1024, 64 * 1024 * 1024, 3200, 512, 16, 2 * 1024 * 1024, 64,
 	    30000, 1,  256 * 1024};
 	plan.budgets = plan.pagination.page_budgets;
+	plan.retry_policy = {1, plan.pagination.scan_budgets.request_attempts, 0, 0};
 	if (secret_name != nullptr) {
 		RequireBearer(plan, *secret_name);
 	}
@@ -791,6 +794,10 @@ bool PackagePredicateMaterializationRejects(PackagePredicatePlanCounterexample c
 duckdb_api::ScanPlan BuildValidAuthenticatedRepositoriesPlanFixture(const std::string &exact_logical_secret_name) {
 	return ScanPlanFixtureBuilder::Repository(exact_logical_secret_name,
 	                                          duckdb_api::PredicateDecisionCategory::UNSUPPORTED, false);
+}
+
+duckdb_api::ScanPlan BuildRetryEnabledPaginatedRestPlanFixture(const std::string &exact_logical_secret_name) {
+	return ScanPlanTestAccess::RetryEnabled(BuildValidAuthenticatedRepositoriesPlanFixture(exact_logical_secret_name));
 }
 
 duckdb_api::ScanPlan BuildVisibilityPrivatePlanFixture(const std::string &exact_logical_secret_name) {

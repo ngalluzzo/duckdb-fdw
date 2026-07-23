@@ -137,7 +137,8 @@ CompiledPackageIdentity::CompiledPackageIdentity(std::string spec_identifier_p, 
                                                  std::string package_version_p, std::string package_digest_p)
     : spec_identifier(std::move(spec_identifier_p)), connector_id(std::move(connector_id_p)),
       package_version(std::move(package_version_p)), package_digest(std::move(package_digest_p)) {
-	if (spec_identifier != "duckdb_api/v1" || !IsIdentifier(connector_id) || !IsPackageDigest(package_digest)) {
+	if ((spec_identifier != "duckdb_api/v1" && spec_identifier != "duckdb_api/v2") || !IsIdentifier(connector_id) ||
+	    !IsPackageDigest(package_digest)) {
 		throw std::invalid_argument("compiled package contains an invalid stable identity");
 	}
 	(void)PackageSemVer::Parse(package_version);
@@ -449,11 +450,29 @@ CompiledOperation CompiledModelBuilder::RestOperation(
 	                         std::move(selector));
 }
 
+CompiledOperation CompiledModelBuilder::RestOperationWithRetry(
+    std::string name, bool fallback, CompiledOperationCardinality cardinality, CompiledPagination pagination,
+    CompiledRestRequest request, CompiledResponseSource response_source, std::string records_extractor,
+    std::vector<std::string> records_extractor_segments, CompiledOperationSelector selector,
+    CompiledRetryRecommendation retry_recommendation) {
+	return CompiledOperation(std::move(name), fallback, cardinality, std::move(pagination), std::move(request),
+	                         response_source, std::move(records_extractor), std::move(records_extractor_segments),
+	                         std::move(selector), retry_recommendation);
+}
+
 CompiledOperation CompiledModelBuilder::GraphqlOperation(std::string name, bool fallback,
                                                          CompiledGraphqlOperation operation,
                                                          CompiledOperationSelector selector) {
 	return CompiledOperation(std::move(name), fallback, CompiledOperationCardinality::ZERO_TO_MANY,
 	                         std::move(operation), std::move(selector));
+}
+
+CompiledOperation CompiledModelBuilder::GraphqlOperationWithRetry(std::string name, bool fallback,
+                                                                  CompiledGraphqlOperation operation,
+                                                                  CompiledOperationSelector selector,
+                                                                  CompiledRetryRecommendation retry_recommendation) {
+	return CompiledOperation(std::move(name), fallback, CompiledOperationCardinality::ZERO_TO_MANY,
+	                         std::move(operation), std::move(selector), retry_recommendation);
 }
 
 CompiledPredicateMapping CompiledModelBuilder::PackagePredicate(

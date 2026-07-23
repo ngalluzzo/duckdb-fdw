@@ -117,6 +117,29 @@ void TestOneRequestAndSchemaAlignedBatches() {
 	        "transport did not receive the applied hard budgets");
 }
 
+void TestPostExposureFailureIsNeverReplayable() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime(100);
+	runtime->Respond(200, ThreeHttpRows());
+	ManualHttpExecutionControl control;
+	auto stream = runtime->Executor()->Open(BuildAnonymousHttpPlan(), control);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 2 &&
+	            stream->Diagnostics().exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "single-page REST fixture did not cross its emission boundary");
+	std::this_thread::sleep_for(std::chrono::milliseconds(120));
+	bool failed = false;
+	try {
+		(void)stream->Next(control, batch);
+	} catch (const duckdb_api::ExecutionError &error) {
+		failed = error.Stage() == duckdb_api::ErrorStage::RESOURCE && error.Classified() &&
+		         error.Properties().exposure_state == duckdb_api::ExposureState::EXPOSED &&
+		         error.Properties().rows_exposed == 2 &&
+		         error.Properties().replay_classification == duckdb_api::ReplayClassification::NEVER_REPLAYABLE;
+	}
+	Require(failed && stream->Diagnostics().exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "post-exposure REST failure retained replay authority or regressed exposure diagnostics");
+}
+
 void TestAnonymousSinglePageIgnoresContinuationMetadata() {
 	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
 	runtime->RespondSequence({duckdb_api_test::ControlledResponse(
@@ -556,6 +579,7 @@ void TestCredentialProviderAdmissionAndFailureBoundary() {
 int main() {
 	try {
 		TestOneRequestAndSchemaAlignedBatches();
+		TestPostExposureFailureIsNeverReplayable();
 		TestAnonymousSinglePageIgnoresContinuationMetadata();
 		TestExactBearerRequestAndRootObject();
 		TestBearerTokenBoundaryPrecedesTransport();

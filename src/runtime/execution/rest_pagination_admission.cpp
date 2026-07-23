@@ -105,8 +105,13 @@ bool HasSupportedRestPagination(const ScanPlan &plan, const HttpExecutionProfile
 	                       target.page_size > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())))) {
 		return false;
 	}
-	return HasPageBindings(plan, query) && FitsEveryPageTarget(plan, query) &&
-	       pagination.ScanBudgets().request_attempts == pagination.ScanBudgets().pages &&
+	const auto page_attempts = pagination.PageBudgets().request_attempts;
+	const auto pages = pagination.ScanBudgets().pages;
+	const bool coherent_attempts = page_attempts != 0 &&
+	                               pages <= std::numeric_limits<uint64_t>::max() / page_attempts &&
+	                               pagination.ScanBudgets().request_attempts >= pages &&
+	                               pagination.ScanBudgets().request_attempts <= pages * page_attempts;
+	return HasPageBindings(plan, query) && FitsEveryPageTarget(plan, query) && coherent_attempts &&
 	       pagination.ScanBudgets().response_bytes >= pagination.PageBudgets().response_bytes &&
 	       pagination.ScanBudgets().header_bytes >= pagination.PageBudgets().header_bytes &&
 	       pagination.ScanBudgets().decompressed_bytes >= pagination.PageBudgets().decompressed_bytes &&

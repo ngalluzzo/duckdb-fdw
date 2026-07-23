@@ -507,8 +507,14 @@ std::string ScanPlan::Snapshot() const {
 	       << ",runtime_limit:" << DelegationName(runtime_limit) << ",runtime_offset:" << DelegationName(runtime_offset)
 	       << ";features=pagination:";
 	AppendPagination(result, pagination);
-	result << ",providers:" << FeatureName(providers) << ",retry:" << FeatureName(retry)
-	       << ",cache:" << FeatureName(cache) << ",authentication:" << FeatureName(authentication)
+	result << ",providers:" << FeatureName(providers) << ",retry:" << FeatureName(retry);
+	if (retry == FeatureState::ENABLED) {
+		result << "[planned_connector_recommendation:attempts_per_step:" << retry_policy.max_attempts_per_step
+		       << ",attempts_per_scan:" << retry_policy.max_attempts_per_scan
+		       << ",max_delay_ms:" << retry_policy.max_delay_milliseconds
+		       << ",max_wait_ms:" << retry_policy.max_cumulative_waiting_milliseconds_per_scan << ']';
+	}
+	result << ",cache:" << FeatureName(cache) << ",authentication:" << FeatureName(authentication)
 	       << ";secret-reference=" << secret_reference.Snapshot()
 	       << ";auth-obligation=requirement:" << RequirementName(authentication_obligation.Requirement())
 	       << ",logical_credential:"

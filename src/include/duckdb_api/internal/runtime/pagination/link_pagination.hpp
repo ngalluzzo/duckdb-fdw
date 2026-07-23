@@ -54,6 +54,7 @@ struct LinkPageTransition {
 class LinkPaginationState {
 public:
 	explicit LinkPaginationState(const AdmittedPaginatedRestRequestProfile &profile);
+	LinkPaginationState(const LinkPaginationState &) = default;
 
 	LinkPageTransition Advance(const std::vector<std::string> &link_field_values);
 	// Body-sourced continuation: an empty next_url means "no next page"

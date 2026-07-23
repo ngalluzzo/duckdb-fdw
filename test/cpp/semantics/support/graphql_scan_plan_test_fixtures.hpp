@@ -189,6 +189,7 @@ enum class GraphqlRuntimeAdmissionCounterexample {
 };
 
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name);
+duckdb_api::ScanPlan BuildRetryEnabledGraphqlScanPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidGraphqlArrayScanPlanFixture(const std::string &exact_logical_secret_name);
 duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_logical_secret_name,
                                                       GraphqlLocalResidualProfile profile);

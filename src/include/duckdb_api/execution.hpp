@@ -98,9 +98,14 @@ enum class BudgetDimension : uint8_t { NONE, TIME, ATTEMPTS, WAITING, PAGES, RES
 // not observe a remote response. Closed-set.
 enum class RemoteStatusClass : uint8_t { NONE, SUCCESS, CLIENT_ERROR, RATE_LIMITED, SERVER_ERROR, GRAPHQL_ERRORS };
 
+// Step-local visibility at the Runtime/Query boundary. Earlier-step rows may
+// already be visible while the current page remains UNACCEPTED and replayable.
+enum class ExposureState : uint8_t { UNACCEPTED, ACCEPTED_UNEXPOSED, EXPOSED };
+
 const char *FailurePhaseName(FailurePhase phase);
 const char *BudgetDimensionName(BudgetDimension dimension);
 const char *RemoteStatusClassName(RemoteStatusClass status_class);
+const char *ExposureStateName(ExposureState state);
 
 // RFC 0021: the additive structured failure-properties field. Every member is a
 // closed code, ordinal, or checked count — never content (no body, document,
@@ -122,6 +127,8 @@ struct FailureProperties {
 	std::uint64_t rows_exposed;
 	RemoteStatusClass remote_status_class;
 	BudgetDimension terminating_budget;
+	std::uint64_t cumulative_delay_milliseconds;
+	ExposureState exposure_state;
 };
 
 class ExecutionError : public std::exception {
@@ -162,7 +169,7 @@ FailureClass ClassifyFailureClass(ErrorStage stage);
 // (e.g. an anonymous request the endpoint refused). 429/503 -> RATE_LIMIT with a
 // server-directed delay. step and rows_exposed are zero (a status is observed
 // before decode, so no rows were exposed); the scan catch boundary enriches them.
-FailureProperties HttpStatusFailureProperties(uint32_t status, bool auth_rejected);
+FailureProperties HttpStatusFailureProperties(uint32_t status, bool auth_rejected, bool retry_after_present = false);
 
 // RFC 0021: combine declared replay safety with exposure state into the replay
 // classification for a traversal step or terminal failure. Codifies the
@@ -193,6 +200,10 @@ FailureProperties FailurePropertiesFromError(const ExecutionError &error);
 // classification. Preserves the throw site's class/phase/replay/
 // remote_status/terminating_budget; only step/attempt/rows_exposed are set.
 FailureProperties EnrichFailureProperties(FailureProperties base, uint64_t step, uint64_t rows_exposed);
+
+FailureProperties EnrichRetryFailureProperties(FailureProperties base, uint64_t step, uint64_t attempt,
+                                               uint64_t rows_exposed, uint64_t cumulative_delay_milliseconds,
+                                               ExposureState exposure_state);
 
 // Protocol-neutral cancellation marker. The adapter translates it exactly
 // once into the host engine's interruption type.
@@ -311,12 +322,26 @@ struct TypedBatch {
 // never be reported as exhaustion, including after earlier batches crossed the
 // streaming boundary. Cancel and Close are idempotent, non-throwing lifecycle
 // signals.
+struct ExecutionSnapshot {
+	std::uint64_t effective_max_attempts_per_step;
+	std::uint64_t effective_max_attempts_per_scan;
+	std::uint64_t effective_max_delay_milliseconds;
+	std::uint64_t effective_max_cumulative_waiting_milliseconds_per_scan;
+	std::uint64_t aggregate_attempts;
+	std::uint64_t cumulative_delay_milliseconds;
+	std::uint64_t current_step;
+	ExposureState exposure_state;
+};
+
 class BatchStream {
 public:
 	virtual ~BatchStream() noexcept;
 	virtual bool Next(ExecutionControl &control, TypedBatch &batch) = 0;
 	virtual void Cancel() noexcept = 0;
 	virtual void Close() noexcept = 0;
+	// Content-free, best-effort execution state. The default keeps independent
+	// compatibility streams source-compatible and reports one-attempt authority.
+	virtual ExecutionSnapshot Diagnostics() const noexcept;
 };
 
 // Immutable Remote Runtime service retained by the adapter. Open preserves the

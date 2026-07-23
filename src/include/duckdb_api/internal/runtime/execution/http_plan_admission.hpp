@@ -60,11 +60,13 @@ public:
 	// query-parameter name. Never the credential value.
 	const std::string &ApiKeyPlacementName() const;
 	const ResourceBudgets &Budgets() const;
+	const RetryPlan &RetryPolicy() const;
 
 private:
 	friend std::unique_ptr<const AdmittedRestRequestProfile>
 	TryAdmitSingleResponseHttpPlan(const ScanPlan &, const HttpExecutionProfile &);
-	AdmittedRestRequestProfile(const ScanPlan &plan, MaterializedRestRequest &&request, RequiredCredential credential);
+	AdmittedRestRequestProfile(const ScanPlan &plan, MaterializedRestRequest &&request, RequiredCredential credential,
+	                           RetryPlan retry);
 
 	std::string method;
 	std::string scheme;
@@ -78,6 +80,7 @@ private:
 	std::vector<std::string> records_path;
 	RequiredCredential credential;
 	ResourceBudgets budgets;
+	RetryPlan retry;
 };
 
 // Immutable authority for a sequential Link traversal. Query order and every
@@ -121,12 +124,13 @@ public:
 	AdmittedPaginatedRestConditionalInput ConditionalInput() const;
 	const ResourceBudgets &PageBudgets() const;
 	const ScanResourceBudgets &ScanBudgets() const;
+	const RetryPlan &RetryPolicy() const;
 
 private:
 	friend std::unique_ptr<const AdmittedPaginatedRestRequestProfile>
 	TryAdmitPaginatedRestPlan(const ScanPlan &, const HttpExecutionProfile &);
 	AdmittedPaginatedRestRequestProfile(const ScanPlan &plan, MaterializedRestRequest &&request,
-	                                    RequiredCredential credential);
+	                                    RequiredCredential credential, RetryPlan retry);
 
 	std::string method;
 	std::string scheme;
@@ -150,6 +154,7 @@ private:
 	AdmittedPaginatedRestConditionalInput conditional_input;
 	ResourceBudgets page_budgets;
 	ScanResourceBudgets scan_budgets;
+	RetryPlan retry;
 };
 
 std::unique_ptr<const AdmittedRestRequestProfile> TryAdmitSingleResponseHttpPlan(const ScanPlan &plan,

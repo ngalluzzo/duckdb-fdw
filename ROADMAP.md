@@ -59,7 +59,7 @@ Four version domains remain distinct:
 | Domain | Contract |
 | --- | --- |
 | Project and extension version | SemVer for the documented duckdb-fdw product surface and observable behavior |
-| Connector specification version | Compatibility identifier for the declarative language, currently `duckdb_api/draft` |
+| Connector specification version | Compatibility identifier for the declarative language: frozen one-attempt `duckdb_api/v1` and retry-capable `duckdb_api/v2` |
 | Connector package version | Independent SemVer for one connector's relations, inputs, policies, schemas, and upstream adaptations |
 | DuckDB compatibility | Tested matrix of DuckDB release, integration profile, platform, architecture, and installation mode |
 
@@ -505,7 +505,22 @@ rotation, persistent restart and exclusive locking, admission-before-read,
 snapshot retention across pagination, cancellation and shutdown, corruption
 and bounds failures, full redaction, and independent credential/concurrency/
 lifecycle review. OAuth, arbitrary executable or external providers, automatic
-retry, rate-limit waiting, and shared result caching remain excluded.
+retry before the next milestone, rate-limit waiting, and shared result caching
+remain excluded.
+
+### `0.16.0` — bounded replay-safe retry
+
+An author may publish a package-major `duckdb_api/v2` generation that opts a
+proved read-only REST or GraphQL operation into bounded automatic retry.
+Runtime repeats only an unaccepted traversal step for closed no-response
+transport failures or complete `502`/`503`/`504` responses without
+`Retry-After`, using one credential snapshot, fresh destination-policy checks,
+at most three attempts per step, at most 96 attempts per scan, bounded jittered
+delay, one deadline, and cancellable waiting. Page/cursor state commits only
+after full response, decode, schema, continuation, resource, and buffer
+acceptance; exposed rows are never replayed. V1 remains one-attempt, while
+`429`, server-directed waiting, writes, caching, parallel pages, and resume
+remain excluded.
 
 ### `1.0.0-rc.N` — compatibility rehearsal
 
@@ -569,7 +584,7 @@ Unless separately accepted and proven, the `1.0.0` guarantee excludes:
   trust infrastructure; the bounded registry of explicitly loaded local
   packages is included;
 - Tier 2 JQ-compatible transforms, Tier 3 code, column providers, partitions,
-  automatic retry or rate-limit waiting, author-configurable cache or
+  rate-limit waiting or proactive quota scheduling, author-configurable cache or
   single-flight behavior, importers, and authenticators beyond anonymous and
   capability-scoped bearer behavior unless a later accepted RFC and pre-freeze
   evidence add them;

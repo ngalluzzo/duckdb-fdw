@@ -415,9 +415,11 @@ const std::string &PackageFixtureCoverage::OrderedDigest() const noexcept {
 }
 
 PackageFixtureCoverage DerivePackageFixtureCoverage(const CompiledPackageGeneration &generation) {
-	if (generation.Identity().SpecIdentifier() != "duckdb_api/v1" ||
+	const auto &spec = generation.Identity().SpecIdentifier();
+	if ((spec != "duckdb_api/v1" && spec != "duckdb_api/v2") ||
 	    generation.Connector().Origin() != CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA) {
-		throw std::invalid_argument("fixture coverage requires one compiled duckdb_api/v1 package generation");
+		throw std::invalid_argument(
+		    "fixture coverage requires one compiled duckdb_api/v1 or duckdb_api/v2 package generation");
 	}
 	CoverageBuilder coverage;
 	const auto &connector = generation.Connector();

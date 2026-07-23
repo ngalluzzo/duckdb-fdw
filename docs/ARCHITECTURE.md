@@ -150,7 +150,8 @@ Compilation performs local work only:
 4. Repeat directory and file identity capture and reject any change.
 5. Compute the length-framed source digest.
 6. Parse the bounded YAML failsafe subset with source spans.
-7. Apply the exact byte-copied v1 schemas.
+7. Apply the exact byte-copied v1 or v2 schemas selected by the declared
+   specification identifier.
 8. Validate identifiers, references, types, selectors, auth, policy, resources,
    predicates, REST, and generated GraphQL.
 9. Construct and validate the complete immutable generation.
@@ -340,10 +341,11 @@ target. It cannot change scheme, host, port, path, credential placement, fixed
 query fields, document, operation, or resource policy.
 
 Pagination is sequential unless independence and consistency are proven. The
-v1 package contract supports only sequential mutable Link or forward Relay
-cursor traversal with one page in flight. No prefetch, parallel page work,
-retry, cache, resume, deduplication, stable ordering, or snapshot claim is
-implied.
+package contract supports only sequential mutable Link or forward Relay cursor
+traversal with one page in flight. No prefetch, parallel page work, cache,
+resume, deduplication, stable ordering, or snapshot claim is implied. An
+explicitly recommended v2 safe-read retry repeats only the current unaccepted
+page.
 
 Response decoding is strict and lossless for the planned structural type.
 Arrays preserve child order, duplicates, empty lists, outer NULL, and admitted
@@ -376,9 +378,12 @@ destructors are non-throwing and idempotent. Terminal failure, cancellation,
 early close, or destruction releases transport, response, decoded page,
 continuation, authorization, and admitted-plan state.
 
-V1 performs one attempt. A declaration of replay safety is necessary but not
-sufficient for a future retry; an uncommitted replay unit would also be
-required.
+V1 performs one attempt. V2 retry additionally requires a compiled
+`replayable_read`, an enabled bounded recommendation, an admission-effective
+host policy, and an unaccepted/unexposed current traversal step. Runtime
+buffers, decodes, validates, continuation-checks, resource-accepts, and
+installs the complete page before Query can observe a row. Failed attempts
+never advance current Link/cursor state.
 
 ## Atomic catalog publication
 
@@ -434,7 +439,7 @@ messages.
 Explanation is derived from typed immutable facts and is never parsed for
 authority. It distinguishes operation/protocol identity, predicate accuracy,
 residual owner, pagination strategy, resource envelope, and safe provenance
-without claiming unsupported ordering, snapshot, retry, cache, or remote
+without claiming unsupported ordering, snapshot, cache, or remote
 relational behavior.
 
 The scan resilience accounting model (RFC 0021) is carried as additive
@@ -445,9 +450,12 @@ transport attempt; one primary failure class per terminal failure; an explicit
 replay classification combining the plan's declared replay safety with Runtime
 exposure state; and one aggregate scan budget that attempts and future waiting
 debit rather than reset. The effective resilience and budget policy (declared
-replay safety; retry, rate-limit waiting, and cache all disabled in v1) is
-explainable. No resilience mechanism is enabled; indeterminate replay safety is
-non-replayable. The closed primary-class and replay-classification vocabularies
+replay safety and the planned connector recommendation) is explainable. V1
+renders retry disabled; Runtime diagnostics authoritatively report the later
+hard/operator/connector minimum, aggregate attempts, cumulative delay, current
+step, and `unaccepted`/`accepted_unexposed`/`exposed`. Rate-limit waiting and
+cache remain disabled; indeterminate replay safety is non-replayable. The
+closed primary-class and replay-classification vocabularies
 are bound to `release/1.0.0/freeze.json` and enforced by
 `scripts/contract_freeze.py`.
 
@@ -457,7 +465,8 @@ The implementation is a native C++ DuckDB table-function extension on the
 exact tested DuckDB and platform dependency cell. The compiled types and
 private builders are not a public binary plugin ABI.
 
-`duckdb_api/v1` is the stable local-package syntax family defined by
+`duckdb_api/v1` is the frozen local-package syntax family and `duckdb_api/v2`
+is its retry-only additive successor, both defined by
 [CONNECTOR_SPECIFICATIONS.md](CONNECTOR_SPECIFICATIONS.md). Package SemVer
 does not grant execution authority. Reload compatibility is a normalized
 compiled-descriptor decision, not an inference from version alone.
@@ -466,7 +475,8 @@ The product is read-only and static-schema. It does not promise writes,
 cross-source transactions, snapshot consistency, remote ordering, arbitrary
 GraphQL, dynamic schema discovery, package distribution, automatic connector
 discovery, OpenAPI import, custom native/WASM code, providers, partitions,
-retries, caching, or a custom DuckDB storage catalog. Adding those capabilities
+retries beyond RFC 0024's closed safe-read matrix, caching, or a custom DuckDB
+storage catalog. Adding those capabilities
 requires an accepted contract and executable evidence; implementations must
 reject unsupported declarations rather than silently ignore them.
 

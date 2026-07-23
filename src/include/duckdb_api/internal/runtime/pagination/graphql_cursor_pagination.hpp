@@ -42,6 +42,7 @@ private:
 class GraphqlCursorState {
 public:
 	GraphqlCursorState(uint64_t max_pages, uint64_t max_cursor_bytes);
+	GraphqlCursorState(const GraphqlCursorState &other);
 
 	const std::string *CurrentCursor() const noexcept;
 	uint64_t RequestedPages() const noexcept;

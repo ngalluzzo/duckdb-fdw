@@ -397,7 +397,7 @@ void MutateCompilerDiagnostic(std::vector<SemanticSourceFile> &files, const Comp
 	auto &manifest_source = FindSource(files, "connector.yaml");
 	const auto manifest = ParseSource(manifest_source, cancellation);
 	if (diagnostic == "DUCKDB_API_UNSUPPORTED_SPEC") {
-		ReplaceScalar(manifest_source, Required(manifest, "api_version"), "duckdb_api/v2");
+		ReplaceScalar(manifest_source, Required(manifest, "api_version"), "duckdb_api/v3");
 	} else if (diagnostic == "DUCKDB_API_UNSUPPORTED_DIALECT") {
 		ReplaceScalar(manifest_source, Required(manifest, "extractor_dialect"), "duckdb_api/unsupported");
 	} else if (diagnostic == "DUCKDB_API_MALFORMED_YAML") {

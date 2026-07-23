@@ -49,9 +49,9 @@ void CommitEmptyPage(ScanResourceAccounting &accounting) {
 
 void TestProfileValidation() {
 	auto invalid = Profile();
-	invalid.page.request_attempts = 2;
+	invalid.page.request_attempts = 4;
 	RequireError([&]() { ScanResourceAccounting accounting(invalid); }, "resource_profile",
-	             "multiple per-page attempts");
+	             "attempts above the retry hard ceiling");
 
 	invalid = Profile();
 	invalid.page.active_requests = 2;
@@ -84,6 +84,74 @@ void TestProfileValidation() {
 	invalid.scan.serialized_request_body_bytes = 24;
 	RequireError([&]() { ScanResourceAccounting accounting(invalid); }, "resource_profile",
 	             "body scan authority without page authority");
+}
+
+void TestRetryAttemptLifecycle() {
+	auto profile = Profile();
+	profile.page.request_attempts = 3;
+	profile.scan.request_attempts = 5;
+	profile.scan.cumulative_waiting_milliseconds = 20;
+	const Clock::time_point start;
+	ScanResourceAccounting accounting(profile);
+	const auto first = accounting.BeginPage(start);
+	accounting.CommitAttemptFailure({1, 2, 3});
+	Require(accounting.State() == ScanResourceState::STEP_ACTIVE && accounting.Counters().pages == 1 &&
+	            accounting.Counters().request_attempts == 1 && accounting.Counters().header_bytes == 1 &&
+	            accounting.CanBeginRetryAttempt(),
+	        "retryable attempt failure did not preserve one active page and cumulative usage");
+	accounting.CommitWait(5);
+	const auto second = accounting.BeginRetryAttempt(start + std::chrono::milliseconds(5));
+	Require(second.deadline == first.deadline && accounting.Counters().pages == 1 &&
+	            accounting.Counters().request_attempts == 2 && accounting.CurrentAttempt() == 2,
+	        "retry attempt reset the page, deadline, or attempt counters");
+	accounting.CommitAttemptFailure({2, 3, 4});
+	accounting.CommitWait(5);
+	accounting.BeginRetryAttempt(start + std::chrono::milliseconds(10));
+	accounting.CommitTransport({3, 4, 5});
+	accounting.CommitDecodedPage({2, 10});
+	accounting.CompletePage(true, start + std::chrono::milliseconds(11));
+	Require(accounting.Counters().pages == 1 && accounting.Counters().request_attempts == 3 &&
+	            accounting.Counters().header_bytes == 6 && accounting.Counters().wire_response_bytes == 9 &&
+	            accounting.Counters().decompressed_response_bytes == 12 &&
+	            accounting.Counters().cumulative_waiting_milliseconds == 10,
+	        "retry attempt accounting did not remain additive");
+	accounting.BeginPage(start + std::chrono::milliseconds(12));
+	Require(accounting.Counters().pages == 2 && accounting.Counters().request_attempts == 4 &&
+	            accounting.CurrentAttempt() == 1,
+	        "next traversal step inherited retry ordinal or debited the wrong aggregate");
+	accounting.AbortPage();
+}
+
+void TestRetryRequiresRemainingByteAndBodyAuthority() {
+	const Clock::time_point start;
+	auto byte_profile = Profile();
+	byte_profile.page.request_attempts = 3;
+	byte_profile.scan.request_attempts = 3;
+	byte_profile.scan.pages = 1;
+	byte_profile.scan.header_bytes = 1;
+	ScanResourceAccounting bytes(byte_profile);
+	bytes.BeginPage(start);
+	bytes.CommitAttemptFailure({1, 0, 0});
+	RequireError([&]() { bytes.RequireRetryAttemptResources(0); }, "header_bytes",
+	             "retry at the exact aggregate header boundary");
+	Require(bytes.Counters().request_attempts == 1 && bytes.Counters().cumulative_waiting_milliseconds == 0,
+	        "byte-exhausted retry debited another attempt or wait");
+
+	auto body_profile = Profile();
+	body_profile.page.request_attempts = 3;
+	body_profile.scan.request_attempts = 3;
+	body_profile.scan.pages = 1;
+	body_profile.page.serialized_request_body_bytes = 8;
+	body_profile.scan.serialized_request_body_bytes = 8;
+	ScanResourceAccounting body(body_profile);
+	body.BeginPage(start);
+	body.CommitRequestBody(8);
+	body.CommitAttemptFailure({0, 0, 0});
+	RequireError([&]() { body.RequireRetryAttemptResources(8); }, "request_body_bytes",
+	             "retry at the exact aggregate request-body boundary");
+	Require(body.Counters().request_attempts == 1 && body.Counters().serialized_request_body_bytes == 8 &&
+	            body.Counters().cumulative_waiting_milliseconds == 0,
+	        "body-exhausted retry debited another attempt, body, or wait");
 }
 
 void TestExactSequentialLifecycle() {
@@ -185,12 +253,16 @@ void TestAdvertisedNextFailsAtScanCeilings() {
 	        "page-ceiling failure did not preserve the reserved page debit");
 
 	auto attempt_limited = Profile();
-	attempt_limited.scan.request_attempts = 1;
+	attempt_limited.page.request_attempts = 2;
+	attempt_limited.scan.request_attempts = 2;
+	attempt_limited.scan.pages = 2;
 	ScanResourceAccounting attempts(attempt_limited);
 	attempts.BeginPage(start);
+	attempts.CommitAttemptFailure({0, 0, 0});
+	attempts.BeginRetryAttempt(start);
 	CommitEmptyPage(attempts);
 	RequireError([&]() { attempts.CompletePage(true, start); }, "request_attempts", "next page at attempt ceiling");
-	Require(attempts.State() == ScanResourceState::FAILED && attempts.Counters().request_attempts == 1,
+	Require(attempts.State() == ScanResourceState::FAILED && attempts.Counters().request_attempts == 2,
 	        "attempt-ceiling failure did not preserve the reserved attempt debit");
 
 	auto byte_limited = Profile();
@@ -355,6 +427,7 @@ void TestCumulativeWaitingBudget() {
 	const Clock::time_point start;
 	ScanResourceAccounting zero_wait(Profile());
 	zero_wait.BeginPage(start);
+	zero_wait.CommitAttemptFailure({0, 0, 0});
 	const auto deadline_before = zero_wait.Deadline();
 	zero_wait.CommitWait(0);
 	Require(zero_wait.Counters().cumulative_waiting_milliseconds == 0, "zero wait debited the counter");
@@ -368,6 +441,7 @@ void TestCumulativeWaitingBudget() {
 	waiting_profile.scan.cumulative_waiting_milliseconds = 5;
 	ScanResourceAccounting waiting(waiting_profile);
 	waiting.BeginPage(start);
+	waiting.CommitAttemptFailure({0, 0, 0});
 	const auto waiting_deadline = waiting.Deadline();
 	waiting.CommitWait(2);
 	waiting.CommitWait(3);
@@ -383,6 +457,8 @@ void TestCumulativeWaitingBudget() {
 int main() {
 	try {
 		TestProfileValidation();
+		TestRetryAttemptLifecycle();
+		TestRetryRequiresRemainingByteAndBodyAuthority();
 		TestExactSequentialLifecycle();
 		TestSerializedRequestBodyAccounting();
 		TestAdvertisedNextFailsAtScanCeilings();

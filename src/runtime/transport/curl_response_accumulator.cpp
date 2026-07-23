@@ -108,8 +108,8 @@ CurlTransferState::CurlTransferState(ExecutionControl &control_p, const HttpLimi
       timed_out(false), header_oversized(false), response_oversized(false), decompressed_oversized(false),
       metadata_oversized(false), body_allocation_failed(false), metadata_allocation_failed(false),
       address_denied(false), socket_attempted(false), metadata_bytes(0), header_section_complete(false),
-      transfer_encoding_seen(false), transfer_chunked(false), transfer_encoding_unsupported(false),
-      content_encoded(false), easy_handle(nullptr) {
+      retry_after_present(false), transfer_encoding_seen(false), transfer_chunked(false),
+      transfer_encoding_unsupported(false), content_encoded(false), easy_handle(nullptr) {
 }
 
 bool CurlTransferState::ShouldContinue() noexcept {
@@ -185,6 +185,7 @@ std::size_t ReadCurlHeader(char *data, std::size_t size, std::size_t count, void
 	if (IsStatusLine(data, length)) {
 		ReleaseCurlLinkMetadata(state);
 		state.header_section_complete = false;
+		state.retry_after_present = false;
 		state.transfer_encoding_seen = false;
 		state.transfer_chunked = false;
 		state.transfer_encoding_unsupported = false;
@@ -214,6 +215,10 @@ std::size_t ReadCurlHeader(char *data, std::size_t size, std::size_t count, void
 	}
 	if (IsNamedField(data, length, "content-encoding", value_offset)) {
 		state.content_encoded = !EqualsFieldValue(data, value_offset, length, "identity");
+		return length;
+	}
+	if (IsNamedField(data, length, "retry-after", value_offset)) {
+		state.retry_after_present = true;
 		return length;
 	}
 	if (!IsNamedField(data, length, "link", value_offset)) {

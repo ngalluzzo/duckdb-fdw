@@ -1,4 +1,5 @@
 #include "duckdb_api/internal/runtime/execution/http_paginated_scan.hpp"
+#include "duckdb_api/internal/runtime/execution/http_retry_controller.hpp"
 
 #include "duckdb_api/internal/runtime/authentication/api_key_authenticator.hpp"
 #include "duckdb_api/internal/runtime/authentication/bearer_authenticator.hpp"
@@ -11,6 +12,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <mutex>
@@ -82,7 +84,8 @@ ScanResourceProfile BuildResourceProfile(const AdmittedPaginatedRestRequestProfi
 	         page.decoded_records, page.decoded_memory_bytes, page.concurrency, page.serialized_request_body_bytes},
 	        {scan.request_attempts, scan.pages, scan.header_bytes, scan.response_bytes, scan.decompressed_bytes,
 	         scan.decoded_records, scan.decoded_memory_bytes, std::min(scan.wall_milliseconds, max_wall_milliseconds),
-	         scan.concurrency, scan.serialized_request_body_bytes, 0}};
+	         scan.concurrency, scan.serialized_request_body_bytes,
+	         profile.RetryPolicy().max_cumulative_waiting_milliseconds_per_scan}};
 }
 
 void CheckState(ExecutionControl &control, std::chrono::steady_clock::time_point deadline) {
@@ -94,18 +97,18 @@ void CheckState(ExecutionControl &control, std::chrono::steady_clock::time_point
 	}
 }
 
-void CheckStatus(uint32_t status) {
+void CheckStatus(uint32_t status, bool retry_after_present) {
 	if (status == 401) {
 		throw ExecutionError(ErrorStage::AUTHENTICATION, "http_status", "HTTP endpoint rejected authentication",
-		                     HttpStatusFailureProperties(status, true));
+		                     HttpStatusFailureProperties(status, true, retry_after_present));
 	}
 	if (status == 403) {
 		throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status", "HTTP endpoint denied authorization",
-		                     HttpStatusFailureProperties(status, true));
+		                     HttpStatusFailureProperties(status, true, retry_after_present));
 	}
 	if (status != 200) {
 		throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status",
-		                     HttpStatusFailureProperties(status, false));
+		                     HttpStatusFailureProperties(status, false, retry_after_present));
 	}
 }
 
@@ -160,9 +163,14 @@ public:
 	    : admitted_profile(std::move(admitted_profile_p)), transport(std::move(transport_p)),
 	      authorization(new ScanAuthorization(std::move(authorization_p))),
 	      column_types(BuildColumnTypes(*admitted_profile)),
-	      accounting(BuildResourceProfile(*admitted_profile, max_wall_milliseconds_p)), pagination(*admitted_profile),
-	      cancelled(false), closed(false), exhausted(false), page_loaded(false), page_has_next(false),
-	      decoded_memory_bytes(0), decoded_memory_allowance(0), offset(0), rows_emitted(0) {
+	      accounting(BuildResourceProfile(*admitted_profile, max_wall_milliseconds_p)),
+	      pagination(new LinkPaginationState(*admitted_profile)), cancelled(false), closed(false), exhausted(false),
+	      page_loaded(false), page_has_next(false), decoded_memory_bytes(0), decoded_memory_allowance(0), offset(0),
+	      rows_emitted(0),
+	      retry_seed(static_cast<uint64_t>(reinterpret_cast<std::uintptr_t>(this)) ^
+	                 static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())),
+	      current_step_exposure(ExposureState::UNACCEPTED), terminal_exposure(ExposureState::UNACCEPTED),
+	      has_terminal_exposure(false) {
 	}
 
 	~PaginatedBatchStream() noexcept override {
@@ -210,6 +218,7 @@ public:
 						authorization.reset();
 						return false;
 					}
+					current_step_exposure = ExposureState::UNACCEPTED;
 				}
 				FetchPage(combined);
 			}
@@ -219,15 +228,21 @@ public:
 		} catch (const ExecutionError &error) {
 			FailWithExecutionError(
 			    error.Stage(), error.Field(), error.SafeMessage(),
-			    EnrichFailureProperties(FailurePropertiesFromError(error), accounting.Counters().pages, rows_emitted));
+			    EnrichRetryFailureProperties(FailurePropertiesFromError(error), accounting.Counters().pages,
+			                                 accounting.CurrentAttempt(), rows_emitted,
+			                                 accounting.Counters().cumulative_waiting_milliseconds, CurrentExposure()));
 		} catch (const LinkPaginationError &error) {
-			FailWithExecutionError(ErrorStage::POLICY, error.Field(), error.SafeMessage(),
-			                       EnrichFailureProperties(LinkPaginationFailureProperties(error.Kind()),
-			                                               accounting.Counters().pages, rows_emitted));
+			FailWithExecutionError(
+			    ErrorStage::POLICY, error.Field(), error.SafeMessage(),
+			    EnrichRetryFailureProperties(LinkPaginationFailureProperties(error.Kind()), accounting.Counters().pages,
+			                                 accounting.CurrentAttempt(), rows_emitted,
+			                                 accounting.Counters().cumulative_waiting_milliseconds, CurrentExposure()));
 		} catch (const ScanResourceError &error) {
-			FailWithExecutionError(ErrorStage::RESOURCE, error.Field(), error.SafeMessage(),
-			                       EnrichFailureProperties(ResourceBudgetFailureProperties(error.Field()),
-			                                               accounting.Counters().pages, rows_emitted));
+			FailWithExecutionError(
+			    ErrorStage::RESOURCE, error.Field(), error.SafeMessage(),
+			    EnrichRetryFailureProperties(ResourceBudgetFailureProperties(error.Field()),
+			                                 accounting.Counters().pages, accounting.CurrentAttempt(), rows_emitted,
+			                                 accounting.Counters().cumulative_waiting_milliseconds, CurrentExposure()));
 		} catch (const std::bad_alloc &) {
 			FailWithExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                       "execution could not be allocated within its memory budget");
@@ -260,7 +275,31 @@ public:
 		}
 	}
 
+	ExecutionSnapshot Diagnostics() const noexcept override {
+		try {
+			std::lock_guard<std::mutex> guard(mutex);
+			const auto &policy = admitted_profile->RetryPolicy();
+			const auto &counters = accounting.Counters();
+			return {policy.max_attempts_per_step,
+			        policy.max_attempts_per_scan,
+			        policy.max_delay_milliseconds,
+			        policy.max_cumulative_waiting_milliseconds_per_scan,
+			        counters.request_attempts,
+			        counters.cumulative_waiting_milliseconds,
+			        counters.pages,
+			        CurrentExposure()};
+		} catch (...) {
+			return BatchStream::Diagnostics();
+		}
+	}
+
 private:
+	ExposureState CurrentExposure() const noexcept {
+		if (has_terminal_exposure) {
+			return terminal_exposure;
+		}
+		return current_step_exposure;
+	}
 	bool ProduceBatch(ExecutionControl &control, TypedBatch &batch) {
 		CheckState(control, accounting.Deadline());
 		const auto remaining = decoded.Rows().size() - offset;
@@ -285,36 +324,33 @@ private:
 		offset += count;
 		rows_emitted += static_cast<uint64_t>(count);
 		batch = std::move(produced);
+		current_step_exposure = ExposureState::EXPOSED;
 		return true;
 	}
 
 	void FetchPage(ExecutionControl &control) {
-		const auto allowance = accounting.BeginPage(std::chrono::steady_clock::now());
+		const auto current_page = pagination->CurrentPage();
+		auto attempted = ExecuteHttpStepWithRetry(
+		    admitted_profile->RetryPolicy(), accounting, transport,
+		    std::min(admitted_profile->PageBudgets().header_bytes,
+		             admitted_profile->PageBudgets().decoded_memory_bytes),
+		    retry_seed,
+		    [this, current_page]() {
+			    auto request = BuildAdmittedPaginatedRestPageRequest(*admitted_profile, current_page);
+			    if (admitted_profile->RequiresBearer()) {
+				    request = BearerAuthenticator::AuthorizePaginatedRest(*admitted_profile, std::move(request),
+				                                                          *authorization);
+			    } else if (admitted_profile->RequiresApiKey()) {
+				    request = ApiKeyAuthenticator::AuthorizePaginatedRest(*admitted_profile, std::move(request),
+				                                                          *authorization);
+			    }
+			    return request;
+		    },
+		    control);
+		auto response = std::move(attempted.response);
+		const auto allowance = attempted.allowance;
 		CheckState(control, allowance.deadline);
-		auto request = BuildAdmittedPaginatedRestPageRequest(*admitted_profile, pagination.CurrentPage());
-		if (admitted_profile->RequiresBearer()) {
-			request =
-			    BearerAuthenticator::AuthorizePaginatedRest(*admitted_profile, std::move(request), *authorization);
-		} else if (admitted_profile->RequiresApiKey()) {
-			request =
-			    ApiKeyAuthenticator::AuthorizePaginatedRest(*admitted_profile, std::move(request), *authorization);
-		}
-		const HttpLimits limits {0,
-		                         allowance.header_bytes,
-		                         allowance.wire_response_bytes,
-		                         allowance.decompressed_response_bytes,
-		                         std::min(allowance.header_bytes, allowance.decoded_memory_bytes),
-		                         allowance.deadline};
-		auto response = transport->Execute(request, limits, control);
-		CheckState(control, allowance.deadline);
-		if (response.header_bytes > limits.max_header_bytes || response.response_bytes > limits.max_response_bytes ||
-		    static_cast<uint64_t>(response.body.size()) > limits.max_decompressed_bytes ||
-		    response.metadata.retained_bytes > limits.max_metadata_bytes) {
-			throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP response exceeded an execution budget");
-		}
-		accounting.CommitTransport(
-		    {response.header_bytes, response.response_bytes, static_cast<uint64_t>(response.body.size())});
-		CheckStatus(response.status);
+		CheckStatus(response.status, response.metadata.retry_after_present);
 		if (response.metadata.retained_bytes >= allowance.decoded_memory_bytes) {
 			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                     "HTTP response metadata exhausted the decoded-page memory budget");
@@ -331,22 +367,25 @@ private:
 		// (RFC 0019) has no external signal at all — exhaustion is inferred
 		// purely from the just-decoded row count against the declared page
 		// size, using a value already computed for row production below.
+		std::unique_ptr<LinkPaginationState> staged_pagination(new LinkPaginationState(*pagination));
 		LinkPageTransition transition;
 		if (admitted_profile->PaginationStrategy() == PlannedPaginationStrategy::RESPONSE_NEXT_URL) {
-			transition = pagination.AdvanceBody(page.next_url);
+			transition = staged_pagination->AdvanceBody(page.next_url);
 		} else if (admitted_profile->PaginationStrategy() == PlannedPaginationStrategy::SHORT_PAGE) {
-			transition = pagination.AdvanceByCount(page.rows.size());
+			transition = staged_pagination->AdvanceByCount(page.rows.size());
 		} else {
-			transition = pagination.Advance(response.metadata.link_field_values);
+			transition = staged_pagination->Advance(response.metadata.link_field_values);
 		}
 		const auto retained_memory = page.retained_memory_bytes + response.metadata.retained_bytes;
 		accounting.CommitDecodedPage({static_cast<uint64_t>(page.rows.size()), retained_memory});
 		decoded_memory_bytes = retained_memory;
 		decoded_memory_allowance = allowance.decoded_memory_bytes;
 		decoded.Install(std::move(page.rows));
+		pagination.swap(staged_pagination);
 		offset = 0;
 		page_has_next = transition.has_next;
 		page_loaded = true;
+		current_step_exposure = ExposureState::ACCEPTED_UNEXPOSED;
 	}
 
 	void ReleasePrivateState() noexcept {
@@ -367,6 +406,8 @@ private:
 	}
 
 	void RememberCurrentFailure() noexcept {
+		terminal_exposure = CurrentExposure();
+		has_terminal_exposure = true;
 		terminal_exception = std::current_exception();
 		Fail();
 	}
@@ -395,7 +436,7 @@ private:
 	std::unique_ptr<ScanAuthorization> authorization;
 	const std::vector<OutputValueType> column_types;
 	ScanResourceAccounting accounting;
-	LinkPaginationState pagination;
+	std::unique_ptr<LinkPaginationState> pagination;
 	mutable std::mutex mutex;
 	std::atomic<bool> cancelled;
 	bool closed;
@@ -409,6 +450,10 @@ private:
 	std::size_t offset;
 	// RFC 0021: cumulative rows emitted to DuckDB across pages, for rows_exposed.
 	uint64_t rows_emitted;
+	const uint64_t retry_seed;
+	ExposureState current_step_exposure;
+	ExposureState terminal_exposure;
+	bool has_terminal_exposure;
 };
 
 } // namespace

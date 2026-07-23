@@ -11,7 +11,7 @@ duckdb_api::ScanPlan ScanPlanTestAccess::Resource(duckdb_api::ScanPlan plan,
 		plan.budgets.request_attempts = 0;
 		break;
 	case ResourcePlanCounterexample::REQUEST_ATTEMPTS_WIDENED:
-		plan.budgets.request_attempts = duckdb_api::HOST_MAX_REQUEST_ATTEMPTS + 1;
+		plan.budgets.request_attempts = duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP + 1;
 		break;
 	case ResourcePlanCounterexample::RESPONSE_BYTES_ZERO:
 		plan.budgets.response_bytes = 0;

@@ -113,6 +113,7 @@ struct ScanResourceCounters {
 
 enum class ScanResourceState : uint8_t {
 	READY,
+	STEP_ACTIVE,
 	REQUEST_ACTIVE,
 	REQUEST_BODY_COMMITTED,
 	TRANSPORT_COMMITTED,
@@ -144,7 +145,11 @@ public:
 	explicit ScanResourceAccounting(const ScanResourceProfile &profile);
 
 	PageResourceAllowance BeginPage(std::chrono::steady_clock::time_point now);
+	PageResourceAllowance BeginRetryAttempt(std::chrono::steady_clock::time_point now);
 	void CommitRequestBody(uint64_t serialized_request_body_bytes);
+	// Commits every observed byte from a failed attempt and returns to the same
+	// active traversal step without debiting another page.
+	void CommitAttemptFailure(const TransportResourceUsage &usage);
 	void CommitTransport(const TransportResourceUsage &usage);
 	void CommitDecodedPage(const DecodedPageResourceUsage &usage);
 	void CompletePage(bool has_next, std::chrono::steady_clock::time_point now);
@@ -164,9 +169,17 @@ public:
 	ScanResourceState State() const noexcept;
 	bool DeadlineStarted() const noexcept;
 	std::chrono::steady_clock::time_point Deadline() const;
+	bool CanBeginRetryAttempt() const noexcept;
+	// A retry decision must prove that the next request can receive nonzero
+	// transport authority and, for a body-bearing protocol, can debit the full
+	// serialized body before any wait or attempt reservation occurs.
+	void RequireRetryAttemptResources(uint64_t serialized_request_body_bytes) const;
+	uint64_t CurrentAttempt() const noexcept;
 
 private:
 	void RequireReadyForNext(std::chrono::steady_clock::time_point now);
+	PageResourceAllowance BeginAttempt(std::chrono::steady_clock::time_point now);
+	void CommitAttemptUsage(const TransportResourceUsage &usage, ScanResourceState next_state);
 	[[noreturn]] void Fail(std::string field, std::string message);
 
 	ScanResourceProfile profile;
@@ -175,6 +188,7 @@ private:
 	bool deadline_started;
 	std::chrono::steady_clock::time_point deadline;
 	PageResourceAllowance active_allowance;
+	uint64_t current_step_attempts;
 };
 
 } // namespace internal

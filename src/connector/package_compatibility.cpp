@@ -211,9 +211,19 @@ bool SameGraphql(const CompiledGraphqlOperation &left, const CompiledGraphqlOper
 	       left.providers_enabled == right.providers_enabled && SameGraphqlRecipe(left, right);
 }
 
+bool SameRetry(const CompiledOperation &left, const CompiledOperation &right) {
+	const auto &left_retry = left.RetryRecommendation();
+	const auto &right_retry = right.RetryRecommendation();
+	return left.ReplayClass() == right.ReplayClass() &&
+	       left_retry.max_attempts_per_step == right_retry.max_attempts_per_step &&
+	       left_retry.max_delay_milliseconds == right_retry.max_delay_milliseconds &&
+	       left_retry.max_cumulative_waiting_milliseconds_per_scan ==
+	           right_retry.max_cumulative_waiting_milliseconds_per_scan;
+}
+
 bool SameOperation(const CompiledOperation &left, const CompiledOperation &right) {
 	if (left.name != right.name || left.fallback != right.fallback || left.cardinality != right.cardinality ||
-	    left.Protocol() != right.Protocol() ||
+	    left.Protocol() != right.Protocol() || !SameRetry(left, right) ||
 	    !internal::SameOperationSelectorStructure(left.selector, right.selector)) {
 		return false;
 	}

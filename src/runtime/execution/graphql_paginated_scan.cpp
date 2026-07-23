@@ -1,4 +1,5 @@
 #include "duckdb_api/internal/runtime/execution/graphql_paginated_scan.hpp"
+#include "duckdb_api/internal/runtime/execution/http_retry_controller.hpp"
 
 #include "duckdb_api/internal/runtime/authentication/bearer_authenticator.hpp"
 #include "duckdb_api/internal/runtime/decoding/decoded_page_buffer.hpp"
@@ -11,6 +12,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <mutex>
@@ -38,7 +40,8 @@ ScanResourceProfile ResourceProfile(const AdmittedGraphqlRequestProfile &profile
 	         page.decoded_records, page.decoded_memory_bytes, page.concurrency, page.serialized_request_body_bytes},
 	        {scan.request_attempts, scan.pages, scan.header_bytes, scan.response_bytes, scan.decompressed_bytes,
 	         scan.decoded_records, scan.decoded_memory_bytes, std::min(scan.wall_milliseconds, max_wall_milliseconds),
-	         scan.concurrency, scan.serialized_request_body_bytes, 0}};
+	         scan.concurrency, scan.serialized_request_body_bytes,
+	         profile.RetryPolicy().max_cumulative_waiting_milliseconds_per_scan}};
 }
 
 void CheckState(ExecutionControl &control, std::chrono::steady_clock::time_point deadline) {
@@ -50,18 +53,18 @@ void CheckState(ExecutionControl &control, std::chrono::steady_clock::time_point
 	}
 }
 
-void CheckStatus(uint32_t status) {
+void CheckStatus(uint32_t status, bool retry_after_present) {
 	if (status == 401) {
 		throw ExecutionError(ErrorStage::AUTHENTICATION, "http_status", "HTTP endpoint rejected authentication",
-		                     HttpStatusFailureProperties(status, true));
+		                     HttpStatusFailureProperties(status, true, retry_after_present));
 	}
 	if (status == 403) {
 		throw ExecutionError(ErrorStage::AUTHORIZATION, "http_status", "HTTP endpoint denied authorization",
-		                     HttpStatusFailureProperties(status, true));
+		                     HttpStatusFailureProperties(status, true, retry_after_present));
 	}
 	if (status != 200) {
 		throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status",
-		                     HttpStatusFailureProperties(status, false));
+		                     HttpStatusFailureProperties(status, false, retry_after_present));
 	}
 }
 
@@ -112,9 +115,13 @@ public:
 	      authorization(new ScanAuthorization(std::move(authorization_p))),
 	      column_types(ColumnTypes(*admitted_profile)),
 	      accounting(ResourceProfile(*admitted_profile, max_wall_milliseconds_p)),
-	      cursor(admitted_profile->MaxPages(), 512), cancelled(false), closed(false), exhausted(false),
-	      page_loaded(false), page_has_next(false), decoded_memory_bytes(0), decoded_memory_allowance(0), offset(0),
-	      rows_emitted(0) {
+	      cursor(new GraphqlCursorState(admitted_profile->MaxPages(), 512)), cancelled(false), closed(false),
+	      exhausted(false), page_loaded(false), page_has_next(false), decoded_memory_bytes(0),
+	      decoded_memory_allowance(0), offset(0), rows_emitted(0),
+	      retry_seed(static_cast<uint64_t>(reinterpret_cast<std::uintptr_t>(this)) ^
+	                 static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())),
+	      current_step_exposure(ExposureState::UNACCEPTED), terminal_exposure(ExposureState::UNACCEPTED),
+	      has_terminal_exposure(false) {
 	}
 
 	~GraphqlBatchStream() noexcept override {
@@ -160,9 +167,10 @@ public:
 					if (!page_has_next) {
 						exhausted = true;
 						authorization.reset();
-						cursor.Release();
+						cursor->Release();
 						return false;
 					}
+					current_step_exposure = ExposureState::UNACCEPTED;
 				}
 				FetchPage(combined);
 			}
@@ -172,15 +180,21 @@ public:
 		} catch (const ExecutionError &error) {
 			FailWithExecutionError(
 			    error.Stage(), error.Field(), error.SafeMessage(),
-			    EnrichFailureProperties(FailurePropertiesFromError(error), accounting.Counters().pages, rows_emitted));
+			    EnrichRetryFailureProperties(FailurePropertiesFromError(error), accounting.Counters().pages,
+			                                 accounting.CurrentAttempt(), rows_emitted,
+			                                 accounting.Counters().cumulative_waiting_milliseconds, CurrentExposure()));
 		} catch (const GraphqlCursorError &error) {
-			FailWithExecutionError(ErrorStage::POLICY, error.Field(), error.SafeMessage(),
-			                       EnrichFailureProperties(GraphqlCursorFailureProperties(error.Kind()),
-			                                               accounting.Counters().pages, rows_emitted));
+			FailWithExecutionError(
+			    ErrorStage::POLICY, error.Field(), error.SafeMessage(),
+			    EnrichRetryFailureProperties(GraphqlCursorFailureProperties(error.Kind()), accounting.Counters().pages,
+			                                 accounting.CurrentAttempt(), rows_emitted,
+			                                 accounting.Counters().cumulative_waiting_milliseconds, CurrentExposure()));
 		} catch (const ScanResourceError &error) {
-			FailWithExecutionError(ErrorStage::RESOURCE, error.Field(), error.SafeMessage(),
-			                       EnrichFailureProperties(ResourceBudgetFailureProperties(error.Field()),
-			                                               accounting.Counters().pages, rows_emitted));
+			FailWithExecutionError(
+			    ErrorStage::RESOURCE, error.Field(), error.SafeMessage(),
+			    EnrichRetryFailureProperties(ResourceBudgetFailureProperties(error.Field()),
+			                                 accounting.Counters().pages, accounting.CurrentAttempt(), rows_emitted,
+			                                 accounting.Counters().cumulative_waiting_milliseconds, CurrentExposure()));
 		} catch (const std::bad_alloc &) {
 			FailWithExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                       "execution could not be allocated within its memory budget");
@@ -213,7 +227,31 @@ public:
 		}
 	}
 
+	ExecutionSnapshot Diagnostics() const noexcept override {
+		try {
+			std::lock_guard<std::mutex> guard(mutex);
+			const auto &policy = admitted_profile->RetryPolicy();
+			const auto &counters = accounting.Counters();
+			return {policy.max_attempts_per_step,
+			        policy.max_attempts_per_scan,
+			        policy.max_delay_milliseconds,
+			        policy.max_cumulative_waiting_milliseconds_per_scan,
+			        counters.request_attempts,
+			        counters.cumulative_waiting_milliseconds,
+			        counters.pages,
+			        CurrentExposure()};
+		} catch (...) {
+			return BatchStream::Diagnostics();
+		}
+	}
+
 private:
+	ExposureState CurrentExposure() const noexcept {
+		if (has_terminal_exposure) {
+			return terminal_exposure;
+		}
+		return current_step_exposure;
+	}
 	bool ProduceBatch(ExecutionControl &control, TypedBatch &batch) {
 		CheckState(control, accounting.Deadline());
 		const auto remaining = decoded.Rows().size() - offset;
@@ -240,37 +278,33 @@ private:
 		offset += count;
 		rows_emitted += static_cast<uint64_t>(count);
 		batch = std::move(produced);
+		current_step_exposure = ExposureState::EXPOSED;
 		return true;
 	}
 
 	void FetchPage(ExecutionControl &control) {
-		const auto allowance = accounting.BeginPage(std::chrono::steady_clock::now());
+		std::unique_ptr<GraphqlCursorState> staged_cursor(new GraphqlCursorState(*cursor));
+		const auto *request_cursor = staged_cursor->CurrentCursor();
+		staged_cursor->MarkRequestStarted();
+		auto attempted = ExecuteHttpStepWithRetry(
+		    admitted_profile->RetryPolicy(), accounting, transport, 0, retry_seed,
+		    [this, request_cursor]() {
+			    auto request = BuildAdmittedGraphqlRequest(*admitted_profile, request_cursor);
+			    if (admitted_profile->RequiresBearer()) {
+				    request =
+				        BearerAuthenticator::AuthorizeGraphql(*admitted_profile, std::move(request), *authorization);
+			    }
+			    return request;
+		    },
+		    control);
+		auto response = std::move(attempted.response);
+		const auto allowance = attempted.allowance;
 		CheckState(control, allowance.deadline);
-		const auto *request_cursor = cursor.CurrentCursor();
-		cursor.MarkRequestStarted();
-		auto request = BuildAdmittedGraphqlRequest(*admitted_profile, request_cursor);
-		accounting.CommitRequestBody(static_cast<uint64_t>(request.body.size()));
-		CheckState(control, allowance.deadline);
-		if (admitted_profile->RequiresBearer()) {
-			request = BearerAuthenticator::AuthorizeGraphql(*admitted_profile, std::move(request), *authorization);
-		}
-		const HttpLimits limits {allowance.serialized_request_body_bytes,
-		                         allowance.header_bytes,
-		                         allowance.wire_response_bytes,
-		                         allowance.decompressed_response_bytes,
-		                         0,
-		                         allowance.deadline};
-		auto response = transport->Execute(request, limits, control);
-		CheckState(control, allowance.deadline);
-		if (response.header_bytes > limits.max_header_bytes || response.response_bytes > limits.max_response_bytes ||
-		    static_cast<uint64_t>(response.body.size()) > limits.max_decompressed_bytes ||
-		    response.metadata.retained_bytes != 0 || !response.metadata.link_field_values.empty()) {
+		if (response.metadata.retained_bytes != 0 || !response.metadata.link_field_values.empty()) {
 			throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP response exceeded an execution budget");
 		}
-		accounting.CommitTransport(
-		    {response.header_bytes, response.response_bytes, static_cast<uint64_t>(response.body.size())});
-		CheckStatus(response.status);
-		const auto cursor_memory_before = cursor.RetainedMemoryBytes();
+		CheckStatus(response.status, response.metadata.retry_after_present);
+		const auto cursor_memory_before = staged_cursor->RetainedMemoryBytes();
 		if (cursor_memory_before >= allowance.decoded_memory_bytes) {
 			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                     "GraphQL cursor state exhausted the decoded-memory budget");
@@ -282,8 +316,8 @@ private:
 		auto page = DecodeGraphqlResponse(response.body, *admitted_profile, decode_limits, control);
 		CheckState(control, allowance.deadline);
 		page_has_next = page.has_next;
-		cursor.Advance(page.has_next, std::move(page.end_cursor));
-		const auto cursor_memory_after = cursor.RetainedMemoryBytes();
+		staged_cursor->Advance(page.has_next, std::move(page.end_cursor));
+		const auto cursor_memory_after = staged_cursor->RetainedMemoryBytes();
 		if (page.retained_memory_bytes > allowance.decoded_memory_bytes ||
 		    cursor_memory_after > allowance.decoded_memory_bytes - page.retained_memory_bytes) {
 			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
@@ -294,8 +328,10 @@ private:
 		decoded_memory_bytes = retained_memory;
 		decoded_memory_allowance = allowance.decoded_memory_bytes;
 		decoded.Install(std::move(page.rows));
+		cursor.swap(staged_cursor);
 		offset = 0;
 		page_loaded = true;
+		current_step_exposure = ExposureState::ACCEPTED_UNEXPOSED;
 	}
 
 	void ReleasePrivateState() noexcept {
@@ -306,12 +342,14 @@ private:
 		decoded.Release();
 		decoded_memory_bytes = 0;
 		decoded_memory_allowance = 0;
-		cursor.Fail();
+		cursor->Fail();
 		offset = 0;
 		page_loaded = false;
 	}
 
 	void RememberCurrentFailure() noexcept {
+		terminal_exposure = CurrentExposure();
+		has_terminal_exposure = true;
 		terminal_exception = std::current_exception();
 		cancelled.store(true, std::memory_order_release);
 		ReleasePrivateState();
@@ -341,7 +379,7 @@ private:
 	std::unique_ptr<ScanAuthorization> authorization;
 	const std::vector<OutputValueType> column_types;
 	ScanResourceAccounting accounting;
-	GraphqlCursorState cursor;
+	std::unique_ptr<GraphqlCursorState> cursor;
 	mutable std::mutex mutex;
 	std::atomic<bool> cancelled;
 	bool closed;
@@ -355,6 +393,10 @@ private:
 	std::size_t offset;
 	// RFC 0021: cumulative rows emitted to DuckDB across pages, for rows_exposed.
 	uint64_t rows_emitted;
+	const uint64_t retry_seed;
+	ExposureState current_step_exposure;
+	ExposureState terminal_exposure;
+	bool has_terminal_exposure;
 };
 
 } // namespace

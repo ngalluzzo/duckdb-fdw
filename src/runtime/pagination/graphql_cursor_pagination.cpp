@@ -43,6 +43,17 @@ GraphqlCursorState::GraphqlCursorState(uint64_t max_pages_p, uint64_t max_cursor
 	}
 }
 
+GraphqlCursorState::GraphqlCursorState(const GraphqlCursorState &other)
+    : max_pages(other.max_pages), max_cursor_bytes(other.max_cursor_bytes), requested_pages(other.requested_pages),
+      exhausted(other.exhausted), failed(other.failed), seen(other.seen) {
+	try {
+		seen.reserve(static_cast<std::size_t>(max_pages));
+	} catch (const std::bad_alloc &) {
+		throw GraphqlCursorError(GraphqlCursorErrorKind::RESOURCE_BUDGET, "decoded_memory_bytes",
+		                         "GraphQL cursor state exceeded available memory");
+	}
+}
+
 const std::string *GraphqlCursorState::CurrentCursor() const noexcept {
 	return exhausted || failed || seen.empty() ? nullptr : &seen.back();
 }

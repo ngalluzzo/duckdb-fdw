@@ -78,6 +78,24 @@ void TestClosedSchemaAndAllOrNothing() {
 	        "closed-schema diagnostic lost its exact safe source coordinate");
 }
 
+void TestV1RejectsRetryDeclaration() {
+	TemporaryPackage package;
+	duckdb_api_test::WriteGithubPackage(package);
+	package.Write("relations/authenticated_user.yaml",
+	              duckdb_api_test::ReplaceOnce(GithubRelation("authenticated_user"), "    replay_safety: safe\n",
+	                                           "    replay_safety: safe\n"
+	                                           "    retry:\n"
+	                                           "      max_attempts_per_step: 3\n"
+	                                           "      max_delay_milliseconds: 10\n"
+	                                           "      max_cumulative_waiting_milliseconds_per_scan: 25\n"));
+	NeverCancel cancellation;
+	const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
+	RequireFirstDiagnostic(result, PackageDiagnosticCode::UNKNOWN_FIELD, PackageDiagnosticPhase::SCHEMA,
+	                       "duckdb_api/v1 accepted the v2-only retry declaration");
+	Require(result.Diagnostics()[0].Coordinate().yaml_path == "$.operations[0].retry",
+	        "v1 retry rejection lost its exact source path");
+}
+
 void TestCrossFileAndPolicyReferences() {
 	{
 		TemporaryPackage package;
@@ -553,6 +571,7 @@ void TestArrayColumnSchemaAndGraphqlDoubleGap() {
 int main() {
 	try {
 		TestClosedSchemaAndAllOrNothing();
+		TestV1RejectsRetryDeclaration();
 		TestCrossFileAndPolicyReferences();
 		TestTypedDefaults();
 		TestTypedDoubleDefaultsRoundTrip();

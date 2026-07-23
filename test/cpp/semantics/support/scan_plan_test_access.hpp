@@ -35,6 +35,7 @@ public:
 	static duckdb_api::ScanPlan DistinctGraphqlProvenance(duckdb_api::ScanPlan plan);
 	static duckdb_api::ScanPlan GraphqlArrayColumns(duckdb_api::ScanPlan plan);
 	static duckdb_api::ScanPlan GraphqlDecodedMemoryBoundary(duckdb_api::ScanPlan plan, uint64_t decoded_memory_bytes);
+	static duckdb_api::ScanPlan RetryEnabled(duckdb_api::ScanPlan plan);
 	static duckdb_api::ScanPlan GraphqlVariation(duckdb_api::ScanPlan plan, GraphqlPlanVariation variation);
 	static GraphqlProtocolEnvelopeShape GraphqlProtocolShape(const duckdb_api::ScanPlan &plan);
 	static bool MutateGraphqlProtocol(duckdb_api::ScanPlan &plan, GraphqlRuntimeAdmissionCounterexample counterexample);

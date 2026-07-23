@@ -153,6 +153,16 @@ CompileRepositoryRickAndMortyLocalPackageFixture(const std::string &absolute_rep
 	return duckdb_api::CompiledLocalPackage(*result.Package());
 }
 
+duckdb_api::CompiledPackageGeneration CompileRetryV2GenerationFixture(const std::string &absolute_repository_root) {
+	NeverCancel cancellation;
+	const auto result = duckdb_api::connector::CompileLocalPackageRoot(
+	    absolute_repository_root + "/test/fixtures/package_retry_v2", cancellation);
+	if (!result.Succeeded() || result.Package() == nullptr) {
+		throw std::runtime_error("repository retry v2 connector package fixture did not compile");
+	}
+	return result.Package()->Generation();
+}
+
 // The canonical package-independence relation. Every field is identical across
 // both migration envelopes except the operation origin host, which must track
 // each envelope's network policy. It deliberately exercises the v1 mechanisms

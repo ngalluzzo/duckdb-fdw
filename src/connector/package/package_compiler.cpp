@@ -72,7 +72,7 @@ PackageCompileResult CompilePackageImpl(const PackageSourceSnapshot &snapshot, c
                                         PackageCancellation &cancellation,
                                         internal::PackageCompilationPhaseHook *phase_hook) {
 	internal::PackageDiagnosticSink diagnostics(host_limits.max_diagnostics);
-	if (!snapshot.IsValid() || !VerifyConnectorPackageV1SchemaAsset()) {
+	if (!snapshot.IsValid() || !VerifyConnectorPackageV1SchemaAsset() || !VerifyConnectorPackageV2SchemaAsset()) {
 		diagnostics.Add(PackageDiagnosticCode::PACKAGE_IDENTITY, PackageDiagnosticPhase::SOURCE, RootMark());
 		return PackageCompileResult(nullptr, diagnostics.Finish());
 	}
@@ -237,7 +237,7 @@ bool DecodePackageSchema(const std::vector<std::pair<std::string, FailsafeYamlNo
 			continue;
 		}
 		RelationDeclaration relation;
-		DecodeRelationSchema(found->first, *found->second, diagnostics, relation);
+		DecodeRelationSchema(found->first, *found->second, diagnostics, package.manifest.api_version.value, relation);
 		if (relation.id.value != listed.value) {
 			diagnostics.Add(PackageDiagnosticCode::INVALID_REFERENCE, PackageDiagnosticPhase::REFERENCE,
 			                relation.id.mark, package.manifest.id.value, listed.value, "", &listed.mark);

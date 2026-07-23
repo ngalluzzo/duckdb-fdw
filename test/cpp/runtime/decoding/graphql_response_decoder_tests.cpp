@@ -32,14 +32,36 @@ void Require(bool condition, const char *message) {
 std::unique_ptr<const duckdb_api::internal::AdmittedGraphqlRequestProfile> Profile() {
 	const auto plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("decoder_secret");
 	const duckdb_api::internal::HttpExecutionProfile host {
-	    duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443, false, false, false, 30000, 100};
+	    duckdb_api::PlannedUrlScheme::HTTPS,
+	    "api.github.com",
+	    443,
+	    false,
+	    false,
+	    false,
+	    30000,
+	    100,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	    duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+	    duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 	return duckdb_api::internal::TryAdmitGraphqlPlan(plan, host);
 }
 
 std::unique_ptr<const duckdb_api::internal::AdmittedGraphqlRequestProfile> ArrayProfile() {
 	const auto plan = duckdb_api_test::BuildValidGraphqlArrayScanPlanFixture("decoder_secret");
 	const duckdb_api::internal::HttpExecutionProfile host {
-	    duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443, false, false, false, 30000, 100};
+	    duckdb_api::PlannedUrlScheme::HTTPS,
+	    "api.github.com",
+	    443,
+	    false,
+	    false,
+	    false,
+	    30000,
+	    100,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	    duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	    duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+	    duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 	return duckdb_api::internal::TryAdmitGraphqlPlan(plan, host);
 }
 

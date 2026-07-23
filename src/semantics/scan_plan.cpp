@@ -174,7 +174,7 @@ PlannedOccurrencePreservation PlannedEqualityPredicate::OccurrencePreservation()
 }
 
 bool ResourceBudgets::IsWithinLiveRestBounds() const {
-	return request_attempts == HOST_MAX_REQUEST_ATTEMPTS && response_bytes > 0 &&
+	return request_attempts > 0 && request_attempts <= RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP && response_bytes > 0 &&
 	       response_bytes <= HOST_MAX_RESPONSE_BYTES && header_bytes > 0 && header_bytes <= HOST_MAX_HEADER_BYTES &&
 	       decompressed_bytes > 0 && decompressed_bytes <= HOST_MAX_DECOMPRESSED_BYTES && decoded_records > 0 &&
 	       decoded_records <= HOST_MAX_DECODED_RECORDS && extracted_string_bytes > 0 &&
@@ -186,7 +186,7 @@ bool ResourceBudgets::IsWithinLiveRestBounds() const {
 }
 
 bool ResourceBudgets::IsWithinPaginatedPageBounds() const {
-	return request_attempts == PAGINATION_MAX_REQUEST_ATTEMPTS_PER_PAGE && response_bytes > 0 &&
+	return request_attempts > 0 && request_attempts <= RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP && response_bytes > 0 &&
 	       response_bytes <= PAGINATION_MAX_RESPONSE_BYTES_PER_PAGE && header_bytes > 0 &&
 	       header_bytes <= PAGINATION_MAX_HEADER_BYTES_PER_PAGE && decompressed_bytes > 0 &&
 	       decompressed_bytes <= PAGINATION_MAX_DECOMPRESSED_BYTES_PER_PAGE && decoded_records > 0 &&
@@ -200,8 +200,8 @@ bool ResourceBudgets::IsWithinPaginatedPageBounds() const {
 }
 
 bool ScanResourceBudgets::IsWithinPaginatedScanBounds() const {
-	return request_attempts > 0 && request_attempts == pages &&
-	       request_attempts <= PAGINATION_MAX_REQUEST_ATTEMPTS_PER_SCAN && pages <= PAGINATION_MAX_PAGES_PER_SCAN &&
+	return request_attempts >= pages && pages > 0 && pages <= PAGINATION_MAX_PAGES_PER_SCAN &&
+	       request_attempts <= RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN && request_attempts <= pages * 3 &&
 	       response_bytes > 0 && response_bytes <= PAGINATION_MAX_RESPONSE_BYTES_PER_SCAN && header_bytes > 0 &&
 	       header_bytes <= PAGINATION_MAX_HEADER_BYTES_PER_SCAN && decompressed_bytes > 0 &&
 	       decompressed_bytes <= PAGINATION_MAX_DECOMPRESSED_BYTES_PER_SCAN && decoded_records > 0 &&
@@ -212,6 +212,21 @@ bool ScanResourceBudgets::IsWithinPaginatedScanBounds() const {
 	       batch_rows <= PAGINATION_OUTPUT_BATCH_ROWS && wall_milliseconds > 0 &&
 	       wall_milliseconds <= PAGINATION_MAX_EXECUTION_MILLISECONDS && concurrency == PAGINATION_MAX_CONCURRENCY &&
 	       serialized_request_body_bytes <= PAGINATION_MAX_SERIALIZED_REQUEST_BODY_BYTES_PER_SCAN;
+}
+
+bool RetryPlan::Enabled() const noexcept {
+	return max_attempts_per_step > 1;
+}
+
+bool RetryPlan::IsWithinHardBounds() const noexcept {
+	if (!Enabled()) {
+		return max_attempts_per_step == 1 && max_attempts_per_scan > 0 && max_delay_milliseconds == 0 &&
+		       max_cumulative_waiting_milliseconds_per_scan == 0;
+	}
+	return max_attempts_per_step <= RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP && max_attempts_per_scan > 0 &&
+	       max_attempts_per_scan <= RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN && max_delay_milliseconds > 0 &&
+	       max_delay_milliseconds <= RETRY_MAX_DELAY_MILLISECONDS && max_cumulative_waiting_milliseconds_per_scan > 0 &&
+	       max_cumulative_waiting_milliseconds_per_scan <= RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN;
 }
 
 PaginationPlan::PaginationPlan()
@@ -371,7 +386,7 @@ std::string PlannedSecretReference::Snapshot() const {
 	return result;
 }
 
-ScanPlan::ScanPlan() {
+ScanPlan::ScanPlan() : replay_class(PlannedOperationReplayClass::REPLAYABLE_READ), retry_policy {1, 1, 0, 0} {
 }
 
 const std::string &ScanPlan::ConnectorName() const {
@@ -489,6 +504,14 @@ FeatureState ScanPlan::Providers() const {
 
 FeatureState ScanPlan::Retry() const {
 	return retry;
+}
+
+PlannedOperationReplayClass ScanPlan::ReplayClass() const noexcept {
+	return replay_class;
+}
+
+const RetryPlan &ScanPlan::RetryPolicy() const noexcept {
+	return retry_policy;
 }
 
 FeatureState ScanPlan::Cache() const {

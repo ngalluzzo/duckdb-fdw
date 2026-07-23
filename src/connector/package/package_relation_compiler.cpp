@@ -171,8 +171,12 @@ CompiledResourceCeilings CompileResources(const RelationDeclaration &relation, P
 		const auto request_bytes = ParseUnsigned(operation.graphql_request.max_serialized_body_bytes_per_request);
 		const auto scan_request_bytes = ParseUnsigned(operation.graphql_request.max_serialized_body_bytes_per_scan);
 		const auto pages = ParseUnsigned(operation.graphql_request.pagination.max_pages_per_scan);
-		if (request_bytes > std::numeric_limits<std::uint64_t>::max() / pages || scan_request_bytes < request_bytes ||
-		    scan_request_bytes > request_bytes * pages) {
+		const auto attempts = operation.retry.present ? ParseUnsigned(operation.retry.max_attempts_per_step) : 1;
+		const bool aggregate_overflow =
+		    pages == 0 || attempts == 0 || pages > std::numeric_limits<std::uint64_t>::max() / attempts;
+		const auto aggregate_attempts = aggregate_overflow ? 0 : pages * attempts;
+		if (aggregate_overflow || request_bytes > std::numeric_limits<std::uint64_t>::max() / aggregate_attempts ||
+		    scan_request_bytes < request_bytes || scan_request_bytes > request_bytes * aggregate_attempts) {
 			diagnostics.Add(PackageDiagnosticCode::POLICY_WIDENING, PackageDiagnosticPhase::COMPILE,
 			                operation.graphql_request.mark, "", relation.id.value, operation.id.value);
 		}

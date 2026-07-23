@@ -167,6 +167,10 @@ CompileRepositoryGithubGenerationFixture(const std::string &absolute_repository_
 duckdb_api::CompiledPackageGeneration
 CompileNonGithubGraphqlGenerationFixture(const std::string &absolute_repository_root);
 
+// Exact duckdb_api/v2 provider fixture with one explicitly recommended,
+// anonymous replayable REST read. Consumers receive compiled facts only.
+duckdb_api::CompiledPackageGeneration CompileRetryV2GenerationFixture(const std::string &absolute_repository_root);
+
 enum class RepositoryGithubGraphqlCounterexample {
 	DOCUMENT_MISMATCH,
 	DIGEST_MISMATCH,

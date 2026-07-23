@@ -51,6 +51,10 @@ const char *ErrorStageName(duckdb_api::ErrorStage stage) {
 std::string ResilienceSuffix(const duckdb_api::FailureProperties &properties) {
 	std::string suffix = " [class=";
 	suffix += duckdb_api::FailureClassName(properties.failure_class);
+	suffix += " attempt=" + std::to_string(properties.attempt);
+	suffix += " cumulative_delay_ms=" + std::to_string(properties.cumulative_delay_milliseconds);
+	suffix += " exposure=";
+	suffix += duckdb_api::ExposureStateName(properties.exposure_state);
 	suffix += " rows_exposed=" + std::to_string(properties.rows_exposed);
 	if (properties.terminating_budget != duckdb_api::BudgetDimension::NONE) {
 		suffix += " budget=";

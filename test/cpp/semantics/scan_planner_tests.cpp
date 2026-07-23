@@ -325,8 +325,8 @@ void TestResourceEnvelopeBounds() {
 	invalid.request_attempts = 0;
 	Require(!invalid.IsWithinLiveRestBounds(), "resource envelope removed the one required request attempt");
 	invalid = plan.Budgets();
-	invalid.request_attempts = 2;
-	Require(!invalid.IsWithinLiveRestBounds(), "resource envelope enabled a retry attempt");
+	invalid.request_attempts = duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP + 1;
+	Require(!invalid.IsWithinLiveRestBounds(), "resource envelope exceeded the hard retry-attempt ceiling");
 	invalid = plan.Budgets();
 	invalid.concurrency = 0;
 	Require(!invalid.IsWithinLiveRestBounds(), "resource envelope removed its one concurrency slot");

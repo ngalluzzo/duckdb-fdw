@@ -2,6 +2,7 @@
 
 #include "duckdb_api/execution.hpp"
 #include "duckdb_api/scan_plan.hpp"
+#include "duckdb_api/internal/runtime/transport/http_transport.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -25,11 +26,16 @@ struct ControlledHttpResponse {
 	// closed Runtime fixture exercise admitted byte ceilings through production
 	// accounting without retaining multi-megabyte padding.
 	uint64_t wire_response_bytes;
+	uint64_t decompressed_response_bytes;
+	bool retry_after_present;
+	duckdb_api::internal::HttpTransportFailureKind transport_failure_kind;
+	uint32_t transport_response_status;
 };
 
 ControlledHttpResponse ControlledResponse(uint32_t status, std::string body,
                                           std::vector<std::string> link_field_values = {});
 ControlledHttpResponse ControlledTransportFailure(std::string dependency_diagnostic);
+ControlledHttpResponse ControlledTransientTransportFailure(duckdb_api::internal::HttpTransportFailureKind kind);
 
 struct ControlledRequestObservation {
 	uint64_t request_count;

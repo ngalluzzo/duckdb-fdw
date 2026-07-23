@@ -83,6 +83,10 @@ duckdb_api::ScanPlan BuildValidGraphqlScanPlanFixture(const std::string &exact_l
 	return BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, GraphqlLocalResidualProfile::UNRESTRICTED);
 }
 
+duckdb_api::ScanPlan BuildRetryEnabledGraphqlScanPlanFixture(const std::string &exact_logical_secret_name) {
+	return ScanPlanTestAccess::RetryEnabled(BuildValidGraphqlScanPlanFixture(exact_logical_secret_name));
+}
+
 duckdb_api::ScanPlan BuildValidGraphqlArrayScanPlanFixture(const std::string &exact_logical_secret_name) {
 	return ScanPlanTestAccess::GraphqlArrayColumns(
 	    BuildValidGraphqlScanPlanFixtureImpl(exact_logical_secret_name, GraphqlLocalResidualProfile::UNRESTRICTED));

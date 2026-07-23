@@ -1,6 +1,7 @@
 #include "runtime/support/runtime_http_test_support.hpp"
 
 #include "semantics/support/scan_plan_test_fixtures.hpp"
+#include "duckdb_api/internal/runtime/transport/http_transport.hpp"
 
 #include <chrono>
 #include <stdexcept>
@@ -47,9 +48,7 @@ std::string RuntimeCurlBearerToken(uint64_t suffix) {
 void RequireExecutionError(const std::function<void()> &action, duckdb_api::ErrorStage stage,
                            const std::string &forbidden, const std::string &forbidden_secondary) {
 	bool rejected = false;
-	try {
-		action();
-	} catch (const duckdb_api::ExecutionError &error) {
+	const auto validate = [&](const duckdb_api::ExecutionError &error) {
 		rejected = true;
 		if (error.Stage() != stage) {
 			throw std::runtime_error("curl execution error stage drifted from " +
@@ -59,16 +58,17 @@ void RequireExecutionError(const std::function<void()> &action, duckdb_api::Erro
 		if (error.SafeMessage().empty() || error.SafeMessage().size() > 128) {
 			throw std::runtime_error("curl diagnostic was empty or unbounded");
 		}
-		if (!forbidden.empty()) {
-			if (error.SafeMessage().find(forbidden) != std::string::npos) {
-				throw std::runtime_error("curl diagnostic exposed controlled response data or authority");
-			}
+		if ((!forbidden.empty() && error.SafeMessage().find(forbidden) != std::string::npos) ||
+		    (!forbidden_secondary.empty() && error.SafeMessage().find(forbidden_secondary) != std::string::npos)) {
+			throw std::runtime_error("curl diagnostic exposed controlled response data or authority");
 		}
-		if (!forbidden_secondary.empty()) {
-			if (error.SafeMessage().find(forbidden_secondary) != std::string::npos) {
-				throw std::runtime_error("curl diagnostic exposed secondary controlled response data or authority");
-			}
-		}
+	};
+	try {
+		action();
+	} catch (const duckdb_api::ExecutionError &error) {
+		validate(error);
+	} catch (const duckdb_api::internal::HttpAttemptFailure &failure) {
+		validate(failure.Error());
 	}
 	if (!rejected) {
 		throw std::runtime_error("expected a structured curl execution error");

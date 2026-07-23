@@ -208,9 +208,13 @@ void TestFailureClassification() {
 	            rate_limited.replay_classification == duckdb_api::ReplayClassification::SERVER_DIRECTED_DELAY,
 	        "HTTP 429 was not classified as a server-directed rate limit");
 	const auto unavailable = duckdb_api::HttpStatusFailureProperties(503, false);
-	Require(unavailable.failure_class == duckdb_api::FailureClass::RATE_LIMIT &&
-	            unavailable.replay_classification == duckdb_api::ReplayClassification::SERVER_DIRECTED_DELAY,
-	        "HTTP 503 was not classified as a server-directed rate limit");
+	Require(unavailable.failure_class == duckdb_api::FailureClass::REMOTE_STATUS &&
+	            unavailable.remote_status_class == duckdb_api::RemoteStatusClass::SERVER_ERROR,
+	        "HTTP 503 without Retry-After was not classified as a server error");
+	const auto directed_unavailable = duckdb_api::HttpStatusFailureProperties(503, false, true);
+	Require(directed_unavailable.failure_class == duckdb_api::FailureClass::RATE_LIMIT &&
+	            directed_unavailable.replay_classification == duckdb_api::ReplayClassification::SERVER_DIRECTED_DELAY,
+	        "HTTP 503 with Retry-After was not classified as a server-directed rate limit");
 	const auto auth_rejected = duckdb_api::HttpStatusFailureProperties(401, true);
 	Require(auth_rejected.failure_class == duckdb_api::FailureClass::AUTHORIZATION &&
 	            auth_rejected.remote_status_class == duckdb_api::RemoteStatusClass::CLIENT_ERROR,
@@ -233,6 +237,9 @@ void TestFailureClassification() {
 	// Closed-set name functions bind the C++ vocabulary to the freeze strings.
 	Require(std::string(duckdb_api::FailureClassName(duckdb_api::FailureClass::RATE_LIMIT)) == "rate_limit",
 	        "FailureClassName drifted from the freeze string");
+	Require(std::string(duckdb_api::ExposureStateName(duckdb_api::ExposureState::ACCEPTED_UNEXPOSED)) ==
+	            "accepted_unexposed",
+	        "ExposureStateName drifted from the retry contract");
 	Require(std::string(duckdb_api::ReplayClassificationName(
 	            duckdb_api::ReplayClassification::SERVER_DIRECTED_DELAY)) == "server_directed_delay",
 	        "ReplayClassificationName drifted from the freeze string");
@@ -276,6 +283,14 @@ void TestFailureClassification() {
 	const auto page_budget = duckdb_api::ResourceBudgetFailureProperties("pages");
 	Require(page_budget.terminating_budget == duckdb_api::BudgetDimension::PAGES,
 	        "page-budget termination did not carry PAGES");
+	const auto accepted =
+	    duckdb_api::EnrichRetryFailureProperties(duckdb_api::ResourceBudgetFailureProperties("decoded_memory_bytes"), 2,
+	                                             1, 0, 0, duckdb_api::ExposureState::ACCEPTED_UNEXPOSED);
+	const auto exposed = duckdb_api::EnrichRetryFailureProperties(duckdb_api::HttpStatusFailureProperties(429, false),
+	                                                              2, 1, 4, 0, duckdb_api::ExposureState::EXPOSED);
+	Require(accepted.replay_classification == duckdb_api::ReplayClassification::NEVER_REPLAYABLE &&
+	            exposed.replay_classification == duckdb_api::ReplayClassification::NEVER_REPLAYABLE,
+	        "accepted or exposed retry diagnostics retained replay authority");
 
 	// Classified ExecutionError carries properties; unclassified does not.
 	const duckdb_api::FailureProperties properties {duckdb_api::FailureClass::RESOURCE_BUDGET,
@@ -285,7 +300,9 @@ void TestFailureClassification() {
 	                                                1,
 	                                                0,
 	                                                duckdb_api::RemoteStatusClass::NONE,
-	                                                duckdb_api::BudgetDimension::PAGES};
+	                                                duckdb_api::BudgetDimension::PAGES,
+	                                                0,
+	                                                duckdb_api::ExposureState::UNACCEPTED};
 	const duckdb_api::ExecutionError classified(duckdb_api::ErrorStage::RESOURCE, "pages",
 	                                            "scan exhausted its page budget", properties);
 	Require(classified.Classified() &&

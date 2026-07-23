@@ -25,7 +25,11 @@ duckdb_api::internal::HttpExecutionProfile PublicFixtureProfile() {
 	        false,
 	        false,
 	        duckdb_api::PAGINATION_MAX_EXECUTION_MILLISECONDS,
-	        duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE};
+	        duckdb_api::PAGINATION_MAX_DECODED_RECORDS_PER_PAGE,
+	        duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_STEP,
+	        duckdb_api::RETRY_MAX_REQUEST_ATTEMPTS_PER_SCAN,
+	        duckdb_api::RETRY_MAX_DELAY_MILLISECONDS,
+	        duckdb_api::RETRY_MAX_CUMULATIVE_WAITING_MILLISECONDS_PER_SCAN};
 }
 
 uint64_t DerivedBodyLimit(const duckdb_api::ScanPlan &plan) {

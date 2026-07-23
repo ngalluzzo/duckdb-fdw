@@ -27,7 +27,7 @@ bool DecodePackageSchema(const std::vector<std::pair<std::string, FailsafeYamlNo
 bool DecodeManifestSchema(const std::string &file, const FailsafeYamlNode &root, PackageDiagnosticSink &diagnostics,
                           ManifestDeclaration &manifest);
 bool DecodeRelationSchema(const std::string &file, const FailsafeYamlNode &root, PackageDiagnosticSink &diagnostics,
-                          RelationDeclaration &relation);
+                          const std::string &expected_spec_identifier, RelationDeclaration &relation);
 
 std::shared_ptr<const CompiledPackageGeneration> CompilePackageDeclaration(const PackageDeclaration &package,
                                                                            const PackageSourceSnapshot &snapshot,

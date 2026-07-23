@@ -17,6 +17,7 @@
 namespace {
 
 using duckdb_api_test::BuildAmbiguousPredicateFallbackPlanFixture;
+using duckdb_api_test::BuildRetryEnabledPaginatedRestPlanFixture;
 using duckdb_api_test::BuildValidAuthenticatedRepositoriesPlanFixture;
 using duckdb_api_test::BuildValidPaginatedPlanFixture;
 using duckdb_api_test::BuildValidPermanentRestScanPlanFixture;
@@ -104,6 +105,16 @@ std::string PermanentRestNextLink(uint64_t page) {
 std::unique_ptr<duckdb_api::BatchStream> Open(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
                                               ManualHttpExecutionControl &control, uint64_t token_suffix) {
 	const auto plan = BuildValidAuthenticatedRepositoriesPlanFixture("github_default");
+	auto token = GeneratedHttpBearerToken(token_suffix);
+	runtime->ExpectBearer("Bearer " + token);
+	return runtime->Executor()->OpenWithAuthorization(
+	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
+}
+
+std::unique_ptr<duckdb_api::BatchStream>
+OpenRetry(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime, ManualHttpExecutionControl &control,
+          uint64_t token_suffix) {
+	const auto plan = BuildRetryEnabledPaginatedRestPlanFixture("github_default");
 	auto token = GeneratedHttpBearerToken(token_suffix);
 	runtime->ExpectBearer("Bearer " + token);
 	return runtime->Executor()->OpenWithAuthorization(
@@ -646,6 +657,34 @@ void TestCancellationCloseAndAggregatePageCeiling() {
 	        "advertised-next-at-ceiling silently exhausted, retried, or exceeded 32 requests");
 }
 
+void TestLaterRestPageRetriesWithoutDuplicatingEarlierExposure() {
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({ControlledResponse(200, Repository(1, "first"), {NextLink(2)}),
+	                          ControlledResponse(503, ""),
+	                          duckdb_api_test::ControlledTransientTransportFailure(
+	                              duckdb_api::internal::HttpTransportFailureKind::COULD_NOT_CONNECT),
+	                          ControlledResponse(200, Repository(2, "second"))});
+	ManualHttpExecutionControl control;
+	auto stream = OpenRetry(runtime, control, 730);
+	duckdb_api::TypedBatch first;
+	duckdb_api::TypedBatch second;
+	Require(stream->Next(control, first) && first.rows.size() == 1 && first.rows[0].values[0].bigint_value == 1,
+	        "retry-enabled REST page one did not cross the exposure boundary exactly once");
+	Require(stream->Next(control, second) && second.rows.size() == 1 && second.rows[0].values[0].bigint_value == 2,
+	        "later REST page did not recover without replaying the exposed first page");
+	const auto diagnostics = stream->Diagnostics();
+	Require(runtime->Observations().size() == 4 && runtime->ConsumeBearerExpectation(4) &&
+	            diagnostics.aggregate_attempts == 4 && diagnostics.current_step == 2 &&
+	            diagnostics.exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "later-page recovery changed credential identity, attempt accounting, or exposure state");
+	Require(!stream->Next(control, second) &&
+	            stream->Diagnostics().exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "paginated REST exhaustion regressed the terminal step's exposed diagnostics");
+	stream->Cancel();
+	Require(stream->Diagnostics().exposure_state == duckdb_api::ExposureState::EXPOSED,
+	        "post-exhaustion paginated REST cancellation regressed exposed diagnostics");
+}
+
 } // namespace
 
 int main() {
@@ -666,6 +705,7 @@ int main() {
 		TestSelectiveProfileDoesNotLeakAcrossStreamLifecycles();
 		TestLateFailuresAreTerminalAndRedacted();
 		TestCancellationCloseAndAggregatePageCeiling();
+		TestLaterRestPageRetriesWithoutDuplicatingEarlierExposure();
 		std::cout << "HTTP scan pagination tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

@@ -4,6 +4,20 @@
 
 namespace duckdb_api_test {
 
+duckdb_api::ScanPlan ScanPlanTestAccess::RetryEnabled(duckdb_api::ScanPlan plan) {
+	if (plan.Pagination().Strategy() == duckdb_api::PlannedPaginationStrategy::DISABLED ||
+	    plan.pagination.scan_budgets.pages == 0 || plan.pagination.scan_budgets.pages > 32) {
+		throw std::invalid_argument("retry-enabled fixture requires a bounded paginated safe read");
+	}
+	plan.retry = duckdb_api::FeatureState::ENABLED;
+	plan.replay_class = duckdb_api::PlannedOperationReplayClass::REPLAYABLE_READ;
+	plan.retry_policy = {3, plan.pagination.scan_budgets.pages * 3, 10, 250};
+	plan.budgets.request_attempts = 3;
+	plan.pagination.page_budgets.request_attempts = 3;
+	plan.pagination.scan_budgets.request_attempts = plan.retry_policy.max_attempts_per_scan;
+	return plan;
+}
+
 duckdb_api::ScanPlan ScanPlanTestAccess::Feature(duckdb_api::ScanPlan plan, FeaturePlanCounterexample counterexample) {
 	switch (counterexample) {
 	case FeaturePlanCounterexample::PROVIDERS_ENABLED:
