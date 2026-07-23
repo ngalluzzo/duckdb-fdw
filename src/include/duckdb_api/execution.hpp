@@ -125,18 +125,35 @@ struct FailureProperties {
 
 class ExecutionError : public std::exception {
 public:
+	// Unclassified: preserves the existing rendered string; Classified()==false
+	// and Properties() is an unspecified default never read while unclassified.
 	ExecutionError(ErrorStage stage, std::string field, std::string safe_message);
+	// RFC 0021 classified: carries structured failure properties alongside the
+	// stage. The existing stage/field/safe_message render unchanged; properties
+	// are an additive field rendered separately by the adapter boundary.
+	ExecutionError(ErrorStage stage, std::string field, std::string safe_message, FailureProperties properties);
 
 	const char *what() const noexcept override;
 	ErrorStage Stage() const noexcept;
 	const std::string &Field() const;
 	const std::string &SafeMessage() const;
+	bool Classified() const noexcept;
+	const FailureProperties &Properties() const noexcept;
 
 private:
 	ErrorStage stage;
 	std::string field;
 	std::string safe_message;
+	FailureProperties properties;
+	bool classified;
 };
+
+// Coarse fallback: derive a primary failure class from an ErrorStage when no
+// explicit FailureProperties were attached (e.g. at the adapter translation
+// boundary). Emitters override with finer classification by attaching
+// FailureProperties at the throw site — e.g. HTTP 429 -> RATE_LIMIT, a GraphQL
+// page-budget exhaustion -> RESOURCE_BUDGET, a malformed continuation -> PROTOCOL.
+FailureClass ClassifyFailureClass(ErrorStage stage);
 
 // Protocol-neutral cancellation marker. The adapter translates it exactly
 // once into the host engine's interruption type.

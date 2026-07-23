@@ -6,7 +6,14 @@
 namespace duckdb_api {
 
 ExecutionError::ExecutionError(ErrorStage stage_p, std::string field_p, std::string safe_message_p)
-    : stage(stage_p), field(std::move(field_p)), safe_message(std::move(safe_message_p)) {
+    : stage(stage_p), field(std::move(field_p)), safe_message(std::move(safe_message_p)), properties {},
+      classified(false) {
+}
+
+ExecutionError::ExecutionError(ErrorStage stage_p, std::string field_p, std::string safe_message_p,
+                               FailureProperties properties_p)
+    : stage(stage_p), field(std::move(field_p)), safe_message(std::move(safe_message_p)), properties(properties_p),
+      classified(true) {
 }
 
 const char *ExecutionError::what() const noexcept {
@@ -23,6 +30,40 @@ const std::string &ExecutionError::Field() const {
 
 const std::string &ExecutionError::SafeMessage() const {
 	return safe_message;
+}
+
+bool ExecutionError::Classified() const noexcept {
+	return classified;
+}
+
+const FailureProperties &ExecutionError::Properties() const noexcept {
+	return properties;
+}
+
+FailureClass ClassifyFailureClass(ErrorStage stage) {
+	switch (stage) {
+	case ErrorStage::TRANSPORT:
+		return FailureClass::TRANSPORT;
+	case ErrorStage::HTTP_STATUS:
+		return FailureClass::REMOTE_STATUS;
+	case ErrorStage::DECODE:
+		return FailureClass::DECODE;
+	case ErrorStage::SCHEMA:
+		return FailureClass::SCHEMA;
+	case ErrorStage::POLICY:
+		return FailureClass::DESTINATION_POLICY;
+	case ErrorStage::RESOURCE:
+		return FailureClass::RESOURCE_BUDGET;
+	case ErrorStage::INTERNAL:
+		return FailureClass::INTERNAL;
+	case ErrorStage::AUTHENTICATION:
+		return FailureClass::CREDENTIAL_PROVIDER;
+	case ErrorStage::AUTHORIZATION:
+		return FailureClass::AUTHORIZATION;
+	case ErrorStage::REMOTE_PROTOCOL:
+		return FailureClass::PROTOCOL;
+	}
+	throw std::logic_error("unknown ErrorStage");
 }
 
 const char *FailureClassName(FailureClass failure_class) {
