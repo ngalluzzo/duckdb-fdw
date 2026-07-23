@@ -190,6 +190,61 @@ ReplayClassification ClassifyReplay(bool declared_replay_safe, bool step_rows_ex
 	return ReplayClassification::REPLAYABLE_BEFORE_EXPOSURE;
 }
 
+BudgetDimension BudgetDimensionFromField(const std::string &field) {
+	if (field == "wall_milliseconds") {
+		return BudgetDimension::TIME;
+	}
+	if (field == "pages") {
+		return BudgetDimension::PAGES;
+	}
+	if (field == "request_attempts") {
+		return BudgetDimension::ATTEMPTS;
+	}
+	if (field == "decoded_records") {
+		return BudgetDimension::RECORDS;
+	}
+	if (field == "decoded_memory_bytes") {
+		return BudgetDimension::MEMORY;
+	}
+	if (field == "cumulative_waiting_milliseconds") {
+		return BudgetDimension::WAITING;
+	}
+	if (field == "response_bytes" || field == "header_bytes" || field == "decompressed_bytes") {
+		return BudgetDimension::RESPONSE_BYTES;
+	}
+	return BudgetDimension::NONE;
+}
+
+FailureProperties ResourceBudgetFailureProperties(const std::string &field) {
+	FailureProperties properties {};
+	properties.failure_class = FailureClass::RESOURCE_BUDGET;
+	properties.phase = FailurePhase::DECODE;
+	properties.replay_classification = ClassifyReplay(true, false);
+	properties.terminating_budget = BudgetDimensionFromField(field);
+	return properties;
+}
+
+FailureProperties FailurePropertiesFromError(const ExecutionError &error) {
+	if (error.Classified()) {
+		return error.Properties();
+	}
+	FailureProperties properties {};
+	properties.failure_class = ClassifyFailureClass(error.Stage());
+	properties.phase = FailurePhase::DECODE;
+	properties.replay_classification = ClassifyReplay(true, false);
+	if (error.Stage() == ErrorStage::RESOURCE) {
+		properties.terminating_budget = BudgetDimensionFromField(error.Field());
+	}
+	return properties;
+}
+
+FailureProperties EnrichFailureProperties(FailureProperties base, uint64_t step, uint64_t rows_exposed) {
+	base.step = step;
+	base.attempt = 1;
+	base.rows_exposed = rows_exposed;
+	return base;
+}
+
 const char *FailureClassName(FailureClass failure_class) {
 	switch (failure_class) {
 	case FailureClass::CONFIGURATION:

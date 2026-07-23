@@ -173,6 +173,26 @@ FailureProperties HttpStatusFailureProperties(uint32_t status, bool auth_rejecte
 // and ATOMIC_TRAVERSAL_STEP are set by sites with that specific context.
 ReplayClassification ClassifyReplay(bool declared_replay_safe, bool step_rows_exposed);
 
+// RFC 0021: map a resource-accounting field name to the aggregate budget
+// dimension that terminated execution (e.g. "wall_milliseconds" -> TIME,
+// "pages" -> PAGES, "decoded_memory_bytes" -> MEMORY). NONE for unrecognized.
+BudgetDimension BudgetDimensionFromField(const std::string &field);
+
+// RFC 0021: base failure properties for a resource-budget termination, carrying
+// the terminating budget dimension derived from the resource field. step and
+// rows_exposed are zero; the scan catch boundary enriches them.
+FailureProperties ResourceBudgetFailureProperties(const std::string &field);
+
+// RFC 0021: base failure properties for an ExecutionError, preserving an
+// explicit classification when present and otherwise deriving the coarse
+// ErrorStage fallback class (and the terminating budget for RESOURCE errors).
+FailureProperties FailurePropertiesFromError(const ExecutionError &error);
+
+// RFC 0021: fill the scan-local identity and cumulative exposure on a base
+// classification. Preserves the throw site's class/phase/replay/
+// remote_status/terminating_budget; only step/attempt/rows_exposed are set.
+FailureProperties EnrichFailureProperties(FailureProperties base, uint64_t step, uint64_t rows_exposed);
+
 // Protocol-neutral cancellation marker. The adapter translates it exactly
 // once into the host engine's interruption type.
 class ExecutionCancelled : public std::exception {

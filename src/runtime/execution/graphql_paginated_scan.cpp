@@ -89,25 +89,6 @@ FailureProperties GraphqlCursorFailureProperties(GraphqlCursorErrorKind kind) {
 	throw std::logic_error("unknown GraphqlCursorErrorKind");
 }
 
-// RFC 0021: enrich failure properties with scan-local identity and exposure at
-// the catch boundary. Preserves the throw site's classification (class/phase/
-// replay/remote_status/terminating_budget) and fills step/attempt/rows_exposed
-// from scan context; unclassified errors get the coarse ErrorStage fallback class.
-FailureProperties EnrichFailureProperties(const ExecutionError &error, uint64_t step, uint64_t rows_exposed) {
-	FailureProperties properties;
-	if (error.Classified()) {
-		properties = error.Properties();
-	} else {
-		properties = FailureProperties {};
-		properties.failure_class = ClassifyFailureClass(error.Stage());
-		properties.replay_classification = ReplayClassification::REPLAYABLE_BEFORE_EXPOSURE;
-	}
-	properties.step = step;
-	properties.attempt = 1;
-	properties.rows_exposed = rows_exposed;
-	return properties;
-}
-
 class CombinedControl final : public ExecutionControl {
 public:
 	CombinedControl(ExecutionControl &outer_p, const std::atomic<bool> &cancelled_p)
@@ -189,13 +170,17 @@ public:
 			RememberCurrentFailure();
 			throw;
 		} catch (const ExecutionError &error) {
-			FailWithExecutionError(error.Stage(), error.Field(), error.SafeMessage(),
-			                       EnrichFailureProperties(error, accounting.Counters().pages, rows_emitted));
+			FailWithExecutionError(
+			    error.Stage(), error.Field(), error.SafeMessage(),
+			    EnrichFailureProperties(FailurePropertiesFromError(error), accounting.Counters().pages, rows_emitted));
 		} catch (const GraphqlCursorError &error) {
 			FailWithExecutionError(ErrorStage::POLICY, error.Field(), error.SafeMessage(),
-			                       GraphqlCursorFailureProperties(error.Kind()));
+			                       EnrichFailureProperties(GraphqlCursorFailureProperties(error.Kind()),
+			                                               accounting.Counters().pages, rows_emitted));
 		} catch (const ScanResourceError &error) {
-			FailWithExecutionError(ErrorStage::RESOURCE, error.Field(), error.SafeMessage());
+			FailWithExecutionError(ErrorStage::RESOURCE, error.Field(), error.SafeMessage(),
+			                       EnrichFailureProperties(ResourceBudgetFailureProperties(error.Field()),
+			                                               accounting.Counters().pages, rows_emitted));
 		} catch (const std::bad_alloc &) {
 			FailWithExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                       "execution could not be allocated within its memory budget");

@@ -255,6 +255,28 @@ void TestFailureClassification() {
 	Require(duckdb_api::ClassifyReplay(false, true) == duckdb_api::ReplayClassification::NEVER_REPLAYABLE,
 	        "unsafe operation after exposure must not be replayable");
 
+	// BudgetDimensionFromField: the four-way termination distinguishability signal.
+	Require(duckdb_api::BudgetDimensionFromField("wall_milliseconds") == duckdb_api::BudgetDimension::TIME,
+	        "wall-time field did not map to TIME");
+	Require(duckdb_api::BudgetDimensionFromField("pages") == duckdb_api::BudgetDimension::PAGES,
+	        "pages field did not map to PAGES");
+	Require(duckdb_api::BudgetDimensionFromField("decoded_memory_bytes") == duckdb_api::BudgetDimension::MEMORY,
+	        "memory field did not map to MEMORY");
+	Require(duckdb_api::BudgetDimensionFromField("request_attempts") == duckdb_api::BudgetDimension::ATTEMPTS,
+	        "attempts field did not map to ATTEMPTS");
+	Require(duckdb_api::BudgetDimensionFromField("cumulative_waiting_milliseconds") ==
+	            duckdb_api::BudgetDimension::WAITING,
+	        "waiting field did not map to WAITING");
+	Require(duckdb_api::BudgetDimensionFromField("unknown") == duckdb_api::BudgetDimension::NONE,
+	        "unknown field did not map to NONE");
+	const auto deadline_budget = duckdb_api::ResourceBudgetFailureProperties("wall_milliseconds");
+	Require(deadline_budget.failure_class == duckdb_api::FailureClass::RESOURCE_BUDGET &&
+	            deadline_budget.terminating_budget == duckdb_api::BudgetDimension::TIME,
+	        "resource-budget termination did not carry its terminating dimension");
+	const auto page_budget = duckdb_api::ResourceBudgetFailureProperties("pages");
+	Require(page_budget.terminating_budget == duckdb_api::BudgetDimension::PAGES,
+	        "page-budget termination did not carry PAGES");
+
 	// Classified ExecutionError carries properties; unclassified does not.
 	const duckdb_api::FailureProperties properties {duckdb_api::FailureClass::RESOURCE_BUDGET,
 	                                                duckdb_api::FailurePhase::DECODE,
