@@ -65,6 +65,30 @@ void CheckStatus(uint32_t status) {
 	}
 }
 
+// RFC 0021: map a GraphqlCursorErrorKind to failure properties so the scan catch
+// boundary classifies cursor failures structurally rather than by message text.
+// The ErrorStage/field/safe_message still render unchanged; this only attaches
+// the additive FailureClass. step/rows_exposed default to zero and are enriched
+// at the catch boundary.
+FailureProperties GraphqlCursorFailureProperties(GraphqlCursorErrorKind kind) {
+	FailureProperties properties {};
+	properties.phase = FailurePhase::PAGINATE;
+	properties.attempt = 1;
+	properties.replay_classification = ReplayClassification::REPLAYABLE_BEFORE_EXPOSURE;
+	switch (kind) {
+	case GraphqlCursorErrorKind::PROFILE:
+		properties.failure_class = FailureClass::CONFIGURATION;
+		return properties;
+	case GraphqlCursorErrorKind::RESOURCE_BUDGET:
+		properties.failure_class = FailureClass::RESOURCE_BUDGET;
+		return properties;
+	case GraphqlCursorErrorKind::PROTOCOL:
+		properties.failure_class = FailureClass::PROTOCOL;
+		return properties;
+	}
+	throw std::logic_error("unknown GraphqlCursorErrorKind");
+}
+
 class CombinedControl final : public ExecutionControl {
 public:
 	CombinedControl(ExecutionControl &outer_p, const std::atomic<bool> &cancelled_p)
@@ -148,7 +172,8 @@ public:
 			RememberCurrentFailure();
 			throw;
 		} catch (const GraphqlCursorError &error) {
-			FailWithExecutionError(ErrorStage::POLICY, error.Field(), error.SafeMessage());
+			FailWithExecutionError(ErrorStage::POLICY, error.Field(), error.SafeMessage(),
+			                       GraphqlCursorFailureProperties(error.Kind()));
 		} catch (const ScanResourceError &error) {
 			FailWithExecutionError(ErrorStage::RESOURCE, error.Field(), error.SafeMessage());
 		} catch (const std::bad_alloc &) {
@@ -295,6 +320,16 @@ private:
 		}
 	}
 
+	[[noreturn]] void FailWithExecutionError(ErrorStage stage, std::string field, std::string safe_message,
+	                                         FailureProperties properties) {
+		try {
+			throw ExecutionError(stage, std::move(field), std::move(safe_message), std::move(properties));
+		} catch (...) {
+			RememberCurrentFailure();
+			throw;
+		}
+	}
+
 	const std::unique_ptr<const AdmittedGraphqlRequestProfile> admitted_profile;
 	const std::shared_ptr<const HttpTransport> transport;
 	std::unique_ptr<ScanAuthorization> authorization;
@@ -334,7 +369,8 @@ OpenGraphqlPaginatedScan(std::unique_ptr<const AdmittedGraphqlRequestProfile> ad
 	} catch (const ScanResourceError &error) {
 		throw ExecutionError(ErrorStage::RESOURCE, error.Field(), error.SafeMessage());
 	} catch (const GraphqlCursorError &error) {
-		throw ExecutionError(ErrorStage::RESOURCE, error.Field(), error.SafeMessage());
+		throw ExecutionError(ErrorStage::RESOURCE, error.Field(), error.SafeMessage(),
+		                     GraphqlCursorFailureProperties(error.Kind()));
 	} catch (const std::bad_alloc &) {
 		throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 		                     "GraphQL scan stream could not be allocated within its memory budget");

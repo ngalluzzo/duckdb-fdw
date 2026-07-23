@@ -78,6 +78,58 @@ void TestPersistentCursorMemoryAndByteBoundary() {
 	}
 }
 
+void TestCursorErrorClassification() {
+	using duckdb_api::internal::GraphqlCursorErrorKind;
+	// Profile invalid -> PROFILE (-> FailureClass::CONFIGURATION).
+	try {
+		duckdb_api::internal::GraphqlCursorState state(0, 512);
+		(void)state;
+		throw std::runtime_error("zero max_pages cursor profile must fail");
+	} catch (const duckdb_api::internal::GraphqlCursorError &error) {
+		Require(error.Kind() == GraphqlCursorErrorKind::PROFILE, "invalid cursor profile was not PROFILE");
+	}
+	// Page authority exceeded -> RESOURCE_BUDGET.
+	duckdb_api::internal::GraphqlCursorState authority(1, 512);
+	authority.MarkRequestStarted();
+	authority.Advance(true, "cursor-1");
+	try {
+		authority.MarkRequestStarted();
+		throw std::runtime_error("cursor state accepted a request beyond max_pages");
+	} catch (const duckdb_api::internal::GraphqlCursorError &error) {
+		Require(error.Kind() == GraphqlCursorErrorKind::RESOURCE_BUDGET,
+		        "page-authority exhaustion was not RESOURCE_BUDGET");
+	}
+	// Missing continuation cursor -> PROTOCOL.
+	duckdb_api::internal::GraphqlCursorState missing(32, 512);
+	missing.MarkRequestStarted();
+	try {
+		missing.Advance(true, "");
+		throw std::runtime_error("missing cursor must fail");
+	} catch (const duckdb_api::internal::GraphqlCursorError &error) {
+		Require(error.Kind() == GraphqlCursorErrorKind::PROTOCOL, "missing cursor was not PROTOCOL");
+	}
+	// Oversized cursor -> RESOURCE_BUDGET.
+	duckdb_api::internal::GraphqlCursorState oversized(32, 512);
+	oversized.MarkRequestStarted();
+	try {
+		oversized.Advance(true, std::string(513, 'z'));
+		throw std::runtime_error("oversized cursor must fail");
+	} catch (const duckdb_api::internal::GraphqlCursorError &error) {
+		Require(error.Kind() == GraphqlCursorErrorKind::RESOURCE_BUDGET, "oversized cursor was not RESOURCE_BUDGET");
+	}
+	// Repeated cursor -> PROTOCOL.
+	duckdb_api::internal::GraphqlCursorState repeated(32, 512);
+	repeated.MarkRequestStarted();
+	repeated.Advance(true, "dup");
+	repeated.MarkRequestStarted();
+	try {
+		repeated.Advance(true, "dup");
+		throw std::runtime_error("repeated cursor must fail");
+	} catch (const duckdb_api::internal::GraphqlCursorError &error) {
+		Require(error.Kind() == GraphqlCursorErrorKind::PROTOCOL, "repeated cursor was not PROTOCOL");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -86,6 +138,7 @@ int main() {
 		TestRepeatedCursorFailsTerminally();
 		TestLastAuthorizedPageRetainsContinuationForCommonAccounting();
 		TestPersistentCursorMemoryAndByteBoundary();
+		TestCursorErrorClassification();
 		std::cout << "GraphQL cursor pagination tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

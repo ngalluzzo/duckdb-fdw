@@ -8,14 +8,30 @@
 namespace duckdb_api {
 namespace internal {
 
+// RFC 0021: structural discriminator for the distinct failure classes a cursor
+// transition can produce, so the scan catch boundary maps to a FailureClass
+// without parsing the safe-message text. Mirrors the LinkPaginationErrorKind
+// precedent. The field/safe_message still carry the specific reason for the
+// rendered diagnostic.
+enum class GraphqlCursorErrorKind : uint8_t {
+	// -> FailureClass::CONFIGURATION: invalid cursor profile.
+	PROFILE,
+	// -> FailureClass::RESOURCE_BUDGET: page authority, cursor byte budget, or memory.
+	RESOURCE_BUDGET,
+	// -> FailureClass::PROTOCOL: cursor state-machine or GraphQL shape violation.
+	PROTOCOL
+};
+
 class GraphqlCursorError : public std::exception {
 public:
-	GraphqlCursorError(std::string field, std::string safe_message);
+	GraphqlCursorError(GraphqlCursorErrorKind kind, std::string field, std::string safe_message);
 	const char *what() const noexcept override;
 	const std::string &Field() const noexcept;
 	const std::string &SafeMessage() const noexcept;
+	GraphqlCursorErrorKind Kind() const noexcept;
 
 private:
+	GraphqlCursorErrorKind kind;
 	std::string field;
 	std::string safe_message;
 };
@@ -39,7 +55,7 @@ public:
 	void Release() noexcept;
 
 private:
-	[[noreturn]] void Reject(std::string field, std::string safe_message);
+	[[noreturn]] void Reject(GraphqlCursorErrorKind kind, std::string field, std::string safe_message);
 
 	uint64_t max_pages;
 	uint64_t max_cursor_bytes;
