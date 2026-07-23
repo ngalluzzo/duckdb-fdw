@@ -109,6 +109,25 @@ void CheckStatus(uint32_t status) {
 	}
 }
 
+// RFC 0021: enrich failure properties with scan-local identity and exposure at
+// the catch boundary. Preserves the throw site's classification and fills
+// step/attempt/rows_exposed from scan context; unclassified errors get the
+// coarse ErrorStage fallback class.
+FailureProperties EnrichFailureProperties(const ExecutionError &error, uint64_t step, uint64_t rows_exposed) {
+	FailureProperties properties;
+	if (error.Classified()) {
+		properties = error.Properties();
+	} else {
+		properties = FailureProperties {};
+		properties.failure_class = ClassifyFailureClass(error.Stage());
+		properties.replay_classification = ReplayClassification::REPLAYABLE_BEFORE_EXPOSURE;
+	}
+	properties.step = step;
+	properties.attempt = 1;
+	properties.rows_exposed = rows_exposed;
+	return properties;
+}
+
 class CombinedControl final : public ExecutionControl {
 public:
 	CombinedControl(ExecutionControl &outer_p, const std::atomic<bool> &cancelled_p)
@@ -139,7 +158,7 @@ public:
 	      column_types(BuildColumnTypes(*admitted_profile)),
 	      accounting(BuildResourceProfile(*admitted_profile, max_wall_milliseconds_p)), pagination(*admitted_profile),
 	      cancelled(false), closed(false), exhausted(false), page_loaded(false), page_has_next(false),
-	      decoded_memory_bytes(0), decoded_memory_allowance(0), offset(0) {
+	      decoded_memory_bytes(0), decoded_memory_allowance(0), offset(0), rows_emitted(0) {
 	}
 
 	~PaginatedBatchStream() noexcept override {
@@ -193,9 +212,9 @@ public:
 		} catch (const ExecutionCancelled &) {
 			RememberCurrentFailure();
 			throw;
-		} catch (const ExecutionError &) {
-			RememberCurrentFailure();
-			throw;
+		} catch (const ExecutionError &error) {
+			FailWithExecutionError(error.Stage(), error.Field(), error.SafeMessage(),
+			                       EnrichFailureProperties(error, accounting.Counters().pages, rows_emitted));
 		} catch (const LinkPaginationError &error) {
 			FailWithExecutionError(ErrorStage::POLICY, error.Field(), error.SafeMessage());
 		} catch (const ScanResourceError &error) {
@@ -255,6 +274,7 @@ private:
 		}
 		CheckState(control, accounting.Deadline());
 		offset += count;
+		rows_emitted += static_cast<uint64_t>(count);
 		batch = std::move(produced);
 		return true;
 	}
@@ -351,6 +371,16 @@ private:
 		}
 	}
 
+	[[noreturn]] void FailWithExecutionError(ErrorStage stage, std::string field, std::string safe_message,
+	                                         FailureProperties properties) {
+		try {
+			throw ExecutionError(stage, std::move(field), std::move(safe_message), std::move(properties));
+		} catch (...) {
+			RememberCurrentFailure();
+			throw;
+		}
+	}
+
 	const std::unique_ptr<const AdmittedPaginatedRestRequestProfile> admitted_profile;
 	const std::shared_ptr<const HttpTransport> transport;
 	std::unique_ptr<ScanAuthorization> authorization;
@@ -368,6 +398,8 @@ private:
 	uint64_t decoded_memory_bytes;
 	uint64_t decoded_memory_allowance;
 	std::size_t offset;
+	// RFC 0021: cumulative rows emitted to DuckDB across pages, for rows_exposed.
+	uint64_t rows_emitted;
 };
 
 } // namespace
