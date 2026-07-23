@@ -298,6 +298,52 @@ void TestFailureClassification() {
 	Require(!unclassified.Classified(), "unclassified ExecutionError reported Classified() true");
 }
 
+void TestFourWayTerminationDistinguishability() {
+	// RFC 0021: deadline expiry and local exhaustion are both RESOURCE_BUDGET
+	// but carry distinct terminating_budget dimensions, so they stay
+	// distinguishable; cancellation is a distinct marker type; remote timeout
+	// is a reserved distinct class (no v1 emitter).
+	const auto deadline = duckdb_api::ResourceBudgetFailureProperties("wall_milliseconds");
+	const auto memory = duckdb_api::ResourceBudgetFailureProperties("decoded_memory_bytes");
+	const auto pages = duckdb_api::ResourceBudgetFailureProperties("pages");
+	Require(deadline.failure_class == memory.failure_class && memory.failure_class == pages.failure_class,
+	        "resource terminations were not all RESOURCE_BUDGET");
+	Require(deadline.terminating_budget == duckdb_api::BudgetDimension::TIME &&
+	            memory.terminating_budget == duckdb_api::BudgetDimension::MEMORY &&
+	            pages.terminating_budget == duckdb_api::BudgetDimension::PAGES,
+	        "resource terminations did not carry distinct terminating budgets");
+	Require(deadline.terminating_budget != memory.terminating_budget &&
+	            deadline.terminating_budget != pages.terminating_budget,
+	        "deadline expiry was not distinguishable from local exhaustion");
+	Require(std::string(duckdb_api::FailureClassName(duckdb_api::FailureClass::TIMEOUT)) == "timeout",
+	        "timeout was not the reserved remote-timeout class");
+	const duckdb_api::ExecutionCancelled cancellation;
+	Require(std::string(cancellation.what()) == "execution cancelled",
+	        "cancellation was not the distinct interruption marker type");
+}
+
+void TestStructuredFieldRedaction() {
+	// RFC 0021: every structured FailureProperties field is a closed code or
+	// count; its name renders only the freeze vocabulary and must never echo
+	// body/document/cursor/row/credential content from the failure context.
+	const std::string canary = "secret-canary-body-cursor-row-credential";
+	const duckdb_api::ExecutionError error(duckdb_api::ErrorStage::HTTP_STATUS, "http_status",
+	                                       std::string("response body contained ") + canary,
+	                                       duckdb_api::HttpStatusFailureProperties(429, true));
+	Require(error.Classified(), "canary error was not classified");
+	const auto &properties = error.Properties();
+	for (const char *name :
+	     {duckdb_api::FailureClassName(properties.failure_class), duckdb_api::FailurePhaseName(properties.phase),
+	      duckdb_api::ReplayClassificationName(properties.replay_classification),
+	      duckdb_api::RemoteStatusClassName(properties.remote_status_class),
+	      duckdb_api::BudgetDimensionName(properties.terminating_budget)}) {
+		Require(std::string(name).find(canary) == std::string::npos,
+		        "a structured failure field echoed redacted content");
+	}
+	Require(properties.rows_exposed == 0 && properties.attempt == 1 && properties.step == 0,
+	        "identity/exposure fields were not closed ordinals/counts");
+}
+
 } // namespace
 
 int main() {
@@ -308,6 +354,8 @@ int main() {
 		TestDoublePayloadAndAlignmentCancellation();
 		TestStableErrorContract();
 		TestFailureClassification();
+		TestFourWayTerminationDistinguishability();
+		TestStructuredFieldRedaction();
 		std::cout << "execution contract tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

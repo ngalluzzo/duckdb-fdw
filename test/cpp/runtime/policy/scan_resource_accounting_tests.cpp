@@ -349,6 +349,35 @@ void TestMaximumCounterBoundary() {
 	        "maximum exact-boundary commit overflowed or wrapped");
 }
 
+void TestCumulativeWaitingBudget() {
+	// RFC 0021: the v1 default ceiling is zero (no waiting mechanism enabled).
+	// A zero wait is a no-op; any positive wait fails closed without debiting.
+	const Clock::time_point start;
+	ScanResourceAccounting zero_wait(Profile());
+	zero_wait.BeginPage(start);
+	const auto deadline_before = zero_wait.Deadline();
+	zero_wait.CommitWait(0);
+	Require(zero_wait.Counters().cumulative_waiting_milliseconds == 0, "zero wait debited the counter");
+	Require(zero_wait.Deadline() == deadline_before, "CommitWait altered the scan deadline");
+	RequireError([&]() { zero_wait.CommitWait(1); }, "cumulative_waiting_milliseconds",
+	             "positive wait at the zero v1 ceiling");
+	Require(zero_wait.Counters().cumulative_waiting_milliseconds == 0, "failed wait debited the counter");
+
+	// A nonzero ceiling debits cumulatively and never resets the deadline.
+	auto waiting_profile = Profile();
+	waiting_profile.scan.cumulative_waiting_milliseconds = 5;
+	ScanResourceAccounting waiting(waiting_profile);
+	waiting.BeginPage(start);
+	const auto waiting_deadline = waiting.Deadline();
+	waiting.CommitWait(2);
+	waiting.CommitWait(3);
+	Require(waiting.Counters().cumulative_waiting_milliseconds == 5, "cumulative waiting did not debit additively");
+	Require(waiting.Deadline() == waiting_deadline, "waiting reset the scan deadline (no-reset invariant)");
+	RequireError([&]() { waiting.CommitWait(1); }, "cumulative_waiting_milliseconds", "wait over ceiling");
+	Require(waiting.Counters().cumulative_waiting_milliseconds == 5, "over-ceiling wait debited the counter");
+	Require(waiting.Deadline() == waiting_deadline, "over-ceiling wait reset the deadline");
+}
+
 } // namespace
 
 int main() {
@@ -362,6 +391,7 @@ int main() {
 		TestDeadlineAndRepresentability();
 		TestOrderingAbortAndTerminalState();
 		TestMaximumCounterBoundary();
+		TestCumulativeWaitingBudget();
 		std::cout << "Scan resource accounting tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {
