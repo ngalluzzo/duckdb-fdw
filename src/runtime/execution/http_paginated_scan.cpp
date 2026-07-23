@@ -128,6 +128,29 @@ FailureProperties EnrichFailureProperties(const ExecutionError &error, uint64_t 
 	return properties;
 }
 
+// RFC 0021: map a LinkPaginationErrorKind to failure properties so the scan
+// catch boundary classifies Link failures structurally rather than flattening
+// every kind to POLICY. The ErrorStage stays POLICY (preserving the rendered
+// string); only the additive FailureClass reflects the kind.
+FailureProperties LinkPaginationFailureProperties(LinkPaginationErrorKind kind) {
+	FailureProperties properties {};
+	properties.phase = FailurePhase::PAGINATE;
+	properties.attempt = 1;
+	properties.replay_classification = ReplayClassification::REPLAYABLE_BEFORE_EXPOSURE;
+	switch (kind) {
+	case LinkPaginationErrorKind::MALFORMED:
+		properties.failure_class = FailureClass::PROTOCOL;
+		return properties;
+	case LinkPaginationErrorKind::POLICY:
+		properties.failure_class = FailureClass::DESTINATION_POLICY;
+		return properties;
+	case LinkPaginationErrorKind::STATE:
+		properties.failure_class = FailureClass::PROTOCOL;
+		return properties;
+	}
+	throw std::logic_error("unknown LinkPaginationErrorKind");
+}
+
 class CombinedControl final : public ExecutionControl {
 public:
 	CombinedControl(ExecutionControl &outer_p, const std::atomic<bool> &cancelled_p)
@@ -216,7 +239,8 @@ public:
 			FailWithExecutionError(error.Stage(), error.Field(), error.SafeMessage(),
 			                       EnrichFailureProperties(error, accounting.Counters().pages, rows_emitted));
 		} catch (const LinkPaginationError &error) {
-			FailWithExecutionError(ErrorStage::POLICY, error.Field(), error.SafeMessage());
+			FailWithExecutionError(ErrorStage::POLICY, error.Field(), error.SafeMessage(),
+			                       LinkPaginationFailureProperties(error.Kind()));
 		} catch (const ScanResourceError &error) {
 			FailWithExecutionError(ErrorStage::RESOURCE, error.Field(), error.SafeMessage());
 		} catch (const std::bad_alloc &) {
