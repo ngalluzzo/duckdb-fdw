@@ -88,8 +88,8 @@ class DescriptorFixture(ProviderFixture):
         return (
             "extension:\n"
             "  name: duckdb_api\n"
-            "  description: Loads a declarative connector package and exposes "
-            "its typed relations as generated DuckDB table functions.\n"
+            "  description: Exposes a typed example relation through DuckDB's "
+            "duckdb_api_scan table function.\n"
             "  version: 0.2.0\n"
             "  language: C++\n"
             "  build: cmake\n"
