@@ -697,8 +697,10 @@ Runtime owns one scan ledger with checked unsigned counters for:
 - emitted records;
 - extracted string bytes;
 - serialized GraphQL document/body bytes;
-- retained response/page memory; and
-- elapsed time.
+- retained response/page memory;
+- elapsed time; and
+- cumulative waiting (RFC 0021; zero in v1 — no retry or rate-limit-waiting
+  mechanism is enabled).
 
 It debits actual use against the minimum of host and compiled ceilings. Every
 increment and multiplication is checked before state mutation. Exceeded or
@@ -718,9 +720,13 @@ host scan ceilings, and Runtime admission independently requires the same
 value. A plan never advertises body authority that page exhaustion makes
 unreachable.
 
-One request/page is the replay unit, but v1 performs one attempt. Retry, cache,
-provider, parallel-page, and progress states are disabled and unknown enum
-values fail admission.
+One request/page is the replay unit, but v1 performs one attempt. This ledger
+is the authoritative aggregate scan resilience budget (RFC 0021): attempts,
+pages, bytes, records, memory, elapsed time, and cumulative waiting all debit
+one checked aggregate, and a retry or wait never resets a counter, deadline, or
+budget (the no-reset invariant). Retry, rate-limit waiting, cache, provider,
+parallel-page, and progress states are disabled and unknown enum values fail
+admission.
 
 ## Cancellation, close, and failure
 
@@ -738,6 +744,15 @@ authorization, and admitted-profile state.
 exhaustion. A failure after prior rows is terminal and repeats the same safe
 failure classification on later pulls; it is never converted to clean
 exhaustion or partial success.
+
+Each terminal failure carries additive structured resilience facts (RFC 0021):
+a primary failure class, the execution phase, an attempt ordinal, the count of
+rows exposed to DuckDB before the failure, the observed remote-status class, the
+terminating budget dimension, and a replay classification. These are closed
+codes, ordinals, and counts — never content — layered on the boundary's error
+stage without changing the rendered string. Cancellation, scan-deadline expiry
+(the `time` budget), a reserved transport-timeout class, and local resource
+exhaustion (`memory`/`bytes`/`records`/`pages`) remain distinguishable.
 
 Executor instances are immutable services. Each open creates isolated mutable
 stream state. Failure or cancellation of one stream cannot poison another.
@@ -780,6 +795,15 @@ exceptions become a fixed internal failure. Cancellation remains DuckDB
 interruption. No layer forwards source scalar content, absolute roots,
 credentials, raw URLs with query values, documents, request/response bodies,
 rows, cursors, or remote messages.
+
+The primary failure taxonomy (RFC 0021) classifies every terminal failure into
+exactly one of: configuration, authorization, credential-provider,
+destination-policy, transport, timeout, remote-status, rate-limit, protocol,
+decode, schema, resource-budget, cancellation, or internal. It is carried as an
+additive structured field; the existing error-stage classification and rendered
+strings are preserved. The closed primary-class and replay-classification sets
+are bound to `release/1.0.0/freeze.json` and enforced by
+`scripts/contract_freeze.py`.
 
 ## Fixture services and dependency direction
 

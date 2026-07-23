@@ -413,6 +413,20 @@ residual owner, pagination strategy, resource envelope, and safe provenance
 without claiming unsupported ordering, snapshot, retry, cache, or remote
 relational behavior.
 
+The scan resilience accounting model (RFC 0021) is carried as additive
+structured facts on each terminal failure and on the explained plan, layered on
+the boundary's stable error stages without altering rendered strings: stable
+identities for the scan, the selected operation, the traversal step, and the
+transport attempt; one primary failure class per terminal failure; an explicit
+replay classification combining the plan's declared replay safety with Runtime
+exposure state; and one aggregate scan budget that attempts and future waiting
+debit rather than reset. The effective resilience and budget policy (declared
+replay safety; retry, rate-limit waiting, and cache all disabled in v1) is
+explainable. No resilience mechanism is enabled; indeterminate replay safety is
+non-replayable. The closed primary-class and replay-classification vocabularies
+are bound to `release/1.0.0/freeze.json` and enforced by
+`scripts/contract_freeze.py`.
+
 ## Compatibility and support boundary
 
 The implementation is a native C++ DuckDB table-function extension on the
