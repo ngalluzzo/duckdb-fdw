@@ -27,6 +27,13 @@ void LoadRepositoryPackage(duckdb::Connection &connection, const std::string &re
 	        "actual DuckDB did not load the repository package");
 }
 
+void LoadRickAndMortyPackage(duckdb::Connection &connection, const std::string &repository_root) {
+	auto load = connection.Query("CALL system.main.duckdb_api_load_connector(package_root := '" + repository_root +
+	                             "/connectors/rickandmorty')");
+	Require(!load->HasError() && load->RowCount() == 1 && load->GetValue(4, 0).GetValue<std::uint64_t>() == 2,
+	        "actual DuckDB did not load the Rick and Morty repository package");
+}
+
 void CreatePackageRuntimeSecret(duckdb::Connection &connection) {
 	auto secret = connection.Query("CREATE TEMPORARY SECRET package_runtime "
 	                               "(TYPE duckdb_api, PROVIDER config, TOKEN 'package-runtime-token')");
@@ -65,7 +72,7 @@ public:
 		duckdb_api::TypedRow row;
 		for (const auto &column : plan.OutputColumns()) {
 			const auto kind = KindFor(column.logical_type);
-			batch.column_kinds.push_back(kind);
+			batch.column_types.push_back(kind);
 			switch (kind) {
 			case duckdb_api::ValueKind::BIGINT:
 				row.values.push_back(duckdb_api::TypedValue::BigInt(11));
@@ -314,6 +321,68 @@ void TestDoubleColumnReachesRealDescribeAndSelectOutput(const std::string &repos
 // Query sees only a ScanExecutor and safe counters while the permanent package
 // supplies the declarations consumed by Connector and Semantics.
 void TestGeneratedRelationsExecuteThroughRuntime(const std::string &repository_root) {
+	{
+		auto scenario = duckdb_api_test::BuildControlledRuntimeScenario(
+		    duckdb_api_test::ControlledRuntimeScenarioId::RICKANDMORTY_CHARACTER_EPISODES);
+		duckdb::DuckDB database(nullptr);
+		duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_rickandmorty_array_product_test");
+		duckdb::RegisterDuckdbApiSecrets(loader);
+		duckdb::RegisterDuckdbApiPackageSurface(loader,
+		                                        duckdb_api::BuildPackageGenerationComposition(scenario->Executor()));
+		duckdb::Connection connection(database);
+		LoadRickAndMortyPackage(connection, repository_root);
+		auto described =
+		    connection.Query("DESCRIBE SELECT * FROM system.main.rickandmorty_character_search(status := 'Alive')");
+		bool found_episode_list = false;
+		for (duckdb::idx_t row = 0; !described->HasError() && row < described->RowCount(); row++) {
+			found_episode_list = found_episode_list || (described->GetValue(0, row).ToString() == "episode" &&
+			                                            described->GetValue(1, row).ToString() == "VARCHAR[]");
+		}
+		Require(!described->HasError() && found_episode_list,
+		        "real DuckDB DESCRIBE did not expose Rick and Morty's episode VARCHAR[] column");
+		auto all_rows = connection.Query("SELECT id, episode "
+		                                 "FROM system.main.rickandmorty_character_search(status := 'Alive') "
+		                                 "ORDER BY id");
+		Require(!all_rows->HasError() && all_rows->RowCount() == 4,
+		        "Rick and Morty's ARRAY scan changed base-row cardinality");
+		const auto id_one_value = all_rows->GetValue(1, 0);
+		const auto id_two_value = all_rows->GetValue(1, 1);
+		const auto id_three_value = all_rows->GetValue(1, 2);
+		const auto id_four_value = all_rows->GetValue(1, 3);
+		const auto &id_one_episodes = duckdb::ListValue::GetChildren(id_one_value);
+		const auto &id_two_episodes = duckdb::ListValue::GetChildren(id_two_value);
+		const auto &id_three_episodes = duckdb::ListValue::GetChildren(id_three_value);
+		const auto &id_four_episodes = duckdb::ListValue::GetChildren(id_four_value);
+		Require(all_rows->GetValue(0, 0).GetValue<int64_t>() == 1 && id_one_episodes.size() == 2 &&
+		            id_one_episodes[0].ToString() == "https://rickandmortyapi.com/api/episode/1" &&
+		            id_one_episodes[1].ToString() == "https://rickandmortyapi.com/api/episode/2" &&
+		            all_rows->GetValue(0, 1).GetValue<int64_t>() == 2 && id_two_episodes.size() == 1 &&
+		            id_two_episodes[0].ToString() == "https://rickandmortyapi.com/api/episode/2" &&
+		            all_rows->GetValue(0, 2).GetValue<int64_t>() == 3 && id_three_episodes.empty() &&
+		            all_rows->GetValue(0, 3).GetValue<int64_t>() == 4 && id_four_episodes.size() == 3 &&
+		            id_four_episodes[0].ToString() == "https://rickandmortyapi.com/api/episode/4" &&
+		            id_four_episodes[1].ToString() == "https://rickandmortyapi.com/api/episode/1" &&
+		            id_four_episodes[2].ToString() == "https://rickandmortyapi.com/api/episode/4",
+		        "Rick and Morty's complete ARRAY scan changed an id, list value, order, duplicate, or empty list");
+		auto result = connection.Query("SELECT id, episode, episode[1] "
+		                               "FROM system.main.rickandmorty_character_search(status := 'Alive') "
+		                               "WHERE id <> 1 ORDER BY id LIMIT 2 OFFSET 1");
+		const bool has_two_rows = !result->HasError() && result->RowCount() == 2;
+		const auto first_episodes = has_two_rows ? result->GetValue(1, 0) : duckdb::Value();
+		const auto second_episodes = has_two_rows ? result->GetValue(1, 1) : duckdb::Value();
+		const auto &second_children = duckdb::ListValue::GetChildren(second_episodes);
+		Require(has_two_rows && result->GetValue(0, 0).GetValue<int64_t>() == 3 &&
+		            duckdb::ListValue::GetChildren(first_episodes).empty() && result->GetValue(2, 0).IsNull() &&
+		            result->GetValue(0, 1).GetValue<int64_t>() == 4 && second_children.size() == 3 &&
+		            second_children[0].ToString() == "https://rickandmortyapi.com/api/episode/4" &&
+		            second_children[1].ToString() == "https://rickandmortyapi.com/api/episode/1" &&
+		            second_children[2].ToString() == "https://rickandmortyapi.com/api/episode/4" &&
+		            result->GetValue(2, 1).ToString() == "https://rickandmortyapi.com/api/episode/4",
+		        "Rick and Morty's episode arrays did not survive package compilation, Runtime decoding, and SQL");
+		const auto observation = scenario->Observation();
+		Require(observation.request_count == observation.expected_request_count,
+		        "Rick and Morty ARRAY query did not consume its exact Runtime scenario");
+	}
 	{
 		auto scenario = duckdb_api_test::BuildControlledRuntimeScenario(
 		    duckdb_api_test::ControlledRuntimeScenarioId::RETAINED_REST_USER);

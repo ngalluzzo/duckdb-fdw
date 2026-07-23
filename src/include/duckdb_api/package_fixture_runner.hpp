@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace duckdb_api {
@@ -21,6 +22,7 @@ enum class PackageFixtureCoverageScope {
 	AUTHENTICATION,
 	INPUT,
 	COLUMN,
+	ARRAY,
 	OPERATION_SELECTION,
 	RELATION_SELECTION,
 	PREDICATE,
@@ -181,8 +183,19 @@ struct PackageFixtureLimits {
 };
 
 struct PackageFixtureCell {
+	PackageFixtureCell(bool is_null_p, std::string value_p)
+	    : is_null(is_null_p), value(std::move(value_p)), is_array(false), elements() {
+	}
+	PackageFixtureCell(bool is_null_p, std::vector<PackageFixtureCell> elements_p)
+	    : is_null(is_null_p), value(), is_array(true), elements(std::move(elements_p)) {
+	}
+
 	bool is_null;
 	std::string value;
+	bool is_array;
+	// Flat scalar children only. The parser rejects SEQUENCE children, so this
+	// recursive storage cannot represent a nested connector value.
+	std::vector<PackageFixtureCell> elements;
 };
 
 // Cells are normalized into the compiled relation's column order. Types and

@@ -439,9 +439,9 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::DistinctRestQueryPath(const std::st
 	                        {{"record_id", duckdb_api::PlannedRestScalarKind::BIGINT, false, {{"identity", "id"}}},
 	                         {"label", duckdb_api::PlannedRestScalarKind::VARCHAR, true, {{"attributes", "label"}}},
 	                         {"active", duckdb_api::PlannedRestScalarKind::BOOLEAN, false, {{"flags", "active"}}}}});
-	plan.output_columns = {{"record_id", "compat-bigint", false, "compat-record-id-path"},
-	                       {"label", "compat-varchar", true, "compat-label-path"},
-	                       {"active", "compat-boolean", false, "compat-active-path"}};
+	plan.output_columns = {{"record_id", "BIGINT", false, "$.identity.id"},
+	                       {"label", "VARCHAR", true, "$.attributes.label"},
+	                       {"active", "BOOLEAN", false, "$.flags.active"}};
 	EnablePagination(plan, duckdb_api::PlannedPaginationStrategy::LINK_HEADER, "page_size", 25, "page", 4, 1024, 4096,
 	                 25, 100, 128);
 	RequireBearer(plan, secret_name);

@@ -113,7 +113,8 @@ bool SameGraphqlColumns(const std::vector<CompiledGraphqlResultColumn> &left,
 	}
 	for (std::size_t index = 0; index < left.size(); index++) {
 		if (left[index].name != right[index].name || left[index].scalar_kind != right[index].scalar_kind ||
-		    left[index].nullable != right[index].nullable ||
+		    left[index].nullable != right[index].nullable || left[index].shape != right[index].shape ||
+		    left[index].element_nullable != right[index].element_nullable ||
 		    !SamePath(left[index].response_path, right[index].response_path)) {
 			return false;
 		}
@@ -235,7 +236,8 @@ bool SameInput(const CompiledRelationInput &left, const CompiledRelationInput &r
 }
 
 bool SameColumn(const CompiledColumn &left, const CompiledColumn &right) {
-	return left.name == right.name && left.ScalarType() == right.ScalarType() && left.nullable == right.nullable &&
+	return left.name == right.name && left.Shape() == right.Shape() && left.ElementType() == right.ElementType() &&
+	       left.ElementNullable() == right.ElementNullable() && left.nullable == right.nullable &&
 	       left.extractor == right.extractor && left.ExtractorSegments() == right.ExtractorSegments();
 }
 

@@ -9,7 +9,7 @@
     "ROADMAP.md section '1.0.0 - narrow stable contract' states the public outcome.",
     "RFC 0009 sets the intended stable boundary and the six SemVer-governed categories.",
     "docs/ARCHITECTURE.md, docs/CONNECTOR_SPECIFICATIONS.md, docs/RUNTIME_CONTRACTS.md define current behavior.",
-    "Accepted RFCs 0010, 0011, 0012, 0013, 0014 bind specific decisions propagated into those contracts.",
+    "Accepted RFCs 0010, 0011, 0012, 0013, 0014, 0021, and 0022 bind specific decisions propagated into those contracts.",
     "release/public-surface/inventory.json is the SQL-surface compatibility oracle.",
     "release/<version>/pins.json and public_contract.json are per-release identity and contract evidence."
   ],
@@ -81,6 +81,21 @@
       "code": "DUCKDB_API_INVALID_TYPE",
       "phase": "SCHEMA"
     }
+  },
+  "column_shapes": {
+    "authored": [
+      "SCALAR",
+      "ARRAY"
+    ],
+    "array_element_types": [
+      "BOOLEAN",
+      "BIGINT",
+      "VARCHAR",
+      "DOUBLE"
+    ],
+    "array_nesting": "flat_only",
+    "array_usage": "output_columns_only",
+    "schema_authority": "src/connector/package/assets/connector-package-v1.schema.json"
   },
   "pagination_strategies": {
     "rest": [
@@ -203,7 +218,9 @@
       "RFC 0011",
       "RFC 0012",
       "RFC 0013",
-      "RFC 0014"
+      "RFC 0014",
+      "RFC 0021",
+      "RFC 0022"
     ]
   }
 }

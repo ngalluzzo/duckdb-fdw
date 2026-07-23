@@ -254,7 +254,8 @@ bool MappingMatches(const CompiledRelation &relation, const CompiledOperation &o
 		return false;
 	}
 	const auto &column = relation.Columns()[candidate.BoundColumnIndex()];
-	if (column.name != mapping.ColumnName() || !ColumnTypeMatches(column.ScalarType(), candidate.BoundColumnType()) ||
+	if (column.Shape() != CompiledColumnShape::SCALAR || column.name != mapping.ColumnName() ||
+	    !ColumnTypeMatches(column.ScalarType(), candidate.BoundColumnType()) ||
 	    candidate.ComparisonOperator() != RequestedPredicateComparisonOperator::EQUALS ||
 	    mapping.Operator() != CompiledPredicateOperator::EQUALS) {
 		return false;
@@ -282,6 +283,7 @@ void ValidateCandidateBindings(const CompiledRelation &relation, const Requested
 		return;
 	case RequestedPredicateKind::COMPARISON:
 		if (candidate.BoundColumnIndex() >= relation.Columns().size() ||
+		    relation.Columns()[candidate.BoundColumnIndex()].Shape() != CompiledColumnShape::SCALAR ||
 		    !ColumnTypeMatches(relation.Columns()[candidate.BoundColumnIndex()].ScalarType(),
 		                       candidate.BoundColumnType()) ||
 		    candidate.BoundColumnType() != candidate.Literal().Kind()) {

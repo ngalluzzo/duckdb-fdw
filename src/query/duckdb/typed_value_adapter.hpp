@@ -14,7 +14,10 @@ namespace duckdb_api_query_internal {
 // It copies only the scalar kind and nullability that the adapter must enforce;
 // response paths and protocol decoding remain behind Runtime's provider API.
 struct PlannedValueColumn {
-	duckdb_api::ValueKind kind;
+	PlannedValueColumn(duckdb_api::ValueKind kind, bool nullable);
+	PlannedValueColumn(duckdb_api::OutputValueType type, bool nullable);
+
+	duckdb_api::OutputValueType type;
 	bool nullable;
 };
 
@@ -27,6 +30,9 @@ std::vector<PlannedValueColumn> PlannedValueColumns(const duckdb_api::ScanPlan &
 // batches fail closed. The caller owns cancellation checks and publication.
 void WriteTypedBatch(DataChunk &output, const duckdb_api::TypedBatch &batch,
                      const std::vector<PlannedValueColumn> &expected_columns, std::uint64_t max_batch_rows);
+void WriteTypedBatch(DataChunk &output, const duckdb_api::TypedBatch &batch,
+                     const std::vector<PlannedValueColumn> &expected_columns, std::uint64_t max_batch_rows,
+                     duckdb_api::ExecutionControl &control);
 
 } // namespace duckdb_api_query_internal
 } // namespace duckdb

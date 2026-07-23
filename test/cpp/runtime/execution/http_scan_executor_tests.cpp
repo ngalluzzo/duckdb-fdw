@@ -33,8 +33,8 @@ void TestOneRequestAndSchemaAlignedBatches() {
 	duckdb_api::TypedBatch batch;
 	Require(stream->Next(control, batch), "first batch was missing");
 	Require(batch.IsSchemaAligned() && batch.rows.size() == 2, "first batch was not aligned or bounded");
-	Require(batch.column_kinds ==
-	            std::vector<duckdb_api::ValueKind>(
+	Require(batch.column_types ==
+	            std::vector<duckdb_api::OutputValueType>(
 	                {duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR, duckdb_api::ValueKind::BOOLEAN}),
 	        "batch schema drifted");
 	Require(batch.rows[0].values[0].bigint_value == 11 && batch.rows[0].values[1].varchar_value == "duckdb" &&
@@ -42,7 +42,7 @@ void TestOneRequestAndSchemaAlignedBatches() {
 	        "first typed row drifted");
 	Require(stream->Next(control, batch) && batch.rows.size() == 1 && batch.rows[0].values[0].bigint_value == 33,
 	        "second bounded batch drifted");
-	Require(!stream->Next(control, batch) && batch.rows.empty() && batch.column_kinds.empty(),
+	Require(!stream->Next(control, batch) && batch.rows.empty() && batch.column_types.empty(),
 	        "stream did not exhaust cleanly");
 	Require(!stream->Next(control, batch), "cleanly exhausted stream did not remain exhausted");
 

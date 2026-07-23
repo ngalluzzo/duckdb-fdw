@@ -8,6 +8,7 @@
 namespace duckdb_api_test {
 
 enum class RuntimeRestPredicatePlanCounterexample;
+enum class RuntimeRestSchemaCounterexample;
 enum class PackageGraphqlRuntimeRecipeCounterexample;
 enum class PackageHttpNumericOriginCounterexample;
 
@@ -20,6 +21,8 @@ public:
 	static void ReplaceGraphql(duckdb_api::ScanPlan &plan, duckdb_api::PlannedGraphqlOperation operation);
 	static duckdb_api::ScanPlan RuntimeRestPredicate(duckdb_api::ScanPlan plan,
 	                                                 RuntimeRestPredicatePlanCounterexample counterexample);
+	static duckdb_api::ScanPlan RuntimeRestSchema(duckdb_api::ScanPlan plan,
+	                                              RuntimeRestSchemaCounterexample counterexample);
 	static duckdb_api::ScanPlan PackageGraphqlRecipe(duckdb_api::ScanPlan plan,
 	                                                 PackageGraphqlRuntimeRecipeCounterexample counterexample);
 	static duckdb_api::ScanPlan PackageHttpNumericOrigin(duckdb_api::ScanPlan plan,
@@ -30,6 +33,8 @@ public:
 	static duckdb_api::ScanPlan GraphqlNonAuthorityVariation(duckdb_api::ScanPlan plan,
 	                                                         GraphqlRuntimeNonAuthorityVariation variation);
 	static duckdb_api::ScanPlan DistinctGraphqlProvenance(duckdb_api::ScanPlan plan);
+	static duckdb_api::ScanPlan GraphqlArrayColumns(duckdb_api::ScanPlan plan);
+	static duckdb_api::ScanPlan GraphqlDecodedMemoryBoundary(duckdb_api::ScanPlan plan, uint64_t decoded_memory_bytes);
 	static duckdb_api::ScanPlan GraphqlVariation(duckdb_api::ScanPlan plan, GraphqlPlanVariation variation);
 	static GraphqlProtocolEnvelopeShape GraphqlProtocolShape(const duckdb_api::ScanPlan &plan);
 	static bool MutateGraphqlProtocol(duckdb_api::ScanPlan &plan, GraphqlRuntimeAdmissionCounterexample counterexample);

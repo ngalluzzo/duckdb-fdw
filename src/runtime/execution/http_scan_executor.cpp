@@ -6,6 +6,7 @@
 #include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
 #include "duckdb_api/internal/runtime/execution/http_paginated_scan.hpp"
 #include "duckdb_api/internal/runtime/execution/http_plan_admission.hpp"
+#include "duckdb_api/internal/runtime/decoding/decoded_page_buffer.hpp"
 #include "duckdb_api/internal/runtime/decoding/json_decoder.hpp"
 #include "duckdb_api/internal/runtime/policy/request_validation.hpp"
 
@@ -41,7 +42,7 @@ JsonDecodePlan BuildDecodePlan(const AdmittedRestRequestProfile &profile,
 	                                                                    : JsonResponseSource::JSON_PATH_MANY;
 	result.records_path = profile.RecordsPath();
 	for (const auto &column : profile.Columns()) {
-		result.columns.push_back(JsonColumnPlan(column.name, column.source_path, column.kind, column.nullable));
+		result.columns.push_back(JsonColumnPlan(column.name, column.source_path, column.type, column.nullable));
 	}
 	result.max_records = budgets.decoded_records;
 	result.max_string_bytes = budgets.extracted_string_bytes;
@@ -90,9 +91,9 @@ public:
 	    : admitted_profile(std::move(admitted_profile_p)), transport(std::move(transport_p)),
 	      max_wall_milliseconds(max_wall_milliseconds_p),
 	      authorization(new ScanAuthorization(std::move(authorization_p))), cancelled(false), closed(false),
-	      attempted(false), exhausted(false), deadline_initialized(false), offset(0) {
+	      attempted(false), exhausted(false), deadline_initialized(false), decoded_memory_bytes(0), offset(0) {
 		for (const auto &column : admitted_profile->Columns()) {
-			column_kinds.push_back(column.kind);
+			column_types.push_back(column.type);
 		}
 	}
 
@@ -107,7 +108,7 @@ public:
 		} catch (...) {
 			throw ExecutionError(ErrorStage::INTERNAL, "", "scan stream synchronization failed");
 		}
-		batch.Clear();
+		batch = TypedBatch();
 		if (closed) {
 			return false;
 		}
@@ -164,7 +165,9 @@ public:
 				if (response.status < 200 || response.status >= 300) {
 					throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status");
 				}
-				decoded = DecodeJsonRows(response.body, BuildDecodePlan(*admitted_profile, deadline), combined);
+				auto page = DecodeJsonPage(response.body, BuildDecodePlan(*admitted_profile, deadline), combined);
+				decoded_memory_bytes = page.retained_memory_bytes;
+				decoded = std::move(page.rows);
 				CheckExecutionState(combined, deadline);
 			}
 
@@ -175,18 +178,23 @@ public:
 			}
 			const auto remaining = decoded.size() - offset;
 			const auto count = std::min(remaining, static_cast<std::size_t>(admitted_profile->Budgets().batch_rows));
+			RequireTypedBatchHandoffMemory(decoded_memory_bytes, admitted_profile->Budgets().decoded_memory_bytes,
+			                               count, column_types.size());
 			TypedBatch produced;
-			produced.column_kinds = column_kinds;
+			produced.column_types = column_types;
 			produced.rows.reserve(count);
+			RequireTypedBatchHandoffMemory(decoded_memory_bytes, admitted_profile->Budgets().decoded_memory_bytes,
+			                               produced.rows.capacity(), produced.column_types.capacity());
 			for (std::size_t index = 0; index < count; index++) {
 				CheckExecutionState(combined, deadline);
 				produced.rows.push_back(std::move(decoded[offset + index]));
 			}
 			CheckExecutionState(combined, deadline);
-			offset += count;
-			if (produced.rows.empty() || !produced.IsSchemaAligned()) {
+			if (produced.rows.empty() || !produced.IsSchemaAligned(combined)) {
 				throw ExecutionError(ErrorStage::INTERNAL, "", "runtime produced a misaligned or empty typed batch");
 			}
+			CheckExecutionState(combined, deadline);
+			offset += count;
 			batch = std::move(produced);
 			return true;
 		} catch (const ExecutionCancelled &) {
@@ -231,6 +239,7 @@ private:
 	void ReleasePrivateState() noexcept {
 		authorization.reset();
 		std::vector<TypedRow>().swap(decoded);
+		decoded_memory_bytes = 0;
 		offset = 0;
 	}
 
@@ -257,7 +266,7 @@ private:
 	const std::shared_ptr<const HttpTransport> transport;
 	const uint64_t max_wall_milliseconds;
 	std::unique_ptr<ScanAuthorization> authorization;
-	std::vector<ValueKind> column_kinds;
+	std::vector<OutputValueType> column_types;
 	mutable std::mutex state_mutex;
 	std::atomic<bool> cancelled;
 	bool closed;
@@ -267,6 +276,7 @@ private:
 	bool deadline_initialized;
 	std::chrono::steady_clock::time_point deadline;
 	std::vector<TypedRow> decoded;
+	uint64_t decoded_memory_bytes;
 	std::size_t offset;
 };
 

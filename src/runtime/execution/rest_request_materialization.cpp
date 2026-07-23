@@ -65,6 +65,76 @@ bool TryColumnKind(PlannedRestScalarKind planned, ValueKind &kind) {
 	return false;
 }
 
+bool TryColumnKind(PlannedColumnScalarKind planned, ValueKind &kind) {
+	switch (planned) {
+	case PlannedColumnScalarKind::BOOLEAN:
+		kind = ValueKind::BOOLEAN;
+		return true;
+	case PlannedColumnScalarKind::BIGINT:
+		kind = ValueKind::BIGINT;
+		return true;
+	case PlannedColumnScalarKind::VARCHAR:
+		kind = ValueKind::VARCHAR;
+		return true;
+	case PlannedColumnScalarKind::DOUBLE:
+		kind = ValueKind::DOUBLE;
+		return true;
+	}
+	return false;
+}
+
+const char *LogicalTypeName(ValueKind kind) {
+	switch (kind) {
+	case ValueKind::BOOLEAN:
+		return "BOOLEAN";
+	case ValueKind::BIGINT:
+		return "BIGINT";
+	case ValueKind::VARCHAR:
+		return "VARCHAR";
+	case ValueKind::DOUBLE:
+		return "DOUBLE";
+	}
+	return nullptr;
+}
+
+std::string Extractor(const PlannedRestResponsePath &path) {
+	std::string result = "$";
+	for (const auto &segment : path.segments) {
+		result += "." + segment;
+	}
+	return result;
+}
+
+bool HasMatchingPermanentColumns(const std::vector<PlannedRestResultColumn> &results,
+                                 const std::vector<PlannedColumn> &output) {
+	if (results.empty() || results.size() != output.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < results.size(); index++) {
+		const auto &result = results[index];
+		const auto &column = output[index];
+		ValueKind result_kind = ValueKind::VARCHAR;
+		ValueKind output_kind = ValueKind::VARCHAR;
+		if (!TryColumnKind(result.scalar_kind, result_kind) || !TryColumnKind(column.element_kind, output_kind) ||
+		    result_kind != output_kind || result.name != column.name || result.nullable != column.nullable ||
+		    result.element_nullable != column.element_nullable || Extractor(result.response_path) != column.extractor) {
+			return false;
+		}
+		const auto expected_shape =
+		    result.shape == PlannedResultShape::ARRAY ? PlannedColumnShape::ARRAY : PlannedColumnShape::SCALAR;
+		if ((result.shape != PlannedResultShape::SCALAR && result.shape != PlannedResultShape::ARRAY) ||
+		    column.shape != expected_shape) {
+			return false;
+		}
+		const auto *logical = LogicalTypeName(result_kind);
+		if (logical == nullptr ||
+		    column.logical_type != std::string(logical) + (result.shape == PlannedResultShape::ARRAY ? "[]" : "")) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool TryDirectExtractor(const std::string &extractor, std::string &field) {
 	if (extractor.size() < 3 || extractor.compare(0, 2, "$.") != 0) {
 		return false;
@@ -116,7 +186,7 @@ bool TryCopyLegacyColumns(const std::vector<PlannedColumn> &planned, std::vector
 		    !TryColumnKind(column.logical_type, kind) || !TryDirectExtractor(column.extractor, field)) {
 			return false;
 		}
-		columns.push_back({column.name, {std::move(field)}, kind, column.nullable});
+		columns.push_back({column.name, {std::move(field)}, OutputValueType::Scalar(kind), column.nullable});
 	}
 	return true;
 }
@@ -133,7 +203,8 @@ bool TryCopyPermanentColumns(const std::vector<PlannedRestResultColumn> &planned
 	for (const auto &column : planned) {
 		ValueKind kind = ValueKind::VARCHAR;
 		if (!IsSafeLogicalId(column.name) || !names.insert(column.name).second ||
-		    !IsSafeRestExtractPath(column.response_path.segments) || !TryColumnKind(column.scalar_kind, kind)) {
+		    !IsSafeRestExtractPath(column.response_path.segments) || !TryColumnKind(column.scalar_kind, kind) ||
+		    (column.shape == PlannedResultShape::SCALAR && column.element_nullable)) {
 			return false;
 		}
 		for (const auto &path : paths) {
@@ -144,7 +215,13 @@ bool TryCopyPermanentColumns(const std::vector<PlannedRestResultColumn> &planned
 			}
 		}
 		paths.push_back(column.response_path.segments);
-		columns.push_back({column.name, column.response_path.segments, kind, column.nullable});
+		const auto type = column.shape == PlannedResultShape::ARRAY
+		                      ? OutputValueType::Array(kind, column.element_nullable)
+		                      : OutputValueType::Scalar(kind);
+		if (column.shape != PlannedResultShape::SCALAR && column.shape != PlannedResultShape::ARRAY) {
+			return false;
+		}
+		columns.push_back({column.name, column.response_path.segments, type, column.nullable});
 	}
 	return true;
 }
@@ -286,16 +363,17 @@ bool TryMaterializeRestRequest(const ScanPlan &plan, const RestConditionalBindin
 	}
 	const auto &operation = plan.Operation().Rest();
 	request = MaterializedRestRequest();
-	const bool permanent = !operation.result_columns.empty();
-	if (permanent) {
+	if (operation.schema_authority == PlannedRestSchemaAuthority::STRUCTURAL_RESULT_COLUMNS) {
 		if (!TryCopyPermanentQuery(operation.query_bindings, conditional, request.query) ||
 		    !TryCopyPermanentColumns(operation.result_columns, request.columns) ||
+		    !HasMatchingPermanentColumns(operation.result_columns, plan.OutputColumns()) ||
 		    !TryCopyPermanentRecordsPath(operation, request.records_path)) {
 			return false;
 		}
-	} else {
+	} else if (operation.schema_authority == PlannedRestSchemaAuthority::LEGACY_OUTPUT_COLUMNS) {
 		std::string legacy_records_field;
-		if (!operation.query_bindings.empty() || !operation.records_path.segments.empty() ||
+		if (!operation.result_columns.empty() || !operation.query_bindings.empty() ||
+		    !operation.records_path.segments.empty() ||
 		    !TryCopyLegacyQuery(operation.query_parameters, request.query) ||
 		    !TryCopyLegacyColumns(plan.OutputColumns(), request.columns) ||
 		    !TryLegacyRecordsField(operation, legacy_records_field)) {
@@ -304,6 +382,8 @@ bool TryMaterializeRestRequest(const ScanPlan &plan, const RestConditionalBindin
 		if (!legacy_records_field.empty()) {
 			request.records_path.assign(1, std::move(legacy_records_field));
 		}
+	} else {
+		return false;
 	}
 	if (!FitsRestRequestTarget(operation.path, request.query) ||
 	    !TryCopyFixedHeaders(operation.headers, false, plan.Budgets().header_bytes, request.headers)) {

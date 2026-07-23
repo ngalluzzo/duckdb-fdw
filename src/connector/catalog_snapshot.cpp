@@ -99,7 +99,11 @@ void AppendSchema(std::ostringstream &result, const std::vector<CompiledColumn> 
 			result << ',';
 		}
 		const auto &column = columns[index];
-		result << column.name << ':' << column.logical_type << (column.nullable ? '?' : '!') << ':' << column.extractor;
+		result << column.name << ':' << column.logical_type;
+		if (column.Shape() == CompiledColumnShape::ARRAY) {
+			result << "<element" << (column.ElementNullable() ? '?' : '!') << '>';
+		}
+		result << (column.nullable ? '?' : '!') << ':' << column.extractor;
 	}
 }
 

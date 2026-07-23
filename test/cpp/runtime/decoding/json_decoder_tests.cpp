@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -29,6 +30,25 @@ public:
 
 private:
 	std::atomic<bool> cancelled;
+};
+
+class CountingControl final : public duckdb_api::ExecutionControl {
+public:
+	explicit CountingControl(std::size_t cancel_at_p = std::numeric_limits<std::size_t>::max())
+	    : cancel_at(cancel_at_p), calls(0) {
+	}
+
+	bool IsCancellationRequested() const noexcept override {
+		return ++calls >= cancel_at;
+	}
+
+	std::size_t Calls() const noexcept {
+		return calls;
+	}
+
+private:
+	const std::size_t cancel_at;
+	mutable std::size_t calls;
 };
 
 duckdb_api::internal::JsonDecodePlan Plan() {
@@ -60,6 +80,36 @@ duckdb_api::internal::JsonDecodePlan NestedPlan() {
 	plan.columns = {{"id", std::vector<std::string>({"identity", "id"}), duckdb_api::ValueKind::BIGINT},
 	                {"label", std::vector<std::string>({"attributes", "label"}), duckdb_api::ValueKind::VARCHAR, true},
 	                {"active", std::vector<std::string>({"flags", "active"}), duckdb_api::ValueKind::BOOLEAN}};
+	return plan;
+}
+
+duckdb_api::internal::JsonDecodePlan ArrayPlan() {
+	duckdb_api::internal::JsonDecodePlan plan;
+	plan.response_source = duckdb_api::internal::JsonResponseSource::JSON_PATH_MANY;
+	plan.records_path = {"items"};
+	plan.columns = {
+	    {"flags", {"flags"}, duckdb_api::OutputValueType::Array(duckdb_api::ValueKind::BOOLEAN, true)},
+	    {"ids", {"ids"}, duckdb_api::OutputValueType::Array(duckdb_api::ValueKind::BIGINT, false)},
+	    {"names", {"names"}, duckdb_api::OutputValueType::Array(duckdb_api::ValueKind::VARCHAR, false), true},
+	    {"scores", {"scores"}, duckdb_api::OutputValueType::Array(duckdb_api::ValueKind::DOUBLE, false)}};
+	plan.max_records = 3;
+	plan.max_string_bytes = 256;
+	plan.max_json_nesting = 16;
+	plan.max_decoded_memory_bytes = 65536;
+	plan.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+	return plan;
+}
+
+duckdb_api::internal::JsonDecodePlan SingleColumnPlan(duckdb_api::OutputValueType type) {
+	duckdb_api::internal::JsonDecodePlan plan;
+	plan.response_source = duckdb_api::internal::JsonResponseSource::JSON_PATH_MANY;
+	plan.records_path = {"items"};
+	plan.columns = {{"value", {"value"}, type}};
+	plan.max_records = 1;
+	plan.max_string_bytes = 256;
+	plan.max_json_nesting = 16;
+	plan.max_decoded_memory_bytes = 65536;
+	plan.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
 	return plan;
 }
 
@@ -289,6 +339,201 @@ void TestDoubleFormatEquivalence() {
 	}
 }
 
+void TestFlatScalarArraysAndFailures() {
+	ManualControl control;
+	auto plan = ArrayPlan();
+	const auto body = "{\"items\":["
+	                  "{\"flags\":[true,null,false],\"ids\":[-9223372036854775808,7,7,9223372036854775807],"
+	                  "\"names\":[\"alpha\",\"\",\"alpha\"],\"scores\":[-0.0,4.9e-324,1.5]},"
+	                  "{\"flags\":[],\"ids\":[],\"names\":null,\"scores\":[]}] }";
+	const auto page = duckdb_api::internal::DecodeJsonPage(body, plan, control);
+	Require(page.rows.size() == 2 && page.rows[0].values.size() == 4 &&
+	            page.rows[0].values[0].shape == duckdb_api::ValueShape::ARRAY &&
+	            page.rows[0].values[0].elements.size() == 3 && page.rows[0].values[0].elements[0].boolean_value &&
+	            !page.rows[0].values[0].elements[1].valid && !page.rows[0].values[0].elements[2].boolean_value &&
+	            page.rows[0].values[1].elements.front().bigint_value == std::numeric_limits<int64_t>::min() &&
+	            page.rows[0].values[1].elements[1].bigint_value == 7 &&
+	            page.rows[0].values[1].elements[2].bigint_value == 7 &&
+	            page.rows[0].values[1].elements.back().bigint_value == std::numeric_limits<int64_t>::max() &&
+	            page.rows[0].values[2].elements[0].varchar_value == "alpha" &&
+	            page.rows[0].values[2].elements[1].varchar_value.empty() &&
+	            page.rows[0].values[3].elements[0].double_value == 0.0 &&
+	            page.rows[0].values[3].elements[2].double_value == 1.5 && page.rows[1].values[0].elements.empty() &&
+	            !page.rows[1].values[2].valid,
+	        "REST ARRAY decoding changed order, duplicates, empty arrays, NULL, or scalar boundaries");
+
+	auto exact_memory = plan;
+	exact_memory.max_decoded_memory_bytes = page.peak_memory_bytes;
+	Require(duckdb_api::internal::DecodeJsonPage(body, exact_memory, control).retained_memory_bytes ==
+	            page.retained_memory_bytes,
+	        "REST ARRAY decoded-memory peak boundary changed retained accounting");
+	auto one_under = exact_memory;
+	one_under.max_decoded_memory_bytes--;
+	RequireError([&]() { (void)duckdb_api::internal::DecodeJsonPage(body, one_under, control); },
+	             duckdb_api::ErrorStage::RESOURCE, "decoded_memory_bytes");
+
+	const std::vector<std::pair<std::string, std::string>> failures = {
+	    {"{\"items\":[{\"flags\":true,\"ids\":[],\"names\":[],\"scores\":[]}]}", "flags"},
+	    {"{\"items\":[{\"flags\":[],\"ids\":[1,\"late\"],\"names\":[],\"scores\":[]}]}", "ids"},
+	    {"{\"items\":[{\"flags\":[],\"ids\":[[1]],\"names\":[],\"scores\":[]}]}", "ids"},
+	    {"{\"items\":[{\"flags\":[],\"ids\":[null],\"names\":[],\"scores\":[]}]}", "ids"},
+	    {"{\"items\":[{\"flags\":[],\"ids\":[],\"names\":[],\"scores\":[1e400]}]}", "scores"}};
+	for (const auto &failure : failures) {
+		RequireError([&]() { (void)duckdb_api::internal::DecodeJsonRows(failure.first, plan, control); },
+		             duckdb_api::ErrorStage::SCHEMA, failure.second);
+	}
+	plan.max_string_bytes = 3;
+	Require(duckdb_api::internal::DecodeJsonRows(
+	            "{\"items\":[{\"flags\":[],\"ids\":[],\"names\":[\"abc\"],\"scores\":[]}]}", plan, control)
+	                .size() == 1,
+	        "REST ARRAY string element exact byte boundary was rejected");
+	RequireError(
+	    [&]() {
+		    (void)duckdb_api::internal::DecodeJsonRows(
+		        "{\"items\":[{\"flags\":[],\"ids\":[],\"names\":[\"abcd\"],\"scores\":[]}]}", plan, control);
+	    },
+	    duckdb_api::ErrorStage::RESOURCE, "names");
+
+	// The score failure is deliberately later in the same object. Retained
+	// VARCHAR child capacity must be charged while names are still decoded;
+	// otherwise the parser would traverse an over-budget row and report the
+	// later schema error instead.
+	auto pending_strings = ArrayPlan();
+	pending_strings.max_string_bytes = 128;
+	pending_strings.max_decoded_memory_bytes = 5000;
+	std::string names;
+	for (std::size_t index = 0; index < 32; index++) {
+		names += names.empty() ? "\"" : ",\"";
+		names += std::string(120, static_cast<char>('a' + (index % 26)));
+		names += "\"";
+	}
+	const auto pending_string_body =
+	    "{\"items\":[{\"flags\":[],\"ids\":[],\"names\":[" + names + "],\"scores\":[true]}]}";
+	RequireError([&]() { (void)duckdb_api::internal::DecodeJsonRows(pending_string_body, pending_strings, control); },
+	             duckdb_api::ErrorStage::RESOURCE, "decoded_memory_bytes");
+
+	std::string elements;
+	for (std::size_t index = 0; index < 512; index++) {
+		elements += elements.empty() ? "true" : ",true";
+	}
+	const auto cancellation_body = "{\"items\":[{\"flags\":[" + elements + "],\"ids\":[],\"names\":[],\"scores\":[]}]}";
+	CountingControl count_only;
+	(void)duckdb_api::internal::DecodeJsonRows(cancellation_body, ArrayPlan(), count_only);
+	CountingControl cancelled(count_only.Calls() * 3 / 4);
+	bool cancelled_during_array = false;
+	try {
+		(void)duckdb_api::internal::DecodeJsonRows(cancellation_body, ArrayPlan(), cancelled);
+	} catch (const duckdb_api::ExecutionCancelled &) {
+		cancelled_during_array = true;
+	}
+	Require(cancelled_during_array, "REST ARRAY element traversal did not observe cancellation");
+}
+
+void TestReplacementAllocationsUseIndependentPeakOracles() {
+	ManualControl control;
+	const auto scalar_plan = SingleColumnPlan(duckdb_api::OutputValueType::Scalar(duckdb_api::ValueKind::BIGINT));
+	const auto baseline = duckdb_api::internal::DecodeJsonPage("{\"items\":[{\"value\":1}]}", scalar_plan, control);
+	Require(baseline.rows.size() == 1 && baseline.rows[0].values.size() == 1,
+	        "REST replacement-allocation baseline changed shape");
+	const auto value_storage =
+	    static_cast<uint64_t>(baseline.rows[0].values.capacity()) * sizeof(duckdb_api::TypedValue);
+	Require(baseline.peak_memory_bytes >= value_storage,
+	        "REST replacement-allocation baseline cannot isolate value storage");
+
+	std::vector<duckdb_api::TypedScalarValue> element_probe;
+	std::size_t previous_element_capacity = 0;
+	const std::size_t element_count = 65;
+	for (std::size_t index = 0; index < element_count; index++) {
+		if (element_probe.size() == element_probe.capacity()) {
+			previous_element_capacity = element_probe.capacity();
+			const auto requested = previous_element_capacity == 0 ? 1 : previous_element_capacity * 2;
+			element_probe.reserve(requested);
+		}
+		element_probe.push_back(duckdb_api::TypedScalarValue::BigInt(static_cast<int64_t>(index)));
+	}
+	const auto previous_array_bytes =
+	    static_cast<uint64_t>(previous_element_capacity) * sizeof(duckdb_api::TypedScalarValue);
+	const auto replacement_array_bytes =
+	    static_cast<uint64_t>(element_probe.capacity()) * sizeof(duckdb_api::TypedScalarValue);
+	Require(previous_array_bytes > value_storage,
+	        "REST ARRAY oracle must make replacement co-liveness the unique peak");
+	std::string array_body = "{\"items\":[{\"value\":[";
+	for (std::size_t index = 0; index < element_count; index++) {
+		if (index != 0) {
+			array_body += ',';
+		}
+		array_body += std::to_string(index);
+	}
+	array_body += "]}]}";
+	const auto array_plan = SingleColumnPlan(duckdb_api::OutputValueType::Array(duckdb_api::ValueKind::BIGINT, false));
+	const auto array_page = duckdb_api::internal::DecodeJsonPage(array_body, array_plan, control);
+	Require(array_page.rows[0].values[0].elements.capacity() == element_probe.capacity(),
+	        "REST ARRAY capacity oracle drifted from decoder allocation");
+	const auto expected_array_peak =
+	    baseline.peak_memory_bytes - value_storage + previous_array_bytes + replacement_array_bytes;
+	Require(array_page.peak_memory_bytes == expected_array_peak,
+	        "REST ARRAY peak must include current and replacement element buffers");
+	auto exact_array_plan = array_plan;
+	exact_array_plan.max_decoded_memory_bytes = expected_array_peak;
+	(void)duckdb_api::internal::DecodeJsonPage(array_body, exact_array_plan, control);
+	auto under_array_plan = exact_array_plan;
+	under_array_plan.max_decoded_memory_bytes--;
+	RequireError([&]() { (void)duckdb_api::internal::DecodeJsonPage(array_body, under_array_plan, control); },
+	             duckdb_api::ErrorStage::RESOURCE, "decoded_memory_bytes");
+
+	std::string string_probe;
+	std::size_t previous_string_capacity = 0;
+	do {
+		previous_string_capacity = string_probe.capacity();
+		string_probe.reserve(previous_string_capacity + 1);
+		string_probe.resize(previous_string_capacity + 1, 'x');
+	} while (previous_string_capacity <= value_storage);
+	Require(string_probe.size() <= scalar_plan.max_string_bytes,
+	        "REST VARCHAR oracle exceeded the declared string budget");
+	const auto string_plan = SingleColumnPlan(duckdb_api::OutputValueType::Scalar(duckdb_api::ValueKind::VARCHAR));
+	const auto string_body = "{\"items\":[{\"value\":\"" + string_probe + "\"}]}";
+	const auto string_page = duckdb_api::internal::DecodeJsonPage(string_body, string_plan, control);
+	Require(string_page.rows[0].values[0].varchar_value.capacity() == string_probe.capacity(),
+	        "REST VARCHAR capacity oracle drifted from decoder allocation");
+	const auto expected_string_peak = baseline.peak_memory_bytes - value_storage +
+	                                  static_cast<uint64_t>(previous_string_capacity) +
+	                                  static_cast<uint64_t>(string_probe.capacity());
+	Require(string_page.peak_memory_bytes == expected_string_peak,
+	        "REST VARCHAR peak must include current and replacement string buffers");
+	auto exact_string_plan = string_plan;
+	exact_string_plan.max_decoded_memory_bytes = expected_string_peak;
+	(void)duckdb_api::internal::DecodeJsonPage(string_body, exact_string_plan, control);
+	auto under_string_plan = exact_string_plan;
+	under_string_plan.max_decoded_memory_bytes--;
+	RequireError([&]() { (void)duckdb_api::internal::DecodeJsonPage(string_body, under_string_plan, control); },
+	             duckdb_api::ErrorStage::RESOURCE, "decoded_memory_bytes");
+}
+
+void TestContinuationMemoryBoundaries() {
+	ManualControl control;
+	auto plan = Plan();
+	plan.page_continuation_path = {"next"};
+	plan.max_string_bytes = 512;
+	plan.max_decoded_memory_bytes = 65536;
+	const std::string continuation = "https://example.test/items?page=2&padding=" + std::string(400, 'x');
+	const auto body =
+	    "{\"items\":[{\"id\":1,\"login\":\"one\",\"site_admin\":false}],\"next\":\"" + continuation + "\"}";
+	const auto page = duckdb_api::internal::DecodeJsonPage(body, plan, control);
+	const auto no_continuation = duckdb_api::internal::DecodeJsonPage(
+	    "{\"items\":[{\"id\":1,\"login\":\"one\",\"site_admin\":false}],\"next\":null}", plan, control);
+	Require(page.next_url == continuation && page.continuation_memory_bytes > 0 &&
+	            page.peak_memory_bytes > no_continuation.peak_memory_bytes,
+	        "response_next storage was absent from retained decode-peak accounting");
+	auto exact = plan;
+	exact.max_decoded_memory_bytes = page.peak_memory_bytes;
+	Require(duckdb_api::internal::DecodeJsonPage(body, exact, control).next_url == continuation,
+	        "response_next exact decoded-memory peak was rejected");
+	auto one_under = exact;
+	one_under.max_decoded_memory_bytes--;
+	RequireError([&]() { (void)duckdb_api::internal::DecodeJsonPage(body, one_under, control); },
+	             duckdb_api::ErrorStage::RESOURCE, "decoded_memory_bytes");
+}
+
 void TestCancellationAndDeadline() {
 	ManualControl cancelled;
 	cancelled.Cancel();
@@ -318,6 +563,9 @@ int main() {
 		TestRequiredShapeAndStrictTypes();
 		TestExactResourceBoundaries();
 		TestDoubleFormatEquivalence();
+		TestFlatScalarArraysAndFailures();
+		TestReplacementAllocationsUseIndependentPeakOracles();
+		TestContinuationMemoryBoundaries();
 		TestCancellationAndDeadline();
 		std::cout << "JSON decoder tests passed" << std::endl;
 		return EXIT_SUCCESS;

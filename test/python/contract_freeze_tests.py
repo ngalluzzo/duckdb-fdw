@@ -132,6 +132,18 @@ class ContractFreezeTests(unittest.TestCase):
     def test_failure_taxonomy_section_removed_fails(self) -> None:
         self.require_rejected(lambda value: value.pop("failure_taxonomy"), "failure_taxonomy")
 
+    def test_failure_taxonomy_authority_omission_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["failure_taxonomy"].pop("authority"),
+            "failure_taxonomy authority",
+        )
+
+    def test_failure_taxonomy_fabricated_authority_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["failure_taxonomy"].__setitem__("authority", "RFC 9999"),
+            "failure_taxonomy authority",
+        )
+
     def test_failure_primary_class_removed_fails(self) -> None:
         self.require_rejected(
             lambda value: value["failure_taxonomy"]["primary_classes"].remove("rate_limit"),
@@ -169,6 +181,24 @@ class ContractFreezeTests(unittest.TestCase):
         self.require_rejected(
             lambda value: value["failure_taxonomy"].__setitem__("indeterminate_replay_is_non_replayable", False),
             "indeterminate replay is non-replayable",
+        )
+
+    def test_column_shape_omission_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["column_shapes"]["authored"].remove("ARRAY"),
+            "column shapes disagree",
+        )
+
+    def test_array_element_type_widening_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["column_shapes"]["array_element_types"].append("DECIMAL"),
+            "array element types disagree",
+        )
+
+    def test_array_scope_drift_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["column_shapes"].__setitem__("array_nesting", "recursive"),
+            "ARRAY scope",
         )
 
     def test_version_domain_omission_fails(self) -> None:

@@ -55,9 +55,15 @@ std::vector<CompiledColumn> CompileColumns(const RelationDeclaration &relation, 
 			                column.extract.mark, "", relation.id.value);
 			continue;
 		}
-		result.push_back(duckdb_api::internal::CompiledModelBuilder::Column(column.id.value, ScalarType(column.type),
-		                                                                    ParseBoolean(column.nullable),
-		                                                                    column.extract.value, std::move(segments)));
+		if (column.type.value == "ARRAY") {
+			result.push_back(duckdb_api::internal::CompiledModelBuilder::ArrayColumn(
+			    column.id.value, ScalarType(column.element_type), ParseBoolean(column.element_nullable),
+			    ParseBoolean(column.nullable), column.extract.value, std::move(segments)));
+		} else {
+			result.push_back(duckdb_api::internal::CompiledModelBuilder::Column(
+			    column.id.value, ScalarType(column.type), ParseBoolean(column.nullable), column.extract.value,
+			    std::move(segments)));
+		}
 	}
 	return result;
 }

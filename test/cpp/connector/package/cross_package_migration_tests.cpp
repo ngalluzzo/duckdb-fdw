@@ -208,7 +208,7 @@ void TestEquivalentInputsCompileToEquivalentOutput(const std::string &repository
 	            rickandmorty_generation.Identity().SpecIdentifier() == github_generation.Identity().SpecIdentifier(),
 	        "migration envelopes lost their shared spec identifier");
 	Require(github_generation.Identity().PackageVersion() == "1.0.0" &&
-	            rickandmorty_generation.Identity().PackageVersion() == "1.1.0",
+	            rickandmorty_generation.Identity().PackageVersion() == "2.0.0",
 	        "migration envelopes lost their real package versions");
 	Require(github_generation.Identity().ConnectorId() == "github_migration" &&
 	            rickandmorty_generation.Identity().ConnectorId() == "rickandmorty_migration",
@@ -220,7 +220,7 @@ void TestEquivalentInputsCompileToEquivalentOutput(const std::string &repository
 	Require(github_digest != rickandmorty_digest, "distinct migration envelopes produced an identical package digest");
 	const std::string real_github_digest = "sha256.b286e6f7481b437b243dfe2ce017a59d601d909272b9d2b35788fb78753ff23b";
 	const std::string real_rickandmorty_digest =
-	    "sha256.f645e62793bcea089475657a68b0e6bd5a76d041bfb23bf4459102a0c5cbe08d";
+	    "sha256.e4ba9694e6f622a9f7b4024ef95efc5b9bd73e441680b1e94b8c947e764df31c";
 	Require(github_digest != real_github_digest && github_digest != real_rickandmorty_digest &&
 	            rickandmorty_digest != real_github_digest && rickandmorty_digest != real_rickandmorty_digest,
 	        "migration envelope reproduced a real repository package digest");

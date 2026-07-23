@@ -11,7 +11,7 @@ namespace internal {
 
 struct RuntimeFixtureJsonColumn {
 	std::string name;
-	duckdb_api::ValueKind kind;
+	duckdb_api::OutputValueType type;
 	bool nullable;
 	std::vector<std::string> path;
 };

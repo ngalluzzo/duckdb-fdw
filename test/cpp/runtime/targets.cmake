@@ -87,6 +87,9 @@ add_executable(
   test/cpp/runtime/decoding/decoded_page_buffer_tests.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_decoded_page_buffer_tests)
 target_include_directories(duckdb_api_decoded_page_buffer_tests PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_decoded_page_buffer_tests
+  PRIVATE duckdb_api_runtime_interface_service)
 
 add_executable(
   duckdb_api_json_decoder_tests

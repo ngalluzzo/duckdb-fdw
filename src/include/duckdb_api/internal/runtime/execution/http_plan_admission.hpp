@@ -18,7 +18,7 @@ struct MaterializedRestRequest;
 struct AdmittedRestColumn {
 	std::string name;
 	std::vector<std::string> source_path;
-	ValueKind kind;
+	OutputValueType type;
 	bool nullable;
 };
 

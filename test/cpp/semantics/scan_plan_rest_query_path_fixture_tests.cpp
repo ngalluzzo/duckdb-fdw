@@ -162,9 +162,12 @@ void TestRestQueryPathFixture(const std::string &canary) {
 	            !operation.result_columns[2].nullable &&
 	            operation.result_columns[2].response_path.segments == std::vector<std::string>({"flags", "active"}),
 	        "REST query/path fixture changed a structural result-column contract");
-	Require(plan.OutputColumns()[0].logical_type == "compat-bigint" &&
-	            plan.OutputColumns()[0].extractor == "compat-record-id-path",
-	        "REST query/path fixture no longer detects legacy type/path authority leaks");
+	Require(plan.OutputColumns()[0].logical_type == "BIGINT" && plan.OutputColumns()[0].extractor == "$.identity.id" &&
+	            plan.OutputColumns()[1].logical_type == "VARCHAR" &&
+	            plan.OutputColumns()[1].extractor == "$.attributes.label" &&
+	            plan.OutputColumns()[2].logical_type == "BOOLEAN" &&
+	            plan.OutputColumns()[2].extractor == "$.flags.active",
+	        "REST query/path fixture lost exact operation-to-output schema correlation");
 
 	const auto construction_count = static_cast<std::size_t>(RestQueryBindingConstructionCounterexample::COUNT);
 	Require(construction_count == 16, "closed REST binding constructor-law catalog changed without review");

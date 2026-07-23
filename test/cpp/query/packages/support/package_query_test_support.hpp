@@ -46,6 +46,17 @@ public:
 	                           duckdb_api::CompiledQueryRegistrationView replacement_registration,
 	                           duckdb_api::CompiledConnector replacement_connector, std::string accepted_root,
 	                           std::shared_ptr<PackageQueryProbe> probe);
+	// Closed negative-oracle constructor: ordinary bind plans use the matching
+	// connector, while selective predicate replans use the supplied structurally
+	// different connector. This proves Query validates both planning call sites
+	// without exposing a mutable ScanPlan builder.
+	PackageQueryStagingService(duckdb_api::CompiledQueryRegistrationView initial_registration,
+	                           duckdb_api::CompiledConnector initial_connector,
+	                           duckdb_api::CompiledConnector initial_selective_connector,
+	                           duckdb_api::CompiledQueryRegistrationView replacement_registration,
+	                           duckdb_api::CompiledConnector replacement_connector,
+	                           duckdb_api::CompiledConnector replacement_selective_connector, std::string accepted_root,
+	                           std::shared_ptr<PackageQueryProbe> probe);
 	PackageQueryStagingService(duckdb_api::CompiledQueryRegistrationView initial_registration,
 	                           duckdb_api::CompiledQueryRegistrationView replacement_registration,
 	                           std::string accepted_root, std::shared_ptr<PackageQueryProbe> probe);
@@ -65,12 +76,15 @@ private:
 	std::shared_ptr<const duckdb_api::QueryPublishedGeneration>
 	BuildPublished(const std::shared_ptr<const duckdb_api::CompiledQueryRegistrationView> &registration,
 	               const std::shared_ptr<const duckdb_api::CompiledConnector> &connector,
+	               const std::shared_ptr<const duckdb_api::CompiledConnector> &selective_connector,
 	               const std::string &marker) const;
 
 	const std::shared_ptr<const duckdb_api::CompiledQueryRegistrationView> initial_registration;
 	const std::shared_ptr<const duckdb_api::CompiledConnector> initial_connector;
+	const std::shared_ptr<const duckdb_api::CompiledConnector> initial_selective_connector;
 	const std::shared_ptr<const duckdb_api::CompiledQueryRegistrationView> replacement_registration;
 	const std::shared_ptr<const duckdb_api::CompiledConnector> replacement_connector;
+	const std::shared_ptr<const duckdb_api::CompiledConnector> replacement_selective_connector;
 	const std::string accepted_root;
 	const std::shared_ptr<PackageQueryProbe> probe;
 	mutable std::atomic<bool> reload_changed;

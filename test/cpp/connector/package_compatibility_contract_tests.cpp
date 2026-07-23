@@ -442,6 +442,8 @@ void TestStructuralRejections() {
 	    PackageCompatibilityFixture::RELATION_INSERTED_BEFORE,
 	    PackageCompatibilityFixture::RELATION_CHANGED,
 	    PackageCompatibilityFixture::COLUMN_CHANGED,
+	    PackageCompatibilityFixture::COLUMN_REORDERED,
+	    PackageCompatibilityFixture::COLUMN_SCALAR_TO_ARRAY,
 	    PackageCompatibilityFixture::INPUT_CHANGED,
 	    PackageCompatibilityFixture::SELECTOR_REFERENCE_CHANGED,
 	    PackageCompatibilityFixture::OPERATION_CHANGED,
@@ -455,6 +457,31 @@ void TestStructuralRejections() {
 		    active, duckdb_api_test::BuildPackageCompatibilityFixture(incompatible[index], "1.3.0", 'f'),
 		    PackageReloadClassification::INCOMPATIBLE_RELOAD,
 		    "normalized structural mutation escaped fail-closed classification at index " + std::to_string(index));
+	}
+
+	const auto array_active =
+	    duckdb_api_test::BuildPackageCompatibilityFixture(PackageCompatibilityFixture::ARRAY_BASELINE, "1.2.3", '1');
+	const auto array_child_nullable = duckdb_api_test::BuildPackageCompatibilityFixture(
+	    PackageCompatibilityFixture::ARRAY_ELEMENT_NULLABILITY_CHANGED, "1.3.0", '2');
+	const auto *active_array_relation = array_active.Connector().FindRelation(duckdb_api_test::PACKAGE_TYPED_RELATION);
+	const auto *nullable_child_relation =
+	    array_child_nullable.Connector().FindRelation(duckdb_api_test::PACKAGE_TYPED_RELATION);
+	Require(active_array_relation != nullptr && nullable_child_relation != nullptr &&
+	            active_array_relation->Snapshot().find("label:VARCHAR[]<element!>?") != std::string::npos &&
+	            nullable_child_relation->Snapshot().find("label:VARCHAR[]<element?>?") != std::string::npos &&
+	            active_array_relation->Snapshot() != nullable_child_relation->Snapshot(),
+	        "safe Connector snapshots did not distinguish ARRAY child nullability from outer nullability");
+	const std::vector<PackageCompatibilityFixture> incompatible_array_changes = {
+	    PackageCompatibilityFixture::ARRAY_ELEMENT_TYPE_CHANGED,
+	    PackageCompatibilityFixture::ARRAY_ELEMENT_NULLABILITY_CHANGED,
+	    PackageCompatibilityFixture::ARRAY_OUTER_NULLABILITY_CHANGED,
+	    PackageCompatibilityFixture::ARRAY_EXTRACTOR_CHANGED};
+	for (std::size_t index = 0; index < incompatible_array_changes.size(); index++) {
+		RequireClassification(
+		    array_active,
+		    duckdb_api_test::BuildPackageCompatibilityFixture(incompatible_array_changes[index], "1.3.0", '2'),
+		    PackageReloadClassification::INCOMPATIBLE_RELOAD,
+		    "ARRAY structural mutation escaped fail-closed classification at index " + std::to_string(index));
 	}
 
 	const auto pagination_active = BuildPaginationCompatibilityGeneration("1.2.3", '1', 1);

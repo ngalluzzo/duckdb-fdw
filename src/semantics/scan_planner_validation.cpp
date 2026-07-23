@@ -24,9 +24,32 @@ std::uint64_t BoundedProduct(std::uint64_t left, std::uint64_t right, std::uint6
 
 namespace {
 
-bool IsSupportedLogicalType(const std::string &logical_type) {
-	return logical_type == "BIGINT" || logical_type == "VARCHAR" || logical_type == "BOOLEAN" ||
-	       logical_type == "DOUBLE";
+const char *SupportedScalarTypeName(CompiledScalarType type) {
+	switch (type) {
+	case CompiledScalarType::BOOLEAN:
+		return "BOOLEAN";
+	case CompiledScalarType::BIGINT:
+		return "BIGINT";
+	case CompiledScalarType::VARCHAR:
+		return "VARCHAR";
+	case CompiledScalarType::DOUBLE:
+		return "DOUBLE";
+	}
+	return nullptr;
+}
+
+bool IsSupportedColumnType(const CompiledColumn &column) {
+	const auto *element_type = SupportedScalarTypeName(column.ElementType());
+	if (element_type == nullptr) {
+		return false;
+	}
+	switch (column.Shape()) {
+	case CompiledColumnShape::SCALAR:
+		return !column.ElementNullable() && column.logical_type == element_type;
+	case CompiledColumnShape::ARRAY:
+		return column.logical_type == std::string(element_type) + "[]";
+	}
+	return false;
 }
 
 bool Contains(const std::vector<std::string> &values, const std::string &expected) {
@@ -66,7 +89,7 @@ void ValidateSchema(const CompiledRelation &relation) {
 	}
 	for (std::size_t index = 0; index < columns.size(); index++) {
 		const auto &column = columns[index];
-		if (column.name.empty() || !IsSupportedLogicalType(column.logical_type) || column.extractor.empty()) {
+		if (column.name.empty() || !IsSupportedColumnType(column) || column.extractor.empty()) {
 			throw std::logic_error("selected relation contains an unsupported output column");
 		}
 		for (std::size_t other = index + 1; other < columns.size(); other++) {

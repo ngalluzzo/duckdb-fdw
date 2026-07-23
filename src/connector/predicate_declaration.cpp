@@ -375,7 +375,8 @@ void ValidatePredicateMappings(const std::string &relation_name, const std::vect
 		const auto *operation = FindOperation(operations, mapping.OperationName());
 		const auto *column = FindColumn(columns, mapping.ColumnName());
 		const bool package_mapping = mapping.ProofIdentity() == CompiledPredicateProofIdentity::PACKAGE_DECLARED_V1;
-		const bool valid_column = column != nullptr && mapping.TypedLiteral().Type() == column->ScalarType() &&
+		const bool valid_column = column != nullptr && column->Shape() == CompiledColumnShape::SCALAR &&
+		                          mapping.TypedLiteral().Type() == column->ScalarType() &&
 		                          (package_mapping || (!column->nullable && column->logical_type == "VARCHAR" &&
 		                                               column->extractor == "$.visibility"));
 		if (!valid_column) {

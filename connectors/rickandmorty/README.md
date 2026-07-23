@@ -13,7 +13,7 @@ GitHub's.
 | Function | Authentication | Columns |
 | --- | --- | --- |
 | `rickandmorty_pilot_episode()` | None | `id BIGINT`, `name VARCHAR`, `air_date VARCHAR`, `episode_code VARCHAR` |
-| `rickandmorty_character_search(status := ...)` | None | `id BIGINT`, `name VARCHAR`, `status VARCHAR`, `species VARCHAR`, `origin_name VARCHAR` |
+| `rickandmorty_character_search(status := ...)` | None | `id BIGINT`, `name VARCHAR`, `status VARCHAR`, `species VARCHAR`, `origin_name VARCHAR`, `episode VARCHAR[]` |
 
 `character_search` declares one relation input, `status`, bound directly into
 the upstream `status` query parameter when supplied and omitted otherwise.
@@ -42,9 +42,12 @@ CALL duckdb_api_load_connector(
 SELECT id, name, air_date, episode_code
 FROM rickandmorty_pilot_episode();
 
-SELECT id, name, status, species
+SELECT id, name, status, species, episode, len(episode) AS episode_count
 FROM rickandmorty_character_search(status := 'Alive');
 ```
+
+`episode` preserves the upstream ordered array of episode URLs as a DuckDB
+`VARCHAR[]`. An empty upstream array remains an empty list rather than NULL.
 
 `CALL duckdb_api_reload_connector(connector := 'rickandmorty')` recompiles the
 same retained package root. Reload compatibility follows package SemVer and

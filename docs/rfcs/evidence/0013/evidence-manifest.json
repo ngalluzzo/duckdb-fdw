@@ -1,9 +1,9 @@
 {
   "manifest": "duckdb_api/rfc0013_evidence_v1",
   "artifacts": {
-    "connector-package-v1.schema.json": "sha256.1d8778551bfcca4cfd0dd22a992f5413556810e912682a17b06ea1dc11671ece",
-    "fixture-coverage-v1.json": "sha256.e4ae603e800bf436dbe66a866f15eaba0c3f0f881fcb210e9a95bb8939172063",
-    "fixture-index-v1.schema.json": "sha256.3d341f49be5b150f53fee68278643f0e35b29ff725b93e5cf3df215c09ff6133",
+    "connector-package-v1.schema.json": "sha256.f094044c9f2e46d25ad379bf89b16730d1779090150cf0cc278ff5fcc4e1d0f6",
+    "fixture-coverage-v1.json": "sha256.8a19c50eaa87e3655ae8c5f2a5511bfc6d7cfa3499e9f14583af40c1c54f36f8",
+    "fixture-index-v1.schema.json": "sha256.3dd9ec84a5e0cbaddf23dba187e983d80aecfda83d8075c1109f6f032b0cf7c9",
     "github/README.md": "sha256.7d2809249b5b7869df4df6a9d933118265ceec74cf0b1e7f828cc8a0522be6e8",
     "github/connector.yaml": "sha256.49b031129fb99451238713a67bf929e35d62cedc4738d6d1bb88b34143b8924e",
     "github/fixtures/index.yaml": "sha256.8e1fb810a1491047f5d54cd321879a0914b86482c3c8702f964c2d3327014a01",

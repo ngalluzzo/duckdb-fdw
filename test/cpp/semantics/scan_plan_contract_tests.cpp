@@ -72,21 +72,21 @@ void RequireColumnsMatch(const duckdb_api::ScanPlan &plan, const duckdb_api::Com
 }
 
 void TestPlannedColumnScalarKindRejectsUnsupportedTypes() {
-	duckdb_api::PlannedColumn column {"probe", "BIGINT", false, "$.probe"};
-	Require(column.ScalarKind() == duckdb_api::PlannedColumnScalarKind::BIGINT,
+	Require(duckdb_api::PlannedColumn("probe", "BIGINT", false, "$.probe").ScalarKind() ==
+	            duckdb_api::PlannedColumnScalarKind::BIGINT,
 	        "planned column lost its BIGINT scalar kind");
-	column.logical_type = "VARCHAR";
-	Require(column.ScalarKind() == duckdb_api::PlannedColumnScalarKind::VARCHAR,
+	Require(duckdb_api::PlannedColumn("probe", "VARCHAR", false, "$.probe").ScalarKind() ==
+	            duckdb_api::PlannedColumnScalarKind::VARCHAR,
 	        "planned column lost its VARCHAR scalar kind");
-	column.logical_type = "BOOLEAN";
-	Require(column.ScalarKind() == duckdb_api::PlannedColumnScalarKind::BOOLEAN,
+	Require(duckdb_api::PlannedColumn("probe", "BOOLEAN", false, "$.probe").ScalarKind() ==
+	            duckdb_api::PlannedColumnScalarKind::BOOLEAN,
 	        "planned column lost its BOOLEAN scalar kind");
-	column.logical_type = "DOUBLE";
-	Require(column.ScalarKind() == duckdb_api::PlannedColumnScalarKind::DOUBLE,
+	Require(duckdb_api::PlannedColumn("probe", "DOUBLE", false, "$.probe").ScalarKind() ==
+	            duckdb_api::PlannedColumnScalarKind::DOUBLE,
 	        "planned column lost its DOUBLE scalar kind");
-	column.logical_type = "DECIMAL";
 	bool rejected = false;
 	try {
+		duckdb_api::PlannedColumn column("probe", "DECIMAL", false, "$.probe");
 		(void)column.ScalarKind();
 	} catch (const std::logic_error &) {
 		rejected = true;

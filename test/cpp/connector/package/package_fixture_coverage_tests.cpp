@@ -197,9 +197,9 @@ void TestFixtureContractAssetsAreByteLocked(const std::string &repository_root) 
 	            "sha256." + duckdb_api::ComputeSha256Hex(mapping) ==
 	                duckdb_api::connector::PackageFixtureCoverageV1MappingDigest(),
 	        "production fixture contract asset bytes drifted from their accepted identities");
-	Require(schema == ReadBytes(repository_root + "/docs/rfcs/evidence/0013/fixture-index-v1.schema.json") &&
-	            mapping == ReadBytes(repository_root + "/docs/rfcs/evidence/0013/fixture-coverage-v1.json"),
-	        "production fixture assets are not exact copies of accepted RFC 0013 evidence");
+	Require(schema == ReadBytes(repository_root + "/docs/rfcs/evidence/0022/fixture-index-v1.schema.json") &&
+	            mapping == ReadBytes(repository_root + "/docs/rfcs/evidence/0022/fixture-coverage-v1.json"),
+	        "production fixture assets are not exact copies of accepted RFC 0022 evidence");
 }
 
 duckdb_api::CompiledLocalPackage CompileControlledPackage(const std::string &repository_root) {

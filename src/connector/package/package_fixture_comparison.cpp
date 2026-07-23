@@ -49,6 +49,27 @@ std::vector<PackageFixtureRequest> ExpectedRequests(const PackageFixtureCase &fi
 	return requests;
 }
 
+bool SameCell(const PackageFixtureCell &left, const PackageFixtureCell &right) {
+	if (left.is_null != right.is_null || left.is_array != right.is_array) {
+		return false;
+	}
+	if (left.is_null) {
+		return true;
+	}
+	if (!left.is_array) {
+		return left.value == right.value;
+	}
+	if (left.elements.size() != right.elements.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.elements.size(); index++) {
+		if (!SameCell(left.elements[index], right.elements[index])) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool SameRows(const std::vector<PackageFixtureRow> &left, const std::vector<PackageFixtureRow> &right) {
 	if (left.size() != right.size()) {
 		return false;
@@ -60,7 +81,7 @@ bool SameRows(const std::vector<PackageFixtureRow> &left, const std::vector<Pack
 		for (std::size_t column = 0; column < left[row].cells.size(); column++) {
 			const auto &expected = left[row].cells[column];
 			const auto &actual = right[row].cells[column];
-			if (expected.is_null != actual.is_null || (!expected.is_null && expected.value != actual.value)) {
+			if (!SameCell(expected, actual)) {
 				return false;
 			}
 		}

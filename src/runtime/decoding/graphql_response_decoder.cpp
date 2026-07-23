@@ -39,12 +39,13 @@ bool CheckedMultiply(uint64_t left, uint64_t right, uint64_t &result) noexcept {
 	return true;
 }
 
-class GraphqlJsonParser : private StrictJsonReader {
+class GraphqlJsonParser : private StrictJsonReader, private StrictJsonStringCapacityObserver {
 public:
 	GraphqlJsonParser(const std::string &input, const AdmittedGraphqlRequestProfile &profile_p,
 	                  const GraphqlDecodeLimits &limits_p, ExecutionControl &control)
 	    : StrictJsonReader(input, limits_p.max_json_nesting, limits_p.deadline, control), profile(profile_p),
-	      limits(limits_p), decoded_memory(0), pending_string_memory(0), has_next(false), end_cursor_is_null(false) {
+	      limits(limits_p), decoded_memory(0), pending_string_memory(0), pending_array_memory(0),
+	      pending_structural_memory(0), peak_memory(0), has_next(false), end_cursor_is_null(false) {
 	}
 
 	DecodedGraphqlPage Parse() {
@@ -58,13 +59,8 @@ public:
 			throw ExecutionError(ErrorStage::SCHEMA, "pagination.end_cursor",
 			                     "GraphQL continuation cursor is missing or empty");
 		}
-		uint64_t retained = 0;
-		if (!CheckedAdd(decoded_memory, static_cast<uint64_t>(end_cursor.capacity()), retained) ||
-		    retained > limits.max_decoded_memory_bytes) {
-			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
-			                     "GraphQL response exceeded its decoded-memory budget");
-		}
-		return {std::move(rows), has_next, std::move(end_cursor), retained};
+		const auto cursor_memory = has_next ? static_cast<uint64_t>(end_cursor.capacity()) : 0;
+		return {std::move(rows), has_next, std::move(end_cursor), decoded_memory, cursor_memory, peak_memory};
 	}
 
 private:
@@ -77,6 +73,7 @@ private:
 		std::string varchar_value;
 		bool boolean_value;
 		double double_value;
+		std::vector<TypedScalarValue> elements;
 	};
 
 	void ValidateProfile() {
@@ -84,6 +81,23 @@ private:
 		    limits.max_string_bytes > 512 || limits.max_json_nesting == 0 || limits.max_json_nesting > 16 ||
 		    limits.max_decoded_memory_bytes == 0 || profile.Columns().empty() || profile.Columns().size() > 256) {
 			throw ExecutionError(ErrorStage::INTERNAL, "", "GraphQL decoder received an invalid profile");
+		}
+		for (const auto &column : profile.Columns()) {
+			if (column.type.shape != ValueShape::SCALAR && column.type.shape != ValueShape::ARRAY) {
+				throw ExecutionError(ErrorStage::INTERNAL, "", "GraphQL decoder received an invalid profile");
+			}
+			if (column.type.shape == ValueShape::SCALAR && column.type.element_nullable) {
+				throw ExecutionError(ErrorStage::INTERNAL, "", "GraphQL decoder received an invalid profile");
+			}
+			switch (column.type.element_kind) {
+			case ValueKind::BIGINT:
+			case ValueKind::VARCHAR:
+			case ValueKind::BOOLEAN:
+			case ValueKind::DOUBLE:
+				break;
+			default:
+				throw ExecutionError(ErrorStage::INTERNAL, "", "GraphQL decoder received an invalid profile");
+			}
 		}
 	}
 
@@ -165,6 +179,12 @@ private:
 
 	std::vector<TypedRow> AllocateRows() {
 		std::vector<TypedRow> rows;
+		uint64_t requested_bytes = 0;
+		if (!CheckedMultiply(limits.max_records, static_cast<uint64_t>(sizeof(TypedRow)), requested_bytes) ||
+		    requested_bytes > limits.max_decoded_memory_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL rows exceeded their decoded-memory budget");
+		}
 		try {
 			rows.reserve(static_cast<std::size_t>(limits.max_records));
 		} catch (const std::bad_alloc &) {
@@ -178,7 +198,77 @@ private:
 			                     "GraphQL rows exceeded their decoded-memory budget");
 		}
 		decoded_memory = bytes;
+		ObserveCurrentMemory();
 		return rows;
+	}
+
+	void ObserveCurrentMemory() {
+		uint64_t current = 0;
+		if (!CheckedAdd(decoded_memory, pending_string_memory, current) ||
+		    !CheckedAdd(current, pending_array_memory, current) ||
+		    !CheckedAdd(current, pending_structural_memory, current) || current > limits.max_decoded_memory_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL response exceeded its decoded-memory budget");
+		}
+		peak_memory = std::max(peak_memory, current);
+	}
+
+	void ReserveStringCapacity(uint64_t current_capacity, uint64_t requested_capacity) override {
+		if (requested_capacity < current_capacity) {
+			throw ExecutionError(ErrorStage::INTERNAL, "", "GraphQL string capacity accounting failed");
+		}
+		uint64_t retained = 0;
+		if (!CheckedAdd(decoded_memory, pending_string_memory, retained) ||
+		    !CheckedAdd(retained, pending_array_memory, retained) ||
+		    !CheckedAdd(retained, pending_structural_memory, retained) ||
+		    !CheckedAdd(retained, requested_capacity, retained) || retained > limits.max_decoded_memory_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL response exceeded its decoded-memory budget");
+		}
+		// Reallocation retains the old buffer until the prospective replacement
+		// allocation succeeds, so the replacement is co-live rather than growth.
+		peak_memory = std::max(peak_memory, retained);
+	}
+
+	void ReconcileStringCapacity(uint64_t current_capacity, uint64_t reserved_capacity,
+	                             uint64_t actual_capacity) override {
+		uint64_t co_live = 0;
+		if (actual_capacity < reserved_capacity || current_capacity > pending_string_memory ||
+		    !CheckedAdd(decoded_memory, pending_string_memory, co_live) ||
+		    !CheckedAdd(co_live, pending_array_memory, co_live) ||
+		    !CheckedAdd(co_live, pending_structural_memory, co_live) ||
+		    !CheckedAdd(co_live, actual_capacity, co_live) || co_live > limits.max_decoded_memory_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL response exceeded its decoded-memory budget");
+		}
+		peak_memory = std::max(peak_memory, co_live);
+		pending_string_memory -= current_capacity;
+		if (!CheckedAdd(pending_string_memory, actual_capacity, pending_string_memory)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL response exceeded its decoded-memory budget");
+		}
+		ObserveCurrentMemory();
+	}
+
+	void ReserveStructuralMemory(uint64_t addition) {
+		uint64_t retained = 0;
+		if (!CheckedAdd(decoded_memory, pending_string_memory, retained) ||
+		    !CheckedAdd(retained, pending_array_memory, retained) ||
+		    !CheckedAdd(retained, pending_structural_memory, retained) || !CheckedAdd(retained, addition, retained) ||
+		    retained > limits.max_decoded_memory_bytes ||
+		    !CheckedAdd(pending_structural_memory, addition, pending_structural_memory)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL row staging exceeded its decoded-memory budget");
+		}
+		ObserveCurrentMemory();
+	}
+
+	void ReconcileStructuralMemory(uint64_t reserved, uint64_t actual) {
+		if (actual > reserved) {
+			ReserveStructuralMemory(actual - reserved);
+		} else {
+			pending_structural_memory -= reserved - actual;
+		}
 	}
 
 	std::vector<TypedRow> ParseRows() {
@@ -221,23 +311,19 @@ private:
 			SkipValue();
 			throw ExecutionError(ErrorStage::SCHEMA, field, "GraphQL response field has an incompatible type");
 		}
-		if (decoded_memory > limits.max_decoded_memory_bytes ||
-		    pending_string_memory > limits.max_decoded_memory_bytes - decoded_memory) {
+		uint64_t retained = 0;
+		if (!CheckedAdd(decoded_memory, pending_string_memory, retained) ||
+		    !CheckedAdd(retained, pending_array_memory, retained) ||
+		    !CheckedAdd(retained, pending_structural_memory, retained) || retained > limits.max_decoded_memory_bytes) {
 			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                     "GraphQL response exceeded its decoded-memory budget");
 		}
-		const auto remaining = limits.max_decoded_memory_bytes - decoded_memory - pending_string_memory;
-		auto value =
-		    ParseString(std::min(limits.max_string_bytes, remaining),
-		                remaining < limits.max_string_bytes ? "decoded_memory_bytes" : field,
-		                remaining < limits.max_string_bytes ? "GraphQL response exceeded its decoded-memory budget"
-		                                                    : "GraphQL response string exceeded its byte budget");
-		if (static_cast<uint64_t>(value.capacity()) > remaining) {
-			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
-			                     "GraphQL response exceeded its decoded-memory budget");
-		}
-		pending_string_memory += static_cast<uint64_t>(value.capacity());
-		return value;
+		const auto remaining = limits.max_decoded_memory_bytes - retained;
+		return ParseString(std::min(limits.max_string_bytes, remaining),
+		                   remaining < limits.max_string_bytes ? "decoded_memory_bytes" : field,
+		                   remaining < limits.max_string_bytes ? "GraphQL response exceeded its decoded-memory budget"
+		                                                       : "GraphQL response string exceeded its byte budget",
+		                   this);
 	}
 
 	int64_t ParseBigInt(const std::string &field) {
@@ -294,6 +380,94 @@ private:
 		throw ExecutionError(ErrorStage::SCHEMA, field, "GraphQL response field has an incompatible type");
 	}
 
+	TypedScalarValue ParseScalarElement(const AdmittedGraphqlColumn &column) {
+		switch (column.type.element_kind) {
+		case ValueKind::VARCHAR:
+			return TypedScalarValue::Varchar(ParseBoundedString(column.name));
+		case ValueKind::BIGINT:
+			return TypedScalarValue::BigInt(ParseBigInt(column.name));
+		case ValueKind::BOOLEAN:
+			return TypedScalarValue::Boolean(ParseBoolean(column.name));
+		case ValueKind::DOUBLE:
+			return TypedScalarValue::Double(ParseDouble(column.name));
+		}
+		throw ExecutionError(ErrorStage::INTERNAL, "", "GraphQL decoder received an invalid array element type");
+	}
+
+	void ReserveArrayElement(std::vector<TypedScalarValue> &elements) {
+		if (elements.size() < elements.capacity()) {
+			return;
+		}
+		const auto current = static_cast<uint64_t>(elements.capacity());
+		uint64_t requested = 1;
+		if (current != 0 && !CheckedMultiply(current, 2, requested)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL array exceeded its decoded-memory budget");
+		}
+		uint64_t requested_bytes = 0;
+		uint64_t current_bytes = 0;
+		uint64_t retained = 0;
+		if (!CheckedMultiply(requested, static_cast<uint64_t>(sizeof(TypedScalarValue)), requested_bytes) ||
+		    !CheckedMultiply(current, static_cast<uint64_t>(sizeof(TypedScalarValue)), current_bytes) ||
+		    requested_bytes < current_bytes || !CheckedAdd(decoded_memory, pending_string_memory, retained) ||
+		    !CheckedAdd(retained, pending_array_memory, retained) ||
+		    !CheckedAdd(retained, pending_structural_memory, retained) ||
+		    !CheckedAdd(retained, requested_bytes, retained) || retained > limits.max_decoded_memory_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL array exceeded its decoded-memory budget");
+		}
+		peak_memory = std::max(peak_memory, retained);
+		try {
+			elements.reserve(static_cast<std::size_t>(requested));
+		} catch (const std::bad_alloc &) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL array exceeded available decoded memory");
+		}
+		uint64_t actual_bytes = 0;
+		uint64_t co_live = 0;
+		if (!CheckedMultiply(static_cast<uint64_t>(elements.capacity()),
+		                     static_cast<uint64_t>(sizeof(TypedScalarValue)), actual_bytes) ||
+		    actual_bytes < current_bytes || !CheckedAdd(decoded_memory, pending_string_memory, co_live) ||
+		    !CheckedAdd(co_live, pending_array_memory, co_live) ||
+		    !CheckedAdd(co_live, pending_structural_memory, co_live) || !CheckedAdd(co_live, actual_bytes, co_live) ||
+		    co_live > limits.max_decoded_memory_bytes ||
+		    !CheckedAdd(pending_array_memory, actual_bytes - current_bytes, pending_array_memory) ||
+		    !CheckedAdd(decoded_memory, pending_string_memory, retained) ||
+		    !CheckedAdd(retained, pending_array_memory, retained) ||
+		    !CheckedAdd(retained, pending_structural_memory, retained) || retained > limits.max_decoded_memory_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL array exceeded its decoded-memory budget");
+		}
+		peak_memory = std::max(peak_memory, co_live);
+		ObserveCurrentMemory();
+	}
+
+	void ParseArray(const AdmittedGraphqlColumn &column, Slot &slot) {
+		SkipWhitespace();
+		if (Peek() != '[') {
+			SkipValue();
+			throw ExecutionError(ErrorStage::SCHEMA, column.name, "GraphQL response field has an incompatible type");
+		}
+		Expect('[');
+		SkipWhitespace();
+		while (Peek() != ']') {
+			Check();
+			ReserveArrayElement(slot.elements);
+			if (Peek() == 'n') {
+				Literal("null");
+				if (!column.type.element_nullable) {
+					throw ExecutionError(ErrorStage::SCHEMA, column.name,
+					                     "GraphQL response array contains a null element");
+				}
+				slot.elements.push_back(TypedScalarValue::Null(column.type.element_kind));
+			} else {
+				slot.elements.push_back(ParseScalarElement(column));
+			}
+			ArraySeparator();
+		}
+		Expect(']');
+	}
+
 	void ParseColumn(const AdmittedGraphqlColumn &column, std::size_t path_index, Slot &slot) {
 		SkipWhitespace();
 		if (Peek() == 'n') {
@@ -335,19 +509,23 @@ private:
 						}
 						slot.valid = false;
 					} else {
-						switch (column.kind) {
-						case ValueKind::VARCHAR:
-							slot.varchar_value = ParseBoundedString(column.name);
-							break;
-						case ValueKind::BIGINT:
-							slot.bigint_value = ParseBigInt(column.name);
-							break;
-						case ValueKind::BOOLEAN:
-							slot.boolean_value = ParseBoolean(column.name);
-							break;
-						case ValueKind::DOUBLE:
-							slot.double_value = ParseDouble(column.name);
-							break;
+						if (column.type.shape == ValueShape::ARRAY) {
+							ParseArray(column, slot);
+						} else {
+							switch (column.type.element_kind) {
+							case ValueKind::VARCHAR:
+								slot.varchar_value = ParseBoundedString(column.name);
+								break;
+							case ValueKind::BIGINT:
+								slot.bigint_value = ParseBigInt(column.name);
+								break;
+							case ValueKind::BOOLEAN:
+								slot.boolean_value = ParseBoolean(column.name);
+								break;
+							case ValueKind::DOUBLE:
+								slot.double_value = ParseDouble(column.name);
+								break;
+							}
 						}
 					}
 					slot.seen = true;
@@ -364,7 +542,27 @@ private:
 	}
 
 	TypedRow ParseNode(std::size_t begin, std::size_t end) {
-		std::vector<Slot> slots(profile.Columns().size());
+		uint64_t reserved_slot_storage = 0;
+		if (!CheckedMultiply(static_cast<uint64_t>(profile.Columns().size()), static_cast<uint64_t>(sizeof(Slot)),
+		                     reserved_slot_storage)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL row staging exceeded its decoded-memory budget");
+		}
+		ReserveStructuralMemory(reserved_slot_storage);
+		std::vector<Slot> slots;
+		try {
+			slots.resize(profile.Columns().size());
+		} catch (const std::bad_alloc &) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL row staging exceeded available decoded memory");
+		}
+		uint64_t slot_storage = 0;
+		if (!CheckedMultiply(static_cast<uint64_t>(slots.capacity()), static_cast<uint64_t>(sizeof(Slot)),
+		                     slot_storage)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL row staging exceeded its decoded-memory budget");
+		}
+		ReconcileStructuralMemory(reserved_slot_storage, slot_storage);
 		for (std::size_t index = 0; index < profile.Columns().size(); index++) {
 			SetPosition(begin);
 			ParseColumn(profile.Columns()[index], 0, slots[index]);
@@ -374,20 +572,67 @@ private:
 			}
 		}
 		TypedRow row;
-		row.values.reserve(profile.Columns().size());
+		uint64_t reserved_value_storage = 0;
+		if (!CheckedMultiply(static_cast<uint64_t>(profile.Columns().size()), static_cast<uint64_t>(sizeof(TypedValue)),
+		                     reserved_value_storage)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL row exceeded its decoded-memory budget");
+		}
+		ReserveStructuralMemory(reserved_value_storage);
+		try {
+			row.values.reserve(profile.Columns().size());
+		} catch (const std::bad_alloc &) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "GraphQL row exceeded available decoded memory");
+		}
 		uint64_t row_memory = 0;
 		if (!CheckedMultiply(static_cast<uint64_t>(row.values.capacity()), static_cast<uint64_t>(sizeof(TypedValue)),
 		                     row_memory)) {
 			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                     "GraphQL row exceeded its decoded-memory budget");
 		}
+		ReconcileStructuralMemory(reserved_value_storage, row_memory);
+		const auto value_storage = row_memory;
 		uint64_t row_strings = 0;
+		uint64_t row_arrays = 0;
 		for (std::size_t index = 0; index < slots.size(); index++) {
 			const auto &column = profile.Columns()[index];
 			auto &slot = slots[index];
 			if (!slot.valid) {
-				row.values.push_back(TypedValue::Null(column.kind));
-			} else if (column.kind == ValueKind::VARCHAR) {
+				row.values.push_back(TypedValue::Null(column.type));
+			} else if (column.type.shape == ValueShape::ARRAY) {
+				auto value =
+				    TypedValue::Array(column.type.element_kind, column.type.element_nullable, std::move(slot.elements));
+				uint64_t element_storage = 0;
+				if (!CheckedMultiply(static_cast<uint64_t>(value.elements.capacity()),
+				                     static_cast<uint64_t>(sizeof(TypedScalarValue)), element_storage)) {
+					throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+					                     "GraphQL row exceeded its decoded-memory budget");
+				}
+				uint64_t updated = 0;
+				if (!CheckedAdd(row_memory, element_storage, updated) || updated > limits.max_decoded_memory_bytes) {
+					throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+					                     "GraphQL row exceeded its decoded-memory budget");
+				}
+				row_memory = updated;
+				if (!CheckedAdd(row_arrays, element_storage, row_arrays)) {
+					throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+					                     "GraphQL row exceeded its decoded-memory budget");
+				}
+				for (const auto &element : value.elements) {
+					if (element.kind == ValueKind::VARCHAR && element.valid) {
+						const auto bytes = static_cast<uint64_t>(element.varchar_value.capacity());
+						if (!CheckedAdd(row_memory, bytes, updated) || updated > limits.max_decoded_memory_bytes ||
+						    !CheckedAdd(row_strings, bytes, updated)) {
+							throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+							                     "GraphQL row exceeded its decoded-memory budget");
+						}
+						row_memory += bytes;
+						row_strings = updated;
+					}
+				}
+				row.values.push_back(std::move(value));
+			} else if (column.type.element_kind == ValueKind::VARCHAR) {
 				auto value = TypedValue::Varchar(std::move(slot.varchar_value));
 				uint64_t updated = 0;
 				if (!CheckedAdd(row_memory, static_cast<uint64_t>(value.varchar_value.capacity()), updated) ||
@@ -402,9 +647,9 @@ private:
 				}
 				row_strings = updated;
 				row.values.push_back(std::move(value));
-			} else if (column.kind == ValueKind::BIGINT) {
+			} else if (column.type.element_kind == ValueKind::BIGINT) {
 				row.values.push_back(TypedValue::BigInt(slot.bigint_value));
-			} else if (column.kind == ValueKind::DOUBLE) {
+			} else if (column.type.element_kind == ValueKind::DOUBLE) {
 				row.values.push_back(TypedValue::Double(slot.double_value));
 			} else {
 				row.values.push_back(TypedValue::Boolean(slot.boolean_value));
@@ -412,12 +657,16 @@ private:
 		}
 		uint64_t updated = 0;
 		if (!CheckedAdd(decoded_memory, row_memory, updated) || updated > limits.max_decoded_memory_bytes ||
-		    row_strings > pending_string_memory) {
+		    row_strings > pending_string_memory || row_arrays > pending_array_memory ||
+		    value_storage > pending_structural_memory || slot_storage > pending_structural_memory - value_storage) {
 			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
 			                     "GraphQL rows exceeded their decoded-memory budget");
 		}
 		decoded_memory = updated;
 		pending_string_memory -= row_strings;
+		pending_array_memory -= row_arrays;
+		pending_structural_memory -= value_storage;
+		pending_structural_memory -= slot_storage;
 		return row;
 	}
 
@@ -444,6 +693,9 @@ private:
 	const GraphqlDecodeLimits &limits;
 	uint64_t decoded_memory;
 	uint64_t pending_string_memory;
+	uint64_t pending_array_memory;
+	uint64_t pending_structural_memory;
+	uint64_t peak_memory;
 	bool has_next;
 	bool end_cursor_is_null;
 	std::string end_cursor;

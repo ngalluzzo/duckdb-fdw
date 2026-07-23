@@ -356,29 +356,40 @@ bool RenderGraphqlOperation(const RelationDeclaration &relation, const Operation
 	for (std::size_t index = 0; index < relation.columns.size(); index++) {
 		const auto &column = relation.columns[index];
 		const auto &selection = query.selection[index];
+		const auto &element_type = column.type.value == "ARRAY" ? column.element_type : column.type;
 		// RFC 0020: DOUBLE has no GraphQL-side representation today (GraphQL
 		// relations render/decode only STRING/INT64/BOOLEAN); reject rather
 		// than silently decode a DOUBLE column as STRING, mirroring RFC
 		// 0018's precedent of rejecting a REST-only capability on GraphQL
 		// operations with a precise compile-time diagnostic instead of a
 		// silent runtime mismatch.
-		if (column.type.value == "DOUBLE") {
-			AddProfileError(relation, operation, column.type.mark, diagnostics);
+		if (element_type.value == "DOUBLE") {
+			AddProfileError(relation, operation, element_type.mark, diagnostics);
 			return false;
 		}
 		CompiledGraphqlScalarKind kind = CompiledGraphqlScalarKind::STRING;
-		if (column.type.value == "BIGINT") {
+		if (element_type.value == "BIGINT") {
 			kind = CompiledGraphqlScalarKind::INT64;
-		} else if (column.type.value == "BOOLEAN") {
+		} else if (element_type.value == "BOOLEAN") {
 			kind = CompiledGraphqlScalarKind::BOOLEAN;
 		}
 		bool nullable = false;
 		(void)IsPlainBoolean(column.nullable, nullable);
+		bool element_nullable = false;
+		if (column.type.value == "ARRAY") {
+			(void)IsPlainBoolean(column.element_nullable, element_nullable);
+		}
 		std::vector<std::string> path;
 		for (const auto &segment : selection.field_path) {
 			path.push_back(segment.value);
 		}
-		rendered.result_columns.push_back({column.id.value, kind, nullable, {std::move(path)}});
+		rendered.result_columns.push_back(
+		    {column.id.value,
+		     kind,
+		     nullable,
+		     {std::move(path)},
+		     column.type.value == "ARRAY" ? CompiledResultShape::ARRAY : CompiledResultShape::SCALAR,
+		     element_nullable});
 	}
 
 	std::vector<std::string> base = {"data"};

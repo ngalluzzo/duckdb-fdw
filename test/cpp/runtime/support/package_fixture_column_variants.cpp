@@ -22,10 +22,14 @@ struct ColumnMutation {
 
 ColumnMutation BuildColumnMutation(const duckdb_api::ScanPlan &plan, const internal::RuntimeFixtureJsonColumn &column,
                                    RuntimeFixtureColumnVariant variant) {
+	if (column.type.shape != duckdb_api::ValueShape::SCALAR) {
+		throw std::invalid_argument("scalar column variant requires a scalar planned column");
+	}
+	const auto kind = column.type.element_kind;
 	const auto string_limit = plan.Budgets().extracted_string_bytes;
 	switch (variant) {
 	case RuntimeFixtureColumnVariant::TYPE_MISMATCH_REJECTED:
-		return {column.kind == duckdb_api::ValueKind::VARCHAR ? "false" : "\"type-mismatch\"",
+		return {kind == duckdb_api::ValueKind::VARCHAR ? "false" : "\"type-mismatch\"",
 		        false,
 		        false,
 		        duckdb_api::ErrorStage::SCHEMA,
@@ -45,7 +49,7 @@ ColumnMutation BuildColumnMutation(const duckdb_api::ScanPlan &plan, const inter
 		return {"null", false, false, duckdb_api::ErrorStage::SCHEMA, RuntimeFixtureVariantOutcome::EXPECTED_REJECTION,
 		        0,      0};
 	case RuntimeFixtureColumnVariant::BIGINT_MINIMUM:
-		if (column.kind != duckdb_api::ValueKind::BIGINT) {
+		if (kind != duckdb_api::ValueKind::BIGINT) {
 			throw std::invalid_argument("BIGINT minimum variant requires a BIGINT planned column");
 		}
 		return {"-9223372036854775808",
@@ -56,7 +60,7 @@ ColumnMutation BuildColumnMutation(const duckdb_api::ScanPlan &plan, const inter
 		        0,
 		        0};
 	case RuntimeFixtureColumnVariant::BIGINT_MAXIMUM:
-		if (column.kind != duckdb_api::ValueKind::BIGINT) {
+		if (kind != duckdb_api::ValueKind::BIGINT) {
 			throw std::invalid_argument("BIGINT maximum variant requires a BIGINT planned column");
 		}
 		return {"9223372036854775807",
@@ -69,7 +73,7 @@ ColumnMutation BuildColumnMutation(const duckdb_api::ScanPlan &plan, const inter
 	case RuntimeFixtureColumnVariant::BIGINT_UNDERFLOW_REJECTED:
 	case RuntimeFixtureColumnVariant::BIGINT_OVERFLOW_REJECTED:
 	case RuntimeFixtureColumnVariant::BIGINT_FRACTION_REJECTED:
-		if (column.kind != duckdb_api::ValueKind::BIGINT) {
+		if (kind != duckdb_api::ValueKind::BIGINT) {
 			throw std::invalid_argument("BIGINT rejection variant requires a BIGINT planned column");
 		}
 		return {variant == RuntimeFixtureColumnVariant::BIGINT_UNDERFLOW_REJECTED  ? "-9223372036854775809"
@@ -83,7 +87,7 @@ ColumnMutation BuildColumnMutation(const duckdb_api::ScanPlan &plan, const inter
 		        0};
 	case RuntimeFixtureColumnVariant::VARCHAR_STRING_BUDGET_BOUNDARY:
 	case RuntimeFixtureColumnVariant::VARCHAR_STRING_BUDGET_ONE_OVER_REJECTED: {
-		if (column.kind != duckdb_api::ValueKind::VARCHAR || string_limit == 0 ||
+		if (kind != duckdb_api::ValueKind::VARCHAR || string_limit == 0 ||
 		    string_limit >= static_cast<uint64_t>(std::numeric_limits<std::size_t>::max())) {
 			throw std::invalid_argument("VARCHAR budget variant requires a bounded VARCHAR planned column");
 		}
@@ -99,7 +103,7 @@ ColumnMutation BuildColumnMutation(const duckdb_api::ScanPlan &plan, const inter
 		        string_limit};
 	}
 	case RuntimeFixtureColumnVariant::DOUBLE_MINIMUM:
-		if (column.kind != duckdb_api::ValueKind::DOUBLE) {
+		if (kind != duckdb_api::ValueKind::DOUBLE) {
 			throw std::invalid_argument("DOUBLE minimum variant requires a DOUBLE planned column");
 		}
 		return {"-1.7976931348623157e+308",
@@ -110,7 +114,7 @@ ColumnMutation BuildColumnMutation(const duckdb_api::ScanPlan &plan, const inter
 		        0,
 		        0};
 	case RuntimeFixtureColumnVariant::DOUBLE_MAXIMUM:
-		if (column.kind != duckdb_api::ValueKind::DOUBLE) {
+		if (kind != duckdb_api::ValueKind::DOUBLE) {
 			throw std::invalid_argument("DOUBLE maximum variant requires a DOUBLE planned column");
 		}
 		return {"1.7976931348623157e+308",
@@ -125,14 +129,14 @@ ColumnMutation BuildColumnMutation(const duckdb_api::ScanPlan &plan, const inter
 		// underflow to a subnormal or exact zero; only HUGE_VAL/-HUGE_VAL is a
 		// real rejection. This proves the decoder accepts underflow rather than
 		// blanket-rejecting on ERANGE.
-		if (column.kind != duckdb_api::ValueKind::DOUBLE) {
+		if (kind != duckdb_api::ValueKind::DOUBLE) {
 			throw std::invalid_argument("DOUBLE subnormal variant requires a DOUBLE planned column");
 		}
 		return {
 		    "4.9e-324", false, true, duckdb_api::ErrorStage::INTERNAL, RuntimeFixtureVariantOutcome::VALUE_SUCCEEDED,
 		    0,          0};
 	case RuntimeFixtureColumnVariant::DOUBLE_MAGNITUDE_OVERFLOW_REJECTED:
-		if (column.kind != duckdb_api::ValueKind::DOUBLE) {
+		if (kind != duckdb_api::ValueKind::DOUBLE) {
 			throw std::invalid_argument("DOUBLE rejection variant requires a DOUBLE planned column");
 		}
 		return {"1e400", false, false, duckdb_api::ErrorStage::SCHEMA, RuntimeFixtureVariantOutcome::EXPECTED_REJECTION,

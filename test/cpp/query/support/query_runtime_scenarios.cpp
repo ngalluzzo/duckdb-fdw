@@ -96,7 +96,7 @@ public:
 			if (!authenticated || protocol != duckdb_api::PlannedProtocol::GRAPHQL) {
 				throw std::logic_error("GraphQL Query fixture received the wrong public provider alternatives");
 			}
-			batch.column_kinds = {duckdb_api::ValueKind::VARCHAR, duckdb_api::ValueKind::VARCHAR,
+			batch.column_types = {duckdb_api::ValueKind::VARCHAR, duckdb_api::ValueKind::VARCHAR,
 			                      duckdb_api::ValueKind::VARCHAR, duckdb_api::ValueKind::BIGINT,
 			                      duckdb_api::ValueKind::VARCHAR, duckdb_api::ValueKind::BOOLEAN,
 			                      duckdb_api::ValueKind::BOOLEAN, duckdb_api::ValueKind::VARCHAR};
@@ -115,7 +115,7 @@ public:
 			return true;
 		}
 
-		batch.column_kinds = {duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR,
+		batch.column_types = {duckdb_api::ValueKind::BIGINT, duckdb_api::ValueKind::VARCHAR,
 		                      duckdb_api::ValueKind::BOOLEAN};
 		if (scenario == QueryRuntimeScenario::EMPTY_BATCH) {
 			probe->batches.fetch_add(1, std::memory_order_relaxed);

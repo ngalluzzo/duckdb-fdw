@@ -19,21 +19,43 @@ PackageFixtureRow ParseRow(const FailsafeYamlNode &node, const std::string &path
 		if (cell == nullptr) {
 			Fail(node, path, "fixture expected row is missing a compiled column");
 		}
-		PackageFixtureCell value;
 		if (cell->Type() == FailsafeYamlNode::Kind::MAPPING) {
 			const auto parsed = ParseValue(*cell, path + "." + column.name);
 			if (!parsed.is_null || !column.nullable) {
 				Fail(*cell, path + "." + column.name, "fixture expected NULL violates column nullability");
 			}
-			value = {true, ""};
-		} else {
+			row.cells.push_back(column.Shape() == CompiledColumnShape::ARRAY
+			                        ? PackageFixtureCell(true, std::vector<PackageFixtureCell>())
+			                        : PackageFixtureCell(true, ""));
+		} else if (column.Shape() == CompiledColumnShape::SCALAR) {
 			const auto scalar = Scalar(*cell, path + "." + column.name);
-			if (!IsTypedScalar(column.ScalarType(), scalar)) {
+			if (!IsTypedScalar(column.ElementType(), scalar)) {
 				Fail(*cell, path + "." + column.name, "fixture expected cell has the wrong scalar type");
 			}
-			value = {false, scalar};
+			row.cells.push_back(PackageFixtureCell(false, scalar));
+		} else {
+			RequireType(*cell, FailsafeYamlNode::Kind::SEQUENCE, path + "." + column.name);
+			std::vector<PackageFixtureCell> elements;
+			elements.reserve(cell->Size());
+			for (std::size_t index = 0; index < cell->Size(); index++) {
+				const auto &element = cell->SequenceValue(index);
+				const auto element_path = path + "." + column.name + "[" + std::to_string(index) + "]";
+				if (element.Type() == FailsafeYamlNode::Kind::MAPPING) {
+					const auto parsed = ParseValue(element, element_path);
+					if (!parsed.is_null || !column.ElementNullable()) {
+						Fail(element, element_path, "fixture expected NULL violates array element nullability");
+					}
+					elements.push_back(PackageFixtureCell(true, ""));
+					continue;
+				}
+				const auto scalar = Scalar(element, element_path);
+				if (!IsTypedScalar(column.ElementType(), scalar)) {
+					Fail(element, element_path, "fixture expected array element has the wrong scalar type");
+				}
+				elements.push_back(PackageFixtureCell(false, scalar));
+			}
+			row.cells.push_back(PackageFixtureCell(false, std::move(elements)));
 		}
-		row.cells.push_back(std::move(value));
 	}
 	return row;
 }

@@ -19,7 +19,7 @@ const char *CanonicalGraphqlDocumentBytes() noexcept;
 
 struct AdmittedGraphqlColumn {
 	std::string name;
-	ValueKind kind;
+	OutputValueType type;
 	bool nullable;
 	std::vector<std::string> response_path;
 };

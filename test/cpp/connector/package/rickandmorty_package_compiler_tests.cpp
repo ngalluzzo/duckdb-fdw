@@ -11,15 +11,23 @@
 
 namespace {
 
+using duckdb_api::CompiledColumnShape;
 using duckdb_api::CompiledRegistrationAuthentication;
 using duckdb_api::CompiledRegistrationRelation;
 using duckdb_api::CompiledScalarType;
 using duckdb_api_test::Require;
 
 struct ExpectedColumn {
+	ExpectedColumn(const char *name_p, CompiledScalarType type_p, bool nullable_p,
+	               CompiledColumnShape shape_p = CompiledColumnShape::SCALAR, bool element_nullable_p = false)
+	    : name(name_p), type(type_p), nullable(nullable_p), shape(shape_p), element_nullable(element_nullable_p) {
+	}
+
 	const char *name;
 	CompiledScalarType type;
 	bool nullable;
+	CompiledColumnShape shape;
+	bool element_nullable;
 };
 
 struct ExpectedInput {
@@ -42,7 +50,8 @@ void RequireRelation(const CompiledRegistrationRelation &relation, const char *n
 		const auto &actual = relation.Columns()[index];
 		const auto &expected = expected_columns[index];
 		Require(actual.Name() == expected.name && actual.Type() == expected.type &&
-		            actual.Nullable() == expected.nullable,
+		            actual.Nullable() == expected.nullable && actual.Shape() == expected.shape &&
+		            actual.ElementNullable() == expected.element_nullable,
 		        std::string("registration column shape drifted for ") + name + "." + expected.name);
 	}
 	Require(relation.Inputs().size() == expected_inputs.size(),
@@ -101,11 +110,11 @@ void TestRickAndMortyCoverageMatchesDerivedMapping(const std::string &repository
 	const auto generation =
 	    duckdb_api_test::CompileRepositoryRickAndMortyLocalPackageFixture(repository_root).Generation();
 	const auto coverage = duckdb_api::connector::DerivePackageFixtureCoverage(generation);
-	Require(coverage.RequiredKeys().size() == 146,
-	        "Rick and Morty package did not derive its complete 146-key fixture-coverage matrix");
+	Require(coverage.RequiredKeys().size() == 163,
+	        "Rick and Morty package did not derive its complete 163-key fixture-coverage matrix");
 	Require(coverage.Entries().size() == coverage.RequiredKeys().size(),
 	        "Rick and Morty typed coverage registry does not align one-for-one with rendered keys");
-	Require(coverage.OrderedDigest() == "sha256.3d9a944860beb0026a4d40e080b4949231e854806903ef46190dd2360b09fc60",
+	Require(coverage.OrderedDigest() == "sha256.a1bfeb2df29612a350d8c9e68408d0eafb6f682bbed02dd1a240363784c01036",
 	        "Rick and Morty coverage ordering drifted from the authored fixture corpus");
 }
 
@@ -140,9 +149,9 @@ int main(int argc, char **argv) {
 		const auto registration = duckdb_api_test::CompileRepositoryRickAndMortyRegistrationFixture(argv[1]);
 		const auto &identity = registration.Identity();
 		Require(identity.SpecIdentifier() == "duckdb_api/v1" && identity.ConnectorId() == "rickandmorty" &&
-		            identity.PackageVersion() == "1.1.0" &&
+		            identity.PackageVersion() == "2.0.0" &&
 		            identity.PackageDigest() ==
-		                "sha256.0855ea7441bc7f521175c8c21166ddc6277034f1e357a582e474732a8d62ca62" &&
+		                "sha256.e4ba9694e6f622a9f7b4024ef95efc5b9bd73e441680b1e94b8c947e764df31c" &&
 		            registration.GenerationHandle().IsValid(),
 		        "Connector compiler fixture did not expose the exact real Rick and Morty package identity");
 		Require(registration.Relations().size() == 2,
@@ -163,7 +172,8 @@ int main(int argc, char **argv) {
 		                 {"name", varchar, false},
 		                 {"status", varchar, false},
 		                 {"species", varchar, false},
-		                 {"origin_name", varchar, false}},
+		                 {"origin_name", varchar, false},
+		                 {"episode", varchar, false, CompiledColumnShape::ARRAY, false}},
 		                {{"status", varchar, true, false}});
 
 		TestRickAndMortyCoverageMatchesDerivedMapping(argv[1]);

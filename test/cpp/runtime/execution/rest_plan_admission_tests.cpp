@@ -189,6 +189,40 @@ void TestConditionalBindingCounterexamplesFailBeforeTransport() {
 	}
 }
 
+void TestPermanentResponseSchemaCounterexamplesFailBeforeTransport() {
+	using duckdb_api_test::RuntimeRestSchemaCounterexample;
+	const RuntimeRestSchemaCounterexample counterexamples[] = {
+	    RuntimeRestSchemaCounterexample::RESULT_NAME,
+	    RuntimeRestSchemaCounterexample::RESULT_SHAPE,
+	    RuntimeRestSchemaCounterexample::RESULT_ELEMENT_KIND,
+	    RuntimeRestSchemaCounterexample::RESULT_ELEMENT_NULLABILITY,
+	    RuntimeRestSchemaCounterexample::RESULT_OUTER_NULLABILITY,
+	    RuntimeRestSchemaCounterexample::RESULT_PATH,
+	    RuntimeRestSchemaCounterexample::RESULT_ARITY,
+	    RuntimeRestSchemaCounterexample::RESULT_ORDER,
+	    RuntimeRestSchemaCounterexample::OUTPUT_NAME,
+	    RuntimeRestSchemaCounterexample::OUTPUT_NAME_ORDER,
+	    RuntimeRestSchemaCounterexample::OUTPUT_ARITY,
+	    RuntimeRestSchemaCounterexample::OUTPUT_SHAPE};
+	for (std::size_t index = 0; index < sizeof(counterexamples) / sizeof(counterexamples[0]); index++) {
+		const auto plan = duckdb_api_test::BuildRuntimeRestSchemaCounterexample(counterexamples[index]);
+		const auto runtime = duckdb_api_test::BuildControlledHttpRuntimeForHost("api.github.com");
+		NeverCancelledControl control;
+		bool rejected = false;
+		try {
+			(void)runtime->Executor()->Open(plan, control);
+		} catch (const duckdb_api::ExecutionError &error) {
+			rejected = true;
+			Require(error.Stage() == duckdb_api::ErrorStage::POLICY,
+			        "REST response-schema mismatch used the wrong error stage");
+		}
+		const auto observation = runtime->Observation();
+		Require(rejected && observation.request_count == 0 && observation.target.empty() && observation.headers.empty(),
+		        "REST response-schema mismatch reached request construction or transport at index " +
+		            std::to_string(index));
+	}
+}
+
 void TestNativeConditionalCompatibilityRemainsIsolated() {
 	auto selected = duckdb_api::internal::TryAdmitPaginatedRestPlan(
 	    duckdb_api_test::BuildRuntimeNativePredicateIsolationPlanFixture(), RepositoryExecutionProfile());
@@ -282,6 +316,7 @@ int main() {
 		TestPlannerProducedExactAndResidualOnlyPlansRemainDistinct();
 		TestDoubleTypedEqualityReachesRealRequest();
 		TestConditionalBindingCounterexamplesFailBeforeTransport();
+		TestPermanentResponseSchemaCounterexamplesFailBeforeTransport();
 		TestNativeConditionalCompatibilityRemainsIsolated();
 		TestApiKeyAuthenticatorPlacesDeclaredHeaderAndQueryValues();
 		std::cout << "REST plan admission tests passed" << std::endl;

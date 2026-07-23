@@ -35,6 +35,44 @@ LogicalType RegistrationLogicalType(duckdb_api::CompiledScalarType type) {
 	throw InternalException("generated relation contains an unsupported structural type");
 }
 
+LogicalType RegistrationLogicalType(const duckdb_api::CompiledRegistrationColumn &column) {
+	const auto child = RegistrationLogicalType(column.Type());
+	switch (column.Shape()) {
+	case duckdb_api::CompiledColumnShape::SCALAR:
+		if (column.ElementNullable()) {
+			throw InternalException("generated scalar relation column has ARRAY element nullability");
+		}
+		return child;
+	case duckdb_api::CompiledColumnShape::ARRAY:
+		return LogicalType::LIST(child);
+	}
+	throw InternalException("generated relation column has an unsupported output shape");
+}
+
+duckdb_api::PlannedColumnShape PlannedShape(duckdb_api::CompiledColumnShape shape) {
+	switch (shape) {
+	case duckdb_api::CompiledColumnShape::SCALAR:
+		return duckdb_api::PlannedColumnShape::SCALAR;
+	case duckdb_api::CompiledColumnShape::ARRAY:
+		return duckdb_api::PlannedColumnShape::ARRAY;
+	}
+	throw InternalException("generated relation column has an unsupported output shape");
+}
+
+duckdb_api::PlannedColumnScalarKind PlannedKind(duckdb_api::CompiledScalarType type) {
+	switch (type) {
+	case duckdb_api::CompiledScalarType::BOOLEAN:
+		return duckdb_api::PlannedColumnScalarKind::BOOLEAN;
+	case duckdb_api::CompiledScalarType::BIGINT:
+		return duckdb_api::PlannedColumnScalarKind::BIGINT;
+	case duckdb_api::CompiledScalarType::VARCHAR:
+		return duckdb_api::PlannedColumnScalarKind::VARCHAR;
+	case duckdb_api::CompiledScalarType::DOUBLE:
+		return duckdb_api::PlannedColumnScalarKind::DOUBLE;
+	}
+	throw InternalException("generated relation contains an unsupported scalar type");
+}
+
 duckdb_api::ExplicitInput ExplicitInputValue(const duckdb_api::CompiledRelationInput &descriptor, const Value &value) {
 	if (value.IsNull()) {
 		switch (descriptor.Type()) {
@@ -121,6 +159,7 @@ void GeneratedRelationPushdown(ClientContext &, LogicalGet &get, FunctionData *f
 	try {
 		auto selected = function_info.generation->Planning()->BuildPlan(
 		    function_info.generation->Registration().GenerationHandle(), candidate);
+		ValidateGeneratedRelationSchema(*function_info.relation, selected);
 		bind_data.plan_state.ReplaceSelected(std::move(candidate), std::move(selected));
 	} catch (const duckdb_api::PlanningError &error) {
 		throw InvalidInputException("[duckdb_api][planning] %s", error.what());
@@ -156,9 +195,12 @@ unique_ptr<FunctionData> BindGeneratedRelation(ClientContext &, TableFunctionBin
 	    identity, relation, duckdb_api::ExplicitInputs(std::move(explicit_values)), std::move(secret));
 	try {
 		auto plan = info.generation->Planning()->BuildPlan(registration.GenerationHandle(), request);
-		for (const auto &column : plan.OutputColumns()) {
-			names.push_back(column.name);
-			return_types.push_back(PlannedLogicalType(column));
+		ValidateGeneratedRelationSchema(relation, plan);
+		for (std::size_t index = 0; index < relation.Columns().size(); index++) {
+			const auto &registered_column = relation.Columns()[index];
+			const auto registered_type = RegistrationLogicalType(registered_column);
+			names.push_back(registered_column.Name());
+			return_types.push_back(registered_type);
 		}
 		return make_uniq<DuckdbApiBindData>(std::move(request), std::move(plan), info.generation->Executor(),
 		                                    info.generation);
@@ -184,6 +226,23 @@ void ScanGeneratedRelation(ClientContext &context, TableFunctionInput &input, Da
 }
 
 } // namespace
+
+void ValidateGeneratedRelationSchema(const duckdb_api::CompiledRegistrationRelation &relation,
+                                     const duckdb_api::ScanPlan &plan) {
+	if (plan.OutputColumns().size() != relation.Columns().size()) {
+		throw std::logic_error("planned output schema disagrees with the published registration");
+	}
+	for (std::size_t index = 0; index < relation.Columns().size(); index++) {
+		const auto &registered = relation.Columns()[index];
+		const auto &planned = plan.OutputColumns()[index];
+		if (registered.Name() != planned.name || PlannedShape(registered.Shape()) != planned.shape ||
+		    PlannedKind(registered.Type()) != planned.ElementKind() ||
+		    registered.ElementNullable() != planned.element_nullable || registered.Nullable() != planned.nullable ||
+		    RegistrationLogicalType(registered) != PlannedLogicalType(planned)) {
+			throw std::logic_error("planned output column disagrees with the published registration");
+		}
+	}
+}
 
 TableFunction
 BuildGeneratedRelationFunction(const std::shared_ptr<CatalogGenerationCoordinator> &coordinator,

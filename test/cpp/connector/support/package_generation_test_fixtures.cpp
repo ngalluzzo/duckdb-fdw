@@ -83,11 +83,35 @@ std::vector<duckdb_api::CompiledRelationInput> TypedInputs(bool default_changed)
 	return inputs;
 }
 
-std::vector<duckdb_api::CompiledColumn> TypedColumns(bool changed) {
+std::vector<duckdb_api::CompiledColumn> TypedColumns(PackageCompatibilityFixture variant) {
 	std::vector<duckdb_api::CompiledColumn> columns;
-	columns.push_back(CompiledModelBuilder::Column("record_id", CompiledScalarType::BIGINT, false, "$.record_id"));
-	columns.push_back(CompiledModelBuilder::Column("label", CompiledScalarType::VARCHAR, true,
-	                                               changed ? "$.display_label" : "$.label"));
+	auto record_id = CompiledModelBuilder::Column("record_id", CompiledScalarType::BIGINT, false, "$.record_id");
+	auto label = CompiledModelBuilder::Column("label", CompiledScalarType::VARCHAR, true,
+	                                          variant == PackageCompatibilityFixture::COLUMN_CHANGED ? "$.display_label"
+	                                                                                                 : "$.label");
+	const bool array_column = variant == PackageCompatibilityFixture::COLUMN_SCALAR_TO_ARRAY ||
+	                          variant == PackageCompatibilityFixture::ARRAY_BASELINE ||
+	                          variant == PackageCompatibilityFixture::ARRAY_ELEMENT_TYPE_CHANGED ||
+	                          variant == PackageCompatibilityFixture::ARRAY_ELEMENT_NULLABILITY_CHANGED ||
+	                          variant == PackageCompatibilityFixture::ARRAY_OUTER_NULLABILITY_CHANGED ||
+	                          variant == PackageCompatibilityFixture::ARRAY_EXTRACTOR_CHANGED;
+	if (array_column) {
+		label = CompiledModelBuilder::ArrayColumn(
+		    "label",
+		    variant == PackageCompatibilityFixture::ARRAY_ELEMENT_TYPE_CHANGED ? CompiledScalarType::BIGINT
+		                                                                       : CompiledScalarType::VARCHAR,
+		    variant == PackageCompatibilityFixture::ARRAY_ELEMENT_NULLABILITY_CHANGED,
+		    variant != PackageCompatibilityFixture::ARRAY_OUTER_NULLABILITY_CHANGED,
+		    variant == PackageCompatibilityFixture::ARRAY_EXTRACTOR_CHANGED ? "$.display_labels" : "$.label",
+		    {variant == PackageCompatibilityFixture::ARRAY_EXTRACTOR_CHANGED ? "display_labels" : "label"});
+	}
+	if (variant == PackageCompatibilityFixture::COLUMN_REORDERED) {
+		columns.push_back(std::move(label));
+		columns.push_back(std::move(record_id));
+	} else {
+		columns.push_back(std::move(record_id));
+		columns.push_back(std::move(label));
+	}
 	columns.push_back(CompiledModelBuilder::Column("active", CompiledScalarType::BOOLEAN, false, "$.active"));
 	return columns;
 }
@@ -116,8 +140,7 @@ CompiledRelation BuildTypedRelation(bool tie, PackageCompatibilityFixture varian
 	                                : ConnectorCatalogTestAccess::Anonymous();
 	const auto resources = ConnectorCatalogTestAccess::UnpaginatedResources(
 	    variant == PackageCompatibilityFixture::RESOURCE_CHANGED ? 17 : 16, 256);
-	return ConnectorCatalogTestAccess::Relation(PACKAGE_TYPED_RELATION,
-	                                            TypedColumns(variant == PackageCompatibilityFixture::COLUMN_CHANGED),
+	return ConnectorCatalogTestAccess::Relation(PACKAGE_TYPED_RELATION, TypedColumns(variant),
 	                                            TypedInputs(variant == PackageCompatibilityFixture::INPUT_CHANGED),
 	                                            std::move(operations), authentication, resources);
 }

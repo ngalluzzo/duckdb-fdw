@@ -15,32 +15,48 @@
 #include <mutex>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace duckdb_api_test {
 namespace {
 
-duckdb_api::ValueKind ValueKindFor(const std::string &logical_type) {
-	if (logical_type == "BIGINT") {
+duckdb_api::ValueKind ValueKindFor(duckdb_api::PlannedColumnScalarKind kind) {
+	switch (kind) {
+	case duckdb_api::PlannedColumnScalarKind::BIGINT:
 		return duckdb_api::ValueKind::BIGINT;
-	}
-	if (logical_type == "VARCHAR") {
+	case duckdb_api::PlannedColumnScalarKind::VARCHAR:
 		return duckdb_api::ValueKind::VARCHAR;
-	}
-	if (logical_type == "BOOLEAN") {
+	case duckdb_api::PlannedColumnScalarKind::BOOLEAN:
 		return duckdb_api::ValueKind::BOOLEAN;
-	}
-	if (logical_type == "DOUBLE") {
+	case duckdb_api::PlannedColumnScalarKind::DOUBLE:
 		return duckdb_api::ValueKind::DOUBLE;
 	}
 	throw std::logic_error("Query package test executor received an unsupported planned scalar type");
+}
+
+duckdb_api::TypedScalarValue MarkerElement(duckdb_api::ValueKind kind, const std::string &marker,
+                                           const std::string &column) {
+	switch (kind) {
+	case duckdb_api::ValueKind::BIGINT:
+		return duckdb_api::TypedScalarValue::BigInt(marker == "old" ? 1 : 2);
+	case duckdb_api::ValueKind::VARCHAR:
+		return duckdb_api::TypedScalarValue::Varchar(marker + ":" + column);
+	case duckdb_api::ValueKind::BOOLEAN:
+		return duckdb_api::TypedScalarValue::Boolean(marker != "old");
+	case duckdb_api::ValueKind::DOUBLE:
+		return duckdb_api::TypedScalarValue::Double(marker == "old" ? 1.5 : 2.5);
+	}
+	throw std::logic_error("Query package test executor received an unsupported ARRAY element type");
 }
 
 class PackagePlanningService final : public duckdb_api::QueryScanPlanningService {
 public:
 	PackagePlanningService(duckdb_api::CompiledGenerationHandle handle_p,
 	                       std::shared_ptr<const duckdb_api::CompiledConnector> connector_p,
+	                       std::shared_ptr<const duckdb_api::CompiledConnector> selective_connector_p,
 	                       std::shared_ptr<PackageQueryProbe> probe_p)
-	    : handle(std::move(handle_p)), connector(std::move(connector_p)), probe(std::move(probe_p)) {
+	    : handle(std::move(handle_p)), connector(std::move(connector_p)),
+	      selective_connector(std::move(selective_connector_p)), probe(std::move(probe_p)) {
 	}
 
 	duckdb_api::ScanPlan BuildPlan(const duckdb_api::CompiledGenerationHandle &candidate_handle,
@@ -49,15 +65,18 @@ public:
 			throw std::logic_error("Query package test planner received the wrong immutable generation");
 		}
 		probe->plans.fetch_add(1, std::memory_order_relaxed);
-		if (!connector) {
+		const auto &selected =
+		    request.capabilities.selective_predicate && selective_connector ? selective_connector : connector;
+		if (!selected) {
 			throw std::logic_error("Query registration-only fixture has no Semantics planning provider");
 		}
-		return duckdb_api::BuildConservativeScanPlan(*connector, request);
+		return duckdb_api::BuildConservativeScanPlan(*selected, request);
 	}
 
 private:
 	const duckdb_api::CompiledGenerationHandle handle;
 	const std::shared_ptr<const duckdb_api::CompiledConnector> connector;
+	const std::shared_ptr<const duckdb_api::CompiledConnector> selective_connector;
 	const std::shared_ptr<PackageQueryProbe> probe;
 };
 
@@ -129,8 +148,15 @@ public:
 		}
 		duckdb_api::TypedRow row;
 		for (const auto &column : plan.OutputColumns()) {
-			const auto kind = ValueKindFor(column.logical_type);
-			batch.column_kinds.push_back(kind);
+			const auto kind = ValueKindFor(column.ElementKind());
+			if (column.shape == duckdb_api::PlannedColumnShape::ARRAY) {
+				batch.column_types.push_back(duckdb_api::OutputValueType::Array(kind, column.element_nullable));
+				std::vector<duckdb_api::TypedScalarValue> elements;
+				elements.push_back(MarkerElement(kind, marker, column.name));
+				row.values.push_back(duckdb_api::TypedValue::Array(kind, column.element_nullable, std::move(elements)));
+				continue;
+			}
+			batch.column_types.push_back(kind);
 			switch (kind) {
 			case duckdb_api::ValueKind::BIGINT:
 				row.values.push_back(duckdb_api::TypedValue::BigInt(marker == "old" ? 1 : 2));
@@ -227,8 +253,29 @@ PackageQueryStagingService::PackageQueryStagingService(
     std::shared_ptr<PackageQueryProbe> probe_p)
     : initial_registration(new duckdb_api::CompiledQueryRegistrationView(std::move(initial_registration_p))),
       initial_connector(new duckdb_api::CompiledConnector(std::move(initial_connector_p))),
+      initial_selective_connector(),
       replacement_registration(new duckdb_api::CompiledQueryRegistrationView(std::move(replacement_registration_p))),
       replacement_connector(new duckdb_api::CompiledConnector(std::move(replacement_connector_p))),
+      replacement_selective_connector(), accepted_root(std::move(accepted_root_p)), probe(std::move(probe_p)),
+      reload_changed(false) {
+	if (accepted_root.empty() || accepted_root[0] != '/' || !probe) {
+		throw std::invalid_argument("Query package test staging requires an absolute root and probe");
+	}
+}
+
+PackageQueryStagingService::PackageQueryStagingService(
+    duckdb_api::CompiledQueryRegistrationView initial_registration_p, duckdb_api::CompiledConnector initial_connector_p,
+    duckdb_api::CompiledConnector initial_selective_connector_p,
+    duckdb_api::CompiledQueryRegistrationView replacement_registration_p,
+    duckdb_api::CompiledConnector replacement_connector_p,
+    duckdb_api::CompiledConnector replacement_selective_connector_p, std::string accepted_root_p,
+    std::shared_ptr<PackageQueryProbe> probe_p)
+    : initial_registration(new duckdb_api::CompiledQueryRegistrationView(std::move(initial_registration_p))),
+      initial_connector(new duckdb_api::CompiledConnector(std::move(initial_connector_p))),
+      initial_selective_connector(new duckdb_api::CompiledConnector(std::move(initial_selective_connector_p))),
+      replacement_registration(new duckdb_api::CompiledQueryRegistrationView(std::move(replacement_registration_p))),
+      replacement_connector(new duckdb_api::CompiledConnector(std::move(replacement_connector_p))),
+      replacement_selective_connector(new duckdb_api::CompiledConnector(std::move(replacement_selective_connector_p))),
       accepted_root(std::move(accepted_root_p)), probe(std::move(probe_p)), reload_changed(false) {
 	if (accepted_root.empty() || accepted_root[0] != '/' || !probe) {
 		throw std::invalid_argument("Query package test staging requires an absolute root and probe");
@@ -240,10 +287,10 @@ PackageQueryStagingService::PackageQueryStagingService(
     duckdb_api::CompiledQueryRegistrationView replacement_registration_p, std::string accepted_root_p,
     std::shared_ptr<PackageQueryProbe> probe_p)
     : initial_registration(new duckdb_api::CompiledQueryRegistrationView(std::move(initial_registration_p))),
-      initial_connector(),
+      initial_connector(), initial_selective_connector(),
       replacement_registration(new duckdb_api::CompiledQueryRegistrationView(std::move(replacement_registration_p))),
-      replacement_connector(), accepted_root(std::move(accepted_root_p)), probe(std::move(probe_p)),
-      reload_changed(false) {
+      replacement_connector(), replacement_selective_connector(), accepted_root(std::move(accepted_root_p)),
+      probe(std::move(probe_p)), reload_changed(false) {
 	if (accepted_root.empty() || accepted_root[0] != '/' || !probe) {
 		throw std::invalid_argument("Query package test staging requires an absolute root and probe");
 	}
@@ -251,12 +298,13 @@ PackageQueryStagingService::PackageQueryStagingService(
 
 std::shared_ptr<const duckdb_api::QueryPublishedGeneration> PackageQueryStagingService::BuildPublished(
     const std::shared_ptr<const duckdb_api::CompiledQueryRegistrationView> &registration,
-    const std::shared_ptr<const duckdb_api::CompiledConnector> &connector, const std::string &marker) const {
+    const std::shared_ptr<const duckdb_api::CompiledConnector> &connector,
+    const std::shared_ptr<const duckdb_api::CompiledConnector> &selective_connector, const std::string &marker) const {
 	auto published =
 	    std::shared_ptr<const duckdb_api::QueryPublishedGeneration>(new duckdb_api::QueryPublishedGeneration(
 	        *registration,
 	        std::shared_ptr<const duckdb_api::QueryScanPlanningService>(
-	            new PackagePlanningService(registration->GenerationHandle(), connector, probe)),
+	            new PackagePlanningService(registration->GenerationHandle(), connector, selective_connector, probe)),
 	        std::shared_ptr<const duckdb_api::ScanExecutor>(new PackageExecutor(marker, probe)),
 	        std::shared_ptr<const duckdb_api::QueryGenerationOwner>(new PackageGenerationOwner(registration, probe))));
 	{
@@ -277,7 +325,7 @@ duckdb_api::QueryStagedGeneration PackageQueryStagingService::StageLoad(const st
 		                                    "package root is not the controlled fixture");
 	}
 	return duckdb_api::QueryStagedGeneration(
-	    BuildPublished(initial_registration, initial_connector, "old"), true,
+	    BuildPublished(initial_registration, initial_connector, initial_selective_connector, "old"), true,
 	    std::unique_ptr<duckdb_api::QueryPublicationLease>(new PackagePublicationLease(probe)));
 }
 
@@ -298,7 +346,7 @@ PackageQueryStagingService::StageReload(const std::string &connector,
 		return duckdb_api::QueryStagedGeneration(active, false);
 	}
 	return duckdb_api::QueryStagedGeneration(
-	    BuildPublished(replacement_registration, replacement_connector, "new"), true,
+	    BuildPublished(replacement_registration, replacement_connector, replacement_selective_connector, "new"), true,
 	    std::unique_ptr<duckdb_api::QueryPublicationLease>(new PackagePublicationLease(probe)));
 }
 
@@ -341,12 +389,15 @@ BuildGithubPackageQueryStaging(const std::string &absolute_repository_root,
 std::shared_ptr<PackageQueryStagingService>
 BuildRickAndMortyPackageQueryStaging(const std::string &absolute_repository_root,
                                      const std::shared_ptr<PackageQueryProbe> &probe) {
-	auto initial = CompileRepositoryRickAndMortyRegistrationFixture(absolute_repository_root);
-	auto replacement = CompileRepositoryRickAndMortyRegistrationFixture(absolute_repository_root);
-	// Same Query-owned catalog oracle as the GitHub fixture above, exercised
-	// against the repository's second, independently authored package.
+	auto initial = CompileRepositoryRickAndMortyLocalPackageFixture(absolute_repository_root);
+	auto replacement = CompileRepositoryRickAndMortyLocalPackageFixture(absolute_repository_root);
+	// ARRAY bind evidence needs the deterministic Semantics provider so DuckDB
+	// can compare the published registration schema with its same-generation
+	// plan. The DESCRIBE remains Runtime-free.
 	return std::shared_ptr<PackageQueryStagingService>(new PackageQueryStagingService(
-	    std::move(initial), std::move(replacement), absolute_repository_root + "/connectors/rickandmorty", probe));
+	    initial.Generation().QueryRegistration(), initial.Generation().Connector(),
+	    replacement.Generation().QueryRegistration(), replacement.Generation().Connector(),
+	    absolute_repository_root + "/connectors/rickandmorty", probe));
 }
 
 std::shared_ptr<duckdb::duckdb_api_query_internal::CatalogGenerationCoordinator>

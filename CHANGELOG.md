@@ -4,6 +4,25 @@ This file records user-visible changes to duckdb-fdw.
 
 ## Unreleased
 
+### Added
+
+- Flat list-of-scalar output columns (RFC 0022). Connector authors can declare
+  `type: ARRAY` with one required v1 scalar `element_type` and explicit child
+  nullability; DuckDB receives a native variable-length list while Runtime
+  preserves order, duplicates, empty lists, outer NULL, and admitted child
+  NULLs. REST supports all four scalar element kinds; GraphQL supports its
+  existing Boolean, integer, and string result scalars.
+- `rickandmorty_character_search` now exposes the upstream `episode` URL array
+  as a trailing `VARCHAR[]` column. The Rick and Morty package advances to
+  `2.0.0` because this changes an existing relation schema.
+
+### Changed
+
+- The `duckdb_api/v1` connector schema and `1.0.0` candidate freeze now record
+  scalar and flat `ARRAY` output-column shapes separately. Shape, element type,
+  child nullability, outer nullability, order, and extractor participate in
+  package reload compatibility.
+
 ## 0.10.0 — 2026-07-21
 
 ### Added

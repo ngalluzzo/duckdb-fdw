@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace duckdb_api_test {
@@ -24,6 +25,7 @@ enum class PlannedUrlScheme { HTTP, HTTPS };
 enum class PlannedResponseSource { JSON_PATH_MANY, ROOT_ARRAY, ROOT_OBJECT };
 
 enum class PlannedRestScalarKind { BOOLEAN, BIGINT, VARCHAR, DOUBLE };
+enum class PlannedResultShape { SCALAR, ARRAY };
 enum class PlannedRestQueryValueSource {
 	FIXED,
 	RELATION_INPUT,
@@ -113,20 +115,37 @@ struct PlannedRestResponsePath {
 };
 
 struct PlannedRestResultColumn {
+	PlannedRestResultColumn(std::string name_p, PlannedRestScalarKind scalar_kind_p, bool nullable_p,
+	                        PlannedRestResponsePath response_path_p,
+	                        PlannedResultShape shape_p = PlannedResultShape::SCALAR, bool element_nullable_p = false)
+	    : name(std::move(name_p)), scalar_kind(scalar_kind_p), nullable(nullable_p),
+	      response_path(std::move(response_path_p)), shape(shape_p), element_nullable(element_nullable_p) {
+	}
+
 	std::string name;
 	PlannedRestScalarKind scalar_kind;
 	bool nullable;
 	PlannedRestResponsePath response_path;
+	PlannedResultShape shape;
+	bool element_nullable;
 };
 
+// Distinguishes the bounded native compatibility bridge from structural
+// package/modern plans. Runtime must not infer this authority from whether a
+// result vector happens to be empty: a malformed structural plan with every
+// result removed must still fail closed rather than enter legacy decoding.
+enum class PlannedRestSchemaAuthority { LEGACY_OUTPUT_COLUMNS, STRUCTURAL_RESULT_COLUMNS };
+
 struct PlannedRestOperation {
-	PlannedRestOperation(std::string operation_name, PlannedHttpMethod method, PlannedCardinality cardinality,
-	                     PlannedReplaySafety replay_safety, PlannedHttpOrigin origin, std::string path,
-	                     std::vector<PlannedQueryParameter> query_parameters, std::vector<PlannedHttpHeader> headers,
-	                     PlannedResponseSource response_source, std::string records_extractor,
-	                     std::vector<PlannedRestQueryBinding> query_bindings = std::vector<PlannedRestQueryBinding>(),
-	                     PlannedRestResponsePath records_path = PlannedRestResponsePath(),
-	                     std::vector<PlannedRestResultColumn> result_columns = std::vector<PlannedRestResultColumn>());
+	PlannedRestOperation(
+	    std::string operation_name, PlannedHttpMethod method, PlannedCardinality cardinality,
+	    PlannedReplaySafety replay_safety, PlannedHttpOrigin origin, std::string path,
+	    std::vector<PlannedQueryParameter> query_parameters, std::vector<PlannedHttpHeader> headers,
+	    PlannedResponseSource response_source, std::string records_extractor,
+	    std::vector<PlannedRestQueryBinding> query_bindings = std::vector<PlannedRestQueryBinding>(),
+	    PlannedRestResponsePath records_path = PlannedRestResponsePath(),
+	    std::vector<PlannedRestResultColumn> result_columns = std::vector<PlannedRestResultColumn>(),
+	    PlannedRestSchemaAuthority schema_authority = PlannedRestSchemaAuthority::LEGACY_OUTPUT_COLUMNS);
 
 	std::string operation_name;
 	PlannedHttpMethod method;
@@ -146,6 +165,7 @@ struct PlannedRestOperation {
 	std::string records_extractor;
 	std::vector<PlannedRestQueryBinding> query_bindings;
 	PlannedRestResponsePath records_path;
+	PlannedRestSchemaAuthority schema_authority;
 	std::vector<PlannedRestResultColumn> result_columns;
 };
 
@@ -177,10 +197,19 @@ struct PlannedGraphqlVariable {
 };
 
 struct PlannedGraphqlResultColumn {
+	PlannedGraphqlResultColumn(std::string name_p, PlannedGraphqlScalarKind scalar_kind_p, bool nullable_p,
+	                           PlannedGraphqlResponsePath response_path_p,
+	                           PlannedResultShape shape_p = PlannedResultShape::SCALAR, bool element_nullable_p = false)
+	    : name(std::move(name_p)), scalar_kind(scalar_kind_p), nullable(nullable_p),
+	      response_path(std::move(response_path_p)), shape(shape_p), element_nullable(element_nullable_p) {
+	}
+
 	std::string name;
 	PlannedGraphqlScalarKind scalar_kind;
 	bool nullable;
 	PlannedGraphqlResponsePath response_path;
+	PlannedResultShape shape;
+	bool element_nullable;
 };
 
 struct PlannedGraphqlResponse {

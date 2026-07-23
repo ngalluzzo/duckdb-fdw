@@ -1,6 +1,6 @@
 api_version: duckdb_api/v1
 kind: fixture_index
-package_digest: sha256.0855ea7441bc7f521175c8c21166ddc6277034f1e357a582e474732a8d62ca62
+package_digest: sha256.e4ba9694e6f622a9f7b4024ef95efc5b9bd73e441680b1e94b8c947e764df31c
 
 cases:
   - id: rickandmorty_pilot_episode_base
@@ -154,6 +154,23 @@ cases:
       - column_character_search_origin_name_null_rejected
       - column_character_search_origin_name_string_budget_boundary
       - column_character_search_origin_name_string_budget_one_over_rejected
+      - column_character_search_episode_success
+      - column_character_search_episode_type_mismatch_rejected
+      - column_character_search_episode_missing_rejected
+      - column_character_search_episode_null_rejected
+      - array_character_search_search_characters_episode_success
+      - array_character_search_search_characters_episode_empty
+      - array_character_search_search_characters_episode_singleton
+      - array_character_search_search_characters_episode_ordered_duplicates
+      - array_character_search_search_characters_episode_outer_type_rejected
+      - array_character_search_search_characters_episode_element_type_rejected
+      - array_character_search_search_characters_episode_nested_rejected
+      - array_character_search_search_characters_episode_late_invalid_element_rejected
+      - array_character_search_search_characters_episode_decode_cancellation
+      - array_character_search_search_characters_episode_query_transfer_cancellation
+      - array_character_search_search_characters_episode_null_element_rejected
+      - array_character_search_search_characters_episode_string_budget_boundary
+      - array_character_search_search_characters_episode_string_budget_one_over_rejected
       - pagination_character_search_search_characters_first_page
       - pagination_character_search_search_characters_multi_page
       - pagination_character_search_search_characters_termination
@@ -201,8 +218,8 @@ cases:
       residual_owner: duckdb
       remote_accuracy: unsupported
       rows:
-        - {id: 1, name: Rick Sanchez, status: Alive, species: Human, origin_name: "Earth (C-137)"}
-        - {id: 3, name: Summer Smith, status: Alive, species: Human, origin_name: "Earth (Replacement Dimension)"}
+        - {id: 1, name: Rick Sanchez, status: Alive, species: Human, origin_name: "Earth (C-137)", episode: ["https://rickandmortyapi.com/api/episode/1"]}
+        - {id: 3, name: Summer Smith, status: Alive, species: Human, origin_name: "Earth (Replacement Dimension)", episode: ["https://rickandmortyapi.com/api/episode/6"]}
       explain: {protocol: rest, pagination: response_next, auth: anonymous}
 
   - id: rickandmorty_character_search_status_unbound
@@ -231,8 +248,8 @@ cases:
       residual_owner: duckdb
       remote_accuracy: unsupported
       rows:
-        - {id: 1, name: Rick Sanchez, status: Alive, species: Human, origin_name: "Earth (C-137)"}
-        - {id: 2, name: Morty Smith, status: unknown, species: Human, origin_name: unknown}
+        - {id: 1, name: Rick Sanchez, status: Alive, species: Human, origin_name: "Earth (C-137)", episode: ["https://rickandmortyapi.com/api/episode/1"]}
+        - {id: 2, name: Morty Smith, status: unknown, species: Human, origin_name: unknown, episode: ["https://rickandmortyapi.com/api/episode/1"]}
       explain: {protocol: rest, pagination: response_next, auth: anonymous}
 
   - id: rickandmorty_character_search_status_bound_null
@@ -262,6 +279,6 @@ cases:
       residual_owner: duckdb
       remote_accuracy: unsupported
       rows:
-        - {id: 1, name: Rick Sanchez, status: Alive, species: Human, origin_name: "Earth (C-137)"}
-        - {id: 2, name: Morty Smith, status: unknown, species: Human, origin_name: unknown}
+        - {id: 1, name: Rick Sanchez, status: Alive, species: Human, origin_name: "Earth (C-137)", episode: ["https://rickandmortyapi.com/api/episode/1"]}
+        - {id: 2, name: Morty Smith, status: unknown, species: Human, origin_name: unknown, episode: ["https://rickandmortyapi.com/api/episode/1"]}
       explain: {protocol: rest, pagination: response_next, auth: anonymous}

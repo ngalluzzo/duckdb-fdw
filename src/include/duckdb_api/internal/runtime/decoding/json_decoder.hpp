@@ -13,15 +13,20 @@ namespace internal {
 
 struct JsonColumnPlan {
 	JsonColumnPlan(std::string output_name_p, std::string json_field_p, ValueKind kind_p, bool nullable_p = false)
-	    : output_name(std::move(output_name_p)), kind(kind_p), nullable(nullable_p),
+	    : output_name(std::move(output_name_p)), type(OutputValueType::Scalar(kind_p)), nullable(nullable_p),
 	      json_path(1, std::move(json_field_p)) {
 	}
 	JsonColumnPlan(std::string output_name_p, std::vector<std::string> json_path_p, ValueKind kind_p,
 	               bool nullable_p = false)
-	    : output_name(std::move(output_name_p)), kind(kind_p), nullable(nullable_p), json_path(std::move(json_path_p)) {
+	    : output_name(std::move(output_name_p)), type(OutputValueType::Scalar(kind_p)), nullable(nullable_p),
+	      json_path(std::move(json_path_p)) {
+	}
+	JsonColumnPlan(std::string output_name_p, std::vector<std::string> json_path_p, OutputValueType type_p,
+	               bool nullable_p = false)
+	    : output_name(std::move(output_name_p)), type(type_p), nullable(nullable_p), json_path(std::move(json_path_p)) {
 	}
 	std::string output_name;
-	ValueKind kind;
+	OutputValueType type;
 	bool nullable;
 	std::vector<std::string> json_path;
 };
@@ -61,6 +66,12 @@ struct DecodedJsonPage {
 	// capacity, and owned VARCHAR capacity. The executor adds normalized
 	// response-metadata storage before committing the page budget.
 	uint64_t retained_memory_bytes;
+	// Temporary body continuation storage returned for response_next
+	// validation. The executor consumes and releases it before page handoff.
+	uint64_t continuation_memory_bytes;
+	// Maximum decoded-memory storage observed while producing the page. This
+	// includes transient row slots while they are co-live with retained rows.
+	uint64_t peak_memory_bytes;
 };
 
 // Strictly decodes one already bounded JSON document. The decoder validates the

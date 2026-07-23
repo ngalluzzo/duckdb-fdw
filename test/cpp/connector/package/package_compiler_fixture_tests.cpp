@@ -50,6 +50,25 @@ const std::vector<std::string> EXPECTED_GITHUB_PACKAGE_FILES = {"connector.yaml"
                                                                 "relations/duckdb_login_search_page.yaml",
                                                                 "relations/viewer_repository_metrics.yaml"};
 
+// RFC 0013 is an immutable decision-evidence generation, not a live mirror of
+// every fixture subsequently added to the permanent package. Its verifier and
+// manifest own the historical fixture index; this consumer keeps the shared
+// semantic package and retained payload bytes from drifting.
+const std::vector<std::string> EXPECTED_RFC0013_GITHUB_FILES = {"connector.yaml",
+                                                                "fixtures/index.yaml",
+                                                                "fixtures/private_visibility_duplicates.json",
+                                                                "fixtures/private_visibility_duplicates_base.json",
+                                                                "fixtures/private_visibility_false_or_null.json",
+                                                                "fixtures/private_visibility_false_or_null_base.json",
+                                                                "fixtures/private_visibility_matching.json",
+                                                                "fixtures/private_visibility_matching_base.json",
+                                                                "fixtures/viewer_repository_metrics_page_1.json",
+                                                                "fixtures/viewer_repository_metrics_page_2.json",
+                                                                "relations/authenticated_repositories.yaml",
+                                                                "relations/authenticated_user.yaml",
+                                                                "relations/duckdb_login_search_page.yaml",
+                                                                "relations/viewer_repository_metrics.yaml"};
+
 bool IsExcludedHumanAsset(const std::string &relative) {
 	// The two root READMEs intentionally address different audiences. Every
 	// other regular file is package or fixture custody regardless of extension.
@@ -156,21 +175,28 @@ std::vector<std::string> PackageFileNames(const PackageFiles &files) {
 	return names;
 }
 
-void RequireMatchingPackageBytes(const PackageFiles &product, const PackageFiles &evidence) {
-	Require(product == evidence, "permanent GitHub package bytes differ from accepted RFC 0013 evidence");
+void RequireMatchingSharedEvidenceBytes(const PackageFiles &product, const PackageFiles &evidence) {
+	for (const auto &entry : evidence) {
+		if (entry.first == "fixtures/index.yaml") {
+			continue;
+		}
+		const auto found = product.find(entry.first);
+		Require(found != product.end() && found->second == entry.second,
+		        "permanent GitHub package shared bytes differ from accepted RFC 0013 evidence");
+	}
 }
 
-void RequireExactGithubPackageMirror(const PackageFiles &product, const PackageFiles &evidence) {
+void RequireExactGithubGenerations(const PackageFiles &product, const PackageFiles &evidence) {
 	Require(PackageFileNames(product) == EXPECTED_GITHUB_PACKAGE_FILES,
 	        "permanent GitHub package file inventory drifted");
-	Require(PackageFileNames(evidence) == EXPECTED_GITHUB_PACKAGE_FILES,
+	Require(PackageFileNames(evidence) == EXPECTED_RFC0013_GITHUB_FILES,
 	        "RFC 0013 GitHub evidence file inventory drifted");
-	RequireMatchingPackageBytes(product, evidence);
+	RequireMatchingSharedEvidenceBytes(product, evidence);
 }
 
-void RequireMirrorFailure(const PackageFiles &product, const PackageFiles &evidence, const std::string &message) {
+void RequireGenerationFailure(const PackageFiles &product, const PackageFiles &evidence, const std::string &message) {
 	try {
-		RequireExactGithubPackageMirror(product, evidence);
+		RequireExactGithubGenerations(product, evidence);
 	} catch (const std::runtime_error &) {
 		return;
 	}
@@ -179,7 +205,7 @@ void RequireMirrorFailure(const PackageFiles &product, const PackageFiles &evide
 
 void RequireByteMismatchFailure(const PackageFiles &product, const PackageFiles &evidence, const std::string &message) {
 	try {
-		RequireMatchingPackageBytes(product, evidence);
+		RequireMatchingSharedEvidenceBytes(product, evidence);
 	} catch (const std::runtime_error &) {
 		return;
 	}
@@ -204,25 +230,25 @@ void TestPermanentGithubPackageTracksAcceptedEvidence(const std::string &reposit
 	        "drift inventory excluded a nested or non-README package file");
 	const auto product = InventoryPackageFiles(repository_root + "/connectors/github");
 	const auto evidence = InventoryPackageFiles(repository_root + "/docs/rfcs/evidence/0013/github");
-	RequireExactGithubPackageMirror(product, evidence);
+	RequireExactGithubGenerations(product, evidence);
 
 	auto extra_product = product;
 	extra_product["fixtures/nested/unexpected.body"] = "product body\n";
-	RequireMirrorFailure(extra_product, evidence, "drift gate accepted an extra permanent-package file");
+	RequireGenerationFailure(extra_product, evidence, "drift gate accepted an extra permanent-package file");
 	auto extra_evidence = evidence;
 	extra_evidence["fixtures/nested/unexpected.body"] = "evidence body\n";
-	RequireMirrorFailure(product, extra_evidence, "drift gate accepted an extra RFC-evidence file");
+	RequireGenerationFailure(product, extra_evidence, "drift gate accepted an extra RFC-evidence file");
 	auto nested_readme = product;
 	nested_readme["fixtures/README.md"] = "nested package file\n";
-	RequireMirrorFailure(nested_readme, evidence, "drift gate excluded a nested README from package custody");
+	RequireGenerationFailure(nested_readme, evidence, "drift gate excluded a nested README from package custody");
 	auto body_product = product;
 	auto body_evidence = evidence;
-	body_product["fixtures/referenced.body"] = "product body\n";
-	body_evidence["fixtures/referenced.body"] = "evidence body\n";
+	body_product["fixtures/private_visibility_matching.json"] = "product body\n";
+	body_evidence["fixtures/private_visibility_matching.json"] = "evidence body\n";
 	RequireByteMismatchFailure(body_product, body_evidence, "drift gate accepted mismatched non-JSON fixture bytes");
 	auto changed_product = product;
 	changed_product["connector.yaml"] += "\n";
-	RequireMirrorFailure(changed_product, evidence, "drift gate accepted changed semantic package bytes");
+	RequireGenerationFailure(changed_product, evidence, "drift gate accepted changed semantic package bytes");
 
 	const auto readme = ReadBytes(repository_root + "/connectors/github/README.md");
 	Require(readme.find("CALL duckdb_api_load_connector") != std::string::npos &&

@@ -141,6 +141,7 @@ target_link_libraries(
           duckdb_api_package_compiler_fixture_service
           duckdb_api_package_generation_fixture_service
           duckdb_api_relational_planning_service
+          duckdb_api_semantics_materialized_fixture_service
           dummy_static_extension_loader
           duckdb_static
           Threads::Threads)
