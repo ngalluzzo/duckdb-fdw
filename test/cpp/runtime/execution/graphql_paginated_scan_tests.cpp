@@ -456,6 +456,32 @@ void TestCursorTransferExactDecodedMemoryBoundary() {
 	        "GraphQL cursor ownership transfer accepted one byte below its physical peak");
 }
 
+void TestMidScanFailureExposure() {
+	// RFC 0021: a failure after page one emitted rows must carry the cumulative
+	// exposure (rows_exposed) and the in-flight step ordinal, proving the
+	// catch-boundary enrichment is accurate at a real mid-scan failure.
+	const auto runtime = duckdb_api_test::BuildControlledHttpRuntime();
+	runtime->RespondSequence({ControlledResponse(200, Page(1, 64, true, "cursor-64")), ControlledResponse(429, "")});
+	ManualHttpExecutionControl control;
+	auto stream = Open(runtime, control, 900);
+	duckdb_api::TypedBatch batch;
+	Require(stream->Next(control, batch) && batch.rows.size() == 64,
+	        "page one did not emit its rows before the mid-scan failure");
+	bool failed = false;
+	try {
+		(void)stream->Next(control, batch);
+	} catch (const duckdb_api::ExecutionError &error) {
+		failed = true;
+		Require(error.Classified(), "mid-scan failure was not classified");
+		Require(error.Properties().failure_class == duckdb_api::FailureClass::RATE_LIMIT,
+		        "429 mid-scan failure was not classified as rate_limit");
+		Require(error.Properties().rows_exposed == 64,
+		        "mid-scan failure did not carry the cumulative rows exposed from page one");
+		Require(error.Properties().step == 2, "mid-scan failure did not carry the in-flight traversal-step ordinal");
+	}
+	Require(failed, "page two 429 did not terminate the scan");
+}
+
 } // namespace
 
 int main() {
@@ -470,6 +496,7 @@ int main() {
 		TestTransportCancellationAndTwoStreamIsolation();
 		TestIntegratedThirtyTwoPageBoundary();
 		TestCursorTransferExactDecodedMemoryBoundary();
+		TestMidScanFailureExposure();
 		std::cout << "GraphQL paginated scan tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {
