@@ -85,7 +85,9 @@ void TestPublicProviderPlanAndProtocolNeutralRequest() {
 	            explanation["Page Size"] == "100" && explanation["Maximum Pages"] == "32" &&
 	            explanation["Page Row Bound"] == "100" && explanation["Scan Row Bound"] == "3200" &&
 	            explanation["Page Body Bytes"] == "8192" && explanation["Scan Body Bytes"] == "262144" &&
-	            explanation["Stable Row Order"] == "none" && explanation["Snapshot Guarantee"] == "none",
+	            explanation["Stable Row Order"] == "none" && explanation["Snapshot Guarantee"] == "none" &&
+	            explanation["Declared Replay Safety"] == "safe" && explanation["Retry"] == "disabled" &&
+	            explanation["Rate-Limit Waiting"] == "disabled" && explanation["Cache"] == "disabled",
 	        "typed GraphQL explanation facts changed or inferred unsupported authority");
 	for (const auto &forbidden :
 	     {"api.github.com", "viewer {", "repositories(", "$pageSize", "$cursor", "Authorization", "Bearer "}) {

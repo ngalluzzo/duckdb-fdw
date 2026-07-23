@@ -121,6 +121,23 @@ const char *CapabilityName(bool available) {
 	return available ? "available" : "unavailable";
 }
 
+const char *ReplaySafetyName(duckdb_api::PlannedReplaySafety safety) {
+	switch (safety) {
+	case duckdb_api::PlannedReplaySafety::SAFE:
+		return "safe";
+	}
+	throw InternalException("duckdb_api scan plan contains an unknown replay safety");
+}
+
+// RFC 0021: the declared replay safety carried on the plan. REST reads the
+// compiled declaration; every accepted v1 GraphQL operation is replay-safe.
+duckdb_api::PlannedReplaySafety OperationReplaySafety(const duckdb_api::PlannedProtocolOperation &operation) {
+	if (operation.Protocol() == duckdb_api::PlannedProtocol::REST) {
+		return operation.Rest().replay_safety;
+	}
+	return duckdb_api::PlannedReplaySafety::SAFE;
+}
+
 const char *ProtocolName(duckdb_api::PlannedProtocol protocol) {
 	switch (protocol) {
 	case duckdb_api::PlannedProtocol::REST:
@@ -344,6 +361,10 @@ InsertionOrderPreservingMap<string> ExplainSelectedScan(const duckdb_api::ScanRe
 	result["Classification Category"] = CategoryName(plan.PredicateCategory());
 	result["Classification Reason"] = ReasonName(plan.PredicateReason());
 	result["Classification Detail"] = plan.ClassificationReason();
+	result["Declared Replay Safety"] = ReplaySafetyName(OperationReplaySafety(plan.Operation()));
+	result["Retry"] = "disabled";
+	result["Rate-Limit Waiting"] = "disabled";
+	result["Cache"] = "disabled";
 	return result;
 }
 
