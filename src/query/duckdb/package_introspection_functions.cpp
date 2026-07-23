@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -101,6 +102,15 @@ std::string RenderDefault(const duckdb_api::CompiledScalarValue &value) {
 		}
 		result.push_back('\'');
 		return result;
+	}
+	case duckdb_api::CompiledScalarType::DOUBLE: {
+		// 17 significant decimal digits round-trips any IEEE-754 double.
+		char buffer[64];
+		const int written = std::snprintf(buffer, sizeof(buffer), "%.17g", value.Double());
+		if (written <= 0 || static_cast<std::size_t>(written) >= sizeof(buffer)) {
+			throw std::logic_error("relation input DOUBLE default could not be rendered");
+		}
+		return std::string(buffer, static_cast<std::size_t>(written));
 	}
 	}
 	throw std::logic_error("relation input default has an unsupported structural type");

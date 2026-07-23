@@ -176,6 +176,21 @@ void AddColumnCoverage(CoverageBuilder &coverage, const CompiledConnector &conne
 			}
 		}
 	}
+	for (const auto &relation : connector.Relations()) {
+		for (const auto &column : relation.Columns()) {
+			if (column.ScalarType() == CompiledScalarType::DOUBLE) {
+				// RFC 0020: no underflow_rejected (underflow to a subnormal
+				// or exact zero is a legitimate, accepted result, not an
+				// error) and no fraction_rejected (DOUBLE accepts
+				// fractions); magnitude_overflow_rejected replaces BIGINT's
+				// overflow_rejected for a JSON number too large to
+				// represent as any finite double.
+				coverage.Variants("column_" + relation.Name() + "_" + column.name + "_",
+				                  {"minimum", "maximum", "magnitude_overflow_rejected"},
+				                  PackageFixtureCoverageScope::COLUMN, relation.Name(), "", "", column.name);
+			}
+		}
+	}
 }
 
 void AddSelectionAndPredicateCoverage(CoverageBuilder &coverage, const CompiledConnector &connector) {

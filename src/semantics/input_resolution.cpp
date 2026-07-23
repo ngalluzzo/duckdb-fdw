@@ -19,31 +19,36 @@ bool TypesAgree(CompiledScalarType compiled, ExplicitInputValueKind explicit_kin
 		return explicit_kind == ExplicitInputValueKind::BIGINT;
 	case CompiledScalarType::VARCHAR:
 		return explicit_kind == ExplicitInputValueKind::VARCHAR;
+	case CompiledScalarType::DOUBLE:
+		return explicit_kind == ExplicitInputValueKind::DOUBLE;
 	}
 	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, "compiled relation input contains an unknown scalar type");
 }
 
 ResolvedRelationInput Unbound(const CompiledRelationInput &input) {
 	return ResolvedRelationInput(input.Name(), input.Type(), ResolvedInputState::UNBOUND, ResolvedInputSource::NONE,
-	                             false, 0, std::string());
+	                             false, 0, std::string(), 0.0);
 }
 
 ResolvedRelationInput Null(const CompiledRelationInput &input, ResolvedInputSource source) {
 	return ResolvedRelationInput(input.Name(), input.Type(), ResolvedInputState::BOUND_NULL, source, false, 0,
-	                             std::string());
+	                             std::string(), 0.0);
 }
 
 ResolvedRelationInput ExplicitValue(const CompiledRelationInput &input, const ExplicitInput &value) {
 	switch (input.Type()) {
 	case CompiledScalarType::BOOLEAN:
 		return ResolvedRelationInput(input.Name(), input.Type(), ResolvedInputState::BOUND_VALUE,
-		                             ResolvedInputSource::EXPLICIT, value.BooleanValue(), 0, std::string());
+		                             ResolvedInputSource::EXPLICIT, value.BooleanValue(), 0, std::string(), 0.0);
 	case CompiledScalarType::BIGINT:
 		return ResolvedRelationInput(input.Name(), input.Type(), ResolvedInputState::BOUND_VALUE,
-		                             ResolvedInputSource::EXPLICIT, false, value.BigIntValue(), std::string());
+		                             ResolvedInputSource::EXPLICIT, false, value.BigIntValue(), std::string(), 0.0);
 	case CompiledScalarType::VARCHAR:
 		return ResolvedRelationInput(input.Name(), input.Type(), ResolvedInputState::BOUND_VALUE,
-		                             ResolvedInputSource::EXPLICIT, false, 0, value.VarcharValue());
+		                             ResolvedInputSource::EXPLICIT, false, 0, value.VarcharValue(), 0.0);
+	case CompiledScalarType::DOUBLE:
+		return ResolvedRelationInput(input.Name(), input.Type(), ResolvedInputState::BOUND_VALUE,
+		                             ResolvedInputSource::EXPLICIT, false, 0, std::string(), value.DoubleValue());
 	}
 	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, "compiled relation input contains an unknown scalar type");
 }
@@ -63,13 +68,16 @@ ResolvedRelationInput DefaultValue(const CompiledRelationInput &input, const Com
 	switch (value.Type()) {
 	case CompiledScalarType::BOOLEAN:
 		return ResolvedRelationInput(input.Name(), input.Type(), ResolvedInputState::BOUND_VALUE,
-		                             ResolvedInputSource::DEFAULT_VALUE, value.Boolean(), 0, std::string());
+		                             ResolvedInputSource::DEFAULT_VALUE, value.Boolean(), 0, std::string(), 0.0);
 	case CompiledScalarType::BIGINT:
 		return ResolvedRelationInput(input.Name(), input.Type(), ResolvedInputState::BOUND_VALUE,
-		                             ResolvedInputSource::DEFAULT_VALUE, false, value.Bigint(), std::string());
+		                             ResolvedInputSource::DEFAULT_VALUE, false, value.Bigint(), std::string(), 0.0);
 	case CompiledScalarType::VARCHAR:
 		return ResolvedRelationInput(input.Name(), input.Type(), ResolvedInputState::BOUND_VALUE,
-		                             ResolvedInputSource::DEFAULT_VALUE, false, 0, value.Varchar());
+		                             ResolvedInputSource::DEFAULT_VALUE, false, 0, value.Varchar(), 0.0);
+	case CompiledScalarType::DOUBLE:
+		return ResolvedRelationInput(input.Name(), input.Type(), ResolvedInputState::BOUND_VALUE,
+		                             ResolvedInputSource::DEFAULT_VALUE, false, 0, std::string(), value.Double());
 	}
 	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
 	                    "compiled relation input default contains an unknown scalar type");
@@ -79,9 +87,10 @@ ResolvedRelationInput DefaultValue(const CompiledRelationInput &input, const Com
 
 ResolvedRelationInput::ResolvedRelationInput(std::string name_p, CompiledScalarType type_p, ResolvedInputState state_p,
                                              ResolvedInputSource source_p, bool boolean_value_p,
-                                             std::int64_t bigint_value_p, std::string varchar_value_p)
+                                             std::int64_t bigint_value_p, std::string varchar_value_p,
+                                             double double_value_p)
     : name(std::move(name_p)), type(type_p), state(state_p), source(source_p), boolean_value(boolean_value_p),
-      bigint_value(bigint_value_p), varchar_value(std::move(varchar_value_p)) {
+      bigint_value(bigint_value_p), varchar_value(std::move(varchar_value_p)), double_value(double_value_p) {
 }
 
 const std::string &ResolvedRelationInput::Name() const noexcept {
@@ -119,6 +128,13 @@ const std::string &ResolvedRelationInput::VarcharValue() const {
 		throw std::logic_error("resolved relation input is not a concrete VARCHAR");
 	}
 	return varchar_value;
+}
+
+double ResolvedRelationInput::DoubleValue() const {
+	if (state != ResolvedInputState::BOUND_VALUE || type != CompiledScalarType::DOUBLE) {
+		throw std::logic_error("resolved relation input is not a concrete DOUBLE");
+	}
+	return double_value;
 }
 
 ResolvedRelationInputs::ResolvedRelationInputs(std::vector<ResolvedRelationInput> values_p)

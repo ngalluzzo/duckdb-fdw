@@ -204,6 +204,8 @@ const char *RestScalarKindName(PlannedRestScalarKind kind) {
 		return "bigint";
 	case PlannedRestScalarKind::VARCHAR:
 		return "varchar";
+	case PlannedRestScalarKind::DOUBLE:
+		return "double";
 	}
 	throw std::logic_error("scan plan contains an unknown REST scalar kind");
 }

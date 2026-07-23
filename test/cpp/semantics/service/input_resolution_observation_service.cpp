@@ -14,16 +14,16 @@ public:
 	static ObservedInputResolution Input(std::string input_id, ObservedScalarKind kind,
 	                                     ObservedCallerInputState caller_state, ObservedInputState state,
 	                                     ObservedInputSource source, bool completed, bool boolean_value,
-	                                     std::int64_t bigint_value, std::string varchar_value) {
+	                                     std::int64_t bigint_value, std::string varchar_value, double double_value) {
 		return ObservedInputResolution(std::move(input_id), kind, caller_state, state, source, completed, boolean_value,
-		                               bigint_value, std::move(varchar_value));
+		                               bigint_value, std::move(varchar_value), double_value);
 	}
 
 	static ObservedRequestBinding Binding(std::string name, std::string source_id, ObservedScalarKind kind,
 	                                      bool boolean_value, std::int64_t bigint_value, std::string varchar_value,
-	                                      std::string encoded_value) {
+	                                      double double_value, std::string encoded_value) {
 		return ObservedRequestBinding(std::move(name), std::move(source_id), kind, boolean_value, bigint_value,
-		                              std::move(varchar_value), std::move(encoded_value));
+		                              std::move(varchar_value), double_value, std::move(encoded_value));
 	}
 };
 
@@ -37,6 +37,8 @@ ObservedScalarKind ObserveKind(duckdb_api::CompiledScalarType kind) {
 		return ObservedScalarKind::BIGINT;
 	case duckdb_api::CompiledScalarType::VARCHAR:
 		return ObservedScalarKind::VARCHAR;
+	case duckdb_api::CompiledScalarType::DOUBLE:
+		return ObservedScalarKind::DOUBLE;
 	}
 	throw std::logic_error("compiled relation input contains an unknown scalar kind");
 }
@@ -49,6 +51,8 @@ ObservedScalarKind ObserveKind(duckdb_api::PlannedRestScalarKind kind) {
 		return ObservedScalarKind::BIGINT;
 	case duckdb_api::PlannedRestScalarKind::VARCHAR:
 		return ObservedScalarKind::VARCHAR;
+	case duckdb_api::PlannedRestScalarKind::DOUBLE:
+		return ObservedScalarKind::DOUBLE;
 	}
 	throw std::logic_error("planned REST binding contains an unknown scalar kind");
 }
@@ -92,6 +96,8 @@ bool ExplicitKindMatches(duckdb_api::CompiledScalarType declared, duckdb_api::Ex
 		return supplied == duckdb_api::ExplicitInputValueKind::BIGINT;
 	case duckdb_api::CompiledScalarType::VARCHAR:
 		return supplied == duckdb_api::ExplicitInputValueKind::VARCHAR;
+	case duckdb_api::CompiledScalarType::DOUBLE:
+		return supplied == duckdb_api::ExplicitInputValueKind::DOUBLE;
 	}
 	throw std::logic_error("compiled relation input contains an unknown scalar kind");
 }
@@ -130,6 +136,7 @@ ObservedInputResolution ObserveCompletedInput(const duckdb_api::input_resolution
 	bool boolean_value = false;
 	std::int64_t bigint_value = 0;
 	std::string varchar_value;
+	double double_value = 0.0;
 	if (resolved.State() == duckdb_api::input_resolution::ResolvedInputState::BOUND_VALUE) {
 		switch (resolved.Type()) {
 		case duckdb_api::CompiledScalarType::BOOLEAN:
@@ -141,12 +148,15 @@ ObservedInputResolution ObserveCompletedInput(const duckdb_api::input_resolution
 		case duckdb_api::CompiledScalarType::VARCHAR:
 			varchar_value = resolved.VarcharValue();
 			break;
+		case duckdb_api::CompiledScalarType::DOUBLE:
+			double_value = resolved.DoubleValue();
+			break;
 		}
 	}
 	return ObservationFactory::Input(resolved.Name(), ObserveKind(resolved.Type()),
 	                                 ObserveCallerState(explicit_inputs.Find(resolved.Name())),
 	                                 ObserveState(resolved.State()), ObserveSource(resolved.Source()), true,
-	                                 boolean_value, bigint_value, std::move(varchar_value));
+	                                 boolean_value, bigint_value, std::move(varchar_value), double_value);
 }
 
 ObservedInputResolution ObserveRejectedNullAttempt(const duckdb_api::CompiledRelation &relation,
@@ -173,7 +183,7 @@ ObservedInputResolution ObserveRejectedNullAttempt(const duckdb_api::CompiledRel
 	                                                          duckdb_api::ExplicitInputs(std::move(remaining)));
 	return ObservationFactory::Input(input.Name(), ObserveKind(input.Type()), ObservedCallerInputState::BOUND_NULL,
 	                                 ObservedInputState::BOUND_NULL, ObservedInputSource::EXPLICIT, false, false, 0,
-	                                 std::string());
+	                                 std::string(), 0.0);
 }
 
 std::size_t CountDeclaredBindings(const duckdb_api::CompiledOperation &operation, const std::string &input_id) {
@@ -204,6 +214,7 @@ std::vector<ObservedRequestBinding> ObserveMaterializedBindings(const duckdb_api
 		bool boolean_value = false;
 		std::int64_t bigint_value = 0;
 		std::string varchar_value;
+		double double_value = 0.0;
 		switch (binding.Kind()) {
 		case duckdb_api::PlannedRestScalarKind::BOOLEAN:
 			boolean_value = binding.BooleanValue();
@@ -214,10 +225,13 @@ std::vector<ObservedRequestBinding> ObserveMaterializedBindings(const duckdb_api
 		case duckdb_api::PlannedRestScalarKind::VARCHAR:
 			varchar_value = binding.VarcharValue();
 			break;
+		case duckdb_api::PlannedRestScalarKind::DOUBLE:
+			double_value = binding.DoubleValue();
+			break;
 		}
 		observed.push_back(ObservationFactory::Binding(binding.Name(), binding.SourceId(), ObserveKind(binding.Kind()),
 		                                               boolean_value, bigint_value, std::move(varchar_value),
-		                                               binding.EncodedValue()));
+		                                               double_value, binding.EncodedValue()));
 	}
 	return observed;
 }

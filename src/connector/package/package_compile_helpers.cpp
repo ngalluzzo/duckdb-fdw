@@ -69,6 +69,9 @@ CompiledScalarType ScalarType(const LocatedText &type) {
 	if (type.value == "BIGINT") {
 		return CompiledScalarType::BIGINT;
 	}
+	if (type.value == "DOUBLE") {
+		return CompiledScalarType::DOUBLE;
+	}
 	return CompiledScalarType::VARCHAR;
 }
 
@@ -116,6 +119,13 @@ CompiledScalarValue CompileConcreteScalar(const LocatedText &type, const Located
 			diagnostics.Add(code, PackageDiagnosticPhase::SCHEMA, value.mark, "", relation);
 		}
 		return duckdb_api::internal::CompiledModelBuilder::Bigint(parsed);
+	}
+	if (type.value == "DOUBLE") {
+		double parsed = 0.0;
+		if (!IsCanonicalDouble(value, parsed)) {
+			diagnostics.Add(code, PackageDiagnosticPhase::SCHEMA, value.mark, "", relation);
+		}
+		return duckdb_api::internal::CompiledModelBuilder::Double(parsed);
 	}
 	if (!SafeVarchar(value, false)) {
 		diagnostics.Add(code, PackageDiagnosticPhase::SCHEMA, value.mark, "", relation);

@@ -30,7 +30,8 @@ ColumnDeclaration DecodeColumn(const SchemaReader &reader) {
 	column.extract = reader.Text("extract");
 	column.mark = reader.Mark();
 	RequireIdentifier(column.id, reader.Diagnostics());
-	if (column.type.value != "BOOLEAN" && column.type.value != "BIGINT" && column.type.value != "VARCHAR") {
+	if (column.type.value != "BOOLEAN" && column.type.value != "BIGINT" && column.type.value != "VARCHAR" &&
+	    column.type.value != "DOUBLE") {
 		reader.Diagnostics().Add(PackageDiagnosticCode::INVALID_TYPE, PackageDiagnosticPhase::SCHEMA, column.type.mark);
 	}
 	bool nullable = false;
@@ -83,7 +84,8 @@ InputDeclaration DecodeInput(const SchemaReader &reader) {
 	if (input.id.value == "secret") {
 		reader.Diagnostics().Add(PackageDiagnosticCode::RESERVED_INPUT, PackageDiagnosticPhase::SCHEMA, input.id.mark);
 	}
-	if (input.type.value != "BOOLEAN" && input.type.value != "BIGINT" && input.type.value != "VARCHAR") {
+	if (input.type.value != "BOOLEAN" && input.type.value != "BIGINT" && input.type.value != "VARCHAR" &&
+	    input.type.value != "DOUBLE") {
 		reader.Diagnostics().Add(PackageDiagnosticCode::INVALID_TYPE, PackageDiagnosticPhase::SCHEMA, input.type.mark);
 	}
 	bool nullable = false;

@@ -29,6 +29,9 @@ duckdb_api::ValueKind ValueKindFor(const std::string &logical_type) {
 	if (logical_type == "BOOLEAN") {
 		return duckdb_api::ValueKind::BOOLEAN;
 	}
+	if (logical_type == "DOUBLE") {
+		return duckdb_api::ValueKind::DOUBLE;
+	}
 	throw std::logic_error("Query package test executor received an unsupported planned scalar type");
 }
 
@@ -137,6 +140,9 @@ public:
 				break;
 			case duckdb_api::ValueKind::BOOLEAN:
 				row.values.push_back(duckdb_api::TypedValue::Boolean(marker != "old"));
+				break;
+			case duckdb_api::ValueKind::DOUBLE:
+				row.values.push_back(duckdb_api::TypedValue::Double(marker == "old" ? 1.5 : 2.5));
 				break;
 			}
 		}

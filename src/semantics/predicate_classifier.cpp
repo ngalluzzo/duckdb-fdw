@@ -25,6 +25,7 @@ TypedEqualityDecision NoTypedEquality() {
 	        false,
 	        0,
 	        "",
+	        0.0,
 	        "",
 	        "",
 	        "",
@@ -39,6 +40,8 @@ PlannedRestScalarKind PlanScalarKind(CompiledScalarType kind) {
 		return PlannedRestScalarKind::BIGINT;
 	case CompiledScalarType::VARCHAR:
 		return PlannedRestScalarKind::VARCHAR;
+	case CompiledScalarType::DOUBLE:
+		return PlannedRestScalarKind::DOUBLE;
 	}
 	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT,
 	                    "package predicate mapping contains an unknown scalar kind");
@@ -63,6 +66,7 @@ TypedEqualityDecision PlanTypedEquality(const CompiledPredicateMapping &mapping)
 	bool boolean_value = false;
 	std::int64_t bigint_value = 0;
 	std::string varchar_value;
+	double double_value = 0.0;
 	switch (literal.Type()) {
 	case CompiledScalarType::BOOLEAN:
 		boolean_value = literal.Boolean();
@@ -73,6 +77,9 @@ TypedEqualityDecision PlanTypedEquality(const CompiledPredicateMapping &mapping)
 	case CompiledScalarType::VARCHAR:
 		varchar_value = literal.Varchar();
 		break;
+	case CompiledScalarType::DOUBLE:
+		double_value = literal.Double();
+		break;
 	}
 	return {true,
 	        mapping.ColumnName(),
@@ -80,6 +87,7 @@ TypedEqualityDecision PlanTypedEquality(const CompiledPredicateMapping &mapping)
 	        boolean_value,
 	        bigint_value,
 	        std::move(varchar_value),
+	        double_value,
 	        mapping.RemoteInputName(),
 	        mapping.ProofIdentityValue(),
 	        mapping.BaseDomainValue(),
@@ -197,6 +205,8 @@ bool ColumnTypeMatches(CompiledScalarType scalar_type, RequestedPredicateValueKi
 		return scalar_type == CompiledScalarType::VARCHAR;
 	case RequestedPredicateValueKind::BOOLEAN:
 		return scalar_type == CompiledScalarType::BOOLEAN;
+	case RequestedPredicateValueKind::DOUBLE:
+		return scalar_type == CompiledScalarType::DOUBLE;
 	}
 	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, "predicate comparison contains an unknown logical type");
 }
@@ -212,6 +222,8 @@ bool TypedLiteralMatches(const CompiledScalarValue &compiled, const RequestedPre
 		return compiled.Type() == CompiledScalarType::BIGINT && compiled.Bigint() == requested.BigIntValue();
 	case RequestedPredicateValueKind::VARCHAR:
 		return compiled.Type() == CompiledScalarType::VARCHAR && compiled.Varchar() == requested.VarcharValue();
+	case RequestedPredicateValueKind::DOUBLE:
+		return compiled.Type() == CompiledScalarType::DOUBLE && compiled.Double() == requested.DoubleValue();
 	}
 	throw PlanningError(PlanningErrorCode::INVALID_CONTRACT, "predicate comparison contains an unknown literal kind");
 }
@@ -230,6 +242,8 @@ bool SameTypedLiteral(const CompiledScalarValue &left, const CompiledScalarValue
 		return left.Bigint() == right.Bigint();
 	case CompiledScalarType::VARCHAR:
 		return left.Varchar() == right.Varchar();
+	case CompiledScalarType::DOUBLE:
+		return left.Double() == right.Double();
 	}
 	return false;
 }

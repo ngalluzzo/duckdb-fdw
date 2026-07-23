@@ -238,6 +238,35 @@ void TestControlledDefaultsPreserveEveryScalarKind() {
 	RequirePlanningOnly(varchar_observation);
 }
 
+void TestControlledDoubleRelationInputResolves() {
+	// RFC 0020: proves input_resolution.cpp's DOUBLE relation-input resolution
+	// (TypesAgree, ExplicitValue, DefaultValue) through the real production
+	// planner, using an isolated single-input fixture rather than risking any
+	// shared relation's existing input count or shape.
+	const auto generation = duckdb_api_test::BuildDoubleRelationInputPackageGenerationFixture();
+	const auto registration = generation.QueryRegistration();
+	const auto request = duckdb_api::BuildPackageScanRequest(
+	    registration.Identity(), FindRegistrationRelation(registration, "double_input_records"),
+	    duckdb_api::ExplicitInputs(), duckdb_api::LogicalSecretReference());
+	const auto observation = duckdb_api_test::semantics_service::ObservePackageInputPlanning(
+	    generation, generation.OpaqueHandle(), request, "threshold");
+	Require(observation.PlanningSucceeded() && observation.SelectedOperation() == "double_input_records_selected" &&
+	            observation.Input().Completed() && observation.Input().Kind() == ObservedScalarKind::DOUBLE &&
+	            observation.Input().CallerState() == ObservedCallerInputState::UNBOUND &&
+	            observation.Input().State() == ObservedInputState::BOUND_VALUE &&
+	            observation.Input().Source() == ObservedInputSource::DEFAULT_VALUE &&
+	            observation.Input().DefaultWasApplied() && observation.Input().DoubleValue() == 2.5 &&
+	            observation.BindingDisposition() == ObservedRequestBindingDisposition::MATERIALIZED &&
+	            observation.DeclaredBindingCount() == 1 && observation.MaterializedBindings().size() == 1 &&
+	            observation.MaterializedBindings()[0].Name() == "threshold_name" &&
+	            observation.MaterializedBindings()[0].SourceId() == "threshold" &&
+	            observation.MaterializedBindings()[0].Kind() == ObservedScalarKind::DOUBLE &&
+	            observation.MaterializedBindings()[0].DoubleValue() == 2.5 &&
+	            observation.MaterializedBindings()[0].EncodedValue() == "2.5",
+	        "controlled DOUBLE default lost typed resolution or planned request materialization");
+	RequirePlanningOnly(observation);
+}
+
 void TestUnusedExplicitNullIsNotReportedAsProtocolOmission() {
 	const auto generation = duckdb_api_test::CompileNonGithubGraphqlGenerationFixture(DUCKDB_API_SOURCE_ROOT);
 	const auto registration = generation.QueryRegistration();
@@ -276,6 +305,7 @@ int main() {
 		TestExactOperationSelectionFailureIsRetained();
 		TestControlledRegionalHighestRankTieIsDerived();
 		TestControlledDefaultsPreserveEveryScalarKind();
+		TestControlledDoubleRelationInputResolves();
 		TestUnusedExplicitNullIsNotReportedAsProtocolOmission();
 		std::cout << "Semantics input-resolution observation service tests passed" << std::endl;
 		return EXIT_SUCCESS;

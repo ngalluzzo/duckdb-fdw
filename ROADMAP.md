@@ -397,6 +397,68 @@ corrected fixture-coverage variant set (`termination_on_short_page` and
 `short_page` string in actual DuckDB output, and a compatibility fixture
 proving `connectors/github` and `connectors/rickandmorty` are unaffected.
 
+### `0.13.0` — floating-point scalar type
+
+A connector author can declare a column or relation input of a fourth
+scalar type, `DOUBLE` (IEEE-754 double precision), alongside the existing
+`BOOLEAN`, `BIGINT`, and `VARCHAR`. This closes the gap a fresh
+architecture-maturity re-assessment (run after `short_page` shipped) judged
+highest-leverage: v1's scalar set had no floating-point or decimal type at
+all, and unlike dates (already capturable as ISO-8601 `VARCHAR` and cast in
+SQL), a JSON field holding a non-integral number — price, rating,
+coordinate, exchange rate, percentage, temperature — had no workaround at
+all, since `BIGINT` decode explicitly requires an integral, lossless value.
+
+Accepted [RFC 0020](rfcs/0020-add-double-scalar-type.md) decides the design.
+The product manager explicitly chose to include `DOUBLE` in
+predicate/conditional-input equality pushdown in this first cut rather than
+defer it, broadening scope beyond the RFC author's own original
+recommendation (output-column-only). This is the largest single-type
+addition attempted in this project's history: every value-carrying struct
+in the pipeline (`CompiledScalarValue`, the JSON decoder's `ParsedSlot`,
+`PlannedEqualityPredicate`, `PlannedRestQueryBinding`, `PlannedScalar`,
+`ExplicitInput`, `RequestedPredicateValue`, `TypedValue`) stores one field
+per scalar kind side by side rather than a tagged union, so adding `DOUBLE`
+required a `double_value` field and an inactive-payload-invariant update to
+each one, plus an arm in every exhaustive switch across all four teams.
+
+Review corrected the RFC's design on every reviewed dimension: the original
+draft's claim that existing typed-equality functions already compare via a
+stored canonical `encoded_value` string field was independently proven
+false — every such function already compares raw decoded values directly
+via `==`, so `DOUBLE` equality is a direct `==` on the normalized (`-0.0`
+folded to `0.0`) decoded double, not a string comparison; the original
+"treat `strtod`'s `ERANGE` as rejection" rule (mirroring `BIGINT`) was
+proven to also reject benign underflow to a subnormal or exact zero, a
+legitimate result, so only `HUGE_VAL`/`-HUGE_VAL` overflow is rejected;
+`complex_filter_adapter.cpp`'s DuckDB-side predicate-constant extraction,
+left as an unconfirmed open item in the original draft, was confirmed
+decision-critical — without its own `DOUBLE` arm, a `DOUBLE` predicate would
+silently never reach the remote request, defeating the chosen scope with no
+visible failure. Canonical wire/query-parameter encoding is fixed-precision
+`%.17g` (17 significant decimal digits, the smallest fixed precision proven
+to round-trip any IEEE-754 double bit-for-bit), not a shortest-round-trip
+encoder, since `CMAKE_CXX_STANDARD` is 11 and `std::to_chars` for
+floating-point is C++17-only; independent encoders in the Connector,
+Relational Semantics, and Remote Runtime layers must stay byte-identical for
+the same double value.
+
+GraphQL relations have no `DOUBLE` equivalent in their own scalar-kind enum
+(`STRING`/`INT64`/`BOOLEAN` only); rather than build full GraphQL Float
+support or silently decode a `DOUBLE` column as `STRING`, a `type: DOUBLE`
+GraphQL column is rejected at compile time with a precise diagnostic,
+mirroring `api_key`'s precedent of rejecting a REST-only capability on
+GraphQL operations rather than a silent runtime mismatch.
+
+This release is a backward-compatible capability addition under the pre-1.0
+versioning model, so it is a `0.Y.0` minor rather than a patch.
+`release/1.0.0/freeze.json` introduces new `scalar_types` tracking from
+scratch (no existing set to extend, unlike pagination strategies or
+credentials) with fixture coverage variants `minimum`, `maximum`, and
+`magnitude_overflow_rejected` — deliberately omitting a `fraction_rejected`
+analog (`DOUBLE` accepts fractions) and an `underflow_rejected` analog
+(underflow is a legitimate result, not an error).
+
 ### `1.0.0-rc.N` — compatibility rehearsal
 
 Each release candidate is an immutable build of the frozen `1.0.0` contract.

@@ -29,6 +29,8 @@ LogicalType RegistrationLogicalType(duckdb_api::CompiledScalarType type) {
 		return LogicalType::BIGINT;
 	case duckdb_api::CompiledScalarType::VARCHAR:
 		return LogicalType::VARCHAR;
+	case duckdb_api::CompiledScalarType::DOUBLE:
+		return LogicalType::DOUBLE;
 	}
 	throw InternalException("generated relation contains an unsupported structural type");
 }
@@ -42,6 +44,8 @@ duckdb_api::ExplicitInput ExplicitInputValue(const duckdb_api::CompiledRelationI
 			return duckdb_api::ExplicitInput::Null(descriptor.Name(), duckdb_api::ExplicitInputValueKind::BIGINT);
 		case duckdb_api::CompiledScalarType::VARCHAR:
 			return duckdb_api::ExplicitInput::Null(descriptor.Name(), duckdb_api::ExplicitInputValueKind::VARCHAR);
+		case duckdb_api::CompiledScalarType::DOUBLE:
+			return duckdb_api::ExplicitInput::Null(descriptor.Name(), duckdb_api::ExplicitInputValueKind::DOUBLE);
 		}
 	}
 	switch (descriptor.Type()) {
@@ -51,6 +55,8 @@ duckdb_api::ExplicitInput ExplicitInputValue(const duckdb_api::CompiledRelationI
 		return duckdb_api::ExplicitInput::BigInt(descriptor.Name(), BigIntValue::Get(value));
 	case duckdb_api::CompiledScalarType::VARCHAR:
 		return duckdb_api::ExplicitInput::Varchar(descriptor.Name(), StringValue::Get(value));
+	case duckdb_api::CompiledScalarType::DOUBLE:
+		return duckdb_api::ExplicitInput::Double(descriptor.Name(), DoubleValue::Get(value));
 	}
 	throw InternalException("generated relation contains an unsupported input type");
 }

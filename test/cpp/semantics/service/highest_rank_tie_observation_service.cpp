@@ -40,6 +40,8 @@ duckdb_api::ExplicitInput ConcreteSentinel(const duckdb_api::CompiledRelationInp
 		return duckdb_api::ExplicitInput::BigInt(input.Name(), 0);
 	case duckdb_api::CompiledScalarType::VARCHAR:
 		return duckdb_api::ExplicitInput::Varchar(input.Name(), std::string());
+	case duckdb_api::CompiledScalarType::DOUBLE:
+		return duckdb_api::ExplicitInput::Double(input.Name(), 0.0);
 	}
 	throw std::logic_error("compiled relation input contains an unknown scalar kind");
 }

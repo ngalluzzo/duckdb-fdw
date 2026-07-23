@@ -52,6 +52,8 @@ duckdb_api::PlannedColumnScalarKind PlannedKindForCompiled(duckdb_api::CompiledS
 		return duckdb_api::PlannedColumnScalarKind::BIGINT;
 	case duckdb_api::CompiledScalarType::VARCHAR:
 		return duckdb_api::PlannedColumnScalarKind::VARCHAR;
+	case duckdb_api::CompiledScalarType::DOUBLE:
+		return duckdb_api::PlannedColumnScalarKind::DOUBLE;
 	}
 	throw std::logic_error("compiled column has an unknown scalar type");
 }
@@ -80,6 +82,9 @@ void TestPlannedColumnScalarKindRejectsUnsupportedTypes() {
 	Require(column.ScalarKind() == duckdb_api::PlannedColumnScalarKind::BOOLEAN,
 	        "planned column lost its BOOLEAN scalar kind");
 	column.logical_type = "DOUBLE";
+	Require(column.ScalarKind() == duckdb_api::PlannedColumnScalarKind::DOUBLE,
+	        "planned column lost its DOUBLE scalar kind");
+	column.logical_type = "DECIMAL";
 	bool rejected = false;
 	try {
 		(void)column.ScalarKind();

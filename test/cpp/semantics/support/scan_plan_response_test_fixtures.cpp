@@ -33,7 +33,7 @@ duckdb_api::ScanPlan ScanPlanTestAccess::Response(duckdb_api::ScanPlan plan,
 		plan.output_columns.front().name.clear();
 		break;
 	case ResponsePlanCounterexample::UNSUPPORTED_SCHEMA_TYPE:
-		plan.output_columns.front().logical_type = "DOUBLE";
+		plan.output_columns.front().logical_type = "DECIMAL";
 		break;
 	case ResponsePlanCounterexample::FLIPPED_SCHEMA_NULLABILITY:
 		plan.output_columns.front().nullable = !plan.output_columns.front().nullable;

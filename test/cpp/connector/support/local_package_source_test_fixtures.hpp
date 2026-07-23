@@ -52,4 +52,28 @@ private:
 
 ShortPagePackageFixture BuildRepositoryShortPagePackageFixture(const std::string &absolute_repository_root);
 
+// RFC 0020: a byte-identical copy of connectors/github except
+// authenticated_repositories.yaml's unused `archived` column declares
+// `type: DOUBLE` instead of `type: BOOLEAN` (that column carries no predicate
+// mapping, so this is a structurally safe swap). Used to prove DOUBLE reaches
+// real DuckDB EXPLAIN output end to end without modifying the real package.
+class DoubleColumnPackageFixture {
+public:
+	DoubleColumnPackageFixture(const DoubleColumnPackageFixture &) = default;
+	DoubleColumnPackageFixture(DoubleColumnPackageFixture &&) = default;
+	DoubleColumnPackageFixture &operator=(const DoubleColumnPackageFixture &) = delete;
+	DoubleColumnPackageFixture &operator=(DoubleColumnPackageFixture &&) = delete;
+
+	const std::string &Root() const noexcept;
+
+private:
+	class State;
+	explicit DoubleColumnPackageFixture(std::shared_ptr<const State> state);
+	std::shared_ptr<const State> state;
+
+	friend DoubleColumnPackageFixture BuildRepositoryDoubleColumnPackageFixture(const std::string &);
+};
+
+DoubleColumnPackageFixture BuildRepositoryDoubleColumnPackageFixture(const std::string &absolute_repository_root);
+
 } // namespace duckdb_api_test

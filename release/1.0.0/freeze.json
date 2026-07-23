@@ -68,6 +68,20 @@
       "sql.table_function.system.main.duckdb_api_scan"
     ]
   },
+  "scalar_types": {
+    "authored": [
+      "BOOLEAN",
+      "BIGINT",
+      "VARCHAR",
+      "DOUBLE"
+    ],
+    "schema_authority": "src/connector/package/assets/connector-package-v1.schema.json",
+    "syntax_authority": "docs/CONNECTOR_SPECIFICATIONS.md",
+    "rejected_diagnostic": {
+      "code": "DUCKDB_API_INVALID_TYPE",
+      "phase": "SCHEMA"
+    }
+  },
   "pagination_strategies": {
     "rest": [
       "disabled",

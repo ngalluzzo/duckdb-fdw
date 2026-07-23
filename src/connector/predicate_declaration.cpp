@@ -4,6 +4,7 @@
 
 #include "duckdb_api/content_digest.hpp"
 
+#include <cstdio>
 #include <iomanip>
 #include <locale>
 #include <ostream>
@@ -53,6 +54,8 @@ bool SameScalarValue(const CompiledScalarValue &left, const CompiledScalarValue 
 		return left.Bigint() == right.Bigint();
 	case CompiledScalarType::VARCHAR:
 		return left.Varchar() == right.Varchar();
+	case CompiledScalarType::DOUBLE:
+		return left.Double() == right.Double();
 	}
 	return false;
 }
@@ -83,6 +86,19 @@ void AppendTypedLiteral(std::ostream &output, const CompiledScalarValue &value) 
 		}
 		output << std::dec;
 		return;
+	case CompiledScalarType::DOUBLE: {
+		// RFC 0020: a deterministic, round-trip-exact rendering for this
+		// identity digest. This is a distinct purpose from the wire encoder
+		// (EncodeCompiledQueryScalar) and need not match it byte-for-byte,
+		// only be itself deterministic.
+		char buffer[64];
+		const int written = std::snprintf(buffer, sizeof(buffer), "%.17g", value.Double());
+		if (written <= 0 || static_cast<std::size_t>(written) >= sizeof(buffer)) {
+			throw std::logic_error("compiled predicate mapping could not render its DOUBLE literal");
+		}
+		output << "double:" << std::string(buffer, static_cast<std::size_t>(written));
+		return;
+	}
 	}
 	throw std::logic_error("compiled predicate mapping contains an unknown typed literal");
 }
@@ -179,7 +195,7 @@ CompiledPredicateMapping::CompiledPredicateMapping(
       remote_input_name(std::move(remote_input_name_p)), encoded_remote_value(std::move(encoded_remote_value_p)),
       accuracy(accuracy_p), proof_identity(proof_identity_p), base_domain(base_domain_p),
       occurrence_preservation(occurrence_preservation_p), encoding_capability(encoding_capability_p),
-      typed_literal(new CompiledScalarValue(CompiledScalarType::VARCHAR, false, false, 0, "private")),
+      typed_literal(new CompiledScalarValue(CompiledScalarType::VARCHAR, false, false, 0, "private", 0.0)),
       proof_identity_value(internal::PredicateProofIdentityName(proof_identity_p)),
       base_domain_value(internal::PredicateBaseDomainName(base_domain_p)) {
 	if (!IsIdentifier(name) || !IsIdentifier(column_name) || !IsIdentifier(operation_name) ||

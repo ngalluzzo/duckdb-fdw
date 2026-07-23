@@ -40,6 +40,10 @@ inline std::string GenericRestPage() {
 	return "{\"records\":[{\"record_id\":1,\"record_label\":\"one\"}]}";
 }
 
+inline std::string DoubleColumnPage() {
+	return "{\"items\":[{\"score\":1.5}]}";
+}
+
 inline std::string AuthenticatedRootObject() {
 	return "{\"id\":11,\"login\":\"duckdb\",\"site_admin\":false}";
 }
@@ -63,6 +67,10 @@ inline std::string NonGithubGraphqlPage() {
 
 inline RuntimeFixtureTranscript AnonymousTranscript() {
 	return {RuntimeFixtureAuthorizationState::ANONYMOUS, {Response(SearchPage())}};
+}
+
+inline RuntimeFixtureTranscript DoubleColumnTranscript() {
+	return {RuntimeFixtureAuthorizationState::ANONYMOUS, {Response(DoubleColumnPage())}};
 }
 
 inline RuntimeFixtureTranscript GenericRestTranscript() {

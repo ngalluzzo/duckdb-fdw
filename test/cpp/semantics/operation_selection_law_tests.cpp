@@ -162,6 +162,12 @@ void RequireTypedPackageEquality(const duckdb_api::CompiledPackageGeneration &ge
 		            decision.typed_equality.varchar_value.empty(),
 		        "empty VARCHAR package equality was confused with absence");
 		break;
+	case RequestedPredicateValueKind::DOUBLE:
+		Require(decision.typed_equality.kind == duckdb_api::PlannedRestScalarKind::DOUBLE &&
+		            !decision.typed_equality.boolean_value && decision.typed_equality.bigint_value == 0 &&
+		            decision.typed_equality.varchar_value.empty() && decision.typed_equality.double_value == 3.5,
+		        "DOUBLE package equality lost its canonical typed payload");
+		break;
 	}
 	auto unavailable_request = matching_request;
 	unavailable_request.capabilities.selective_predicate = false;
@@ -267,6 +273,8 @@ void TestPackageTypedEqualitySelectionEvidence() {
 	                            RequestedPredicateValue::BigInt(42), RequestedPredicateValue::BigInt(41), "42");
 	RequireTypedPackageEquality(generation, "varchar_predicates", RequestedPredicateValueKind::VARCHAR,
 	                            RequestedPredicateValue::Varchar(""), RequestedPredicateValue::Varchar("other"), "");
+	RequireTypedPackageEquality(generation, "double_predicates", RequestedPredicateValueKind::DOUBLE,
+	                            RequestedPredicateValue::Double(3.5), RequestedPredicateValue::Double(2.5), "3.5");
 
 	const auto native = duckdb_api::BuildNativeGithubConnector();
 	const auto *native_relation = native.FindRelation("authenticated_repositories");

@@ -28,7 +28,9 @@ enum class CompiledConnectorOrigin { NATIVE_PRODUCT_METADATA, PACKAGE_COMPILED_M
 // Closed scalar vocabulary shared by package-declared columns, relation
 // inputs, typed defaults, and consumer projections. Consumers switch on this
 // enum; they never parse YAML or logical-type strings to recover authority.
-enum class CompiledScalarType { BOOLEAN, BIGINT, VARCHAR };
+// DOUBLE (RFC 0020) is IEEE-754 double precision; -0.0 is normalized to 0.0
+// at construction so every consumer sees a single canonical zero value.
+enum class CompiledScalarType { BOOLEAN, BIGINT, VARCHAR, DOUBLE };
 
 const char *CompiledScalarTypeName(CompiledScalarType type);
 
@@ -47,19 +49,21 @@ public:
 	bool Boolean() const;
 	std::int64_t Bigint() const;
 	const std::string &Varchar() const;
+	double Double() const;
 
 private:
 	friend class internal::CompiledModelBuilder;
 	friend class CompiledPredicateMapping;
 
 	CompiledScalarValue(CompiledScalarType type, bool is_null, bool boolean_value, std::int64_t bigint_value,
-	                    std::string varchar_value);
+	                    std::string varchar_value, double double_value);
 
 	CompiledScalarType type;
 	bool is_null;
 	bool boolean_value;
 	std::int64_t bigint_value;
 	std::string varchar_value;
+	double double_value;
 };
 
 // Default presence is structural. HasDefault() false never aliases a present

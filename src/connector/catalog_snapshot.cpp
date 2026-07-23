@@ -150,6 +150,9 @@ void AppendScalar(std::ostringstream &result, const CompiledScalarValue &value) 
 	case CompiledScalarType::VARCHAR:
 		result << "VARCHAR(" << value.Varchar().size() << " bytes)";
 		return;
+	case CompiledScalarType::DOUBLE:
+		result << value.Double();
+		return;
 	}
 }
 

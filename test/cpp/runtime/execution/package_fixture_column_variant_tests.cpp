@@ -74,6 +74,25 @@ void TestBigintClosedVariants() {
 	}
 }
 
+void TestDoubleClosedVariants() {
+	const auto plan = duckdb_api_test::BuildValidAnonymousDoubleColumnPlanFixture();
+	const auto transcript = duckdb_api_test::variant_test::DoubleColumnTranscript();
+	RuntimePackageFixtureExecutionService service;
+	const RuntimeFixtureColumnVariant values[] = {RuntimeFixtureColumnVariant::DOUBLE_MINIMUM,
+	                                              RuntimeFixtureColumnVariant::DOUBLE_MAXIMUM,
+	                                              RuntimeFixtureColumnVariant::DOUBLE_SUBNORMAL};
+	for (const auto variant : values) {
+		ManualControl control;
+		RequireOutcome(service.ExecuteColumnVariant(plan, transcript, {0, variant}, control),
+		               RuntimeFixtureVariantOutcome::VALUE_SUCCEEDED);
+	}
+	ManualControl rejected_control;
+	RequireOutcome(service.ExecuteColumnVariant(plan, transcript,
+	                                            {0, RuntimeFixtureColumnVariant::DOUBLE_MAGNITUDE_OVERFLOW_REJECTED},
+	                                            rejected_control),
+	               RuntimeFixtureVariantOutcome::EXPECTED_REJECTION);
+}
+
 void TestVarcharBudgetClosedVariants() {
 	const auto plan = duckdb_api_test::BuildValidAnonymousPlanFixture();
 	const auto transcript = AnonymousTranscript();
@@ -128,6 +147,7 @@ int main() {
 		TestEveryScalarKindRejectsTypeMismatch();
 		TestEveryNonNullableColumnRejectsMissingAndNull();
 		TestBigintClosedVariants();
+		TestDoubleClosedVariants();
 		TestVarcharBudgetClosedVariants();
 		TestAmbiguousSelectedPathFailsBeforeExecution();
 		std::cout << "package fixture Runtime column variant tests passed\n";

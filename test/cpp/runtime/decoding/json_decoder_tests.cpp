@@ -266,6 +266,29 @@ void TestExactResourceBoundaries() {
 	             duckdb_api::ErrorStage::RESOURCE, "decoded_memory_bytes");
 }
 
+void TestDoubleFormatEquivalence() {
+	// RFC 0020: different JSON-source spellings of the same double value must
+	// decode to the identical bit pattern.
+	duckdb_api::internal::JsonDecodePlan plan;
+	plan.response_source = duckdb_api::internal::JsonResponseSource::JSON_PATH_MANY;
+	plan.records_path = {"items"};
+	plan.columns = {{"value", "value", duckdb_api::ValueKind::DOUBLE}};
+	plan.max_records = 1;
+	plan.max_string_bytes = 256;
+	plan.max_json_nesting = 16;
+	plan.max_decoded_memory_bytes = 4096;
+	plan.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+	ManualControl control;
+	const char *spellings[] = {"1.5", "1.50", "1.5e0", "0.00015e4", "15e-1"};
+	for (const auto *spelling : spellings) {
+		const auto rows = duckdb_api::internal::DecodeJsonRows(
+		    std::string("{\"items\":[{\"value\":") + spelling + "}]}", plan, control);
+		Require(rows.size() == 1 && rows[0].values.size() == 1 && rows[0].values[0].valid &&
+		            rows[0].values[0].double_value == 1.5,
+		        std::string("DOUBLE spelling \"") + spelling + "\" did not decode to the identical value");
+	}
+}
+
 void TestCancellationAndDeadline() {
 	ManualControl cancelled;
 	cancelled.Cancel();
@@ -294,6 +317,7 @@ int main() {
 		TestMalformedAndInvalidUtf8();
 		TestRequiredShapeAndStrictTypes();
 		TestExactResourceBoundaries();
+		TestDoubleFormatEquivalence();
 		TestCancellationAndDeadline();
 		std::cout << "JSON decoder tests passed" << std::endl;
 		return EXIT_SUCCESS;

@@ -133,7 +133,10 @@ identity are provenance; they are never shortcuts for Runtime admission.
 
 ### Structural values
 
-The only v1 scalar kinds are `BOOLEAN`, `BIGINT`, and `VARCHAR`. A typed scalar
+The only v1 scalar kinds are `BOOLEAN`, `BIGINT`, `VARCHAR`, and `DOUBLE`
+(IEEE-754 double precision; encoded canonically as 17 significant decimal
+digits, the smallest fixed precision proven to round-trip any double
+bit-for-bit; `-0.0` normalizes to `0.0` at construction). A typed scalar
 stores its kind, NULL state, and at most one matching payload. The following
 states are distinct:
 
@@ -201,7 +204,7 @@ ScanRequest
 ├── captured connector and relation identity
 ├── ordered explicit relation inputs
 │   ├── identifier
-│   ├── BOOLEAN | BIGINT | VARCHAR
+│   ├── BOOLEAN | BIGINT | VARCHAR | DOUBLE
 │   └── present NULL | present value
 ├── full projected-column closure
 ├── bounded requested predicate structure

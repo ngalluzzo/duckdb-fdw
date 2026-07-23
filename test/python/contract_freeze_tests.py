@@ -101,6 +101,34 @@ class ContractFreezeTests(unittest.TestCase):
             "rejected_diagnostic",
         )
 
+    def test_scalar_type_schema_authority_drift_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["scalar_types"].__setitem__(
+                "schema_authority", "src/connector/package/assets/old.schema.json"
+            ),
+            "schema_authority",
+        )
+
+    def test_scalar_type_widening_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["scalar_types"]["authored"].append("DECIMAL"),
+            "scalar types disagree",
+        )
+
+    def test_scalar_type_omission_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["scalar_types"]["authored"].pop(),
+            "scalar types disagree",
+        )
+
+    def test_scalar_type_rejected_diagnostic_drift_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["scalar_types"]["rejected_diagnostic"].__setitem__(
+                "code", "DUCKDB_API_UNSUPPORTED_DECLARATION"
+            ),
+            "scalar_types rejected_diagnostic",
+        )
+
     def test_version_domain_omission_fails(self) -> None:
         self.require_rejected(lambda value: value["version_domains"].pop(), "version domains")
 

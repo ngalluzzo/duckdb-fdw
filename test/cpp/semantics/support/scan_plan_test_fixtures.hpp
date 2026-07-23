@@ -187,6 +187,10 @@ enum class PackagePredicatePlanCounterexample {
 };
 
 duckdb_api::ScanPlan BuildValidAnonymousPlanFixture();
+// RFC 0020: a single-DOUBLE-column anonymous relation, otherwise unrelated to
+// BuildValidAnonymousPlanFixture's own shape, for exercising Runtime's DOUBLE
+// column-variant decoding directly without touching that widely shared fixture.
+duckdb_api::ScanPlan BuildValidAnonymousDoubleColumnPlanFixture();
 duckdb_api::ScanPlan BuildValidAuthenticatedPlanFixture(const std::string &exact_logical_secret_name);
 // RFC 0018: an api_key-authenticated variant of BuildValidAuthenticatedPlanFixture,
 // otherwise identical (same relation shape, same fixed destination), for

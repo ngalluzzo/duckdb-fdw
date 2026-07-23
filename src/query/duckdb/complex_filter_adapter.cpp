@@ -45,6 +45,10 @@ bool RequestedType(const LogicalType &type, duckdb_api::RequestedPredicateValueK
 		result = duckdb_api::RequestedPredicateValueKind::BOOLEAN;
 		return true;
 	}
+	if (type == LogicalType::DOUBLE) {
+		result = duckdb_api::RequestedPredicateValueKind::DOUBLE;
+		return true;
+	}
 	return false;
 }
 
@@ -110,6 +114,12 @@ bool RequestedLiteral(const Expression &expression, duckdb_api::RequestedPredica
 			return false;
 		}
 		result = duckdb_api::RequestedPredicateValue::Boolean(value.GetValue<bool>());
+		return true;
+	case duckdb_api::RequestedPredicateValueKind::DOUBLE:
+		if (value.type() != LogicalType::DOUBLE) {
+			return false;
+		}
+		result = duckdb_api::RequestedPredicateValue::Double(value.GetValue<double>());
 		return true;
 	}
 	return false;

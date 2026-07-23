@@ -20,6 +20,9 @@ public:
 	static CompiledScalarValue Boolean(bool value);
 	static CompiledScalarValue Bigint(std::int64_t value);
 	static CompiledScalarValue Varchar(std::string value);
+	// RFC 0020: -0.0 is normalized to 0.0 so every consumer sees one
+	// canonical zero.
+	static CompiledScalarValue Double(double value);
 
 	static CompiledInputDefault NoDefault();
 	static CompiledInputDefault Default(CompiledScalarValue value);

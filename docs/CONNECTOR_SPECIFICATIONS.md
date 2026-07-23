@@ -217,8 +217,8 @@ id: authenticated_repositories
 schema: static
 ```
 
-`schema` is exactly `static`. V1 types are `BOOLEAN`, `BIGINT`, and `VARCHAR`.
-Columns retain declaration order:
+`schema` is exactly `static`. V1 types are `BOOLEAN`, `BIGINT`, `VARCHAR`, and
+`DOUBLE`. Columns retain declaration order:
 
 ```yaml
 columns:
@@ -230,7 +230,11 @@ columns:
 
 Conversion is strict. Missing or JSON-null data fails for a non-nullable
 column. Numeric conversion must be integral and lossless for `BIGINT`; strings
-and Booleans are never coerced across types.
+and Booleans are never coerced across types. `DOUBLE` accepts any JSON number
+(a fractional part and exponent are both permitted, unlike `BIGINT`) and
+decodes to the nearest IEEE-754 double; a magnitude too large to represent as
+any finite double is rejected, while underflow to a subnormal or exact zero is
+a legitimate decoded result, not an error.
 
 ### Relation inputs and defaults
 
@@ -252,8 +256,10 @@ inputs:
 Defaults use a discriminated object. The admitted `kind` values correspond to
 the declared type plus `null` for a nullable typed NULL default. Boolean
 defaults use plain `true` or `false`; `BIGINT` defaults use canonical signed
-64-bit decimal; `VARCHAR` defaults use a double-quoted scalar. A default's type
-must exactly match its input. A non-nullable input cannot default to NULL.
+64-bit decimal; `VARCHAR` defaults use a double-quoted scalar; `DOUBLE`
+defaults use a plain JSON-number-shaped literal under the same conversion
+rule as a column value. A default's type must exactly match its input. A
+non-nullable input cannot default to NULL.
 
 `secret` is reserved and cannot be a relation input. Query synthesizes a
 separate required `secret VARCHAR` argument only for an authenticated

@@ -98,6 +98,45 @@ ColumnMutation BuildColumnMutation(const duckdb_api::ScanPlan &plan, const inter
 		        units,
 		        string_limit};
 	}
+	case RuntimeFixtureColumnVariant::DOUBLE_MINIMUM:
+		if (column.kind != duckdb_api::ValueKind::DOUBLE) {
+			throw std::invalid_argument("DOUBLE minimum variant requires a DOUBLE planned column");
+		}
+		return {"-1.7976931348623157e+308",
+		        false,
+		        true,
+		        duckdb_api::ErrorStage::INTERNAL,
+		        RuntimeFixtureVariantOutcome::VALUE_SUCCEEDED,
+		        0,
+		        0};
+	case RuntimeFixtureColumnVariant::DOUBLE_MAXIMUM:
+		if (column.kind != duckdb_api::ValueKind::DOUBLE) {
+			throw std::invalid_argument("DOUBLE maximum variant requires a DOUBLE planned column");
+		}
+		return {"1.7976931348623157e+308",
+		        false,
+		        true,
+		        duckdb_api::ErrorStage::INTERNAL,
+		        RuntimeFixtureVariantOutcome::VALUE_SUCCEEDED,
+		        0,
+		        0};
+	case RuntimeFixtureColumnVariant::DOUBLE_SUBNORMAL:
+		// RFC 0020: strtod sets ERANGE for both true overflow and benign
+		// underflow to a subnormal or exact zero; only HUGE_VAL/-HUGE_VAL is a
+		// real rejection. This proves the decoder accepts underflow rather than
+		// blanket-rejecting on ERANGE.
+		if (column.kind != duckdb_api::ValueKind::DOUBLE) {
+			throw std::invalid_argument("DOUBLE subnormal variant requires a DOUBLE planned column");
+		}
+		return {
+		    "4.9e-324", false, true, duckdb_api::ErrorStage::INTERNAL, RuntimeFixtureVariantOutcome::VALUE_SUCCEEDED,
+		    0,          0};
+	case RuntimeFixtureColumnVariant::DOUBLE_MAGNITUDE_OVERFLOW_REJECTED:
+		if (column.kind != duckdb_api::ValueKind::DOUBLE) {
+			throw std::invalid_argument("DOUBLE rejection variant requires a DOUBLE planned column");
+		}
+		return {"1e400", false, false, duckdb_api::ErrorStage::SCHEMA, RuntimeFixtureVariantOutcome::EXPECTED_REJECTION,
+		        0,       0};
 	}
 	throw std::invalid_argument("unknown closed Runtime column variant");
 }
@@ -123,6 +162,17 @@ void ValidateColumnObservation(const RuntimeFixtureExecutionObservation &executi
 		if (scenario.variant == RuntimeFixtureColumnVariant::VARCHAR_STRING_BUDGET_BOUNDARY &&
 		    value.varchar_value.size() != mutation.admitted_limit) {
 			throw std::logic_error("closed Runtime VARCHAR boundary variant decoded the wrong byte count");
+		}
+		if (scenario.variant == RuntimeFixtureColumnVariant::DOUBLE_MINIMUM &&
+		    value.double_value != std::numeric_limits<double>::lowest()) {
+			throw std::logic_error("closed Runtime DOUBLE minimum variant decoded the wrong value");
+		}
+		if (scenario.variant == RuntimeFixtureColumnVariant::DOUBLE_MAXIMUM &&
+		    value.double_value != std::numeric_limits<double>::max()) {
+			throw std::logic_error("closed Runtime DOUBLE maximum variant decoded the wrong value");
+		}
+		if (scenario.variant == RuntimeFixtureColumnVariant::DOUBLE_SUBNORMAL && value.double_value != 4.9e-324) {
+			throw std::logic_error("closed Runtime DOUBLE subnormal variant decoded the wrong value");
 		}
 		return;
 	}

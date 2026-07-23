@@ -18,6 +18,8 @@ const char *ExplicitInputValueKindName(ExplicitInputValueKind kind) {
 		return "bigint";
 	case ExplicitInputValueKind::VARCHAR:
 		return "varchar";
+	case ExplicitInputValueKind::DOUBLE:
+		return "double";
 	}
 	throw std::logic_error("explicit input contains an unknown value kind");
 }
@@ -49,9 +51,10 @@ const char *RetainedPredicateScopeName(RetainedPredicateScope scope) {
 } // namespace
 
 ExplicitInput::ExplicitInput(std::string identifier_p, ExplicitInputValueKind kind_p, bool is_null_p,
-                             bool boolean_value_p, std::int64_t bigint_value_p, std::string varchar_value_p)
+                             bool boolean_value_p, std::int64_t bigint_value_p, std::string varchar_value_p,
+                             double double_value_p)
     : identifier(std::move(identifier_p)), kind(kind_p), is_null(is_null_p), boolean_value(boolean_value_p),
-      bigint_value(bigint_value_p), varchar_value(std::move(varchar_value_p)) {
+      bigint_value(bigint_value_p), varchar_value(std::move(varchar_value_p)), double_value(double_value_p) {
 	if (identifier.empty()) {
 		throw std::invalid_argument("explicit input identifier must not be empty");
 	}
@@ -59,19 +62,27 @@ ExplicitInput::ExplicitInput(std::string identifier_p, ExplicitInputValueKind ki
 }
 
 ExplicitInput ExplicitInput::Null(std::string identifier, ExplicitInputValueKind kind) {
-	return ExplicitInput(std::move(identifier), kind, true, false, 0, std::string());
+	return ExplicitInput(std::move(identifier), kind, true, false, 0, std::string(), 0.0);
 }
 
 ExplicitInput ExplicitInput::Boolean(std::string identifier, bool value) {
-	return ExplicitInput(std::move(identifier), ExplicitInputValueKind::BOOLEAN, false, value, 0, std::string());
+	return ExplicitInput(std::move(identifier), ExplicitInputValueKind::BOOLEAN, false, value, 0, std::string(), 0.0);
 }
 
 ExplicitInput ExplicitInput::BigInt(std::string identifier, std::int64_t value) {
-	return ExplicitInput(std::move(identifier), ExplicitInputValueKind::BIGINT, false, false, value, std::string());
+	return ExplicitInput(std::move(identifier), ExplicitInputValueKind::BIGINT, false, false, value, std::string(),
+	                     0.0);
 }
 
 ExplicitInput ExplicitInput::Varchar(std::string identifier, std::string value) {
-	return ExplicitInput(std::move(identifier), ExplicitInputValueKind::VARCHAR, false, false, 0, std::move(value));
+	return ExplicitInput(std::move(identifier), ExplicitInputValueKind::VARCHAR, false, false, 0, std::move(value),
+	                     0.0);
+}
+
+ExplicitInput ExplicitInput::Double(std::string identifier, double value) {
+	// RFC 0020: -0.0 is normalized to 0.0 so every consumer sees one canonical zero.
+	return ExplicitInput(std::move(identifier), ExplicitInputValueKind::DOUBLE, false, false, 0, std::string(),
+	                     value == 0.0 ? 0.0 : value);
 }
 
 const std::string &ExplicitInput::Identifier() const noexcept {
@@ -107,10 +118,17 @@ const std::string &ExplicitInput::VarcharValue() const {
 	return varchar_value;
 }
 
+double ExplicitInput::DoubleValue() const {
+	if (is_null || kind != ExplicitInputValueKind::DOUBLE) {
+		throw std::logic_error("explicit input does not contain a DOUBLE value");
+	}
+	return double_value;
+}
+
 bool ExplicitInput::operator==(const ExplicitInput &other) const noexcept {
 	return identifier == other.identifier && kind == other.kind && is_null == other.is_null &&
 	       boolean_value == other.boolean_value && bigint_value == other.bigint_value &&
-	       varchar_value == other.varchar_value;
+	       varchar_value == other.varchar_value && double_value == other.double_value;
 }
 
 bool ExplicitInput::operator!=(const ExplicitInput &other) const noexcept {
@@ -120,6 +138,10 @@ bool ExplicitInput::operator!=(const ExplicitInput &other) const noexcept {
 std::string ExplicitInput::Snapshot() const {
 	std::ostringstream result;
 	result.imbue(std::locale::classic());
+	// 17 significant digits so a DOUBLE value round-trips through this snapshot,
+	// matching the wire-encoding precision used elsewhere for RFC 0020 (see
+	// EncodeCanonicalDouble in protocol_operation_declaration.cpp).
+	result.precision(17);
 	result << "input[id=hex:" << HexEncode(identifier) << ",kind=" << ExplicitInputValueKindName(kind) << ",value=";
 	if (is_null) {
 		result << "null";
@@ -133,6 +155,9 @@ std::string ExplicitInput::Snapshot() const {
 			break;
 		case ExplicitInputValueKind::VARCHAR:
 			result << "hex:" << HexEncode(varchar_value);
+			break;
+		case ExplicitInputValueKind::DOUBLE:
+			result << double_value;
 			break;
 		}
 	}

@@ -23,7 +23,7 @@ enum class PlannedReplaySafety { SAFE };
 enum class PlannedUrlScheme { HTTP, HTTPS };
 enum class PlannedResponseSource { JSON_PATH_MANY, ROOT_ARRAY, ROOT_OBJECT };
 
-enum class PlannedRestScalarKind { BOOLEAN, BIGINT, VARCHAR };
+enum class PlannedRestScalarKind { BOOLEAN, BIGINT, VARCHAR, DOUBLE };
 enum class PlannedRestQueryValueSource {
 	FIXED,
 	RELATION_INPUT,
@@ -62,6 +62,7 @@ public:
 	bool BooleanValue() const;
 	std::int64_t BigintValue() const;
 	const std::string &VarcharValue() const;
+	double DoubleValue() const;
 	PlannedRestQueryEncoding Encoding() const noexcept;
 	const std::string &EncodedValue() const noexcept;
 
@@ -72,7 +73,8 @@ private:
 
 	PlannedRestQueryBinding(std::string name, PlannedRestQueryValueSource source, std::string source_id,
 	                        PlannedRestScalarKind kind, bool boolean_value, std::int64_t bigint_value,
-	                        std::string varchar_value, PlannedRestQueryEncoding encoding, std::string encoded_value);
+	                        std::string varchar_value, double double_value, PlannedRestQueryEncoding encoding,
+	                        std::string encoded_value);
 
 	std::string name;
 	PlannedRestQueryValueSource source;
@@ -81,6 +83,7 @@ private:
 	bool boolean_value;
 	std::int64_t bigint_value;
 	std::string varchar_value;
+	double double_value;
 	PlannedRestQueryEncoding encoding;
 	std::string encoded_value;
 };

@@ -29,6 +29,11 @@ EXPECTED_REJECTED_DIAGNOSTIC = {
     "phase": "SCHEMA",
 }
 
+EXPECTED_SCALAR_TYPE_REJECTED_DIAGNOSTIC = {
+    "code": "DUCKDB_API_INVALID_TYPE",
+    "phase": "SCHEMA",
+}
+
 EXPECTED_VERSION_DOMAINS = (
     "project_extension",
     "connector_spec",
@@ -149,6 +154,14 @@ def _schema_rest_pagination_strategies(schema: dict[str, Any]) -> set[str]:
 def _schema_graphql_pagination_strategies(schema: dict[str, Any]) -> set[str]:
     ref = _schema_value(schema, ("$defs", "graphqlRequest", "properties", "pagination", "$ref"))
     return {_schema_value(schema, ("$defs", _def_name(ref), "properties", "strategy", "const"))}
+
+
+def _schema_scalar_types(schema: dict[str, Any]) -> set[str]:
+    # The column def is the authoritative closed set; package_relation_schema.py's
+    # DecodeColumn/DecodeInput and package_predicate_schema.py's literal-type
+    # check keep the input and predicate-literal defs in lockstep with it, so
+    # cross-checking all three here would only restate the same authority.
+    return set(_schema_value(schema, ("$defs", "column", "properties", "type", "enum")))
 
 
 def _inventory_release_view(inventory: dict[str, Any], release: str) -> dict[str, Any]:
@@ -286,6 +299,7 @@ def verify_freeze(
     declared_schema_authority = {
         _require_freeze_field(freeze, "connector_spec", "schema_authority"),
         _require_freeze_field(freeze, "pagination_strategies", "schema_authority"),
+        _require_freeze_field(freeze, "scalar_types", "schema_authority"),
     }
     if declared_schema_authority != {EXPECTED_SCHEMA_AUTHORITY}:
         raise FreezeError(
@@ -319,6 +333,16 @@ def verify_freeze(
     if rejected != EXPECTED_REJECTED_DIAGNOSTIC:
         raise FreezeError(
             f"freeze rejected_diagnostic {rejected!r} disagrees with {EXPECTED_REJECTED_DIAGNOSTIC!r}"
+        )
+
+    scalar_types = set(freeze["scalar_types"]["authored"])
+    if scalar_types != _schema_scalar_types(schema):
+        raise FreezeError("freeze scalar types disagree with the schema's closed column-type enum")
+    scalar_rejected = freeze["scalar_types"].get("rejected_diagnostic")
+    if scalar_rejected != EXPECTED_SCALAR_TYPE_REJECTED_DIAGNOSTIC:
+        raise FreezeError(
+            f"freeze scalar_types rejected_diagnostic {scalar_rejected!r} disagrees with "
+            f"{EXPECTED_SCALAR_TYPE_REJECTED_DIAGNOSTIC!r}"
         )
 
     declared_domains = {domain["domain"] for domain in freeze.get("version_domains", [])}

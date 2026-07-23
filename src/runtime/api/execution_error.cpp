@@ -25,12 +25,13 @@ const std::string &ExecutionError::SafeMessage() const {
 }
 
 TypedValue::TypedValue()
-    : kind(ValueKind::VARCHAR), valid(false), bigint_value(0), varchar_value(), boolean_value(false) {
+    : kind(ValueKind::VARCHAR), valid(false), bigint_value(0), varchar_value(), boolean_value(false),
+      double_value(0.0) {
 }
 
 TypedValue::TypedValue(ValueKind kind_p, int64_t bigint_value_p, std::string varchar_value_p, bool boolean_value_p)
     : kind(kind_p), valid(true), bigint_value(bigint_value_p), varchar_value(std::move(varchar_value_p)),
-      boolean_value(boolean_value_p) {
+      boolean_value(boolean_value_p), double_value(0.0) {
 }
 
 TypedValue TypedValue::BigInt(int64_t value) {
@@ -58,6 +59,18 @@ TypedValue TypedValue::Boolean(bool value) {
 	result.valid = true;
 	result.bigint_value = 0;
 	result.boolean_value = value;
+	return result;
+}
+
+TypedValue TypedValue::Double(double value) {
+	TypedValue result;
+	result.kind = ValueKind::DOUBLE;
+	result.valid = true;
+	result.bigint_value = 0;
+	result.boolean_value = false;
+	// RFC 0020: -0.0 is normalized to 0.0 so every consumer sees one
+	// canonical zero.
+	result.double_value = value == 0.0 ? 0.0 : value;
 	return result;
 }
 

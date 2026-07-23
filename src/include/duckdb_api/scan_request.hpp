@@ -36,7 +36,7 @@ private:
 	std::string exact_duckdb_secret_name;
 };
 
-enum class ExplicitInputValueKind { BOOLEAN, BIGINT, VARCHAR };
+enum class ExplicitInputValueKind { BOOLEAN, BIGINT, VARCHAR, DOUBLE };
 
 // One explicitly supplied relation argument at the Query-to-Semantics
 // boundary. Its exact identifier and DuckDB scalar kind are structural facts;
@@ -49,6 +49,7 @@ public:
 	static ExplicitInput Boolean(std::string identifier, bool value);
 	static ExplicitInput BigInt(std::string identifier, std::int64_t value);
 	static ExplicitInput Varchar(std::string identifier, std::string value);
+	static ExplicitInput Double(std::string identifier, double value);
 
 	const std::string &Identifier() const noexcept;
 	ExplicitInputValueKind Kind() const noexcept;
@@ -56,6 +57,7 @@ public:
 	bool BooleanValue() const;
 	std::int64_t BigIntValue() const;
 	const std::string &VarcharValue() const;
+	double DoubleValue() const;
 
 	bool operator==(const ExplicitInput &other) const noexcept;
 	bool operator!=(const ExplicitInput &other) const noexcept;
@@ -68,7 +70,7 @@ public:
 
 private:
 	ExplicitInput(std::string identifier, ExplicitInputValueKind kind, bool is_null, bool boolean_value,
-	              std::int64_t bigint_value, std::string varchar_value);
+	              std::int64_t bigint_value, std::string varchar_value, double double_value);
 
 	std::string identifier;
 	ExplicitInputValueKind kind;
@@ -76,6 +78,7 @@ private:
 	bool boolean_value;
 	std::int64_t bigint_value;
 	std::string varchar_value;
+	double double_value;
 };
 
 // Query's immutable ordered set of supplied relation arguments. Construction

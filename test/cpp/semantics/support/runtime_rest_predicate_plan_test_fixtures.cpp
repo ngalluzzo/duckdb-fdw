@@ -13,6 +13,7 @@ namespace duckdb_api_test {
 namespace {
 
 const char RUNTIME_EXACT_REST_PREDICATE_RELATION[] = "bigint_predicates";
+const char RUNTIME_EXACT_DOUBLE_REST_PREDICATE_RELATION[] = "double_predicates";
 
 duckdb_api::ScanRequest RuntimeRestPredicateRequest(const duckdb_api::CompiledConnector &connector,
                                                     const std::string &relation_name, bool selective_predicate) {
@@ -34,6 +35,19 @@ duckdb_api::ScanPlan BuildRuntimeRestPredicatePlan(const duckdb_api::CompiledPac
 	    RuntimeRestPredicateRequest(generation.Connector(), relation_name, selective_predicate));
 }
 
+duckdb_api::ScanRequest RuntimeDoubleRestPredicateRequest(const duckdb_api::CompiledConnector &connector,
+                                                          const std::string &relation_name) {
+	auto request =
+	    duckdb_api::BuildConservativeScanRequest(connector, relation_name, duckdb_api::LogicalSecretReference());
+	request.requested_predicate = duckdb_api::RequestedPredicate::Comparison(
+	    1, duckdb_api::RequestedPredicateValueKind::DOUBLE, duckdb_api::RequestedPredicateComparisonOperator::EQUALS,
+	    duckdb_api::RequestedPredicateValue::Double(3.5));
+	request.retained_predicate_scope = duckdb_api::RetainedPredicateScope::REQUESTED_PREDICATE;
+	request.capabilities.selective_predicate = true;
+	request.capabilities.retains_predicate = true;
+	return request;
+}
+
 std::size_t ConditionalBindingIndex(const duckdb_api::PlannedRestOperation &operation) {
 	for (std::size_t index = 0; index < operation.query_bindings.size(); index++) {
 		if (operation.query_bindings[index].Source() == duckdb_api::PlannedRestQueryValueSource::CONDITIONAL_INPUT) {
@@ -48,6 +62,13 @@ std::size_t ConditionalBindingIndex(const duckdb_api::PlannedRestOperation &oper
 duckdb_api::ScanPlan BuildRuntimeExactRestPredicatePlanFixture() {
 	const auto generation = BuildTypedPredicatePackageGenerationFixture();
 	return BuildRuntimeRestPredicatePlan(generation, RUNTIME_EXACT_REST_PREDICATE_RELATION, true);
+}
+
+duckdb_api::ScanPlan BuildRuntimeExactDoubleRestPredicatePlanFixture() {
+	const auto generation = BuildTypedPredicatePackageGenerationFixture();
+	return duckdb_api::BuildConservativeScanPlan(
+	    generation.Connector(),
+	    RuntimeDoubleRestPredicateRequest(generation.Connector(), RUNTIME_EXACT_DOUBLE_REST_PREDICATE_RELATION));
 }
 
 duckdb_api::ScanPlan BuildRuntimeResidualOnlyRestPredicatePlanFixture() {

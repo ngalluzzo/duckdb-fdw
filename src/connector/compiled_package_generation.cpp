@@ -272,19 +272,25 @@ CompiledGenerationHandle CompiledPackageGeneration::OpaqueHandle() const {
 namespace internal {
 
 CompiledScalarValue CompiledModelBuilder::Null(CompiledScalarType type) {
-	return CompiledScalarValue(type, true, false, 0, "");
+	return CompiledScalarValue(type, true, false, 0, "", 0.0);
 }
 
 CompiledScalarValue CompiledModelBuilder::Boolean(bool value) {
-	return CompiledScalarValue(CompiledScalarType::BOOLEAN, false, value, 0, "");
+	return CompiledScalarValue(CompiledScalarType::BOOLEAN, false, value, 0, "", 0.0);
 }
 
 CompiledScalarValue CompiledModelBuilder::Bigint(std::int64_t value) {
-	return CompiledScalarValue(CompiledScalarType::BIGINT, false, false, value, "");
+	return CompiledScalarValue(CompiledScalarType::BIGINT, false, false, value, "", 0.0);
 }
 
 CompiledScalarValue CompiledModelBuilder::Varchar(std::string value) {
-	return CompiledScalarValue(CompiledScalarType::VARCHAR, false, false, 0, std::move(value));
+	return CompiledScalarValue(CompiledScalarType::VARCHAR, false, false, 0, std::move(value), 0.0);
+}
+
+CompiledScalarValue CompiledModelBuilder::Double(double value) {
+	// RFC 0020: -0.0 is normalized to 0.0 at construction so every consumer
+	// (equality comparison, encoding, diagnostics) sees one canonical zero.
+	return CompiledScalarValue(CompiledScalarType::DOUBLE, false, false, 0, "", value == 0.0 ? 0.0 : value);
 }
 
 CompiledInputDefault CompiledModelBuilder::NoDefault() {

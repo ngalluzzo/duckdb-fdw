@@ -33,6 +33,54 @@ bool IsCanonicalInteger(const std::string &value) {
 	return true;
 }
 
+// RFC 0020: a JSON-number-shaped fixture value (optional '-', digits with no
+// unnecessary leading zero, optional '.' fraction, optional exponent),
+// rejecting non-numeric text (including "nan"/"inf") before strtod ever sees
+// it, and rejecting true overflow (HUGE_VAL).
+bool IsCanonicalDoubleFixture(const std::string &value) {
+	if (value.empty()) {
+		return false;
+	}
+	std::size_t index = value.front() == '-' ? 1 : 0;
+	const std::size_t integer_start = index;
+	while (index < value.size() && IsDigit(value[index])) {
+		index++;
+	}
+	if (index == integer_start || (value[integer_start] == '0' && index - integer_start > 1)) {
+		return false;
+	}
+	if (index < value.size() && value[index] == '.') {
+		index++;
+		const std::size_t fraction_start = index;
+		while (index < value.size() && IsDigit(value[index])) {
+			index++;
+		}
+		if (index == fraction_start) {
+			return false;
+		}
+	}
+	if (index < value.size() && (value[index] == 'e' || value[index] == 'E')) {
+		index++;
+		if (index < value.size() && (value[index] == '+' || value[index] == '-')) {
+			index++;
+		}
+		const std::size_t exponent_start = index;
+		while (index < value.size() && IsDigit(value[index])) {
+			index++;
+		}
+		if (index == exponent_start) {
+			return false;
+		}
+	}
+	if (index != value.size()) {
+		return false;
+	}
+	errno = 0;
+	char *end = nullptr;
+	const double result = std::strtod(value.c_str(), &end);
+	return end == value.c_str() + value.size() && result != HUGE_VAL && result != -HUGE_VAL;
+}
+
 } // namespace
 
 const char *const INDEX_FILE = "fixtures/index.yaml";
@@ -163,6 +211,8 @@ bool IsTypedScalar(CompiledScalarType type, const std::string &value) {
 	}
 	case CompiledScalarType::VARCHAR:
 		return value.size() <= 1024ULL * 1024ULL;
+	case CompiledScalarType::DOUBLE:
+		return IsCanonicalDoubleFixture(value);
 	}
 	return false;
 }

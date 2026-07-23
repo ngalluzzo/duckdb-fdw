@@ -158,6 +158,8 @@ std::string ScalarTypeName(CompiledScalarType type) {
 		return "BIGINT";
 	case CompiledScalarType::VARCHAR:
 		return "VARCHAR";
+	case CompiledScalarType::DOUBLE:
+		return "DOUBLE";
 	}
 	throw std::logic_error("compiled column has an unknown scalar type");
 }
@@ -170,6 +172,8 @@ std::string ScalarLiteral(CompiledScalarType type) {
 		return "0";
 	case CompiledScalarType::VARCHAR:
 		return "fixture";
+	case CompiledScalarType::DOUBLE:
+		return "0.0";
 	}
 	throw std::logic_error("compiled column has an unknown scalar type");
 }

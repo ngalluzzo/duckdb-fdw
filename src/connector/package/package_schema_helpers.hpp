@@ -41,6 +41,13 @@ bool IsGraphqlName(const std::string &value);
 bool IsCanonicalUnsigned(const LocatedText &value, std::uint64_t &parsed);
 bool IsCanonicalSigned(const LocatedText &value, std::int64_t &parsed);
 bool IsPlainBoolean(const LocatedText &value, bool &parsed);
+// RFC 0020: a plain-style JSON-number-shaped scalar (optional '-', digits
+// with no unnecessary leading zero, optional '.' fraction, optional
+// exponent), converted via strtod and rejecting only true overflow
+// (HUGE_VAL); -0.0 is normalized to 0.0. Author-declared "nan"/"inf"/
+// "infinity" text is rejected by the grammar check before strtod ever sees
+// it, since those are not JSON-number-shaped.
+bool IsCanonicalDouble(const LocatedText &value, double &parsed);
 bool IsExtractor(const std::string &value, bool collection, std::vector<std::string> *segments = nullptr);
 bool IsFixedPath(const std::string &value);
 bool IsHeaderName(const std::string &value);

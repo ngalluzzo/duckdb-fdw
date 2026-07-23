@@ -4,12 +4,28 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <set>
+#include <stdexcept>
 #include <utility>
 
 namespace duckdb_api {
 namespace internal {
 namespace {
+
+// RFC 0020: 17 significant decimal digits is the smallest fixed precision
+// proven to round-trip any IEEE-754 double bit-for-bit (Steele & White). Must
+// stay byte-identical to Connector's and Semantics' own EncodeCanonicalDouble
+// (protocol_operation_declaration.cpp, planned_protocol_operation.cpp,
+// rest_operation_planner.cpp) for the same double value.
+std::string EncodeCanonicalDouble(double value) {
+	char buffer[64];
+	const int written = std::snprintf(buffer, sizeof(buffer), "%.17g", value);
+	if (written <= 0 || static_cast<std::size_t>(written) >= sizeof(buffer)) {
+		throw std::invalid_argument("REST query DOUBLE could not be canonically encoded");
+	}
+	return std::string(buffer, static_cast<std::size_t>(written));
+}
 
 bool TryColumnKind(const std::string &logical_type, ValueKind &kind) {
 	if (logical_type == "VARCHAR") {
@@ -22,6 +38,10 @@ bool TryColumnKind(const std::string &logical_type, ValueKind &kind) {
 	}
 	if (logical_type == "BOOLEAN") {
 		kind = ValueKind::BOOLEAN;
+		return true;
+	}
+	if (logical_type == "DOUBLE") {
+		kind = ValueKind::DOUBLE;
 		return true;
 	}
 	return false;
@@ -37,6 +57,9 @@ bool TryColumnKind(PlannedRestScalarKind planned, ValueKind &kind) {
 		return true;
 	case PlannedRestScalarKind::VARCHAR:
 		kind = ValueKind::VARCHAR;
+		return true;
+	case PlannedRestScalarKind::DOUBLE:
+		kind = ValueKind::DOUBLE;
 		return true;
 	}
 	return false;
@@ -138,6 +161,8 @@ bool MatchesConditionalAuthority(const PlannedRestQueryBinding &binding,
 		return binding.BigintValue() == authority.bigint_value;
 	case PlannedRestScalarKind::VARCHAR:
 		return binding.VarcharValue() == authority.varchar_value;
+	case PlannedRestScalarKind::DOUBLE:
+		return binding.DoubleValue() == authority.double_value;
 	}
 	return false;
 }
@@ -177,6 +202,8 @@ bool HasCanonicalBinding(const PlannedRestQueryBinding &binding, const RestCondi
 		return binding.EncodedValue() == std::to_string(binding.BigintValue());
 	case PlannedRestScalarKind::VARCHAR:
 		return binding.EncodedValue() == FormUrlEncode(binding.VarcharValue());
+	case PlannedRestScalarKind::DOUBLE:
+		return binding.EncodedValue() == EncodeCanonicalDouble(binding.DoubleValue());
 	}
 	return false;
 }

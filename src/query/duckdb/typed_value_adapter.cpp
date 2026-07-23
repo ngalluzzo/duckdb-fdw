@@ -14,6 +14,8 @@ LogicalType LogicalTypeForKind(duckdb_api::ValueKind kind) {
 		return LogicalType::VARCHAR;
 	case duckdb_api::ValueKind::BOOLEAN:
 		return LogicalType::BOOLEAN;
+	case duckdb_api::ValueKind::DOUBLE:
+		return LogicalType::DOUBLE;
 	}
 	throw std::logic_error("runtime value contract contains an unknown scalar kind");
 }
@@ -29,6 +31,8 @@ duckdb_api::ValueKind ValueKindForScalarKind(duckdb_api::PlannedColumnScalarKind
 		return duckdb_api::ValueKind::VARCHAR;
 	case duckdb_api::PlannedColumnScalarKind::BOOLEAN:
 		return duckdb_api::ValueKind::BOOLEAN;
+	case duckdb_api::PlannedColumnScalarKind::DOUBLE:
+		return duckdb_api::ValueKind::DOUBLE;
 	}
 	throw std::logic_error("planned column contains an unknown scalar kind");
 }
@@ -44,6 +48,8 @@ Value DuckdbValue(const duckdb_api::TypedValue &value, const PlannedValueColumn 
 		return Value(value.varchar_value);
 	case duckdb_api::ValueKind::BOOLEAN:
 		return Value::BOOLEAN(value.boolean_value);
+	case duckdb_api::ValueKind::DOUBLE:
+		return Value::DOUBLE(value.double_value);
 	}
 	throw std::logic_error("runtime value contract contains an unknown scalar kind");
 }

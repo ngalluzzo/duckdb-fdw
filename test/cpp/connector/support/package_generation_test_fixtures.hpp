@@ -11,6 +11,7 @@ extern const char PACKAGE_DISTINCT_RELATION[];
 extern const char PACKAGE_PREDICATE_RELATION[];
 extern const char PACKAGE_RESIDUAL_PREDICATE_RELATION[];
 extern const char PACKAGE_REST_MATERIALIZATION_RELATION[];
+extern const char PACKAGE_DOUBLE_INPUT_RELATION[];
 
 // Closed structural variants used to prove every RFC 0013 reload category.
 // They are valid immutable generations, not malformed-construction probes.
@@ -92,5 +93,14 @@ BuildDistinctPackageGenerationFixture(const std::string &package_version = "1.2.
 duckdb_api::CompiledPackageGeneration BuildPackageCompatibilityFixture(PackageCompatibilityFixture variant,
                                                                        const std::string &package_version = "1.2.3",
                                                                        char digest_fill = 'd');
+
+// RFC 0020: a minimal one-relation, one-input package isolated from every
+// other fixture in this file, whose sole relation input is DOUBLE (default
+// 2.5) and is materialized into a REST query parameter. Used to prove
+// input_resolution.cpp's DOUBLE relation-input resolution (TypesAgree,
+// ExplicitValue, DefaultValue) through the real production planner without
+// risking any other fixture's shared relation-input shape or input count.
+duckdb_api::CompiledPackageGeneration
+BuildDoubleRelationInputPackageGenerationFixture(const std::string &package_version = "1.2.3", char digest_fill = '9');
 
 } // namespace duckdb_api_test

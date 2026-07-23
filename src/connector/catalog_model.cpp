@@ -46,6 +46,7 @@ void ValidateScalarType(CompiledScalarType type) {
 	case CompiledScalarType::BOOLEAN:
 	case CompiledScalarType::BIGINT:
 	case CompiledScalarType::VARCHAR:
+	case CompiledScalarType::DOUBLE:
 		return;
 	}
 	throw std::invalid_argument("compiled value contains an unknown scalar type");
@@ -60,6 +61,9 @@ CompiledScalarType ScalarTypeFromName(const std::string &logical_type) {
 	}
 	if (logical_type == "VARCHAR") {
 		return CompiledScalarType::VARCHAR;
+	}
+	if (logical_type == "DOUBLE") {
+		return CompiledScalarType::DOUBLE;
 	}
 	throw std::invalid_argument("compiled relation contains an unsupported logical type");
 }
@@ -210,24 +214,28 @@ const char *CompiledScalarTypeName(CompiledScalarType type) {
 		return "BIGINT";
 	case CompiledScalarType::VARCHAR:
 		return "VARCHAR";
+	case CompiledScalarType::DOUBLE:
+		return "DOUBLE";
 	}
 	throw std::logic_error("compiled value contains an unknown scalar type");
 }
 
 CompiledScalarValue::CompiledScalarValue(CompiledScalarType type_p, bool is_null_p, bool boolean_value_p,
-                                         std::int64_t bigint_value_p, std::string varchar_value_p)
+                                         std::int64_t bigint_value_p, std::string varchar_value_p,
+                                         double double_value_p)
     : type(type_p), is_null(is_null_p), boolean_value(boolean_value_p), bigint_value(bigint_value_p),
-      varchar_value(std::move(varchar_value_p)) {
+      varchar_value(std::move(varchar_value_p)), double_value(double_value_p) {
 	ValidateScalarType(type);
 	if (is_null) {
-		if (boolean_value || bigint_value != 0 || !varchar_value.empty()) {
+		if (boolean_value || bigint_value != 0 || !varchar_value.empty() || double_value != 0.0) {
 			throw std::invalid_argument("compiled NULL scalar contains a concrete payload");
 		}
 		return;
 	}
 	if ((type != CompiledScalarType::BOOLEAN && boolean_value) ||
 	    (type != CompiledScalarType::BIGINT && bigint_value != 0) ||
-	    (type != CompiledScalarType::VARCHAR && !varchar_value.empty())) {
+	    (type != CompiledScalarType::VARCHAR && !varchar_value.empty()) ||
+	    (type != CompiledScalarType::DOUBLE && double_value != 0.0)) {
 		throw std::invalid_argument("compiled scalar contains a payload for another type");
 	}
 }
@@ -259,6 +267,13 @@ const std::string &CompiledScalarValue::Varchar() const {
 		throw std::logic_error("compiled scalar is not a concrete VARCHAR");
 	}
 	return varchar_value;
+}
+
+double CompiledScalarValue::Double() const {
+	if (is_null || type != CompiledScalarType::DOUBLE) {
+		throw std::logic_error("compiled scalar is not a concrete DOUBLE");
+	}
+	return double_value;
 }
 
 CompiledInputDefault::CompiledInputDefault() : has_default(false), value() {

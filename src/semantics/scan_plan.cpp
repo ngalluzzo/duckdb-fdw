@@ -18,6 +18,8 @@ bool SameTypedValue(const PlannedEqualityPredicate &predicate, const PlannedRest
 		return predicate.BigintValue() == binding.BigintValue();
 	case PlannedRestScalarKind::VARCHAR:
 		return predicate.VarcharValue() == binding.VarcharValue();
+	case PlannedRestScalarKind::DOUBLE:
+		return predicate.DoubleValue() == binding.DoubleValue();
 	}
 	throw std::logic_error("planned typed equality contains an unknown scalar kind");
 }
@@ -28,13 +30,14 @@ PlannedEqualityPredicate::PlannedEqualityPredicate(std::string column_name_p,
                                                    PlannedPredicateOperator predicate_operator_p,
                                                    PlannedRestScalarKind kind_p, bool boolean_value_p,
                                                    std::int64_t bigint_value_p, std::string varchar_value_p,
-                                                   std::string conditional_input_id_p, std::string proof_identity_p,
-                                                   std::string base_domain_identity_p,
+                                                   double double_value_p, std::string conditional_input_id_p,
+                                                   std::string proof_identity_p, std::string base_domain_identity_p,
                                                    PlannedOccurrencePreservation occurrence_preservation_p)
     : column_name(std::move(column_name_p)), predicate_operator(predicate_operator_p), kind(kind_p),
       boolean_value(boolean_value_p), bigint_value(bigint_value_p), varchar_value(std::move(varchar_value_p)),
-      conditional_input_id(std::move(conditional_input_id_p)), proof_identity(std::move(proof_identity_p)),
-      base_domain_identity(std::move(base_domain_identity_p)), occurrence_preservation(occurrence_preservation_p) {
+      double_value(double_value_p), conditional_input_id(std::move(conditional_input_id_p)),
+      proof_identity(std::move(proof_identity_p)), base_domain_identity(std::move(base_domain_identity_p)),
+      occurrence_preservation(occurrence_preservation_p) {
 	if (column_name.empty() || conditional_input_id.empty() || proof_identity.empty() || base_domain_identity.empty()) {
 		throw std::invalid_argument("planned typed equality requires complete mapping and proof identities");
 	}
@@ -43,18 +46,23 @@ PlannedEqualityPredicate::PlannedEqualityPredicate(std::string column_name_p,
 	}
 	switch (kind) {
 	case PlannedRestScalarKind::BOOLEAN:
-		if (bigint_value != 0 || !varchar_value.empty()) {
+		if (bigint_value != 0 || !varchar_value.empty() || double_value != 0.0) {
 			throw std::invalid_argument("BOOLEAN typed equality carries a noncanonical inactive payload");
 		}
 		break;
 	case PlannedRestScalarKind::BIGINT:
-		if (boolean_value || !varchar_value.empty()) {
+		if (boolean_value || !varchar_value.empty() || double_value != 0.0) {
 			throw std::invalid_argument("BIGINT typed equality carries a noncanonical inactive payload");
 		}
 		break;
 	case PlannedRestScalarKind::VARCHAR:
-		if (boolean_value || bigint_value != 0) {
+		if (boolean_value || bigint_value != 0 || double_value != 0.0) {
 			throw std::invalid_argument("VARCHAR typed equality carries a noncanonical inactive payload");
+		}
+		break;
+	case PlannedRestScalarKind::DOUBLE:
+		if (boolean_value || bigint_value != 0 || !varchar_value.empty()) {
+			throw std::invalid_argument("DOUBLE typed equality carries a noncanonical inactive payload");
 		}
 		break;
 	default:
@@ -100,6 +108,13 @@ const std::string &PlannedEqualityPredicate::VarcharValue() const {
 		throw std::logic_error("planned typed equality is not a VARCHAR");
 	}
 	return varchar_value;
+}
+
+double PlannedEqualityPredicate::DoubleValue() const {
+	if (kind != PlannedRestScalarKind::DOUBLE) {
+		throw std::logic_error("planned typed equality is not a DOUBLE");
+	}
+	return double_value;
 }
 
 const std::string &PlannedEqualityPredicate::ConditionalInputId() const noexcept {
@@ -359,6 +374,9 @@ PlannedColumnScalarKind PlannedColumn::ScalarKind() const {
 	}
 	if (logical_type == "VARCHAR") {
 		return PlannedColumnScalarKind::VARCHAR;
+	}
+	if (logical_type == "DOUBLE") {
+		return PlannedColumnScalarKind::DOUBLE;
 	}
 	throw std::logic_error("planned column contains an unsupported logical type");
 }

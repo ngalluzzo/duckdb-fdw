@@ -356,6 +356,16 @@ bool RenderGraphqlOperation(const RelationDeclaration &relation, const Operation
 	for (std::size_t index = 0; index < relation.columns.size(); index++) {
 		const auto &column = relation.columns[index];
 		const auto &selection = query.selection[index];
+		// RFC 0020: DOUBLE has no GraphQL-side representation today (GraphQL
+		// relations render/decode only STRING/INT64/BOOLEAN); reject rather
+		// than silently decode a DOUBLE column as STRING, mirroring RFC
+		// 0018's precedent of rejecting a REST-only capability on GraphQL
+		// operations with a precise compile-time diagnostic instead of a
+		// silent runtime mismatch.
+		if (column.type.value == "DOUBLE") {
+			AddProfileError(relation, operation, column.type.mark, diagnostics);
+			return false;
+		}
 		CompiledGraphqlScalarKind kind = CompiledGraphqlScalarKind::STRING;
 		if (column.type.value == "BIGINT") {
 			kind = CompiledGraphqlScalarKind::INT64;

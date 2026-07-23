@@ -14,6 +14,7 @@ const char PACKAGE_DISTINCT_RELATION[] = "distinct_status";
 const char PACKAGE_PREDICATE_RELATION[] = "controlled_exact_repositories";
 const char PACKAGE_RESIDUAL_PREDICATE_RELATION[] = "residual_predicates";
 const char PACKAGE_REST_MATERIALIZATION_RELATION[] = "materialized_records";
+const char PACKAGE_DOUBLE_INPUT_RELATION[] = "double_input_records";
 
 namespace {
 
@@ -334,6 +335,8 @@ duckdb_api::CompiledPackageGeneration BuildTypedPredicateGeneration(const std::s
 	relations.push_back(BuildScalarPredicateRelation(digest, "varchar_predicates", "visibility",
 	                                                 CompiledScalarType::VARCHAR, CompiledModelBuilder::Varchar(""),
 	                                                 ""));
+	relations.push_back(BuildScalarPredicateRelation(digest, "double_predicates", "score", CompiledScalarType::DOUBLE,
+	                                                 CompiledModelBuilder::Double(3.5), "3.5"));
 	auto identity = CompiledModelBuilder::PackageIdentity("duckdb_api/v1", "typed_predicate_package", version, digest);
 	auto connector =
 	    CompiledModelBuilder::Connector(CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA, "typed_predicate_package",
@@ -419,6 +422,41 @@ duckdb_api::CompiledPackageGeneration BuildRestMaterializationGeneration(const s
 	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
 }
 
+duckdb_api::CompiledPackageGeneration BuildDoubleRelationInputGeneration(const std::string &version, char digest_fill) {
+	std::vector<duckdb_api::CompiledColumn> columns;
+	columns.push_back(CompiledModelBuilder::Column("record_id", CompiledScalarType::BIGINT, false, "$.record_id"));
+	std::vector<duckdb_api::CompiledRelationInput> inputs;
+	inputs.push_back(CompiledModelBuilder::Input("threshold", CompiledScalarType::DOUBLE, false,
+	                                             CompiledModelBuilder::Default(CompiledModelBuilder::Double(2.5))));
+	std::vector<CompiledOperation> operations;
+	operations.push_back(
+	    CompiledOperation {"double_input_records_selected",
+	                       true,
+	                       CompiledOperationCardinality::ZERO_TO_MANY,
+	                       CompiledProtocol::REST,
+	                       CompiledHttpMethod::GET,
+	                       CompiledReplaySafety::SAFE,
+	                       false,
+	                       CompiledModelBuilder::DisabledPagination(),
+	                       {Origin("predicate-proof.invalid"),
+	                        "/fixtures/double-input-records",
+	                        {CompiledModelBuilder::RelationInputQueryParameter("threshold_name", "threshold")},
+	                        {{"X-Connector-Fixture", "double-input-records"}}},
+	                       CompiledResponseSource::JSON_PATH_MANY,
+	                       "$.records[*]",
+	                       CompiledModelBuilder::V1OperationSelector({})});
+	std::vector<CompiledRelation> relations;
+	relations.push_back(ConnectorCatalogTestAccess::Relation(
+	    PACKAGE_DOUBLE_INPUT_RELATION, std::move(columns), std::move(inputs), std::move(operations),
+	    ConnectorCatalogTestAccess::Anonymous(), ConnectorCatalogTestAccess::UnpaginatedResources(1, 64)));
+	const auto digest = Digest(digest_fill);
+	auto identity = CompiledModelBuilder::PackageIdentity("duckdb_api/v1", "double_input_package", version, digest);
+	auto connector =
+	    CompiledModelBuilder::Connector(CompiledConnectorOrigin::PACKAGE_COMPILED_METADATA, "double_input_package",
+	                                    version, std::move(relations), NetworkPolicy(false));
+	return CompiledModelBuilder::PackageGeneration(std::move(identity), std::move(connector));
+}
+
 } // namespace
 
 duckdb_api::CompiledPackageGeneration BuildTypedFallbackPackageGenerationFixture(const std::string &package_version,
@@ -460,6 +498,11 @@ duckdb_api::CompiledPackageGeneration BuildPackageCompatibilityFixture(PackageCo
                                                                        const std::string &package_version,
                                                                        char digest_fill) {
 	return BuildGeneration(variant, false, package_version, digest_fill);
+}
+
+duckdb_api::CompiledPackageGeneration
+BuildDoubleRelationInputPackageGenerationFixture(const std::string &package_version, char digest_fill) {
+	return BuildDoubleRelationInputGeneration(package_version, digest_fill);
 }
 
 } // namespace duckdb_api_test

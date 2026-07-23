@@ -1,5 +1,6 @@
 #include "duckdb_api/planned_protocol_operation.hpp"
 
+#include <cstdio>
 #include <stdexcept>
 #include <utility>
 
@@ -84,16 +85,30 @@ std::string FormUrlEncode(const std::string &value) {
 	return result;
 }
 
+// RFC 0020: 17 significant decimal digits is the smallest fixed precision
+// proven to round-trip any IEEE-754 double bit-for-bit (Steele & White). Must
+// stay byte-identical to Connector's EncodeCanonicalDouble
+// (protocol_operation_declaration.cpp) and Remote Runtime's Encode(...)
+// (rest_operation_planner.cpp) for the same double value.
+std::string EncodeCanonicalDouble(double value) {
+	char buffer[64];
+	const int written = std::snprintf(buffer, sizeof(buffer), "%.17g", value);
+	if (written <= 0 || static_cast<std::size_t>(written) >= sizeof(buffer)) {
+		throw std::invalid_argument("planned REST query DOUBLE could not be canonically encoded");
+	}
+	return std::string(buffer, static_cast<std::size_t>(written));
+}
+
 } // namespace
 
 PlannedRestQueryBinding::PlannedRestQueryBinding(std::string name_p, PlannedRestQueryValueSource source_p,
                                                  std::string source_id_p, PlannedRestScalarKind kind_p,
                                                  bool boolean_value_p, std::int64_t bigint_value_p,
-                                                 std::string varchar_value_p, PlannedRestQueryEncoding encoding_p,
-                                                 std::string encoded_value_p)
+                                                 std::string varchar_value_p, double double_value_p,
+                                                 PlannedRestQueryEncoding encoding_p, std::string encoded_value_p)
     : name(std::move(name_p)), source(source_p), source_id(std::move(source_id_p)), kind(kind_p),
       boolean_value(boolean_value_p), bigint_value(bigint_value_p), varchar_value(std::move(varchar_value_p)),
-      encoding(encoding_p), encoded_value(std::move(encoded_value_p)) {
+      double_value(double_value_p), encoding(encoding_p), encoded_value(std::move(encoded_value_p)) {
 	if (name.empty()) {
 		throw std::invalid_argument("planned REST query binding name must not be empty");
 	}
@@ -116,20 +131,25 @@ PlannedRestQueryBinding::PlannedRestQueryBinding(std::string name_p, PlannedRest
 	}
 	switch (kind) {
 	case PlannedRestScalarKind::BOOLEAN:
-		if (bigint_value != 0 || !varchar_value.empty()) {
+		if (bigint_value != 0 || !varchar_value.empty() || double_value != 0.0) {
 			throw std::invalid_argument("BOOLEAN REST query binding carries a noncanonical inactive payload");
 		}
 		break;
 	case PlannedRestScalarKind::BIGINT:
-		if (boolean_value || !varchar_value.empty()) {
+		if (boolean_value || !varchar_value.empty() || double_value != 0.0) {
 			throw std::invalid_argument("BIGINT REST query binding carries a noncanonical inactive payload");
 		}
 		break;
 	case PlannedRestScalarKind::VARCHAR:
-		if (boolean_value || bigint_value != 0) {
+		if (boolean_value || bigint_value != 0 || double_value != 0.0) {
 			throw std::invalid_argument("VARCHAR REST query binding carries a noncanonical inactive payload");
 		}
 		ValidateVarchar(varchar_value);
+		break;
+	case PlannedRestScalarKind::DOUBLE:
+		if (boolean_value || bigint_value != 0 || !varchar_value.empty()) {
+			throw std::invalid_argument("DOUBLE REST query binding carries a noncanonical inactive payload");
+		}
 		break;
 	default:
 		throw std::invalid_argument("planned REST query binding has an unknown scalar kind");
@@ -147,6 +167,9 @@ PlannedRestQueryBinding::PlannedRestQueryBinding(std::string name_p, PlannedRest
 		break;
 	case PlannedRestScalarKind::VARCHAR:
 		expected_encoded_value = FormUrlEncode(varchar_value);
+		break;
+	case PlannedRestScalarKind::DOUBLE:
+		expected_encoded_value = EncodeCanonicalDouble(double_value);
 		break;
 	default:
 		throw std::logic_error("validated REST query binding lost its scalar kind");
@@ -191,6 +214,13 @@ const std::string &PlannedRestQueryBinding::VarcharValue() const {
 		throw std::logic_error("planned REST query binding is not a VARCHAR");
 	}
 	return varchar_value;
+}
+
+double PlannedRestQueryBinding::DoubleValue() const {
+	if (kind != PlannedRestScalarKind::DOUBLE) {
+		throw std::logic_error("planned REST query binding is not a DOUBLE");
+	}
+	return double_value;
 }
 
 PlannedRestQueryEncoding PlannedRestQueryBinding::Encoding() const noexcept {

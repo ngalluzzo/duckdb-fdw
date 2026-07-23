@@ -142,6 +142,26 @@ void TestPlannerProducedExactAndResidualOnlyPlansRemainDistinct() {
 	}
 }
 
+void TestDoubleTypedEqualityReachesRealRequest() {
+	// RFC 0020: proves a DOUBLE predicate reaches the actual constructed REST
+	// request (not merely a correct result via DuckDB's residual fallback).
+	const auto plan = duckdb_api_test::BuildRuntimeExactDoubleRestPredicatePlanFixture();
+	Require(plan.RemoteAccuracy() == duckdb_api::RemotePredicateAccuracy::EXACT && plan.TypedEquality() != nullptr &&
+	            plan.TypedEquality()->Kind() == duckdb_api::PlannedRestScalarKind::DOUBLE &&
+	            plan.TypedEquality()->DoubleValue() == 3.5,
+	        "planner-produced DOUBLE exact fixture lost its typed conditional authority");
+	auto admitted = duckdb_api::internal::TryAdmitSingleResponseHttpPlan(plan, PredicateProofExecutionProfile());
+	Require(static_cast<bool>(admitted), "planner-produced DOUBLE REST predicate plan was not admitted");
+	std::size_t score_filter_count = 0;
+	for (const auto &parameter : admitted->QueryParameters()) {
+		if (parameter.name == "score_filter") {
+			score_filter_count++;
+			Require(parameter.encoded_value == "3.5", "exact DOUBLE predicate changed during materialization");
+		}
+	}
+	Require(score_filter_count == 1, "DOUBLE conditional authority did not emit exactly one request binding");
+}
+
 void TestConditionalBindingCounterexamplesFailBeforeTransport() {
 	using duckdb_api_test::RuntimeRestPredicatePlanCounterexample;
 	const RuntimeRestPredicatePlanCounterexample counterexamples[] = {
@@ -260,6 +280,7 @@ int main() {
 		TestNamesClassificationAndValidRequestFactsAreNotAuthority();
 		TestPermanentConditionalBindingUsesTypedAuthority();
 		TestPlannerProducedExactAndResidualOnlyPlansRemainDistinct();
+		TestDoubleTypedEqualityReachesRealRequest();
 		TestConditionalBindingCounterexamplesFailBeforeTransport();
 		TestNativeConditionalCompatibilityRemainsIsolated();
 		TestApiKeyAuthenticatorPlacesDeclaredHeaderAndQueryValues();

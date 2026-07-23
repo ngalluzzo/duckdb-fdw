@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <new>
@@ -133,12 +134,13 @@ public:
 
 private:
 	struct ParsedSlot {
-		ParsedSlot() : bigint_value(0), boolean_value(false), seen(false), valid(true) {
+		ParsedSlot() : bigint_value(0), boolean_value(false), double_value(0.0), seen(false), valid(true) {
 		}
 
 		int64_t bigint_value;
 		std::string varchar_value;
 		bool boolean_value;
+		double double_value;
 		bool seen;
 		bool valid;
 	};
@@ -665,6 +667,33 @@ private:
 		return static_cast<int64_t>(value);
 	}
 
+	double ParseDouble(const JsonColumnPlan &column) {
+		SkipWhitespace();
+		if (Peek() != '-' && (Peek() < '0' || Peek() > '9')) {
+			SkipValue();
+			throw ExecutionError(ErrorStage::SCHEMA, column.output_name,
+			                     "required response field has an incompatible type");
+		}
+		// Unlike ParseBigInt, a fractional part and/or exponent are accepted:
+		// DOUBLE has no integrality requirement.
+		const auto token = ParseNumberToken();
+		errno = 0;
+		char *end = nullptr;
+		const auto value = std::strtod(token.c_str(), &end);
+		if (!end || *end != '\0') {
+			throw ExecutionError(ErrorStage::SCHEMA, column.output_name,
+			                     "required response field has an incompatible type");
+		}
+		// RFC 0020: strtod sets ERANGE for both true overflow (HUGE_VAL) and
+		// benign underflow to a subnormal or exact zero. Reject only true
+		// overflow; a legitimate tiny measurement must decode, not fail.
+		if (value == HUGE_VAL || value == -HUGE_VAL) {
+			throw ExecutionError(ErrorStage::SCHEMA, column.output_name,
+			                     "required response field is outside the DOUBLE range");
+		}
+		return value == 0.0 ? 0.0 : value;
+	}
+
 	std::string ParseVarchar(const JsonColumnPlan &column) {
 		SkipWhitespace();
 		if (Peek() != '"') {
@@ -721,6 +750,9 @@ private:
 			break;
 		case ValueKind::BOOLEAN:
 			slot.boolean_value = ParseBoolean(column);
+			break;
+		case ValueKind::DOUBLE:
+			slot.double_value = ParseDouble(column);
 			break;
 		}
 		slot.seen = true;
@@ -823,6 +855,9 @@ private:
 			}
 			case ValueKind::BOOLEAN:
 				row.values.push_back(TypedValue::Boolean(slots[index].boolean_value));
+				break;
+			case ValueKind::DOUBLE:
+				row.values.push_back(TypedValue::Double(slots[index].double_value));
 				break;
 			}
 		}

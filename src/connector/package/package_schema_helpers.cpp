@@ -1,5 +1,7 @@
 #include "package_schema_helpers.hpp"
 
+#include <cerrno>
+#include <cstdlib>
 #include <limits>
 
 namespace duckdb_api {
@@ -96,6 +98,55 @@ bool IsPlainBoolean(const LocatedText &value, bool &parsed) {
 		return false;
 	}
 	parsed = value.value == "true";
+	return true;
+}
+
+bool IsCanonicalDouble(const LocatedText &value, double &parsed) {
+	if (value.style != FailsafeYamlNode::ScalarStyle::PLAIN || value.value.empty()) {
+		return false;
+	}
+	const std::string &text = value.value;
+	std::size_t index = text.front() == '-' ? 1 : 0;
+	const std::size_t integer_start = index;
+	while (index < text.size() && IsAsciiDigit(text[index])) {
+		index++;
+	}
+	if (index == integer_start || (text[integer_start] == '0' && index - integer_start > 1)) {
+		return false;
+	}
+	if (index < text.size() && text[index] == '.') {
+		index++;
+		const std::size_t fraction_start = index;
+		while (index < text.size() && IsAsciiDigit(text[index])) {
+			index++;
+		}
+		if (index == fraction_start) {
+			return false;
+		}
+	}
+	if (index < text.size() && (text[index] == 'e' || text[index] == 'E')) {
+		index++;
+		if (index < text.size() && (text[index] == '+' || text[index] == '-')) {
+			index++;
+		}
+		const std::size_t exponent_start = index;
+		while (index < text.size() && IsAsciiDigit(text[index])) {
+			index++;
+		}
+		if (index == exponent_start) {
+			return false;
+		}
+	}
+	if (index != text.size()) {
+		return false;
+	}
+	errno = 0;
+	char *end = nullptr;
+	const double result = std::strtod(text.c_str(), &end);
+	if (end != text.c_str() + text.size() || result == HUGE_VAL || result == -HUGE_VAL) {
+		return false;
+	}
+	parsed = result == 0.0 ? 0.0 : result;
 	return true;
 }
 

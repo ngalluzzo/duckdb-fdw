@@ -180,7 +180,7 @@ R"DUCKDBAPIV1({
       "required": ["id", "type", "nullable", "extract"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
-        "type": {"enum": ["BOOLEAN", "BIGINT", "VARCHAR"]},
+        "type": {"enum": ["BOOLEAN", "BIGINT", "VARCHAR", "DOUBLE"]},
         "nullable": {"$ref": "#/$defs/boolean"},
         "extract": {"$ref": "#/$defs/extractPath"}
       }
@@ -206,7 +206,7 @@ R"DUCKDBAPIV1({
       "required": ["id", "type", "nullable"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
-        "type": {"enum": ["BOOLEAN", "BIGINT", "VARCHAR"]},
+        "type": {"enum": ["BOOLEAN", "BIGINT", "VARCHAR", "DOUBLE"]},
         "nullable": {"$ref": "#/$defs/boolean"},
         "default": {
           "oneOf": [
@@ -624,7 +624,7 @@ R"DUCKDBAPIV1({
           "additionalProperties": false,
           "required": ["type", "value"],
           "properties": {
-            "type": {"enum": ["BOOLEAN", "BIGINT", "VARCHAR"]},
+            "type": {"enum": ["BOOLEAN", "BIGINT", "VARCHAR", "DOUBLE"]},
             "value": {"type": "string", "maxLength": 1048576}
           }
         },

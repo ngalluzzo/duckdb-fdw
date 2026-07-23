@@ -23,12 +23,13 @@ duckdb::unique_ptr<duckdb::LogicalGet> RepositoryGet() {
 	duckdb::vector<duckdb::LogicalType> types = {
 	    duckdb::LogicalType::BIGINT,  duckdb::LogicalType::VARCHAR, duckdb::LogicalType::BOOLEAN,
 	    duckdb::LogicalType::BOOLEAN, duckdb::LogicalType::BOOLEAN, duckdb::LogicalType::VARCHAR,
+	    duckdb::LogicalType::DOUBLE,
 	};
-	duckdb::vector<duckdb::string> names = {"id", "full_name", "private", "fork", "archived", "visibility"};
+	duckdb::vector<duckdb::string> names = {"id", "full_name", "private", "fork", "archived", "visibility", "score"};
 	auto result =
 	    duckdb::make_uniq<duckdb::LogicalGet>(71, duckdb::TableFunction(), nullptr, std::move(types), std::move(names));
 	duckdb::vector<duckdb::ColumnIndex> columns;
-	for (duckdb::idx_t index = 0; index < 6; index++) {
+	for (duckdb::idx_t index = 0; index < 7; index++) {
 		columns.emplace_back(index);
 	}
 	result->SetColumnIds(std::move(columns));
@@ -84,6 +85,10 @@ duckdb::unique_ptr<duckdb::Expression> Id(std::int64_t value) {
 	return Equals(Column(0, duckdb::LogicalType::BIGINT), Constant(duckdb::Value::BIGINT(value)));
 }
 
+duckdb::unique_ptr<duckdb::Expression> Score(double value) {
+	return Equals(Column(6, duckdb::LogicalType::DOUBLE), Constant(duckdb::Value::DOUBLE(value)));
+}
+
 duckdb::duckdb_api_query_internal::ComplexFilterTranslation
 Translate(const duckdb::LogicalGet &get, const duckdb::vector<duckdb::unique_ptr<duckdb::Expression>> &filters) {
 	return duckdb::duckdb_api_query_internal::TranslateComplexFilters(get, filters);
@@ -111,6 +116,11 @@ void TestTypedBindingsAndReversedEquality() {
 	Require(translated.candidate.Snapshot() ==
 	            "comparison[column:4,type:boolean,operator:equals,literal:boolean:false]",
 	        "BOOLEAN equality lost its exact literal identity");
+	filters.clear();
+	filters.push_back(Score(3.5));
+	translated = Translate(*get, filters);
+	Require(translated.candidate.Snapshot() == "comparison[column:6,type:double,operator:equals,literal:double:3.5]",
+	        "DOUBLE equality lost its exact literal identity");
 }
 
 void TestBooleanStructureAndOpaquePositions() {

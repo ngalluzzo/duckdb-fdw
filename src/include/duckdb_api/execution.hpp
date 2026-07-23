@@ -64,8 +64,10 @@ public:
 	virtual bool IsCancellationRequested() const noexcept = 0;
 };
 
-// DuckDB-free scalar kinds supported by the native preview runtime.
-enum class ValueKind : uint8_t { BIGINT, VARCHAR, BOOLEAN };
+// DuckDB-free scalar kinds supported by the native preview runtime. DOUBLE
+// (RFC 0020) is IEEE-754 double precision; -0.0 is normalized to 0.0 at
+// construction.
+enum class ValueKind : uint8_t { BIGINT, VARCHAR, BOOLEAN, DOUBLE };
 
 // Protocol-neutral scalar handoff owned by Remote Runtime and consumed by
 // Query Experience. Invalid values represent SQL NULL while retaining the
@@ -83,6 +85,7 @@ struct TypedValue {
 	static TypedValue BigInt(int64_t value);
 	static TypedValue Varchar(std::string value);
 	static TypedValue Boolean(bool value);
+	static TypedValue Double(double value);
 	static TypedValue Null(ValueKind kind);
 
 	ValueKind kind;
@@ -90,6 +93,7 @@ struct TypedValue {
 	int64_t bigint_value;
 	std::string varchar_value;
 	bool boolean_value;
+	double double_value;
 };
 
 struct TypedRow {

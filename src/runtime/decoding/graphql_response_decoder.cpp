@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <limits>
@@ -68,13 +69,14 @@ public:
 
 private:
 	struct Slot {
-		Slot() : seen(false), valid(true), bigint_value(0), boolean_value(false) {
+		Slot() : seen(false), valid(true), bigint_value(0), boolean_value(false), double_value(0.0) {
 		}
 		bool seen;
 		bool valid;
 		int64_t bigint_value;
 		std::string varchar_value;
 		bool boolean_value;
+		double double_value;
 	};
 
 	void ValidateProfile() {
@@ -257,6 +259,27 @@ private:
 		return static_cast<int64_t>(value);
 	}
 
+	double ParseDouble(const std::string &field) {
+		SkipWhitespace();
+		if (Peek() != '-' && (Peek() < '0' || Peek() > '9')) {
+			SkipValue();
+			throw ExecutionError(ErrorStage::SCHEMA, field, "GraphQL response field has an incompatible type");
+		}
+		const auto token = ParseNumberToken(64, field, "GraphQL number exceeded its lexical byte budget");
+		errno = 0;
+		char *end = nullptr;
+		const auto value = std::strtod(token.c_str(), &end);
+		if (!end || *end != '\0') {
+			throw ExecutionError(ErrorStage::SCHEMA, field, "GraphQL response field has an incompatible type");
+		}
+		// RFC 0020: reject only true overflow; benign underflow to a
+		// subnormal or exact zero is a legitimate, accepted result.
+		if (value == HUGE_VAL || value == -HUGE_VAL) {
+			throw ExecutionError(ErrorStage::SCHEMA, field, "GraphQL number is outside the DOUBLE range");
+		}
+		return value == 0.0 ? 0.0 : value;
+	}
+
 	bool ParseBoolean(const std::string &field) {
 		SkipWhitespace();
 		if (Peek() == 't') {
@@ -322,6 +345,9 @@ private:
 						case ValueKind::BOOLEAN:
 							slot.boolean_value = ParseBoolean(column.name);
 							break;
+						case ValueKind::DOUBLE:
+							slot.double_value = ParseDouble(column.name);
+							break;
 						}
 					}
 					slot.seen = true;
@@ -378,6 +404,8 @@ private:
 				row.values.push_back(std::move(value));
 			} else if (column.kind == ValueKind::BIGINT) {
 				row.values.push_back(TypedValue::BigInt(slot.bigint_value));
+			} else if (column.kind == ValueKind::DOUBLE) {
+				row.values.push_back(TypedValue::Double(slot.double_value));
 			} else {
 				row.values.push_back(TypedValue::Boolean(slot.boolean_value));
 			}

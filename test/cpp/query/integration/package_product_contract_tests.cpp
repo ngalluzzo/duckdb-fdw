@@ -43,6 +43,9 @@ duckdb_api::ValueKind KindFor(const std::string &logical_type) {
 	if (logical_type == "BOOLEAN") {
 		return duckdb_api::ValueKind::BOOLEAN;
 	}
+	if (logical_type == "DOUBLE") {
+		return duckdb_api::ValueKind::DOUBLE;
+	}
 	throw std::logic_error("package product fake received an unsupported output type");
 }
 
@@ -72,6 +75,9 @@ public:
 				break;
 			case duckdb_api::ValueKind::BOOLEAN:
 				row.values.push_back(duckdb_api::TypedValue::Boolean(false));
+				break;
+			case duckdb_api::ValueKind::DOUBLE:
+				row.values.push_back(duckdb_api::TypedValue::Double(1.5));
 				break;
 			}
 		}
@@ -259,6 +265,51 @@ void TestShortPageReachesRealExplainOutput(const std::string &repository_root) {
 	        "offline EXPLAIN of a short_page relation entered Runtime");
 }
 
+// RFC 0020, Query Experience review requirement: prove DOUBLE reaches real
+// DuckDB output end to end, not merely an internal LogicalTypeForKind-style
+// unit call. DESCRIBE is the oracle this repository already uses to assert a
+// literal SQL type string against a real bind (see
+// TestOfflineBindPrepareAndSafeExplanation's own DESCRIBE assertions in
+// graphql_adapter_contract_tests.cpp) — EXPLAIN's own safe explanation map
+// carries no per-column type fact, so DESCRIBE is the correct, not merely
+// convenient, real-DuckDB oracle for the type. A real SELECT through the same
+// PlanEchoExecutor fake additionally proves the decoded DOUBLE value itself
+// round-trips through WriteTypedBatch into a real DuckDB result vector.
+void TestDoubleColumnReachesRealDescribeAndSelectOutput(const std::string &repository_root) {
+	auto executor = std::shared_ptr<PlanEchoExecutor>(new PlanEchoExecutor());
+	duckdb::DuckDB database(nullptr);
+	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_double_column_describe_test");
+	duckdb::RegisterDuckdbApiSecrets(loader);
+	duckdb::RegisterDuckdbApiPackageSurface(loader, duckdb_api::BuildPackageGenerationComposition(executor));
+	duckdb::Connection connection(database);
+	const auto package = duckdb_api_test::BuildRepositoryDoubleColumnPackageFixture(repository_root);
+	auto load =
+	    connection.Query("CALL system.main.duckdb_api_load_connector(package_root := '" + package.Root() + "')");
+	Require(!load->HasError() && load->RowCount() == 1, "DOUBLE-column package fixture failed to load");
+	auto described = connection.Query(
+	    "DESCRIBE SELECT * FROM system.main.github_authenticated_repositories(secret := 'double_column_describe')");
+	if (described->HasError()) {
+		throw std::runtime_error("DOUBLE-column relation failed offline DESCRIBE: " + described->GetError());
+	}
+	bool found_double_archived = false;
+	for (duckdb::idx_t row = 0; row < described->RowCount(); row++) {
+		if (described->GetValue(0, row).ToString() == "archived" &&
+		    described->GetValue(1, row).ToString() == "DOUBLE") {
+			found_double_archived = true;
+		}
+	}
+	Require(found_double_archived,
+	        "real DESCRIBE output for a DOUBLE-column relation omitted the literal DOUBLE scalar type");
+
+	auto secret = connection.Query("CREATE TEMPORARY SECRET double_column_describe "
+	                               "(TYPE duckdb_api, PROVIDER config, TOKEN 'double-column-token')");
+	Require(!secret->HasError(), "actual-DuckDB DOUBLE-column test could not create its logical secret");
+	auto result = connection.Query(
+	    "SELECT archived FROM system.main.github_authenticated_repositories(secret := 'double_column_describe')");
+	Require(!result->HasError() && result->RowCount() == 1 && result->GetValue(0, 0).GetValue<double>() == 1.5,
+	        "a real DuckDB SELECT did not round-trip a decoded DOUBLE value through Query's vector conversion");
+}
+
 // This is the whole-graph product oracle. Runtime owns the response programs;
 // Query sees only a ScanExecutor and safe counters while the permanent package
 // supplies the declarations consumed by Connector and Semantics.
@@ -319,6 +370,7 @@ int main(int argc, char **argv) {
 		}
 		TestRealCatalogCompositionQueriesAnonymousAndAuthenticated(argv[1]);
 		TestShortPageReachesRealExplainOutput(argv[1]);
+		TestDoubleColumnReachesRealDescribeAndSelectOutput(argv[1]);
 		TestGeneratedRelationsExecuteThroughRuntime(argv[1]);
 		std::cout << "actual-DuckDB package product contract tests passed\n";
 		return EXIT_SUCCESS;

@@ -65,6 +65,10 @@ const char REPOSITORY_SOURCE_SNAPSHOT[] =
 class ScanPlanFixtureBuilder {
 public:
 	static duckdb_api::ScanPlan Anonymous();
+	// RFC 0020: an unrelated single-DOUBLE-column anonymous relation, isolated
+	// from Anonymous()'s own 3-column shape so DOUBLE-specific Runtime variant
+	// tests never risk the many consumers of that widely shared fixture.
+	static duckdb_api::ScanPlan AnonymousDoubleColumn();
 	static duckdb_api::ScanPlan Authenticated(const std::string &secret_name);
 	static duckdb_api::ScanPlan ApiKey(const std::string &secret_name, duckdb_api::PlannedCredentialPlacement placement,
 	                                   std::string placement_name);
@@ -229,6 +233,25 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Anonymous() {
 	return plan;
 }
 
+duckdb_api::ScanPlan ScanPlanFixtureBuilder::AnonymousDoubleColumn() {
+	auto plan = Common("fixture_double_column_catalog", "test-1", "fixture_double_column_records",
+	                   "fixture:double-column-records");
+	plan.domain = duckdb_api::BaseDomain::JSON_PATH_RECORDS;
+	SetRestOperation(plan, {"fixture_double_column_records",
+	                        duckdb_api::PlannedHttpMethod::GET,
+	                        duckdb_api::PlannedCardinality::ZERO_TO_MANY,
+	                        duckdb_api::PlannedReplaySafety::SAFE,
+	                        {duckdb_api::PlannedUrlScheme::HTTPS, "api.github.com", 443},
+	                        "/fixtures/double-column-records",
+	                        {},
+	                        {{"Accept", "application/json"}},
+	                        duckdb_api::PlannedResponseSource::JSON_PATH_MANY,
+	                        "$.items[*]"});
+	plan.output_columns = {{"score", "DOUBLE", false, "$.score"}};
+	plan.budgets = {1, 65536, 16384, 65536, 3, 256, 16, 131072, 2, 5000, 1, 0};
+	return plan;
+}
+
 duckdb_api::ScanPlan ScanPlanFixtureBuilder::Authenticated(const std::string &secret_name) {
 	auto plan = Common("github", "0.7.0", "authenticated_user", AUTHENTICATED_SOURCE_SNAPSHOT);
 	plan.domain = duckdb_api::BaseDomain::SUCCESSFUL_ROOT_OBJECT;
@@ -373,33 +396,33 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::DistinctRestQueryPath(const std::st
 	std::vector<duckdb_api::PlannedRestQueryBinding> bindings;
 	bindings.push_back(duckdb_api::PlannedRestQueryBinding(
 	    "view", duckdb_api::PlannedRestQueryValueSource::FIXED, "", duckdb_api::PlannedRestScalarKind::VARCHAR, false,
-	    0, "summary", duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "summary"));
-	bindings.push_back(duckdb_api::PlannedRestQueryBinding("empty_tag", duckdb_api::PlannedRestQueryValueSource::FIXED,
-	                                                       "", duckdb_api::PlannedRestScalarKind::VARCHAR, false, 0, "",
-	                                                       duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, ""));
+	    0, "summary", 0.0, duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "summary"));
+	bindings.push_back(duckdb_api::PlannedRestQueryBinding(
+	    "empty_tag", duckdb_api::PlannedRestQueryValueSource::FIXED, "", duckdb_api::PlannedRestScalarKind::VARCHAR,
+	    false, 0, "", 0.0, duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, ""));
 	bindings.push_back(
 	    duckdb_api::PlannedRestQueryBinding("include_archived", duckdb_api::PlannedRestQueryValueSource::RELATION_INPUT,
 	                                        "include_archived", duckdb_api::PlannedRestScalarKind::BOOLEAN, false, 0,
-	                                        "", duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "false"));
+	                                        "", 0.0, duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "false"));
 	bindings.push_back(
 	    duckdb_api::PlannedRestQueryBinding("min_rank", duckdb_api::PlannedRestQueryValueSource::RELATION_INPUT,
 	                                        "minimum_rank", duckdb_api::PlannedRestScalarKind::BIGINT, false, 42, "",
-	                                        duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "42"));
+	                                        0.0, duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "42"));
 	bindings.push_back(duckdb_api::PlannedRestQueryBinding(
 	    "label_filter", duckdb_api::PlannedRestQueryValueSource::RELATION_INPUT, "label",
-	    duckdb_api::PlannedRestScalarKind::VARCHAR, false, 0, "north america/β",
+	    duckdb_api::PlannedRestScalarKind::VARCHAR, false, 0, "north america/β", 0.0,
 	    duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "north+america%2F%CE%B2"));
 	bindings.push_back(duckdb_api::PlannedRestQueryBinding(
 	    "access", duckdb_api::PlannedRestQueryValueSource::CONDITIONAL_INPUT, "visibility",
-	    duckdb_api::PlannedRestScalarKind::VARCHAR, false, 0, "private",
+	    duckdb_api::PlannedRestScalarKind::VARCHAR, false, 0, "private", 0.0,
 	    duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "private"));
 	bindings.push_back(
 	    duckdb_api::PlannedRestQueryBinding("page_size", duckdb_api::PlannedRestQueryValueSource::PAGINATION_PAGE_SIZE,
-	                                        "", duckdb_api::PlannedRestScalarKind::BIGINT, false, 25, "",
+	                                        "", duckdb_api::PlannedRestScalarKind::BIGINT, false, 25, "", 0.0,
 	                                        duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "25"));
 	bindings.push_back(
 	    duckdb_api::PlannedRestQueryBinding("page", duckdb_api::PlannedRestQueryValueSource::PAGINATION_PAGE_NUMBER, "",
-	                                        duckdb_api::PlannedRestScalarKind::BIGINT, false, 1, "",
+	                                        duckdb_api::PlannedRestScalarKind::BIGINT, false, 1, "", 0.0,
 	                                        duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED, "1"));
 	SetRestOperation(plan, {"package_activity_records",
 	                        duckdb_api::PlannedHttpMethod::GET,
@@ -429,7 +452,7 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::DistinctRestQueryPath(const std::st
 	plan.typed_equality =
 	    std::shared_ptr<const duckdb_api::PlannedEqualityPredicate>(new duckdb_api::PlannedEqualityPredicate(
 	        "label", duckdb_api::PlannedPredicateOperator::EQUALS, duckdb_api::PlannedRestScalarKind::VARCHAR, false, 0,
-	        "private", "visibility", "sha256.package-proof-activity-private",
+	        "private", 0.0, "visibility", "sha256.package-proof-activity-private",
 	        "sha256.package-domain-activity-occurrences",
 	        duckdb_api::PlannedOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES));
 	plan.predicate_category = duckdb_api::PredicateDecisionCategory::SUPERSET;
@@ -447,6 +470,7 @@ bool ScanPlanFixtureBuilder::RejectsRestQueryBinding(RestQueryBindingConstructio
 	bool boolean_value = false;
 	std::int64_t bigint_value = 0;
 	std::string varchar_value = "value";
+	double double_value = 0.0;
 	duckdb_api::PlannedRestQueryEncoding encoding = duckdb_api::PlannedRestQueryEncoding::FORM_URLENCODED;
 	std::string encoded_value = "value";
 	switch (counterexample) {
@@ -517,7 +541,7 @@ bool ScanPlanFixtureBuilder::RejectsRestQueryBinding(RestQueryBindingConstructio
 	}
 	try {
 		(void)duckdb_api::PlannedRestQueryBinding("field", source, std::move(source_id), kind, boolean_value,
-		                                          bigint_value, std::move(varchar_value), encoding,
+		                                          bigint_value, std::move(varchar_value), double_value, encoding,
 		                                          std::move(encoded_value));
 		return false;
 	} catch (const std::invalid_argument &) {
@@ -554,7 +578,7 @@ bool ScanPlanFixtureBuilder::RejectsPackagePredicateMaterialization(PackagePredi
 		plan.typed_equality =
 		    std::shared_ptr<const duckdb_api::PlannedEqualityPredicate>(new duckdb_api::PlannedEqualityPredicate(
 		        "other_label", duckdb_api::PlannedPredicateOperator::EQUALS, duckdb_api::PlannedRestScalarKind::VARCHAR,
-		        false, 0, "private", "visibility", "sha256.package-proof-activity-private",
+		        false, 0, "private", 0.0, "visibility", "sha256.package-proof-activity-private",
 		        "sha256.package-domain-activity-occurrences",
 		        duckdb_api::PlannedOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES));
 		break;
@@ -562,7 +586,7 @@ bool ScanPlanFixtureBuilder::RejectsPackagePredicateMaterialization(PackagePredi
 		plan.typed_equality =
 		    std::shared_ptr<const duckdb_api::PlannedEqualityPredicate>(new duckdb_api::PlannedEqualityPredicate(
 		        "label", duckdb_api::PlannedPredicateOperator::EQUALS, duckdb_api::PlannedRestScalarKind::VARCHAR,
-		        false, 0, "private", "other_visibility", "sha256.package-proof-activity-private",
+		        false, 0, "private", 0.0, "other_visibility", "sha256.package-proof-activity-private",
 		        "sha256.package-domain-activity-occurrences",
 		        duckdb_api::PlannedOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES));
 		break;
@@ -570,7 +594,7 @@ bool ScanPlanFixtureBuilder::RejectsPackagePredicateMaterialization(PackagePredi
 		plan.typed_equality =
 		    std::shared_ptr<const duckdb_api::PlannedEqualityPredicate>(new duckdb_api::PlannedEqualityPredicate(
 		        "label", duckdb_api::PlannedPredicateOperator::EQUALS, duckdb_api::PlannedRestScalarKind::VARCHAR,
-		        false, 0, "public", "visibility", "sha256.package-proof-activity-private",
+		        false, 0, "public", 0.0, "visibility", "sha256.package-proof-activity-private",
 		        "sha256.package-domain-activity-occurrences",
 		        duckdb_api::PlannedOccurrencePreservation::PRESERVES_ALL_MATCHING_BASE_OCCURRENCES));
 		break;
@@ -728,6 +752,10 @@ duckdb_api::ScanPlan ScanPlanFixtureBuilder::Graphql(const std::string *secret_n
 
 duckdb_api::ScanPlan BuildValidAnonymousPlanFixture() {
 	return ScanPlanFixtureBuilder::Anonymous();
+}
+
+duckdb_api::ScanPlan BuildValidAnonymousDoubleColumnPlanFixture() {
+	return ScanPlanFixtureBuilder::AnonymousDoubleColumn();
 }
 
 duckdb_api::ScanPlan BuildValidAuthenticatedPlanFixture(const std::string &exact_logical_secret_name) {

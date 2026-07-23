@@ -187,10 +187,10 @@ void TestPackageGenerationFixtureBoundary() {
 
 	const auto typed_predicates = duckdb_api_test::BuildTypedPredicatePackageGenerationFixture();
 	const std::vector<std::string> typed_relation_names = {"boolean_predicates", "bigint_predicates",
-	                                                       "varchar_predicates"};
-	const std::vector<duckdb_api::CompiledScalarType> typed_relation_types = {duckdb_api::CompiledScalarType::BOOLEAN,
-	                                                                          duckdb_api::CompiledScalarType::BIGINT,
-	                                                                          duckdb_api::CompiledScalarType::VARCHAR};
+	                                                       "varchar_predicates", "double_predicates"};
+	const std::vector<duckdb_api::CompiledScalarType> typed_relation_types = {
+	    duckdb_api::CompiledScalarType::BOOLEAN, duckdb_api::CompiledScalarType::BIGINT,
+	    duckdb_api::CompiledScalarType::VARCHAR, duckdb_api::CompiledScalarType::DOUBLE};
 	Require(typed_predicates.Connector().Relations().size() == typed_relation_names.size(),
 	        "typed predicate fixture relation inventory drifted");
 	for (std::size_t index = 0; index < typed_relation_names.size(); index++) {

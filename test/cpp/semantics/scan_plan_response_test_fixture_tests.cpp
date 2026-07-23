@@ -39,7 +39,7 @@ void TestResponseCounterexamples(const std::string &canary) {
 			Require(plan.OutputColumns().front().name.empty(), "schema-name counterexample retained a name");
 			break;
 		case ResponsePlanCounterexample::UNSUPPORTED_SCHEMA_TYPE:
-			Require(plan.OutputColumns().front().logical_type == "DOUBLE",
+			Require(plan.OutputColumns().front().logical_type == "DECIMAL",
 			        "schema-type counterexample retained a supported type");
 			break;
 		case ResponsePlanCounterexample::FLIPPED_SCHEMA_NULLABILITY:

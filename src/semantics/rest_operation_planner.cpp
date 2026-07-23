@@ -2,6 +2,7 @@
 
 #include "scan_planner_internal.hpp"
 
+#include <cstdio>
 #include <stdexcept>
 #include <utility>
 
@@ -16,6 +17,8 @@ PlannedRestScalarKind PlanScalarKind(CompiledScalarType type) {
 		return PlannedRestScalarKind::BIGINT;
 	case CompiledScalarType::VARCHAR:
 		return PlannedRestScalarKind::VARCHAR;
+	case CompiledScalarType::DOUBLE:
+		return PlannedRestScalarKind::DOUBLE;
 	}
 	throw std::logic_error("compiled REST scalar has an unknown type");
 }
@@ -66,8 +69,22 @@ std::string FormUrlEncode(const std::string &value) {
 	return result;
 }
 
+// RFC 0020: 17 significant decimal digits is the smallest fixed precision
+// proven to round-trip any IEEE-754 double bit-for-bit (Steele & White). Must
+// stay byte-identical to Connector's EncodeCanonicalDouble
+// (protocol_operation_declaration.cpp) and Semantics' own EncodeCanonicalDouble
+// (planned_protocol_operation.cpp) for the same double value.
+std::string EncodeCanonicalDouble(double value) {
+	char buffer[64];
+	const int written = std::snprintf(buffer, sizeof(buffer), "%.17g", value);
+	if (written <= 0 || static_cast<std::size_t>(written) >= sizeof(buffer)) {
+		throw std::invalid_argument("planned REST query DOUBLE could not be canonically encoded");
+	}
+	return std::string(buffer, static_cast<std::size_t>(written));
+}
+
 std::string Encode(PlannedRestScalarKind kind, bool boolean_value, std::int64_t bigint_value,
-                   const std::string &varchar_value, PlannedRestQueryEncoding encoding) {
+                   const std::string &varchar_value, double double_value, PlannedRestQueryEncoding encoding) {
 	if (encoding != PlannedRestQueryEncoding::FORM_URLENCODED) {
 		throw std::logic_error("planned REST query field has an unknown encoding");
 	}
@@ -78,6 +95,8 @@ std::string Encode(PlannedRestScalarKind kind, bool boolean_value, std::int64_t 
 		return std::to_string(bigint_value);
 	case PlannedRestScalarKind::VARCHAR:
 		return FormUrlEncode(varchar_value);
+	case PlannedRestScalarKind::DOUBLE:
+		return EncodeCanonicalDouble(double_value);
 	}
 	throw std::logic_error("planned REST query field has an unknown scalar kind");
 }
@@ -87,6 +106,7 @@ struct PlannedScalar {
 	bool boolean_value;
 	std::int64_t bigint_value;
 	std::string varchar_value;
+	double double_value;
 };
 
 PlannedScalar PlanScalar(const CompiledScalarValue &value) {
@@ -95,11 +115,13 @@ PlannedScalar PlanScalar(const CompiledScalarValue &value) {
 	}
 	switch (value.Type()) {
 	case CompiledScalarType::BOOLEAN:
-		return {PlannedRestScalarKind::BOOLEAN, value.Boolean(), 0, std::string()};
+		return {PlannedRestScalarKind::BOOLEAN, value.Boolean(), 0, std::string(), 0.0};
 	case CompiledScalarType::BIGINT:
-		return {PlannedRestScalarKind::BIGINT, false, value.Bigint(), std::string()};
+		return {PlannedRestScalarKind::BIGINT, false, value.Bigint(), std::string(), 0.0};
 	case CompiledScalarType::VARCHAR:
-		return {PlannedRestScalarKind::VARCHAR, false, 0, value.Varchar()};
+		return {PlannedRestScalarKind::VARCHAR, false, 0, value.Varchar(), 0.0};
+	case CompiledScalarType::DOUBLE:
+		return {PlannedRestScalarKind::DOUBLE, false, 0, std::string(), value.Double()};
 	}
 	throw std::logic_error("compiled REST query field contains an unknown scalar type");
 }
@@ -110,11 +132,13 @@ PlannedScalar PlanScalar(const input_resolution::ResolvedRelationInput &value) {
 	}
 	switch (value.Type()) {
 	case CompiledScalarType::BOOLEAN:
-		return {PlannedRestScalarKind::BOOLEAN, value.BooleanValue(), 0, std::string()};
+		return {PlannedRestScalarKind::BOOLEAN, value.BooleanValue(), 0, std::string(), 0.0};
 	case CompiledScalarType::BIGINT:
-		return {PlannedRestScalarKind::BIGINT, false, value.BigintValue(), std::string()};
+		return {PlannedRestScalarKind::BIGINT, false, value.BigintValue(), std::string(), 0.0};
 	case CompiledScalarType::VARCHAR:
-		return {PlannedRestScalarKind::VARCHAR, false, 0, value.VarcharValue()};
+		return {PlannedRestScalarKind::VARCHAR, false, 0, value.VarcharValue(), 0.0};
+	case CompiledScalarType::DOUBLE:
+		return {PlannedRestScalarKind::DOUBLE, false, 0, std::string(), value.DoubleValue()};
 	}
 	throw std::logic_error("resolved REST relation input contains an unknown scalar type");
 }
@@ -123,7 +147,7 @@ PlannedScalar PlanScalar(const predicate_classifier::TypedEqualityDecision &valu
 	if (!value.present) {
 		throw std::logic_error("absent conditional equality reached concrete request materialization");
 	}
-	return {value.kind, value.boolean_value, value.bigint_value, value.varchar_value};
+	return {value.kind, value.boolean_value, value.bigint_value, value.varchar_value, value.double_value};
 }
 
 } // namespace
@@ -173,7 +197,7 @@ ScanPlanBuilder::BuildRestOperation(CompiledConnectorOrigin connector_origin, co
 	planned.query_bindings.reserve(rest.request.query_parameters.size());
 	for (const auto &query : rest.request.query_parameters) {
 		const auto encoding = PlanQueryEncoding(query.encoding);
-		PlannedScalar scalar {PlannedRestScalarKind::VARCHAR, false, 0, std::string()};
+		PlannedScalar scalar {PlannedRestScalarKind::VARCHAR, false, 0, std::string(), 0.0};
 		std::string encoded_value;
 		switch (query.source) {
 		case CompiledQueryValueSource::FIXED:
@@ -203,8 +227,8 @@ ScanPlanBuilder::BuildRestOperation(CompiledConnectorOrigin connector_origin, co
 				continue;
 			}
 			scalar = PlanScalar(*input);
-			encoded_value =
-			    Encode(scalar.kind, scalar.boolean_value, scalar.bigint_value, scalar.varchar_value, encoding);
+			encoded_value = Encode(scalar.kind, scalar.boolean_value, scalar.bigint_value, scalar.varchar_value,
+			                       scalar.double_value, encoding);
 			break;
 		}
 		case CompiledQueryValueSource::CONDITIONAL_INPUT:
@@ -219,15 +243,16 @@ ScanPlanBuilder::BuildRestOperation(CompiledConnectorOrigin connector_origin, co
 				throw std::logic_error("selected REST conditional input disagrees with its typed predicate source");
 			}
 			scalar = PlanScalar(predicate_decision.typed_equality);
-			encoded_value =
-			    Encode(scalar.kind, scalar.boolean_value, scalar.bigint_value, scalar.varchar_value, encoding);
+			encoded_value = Encode(scalar.kind, scalar.boolean_value, scalar.bigint_value, scalar.varchar_value,
+			                       scalar.double_value, encoding);
 			break;
 		default:
 			throw std::logic_error("compiled REST query field has an unknown source");
 		}
-		planned.query_bindings.push_back(PlannedRestQueryBinding(
-		    query.name, PlanQuerySource(query.source), query.source_id, scalar.kind, scalar.boolean_value,
-		    scalar.bigint_value, std::move(scalar.varchar_value), encoding, std::move(encoded_value)));
+		planned.query_bindings.push_back(
+		    PlannedRestQueryBinding(query.name, PlanQuerySource(query.source), query.source_id, scalar.kind,
+		                            scalar.boolean_value, scalar.bigint_value, std::move(scalar.varchar_value),
+		                            scalar.double_value, encoding, std::move(encoded_value)));
 	}
 	return planned;
 }

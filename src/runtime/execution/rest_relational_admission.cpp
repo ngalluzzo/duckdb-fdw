@@ -67,6 +67,7 @@ bool TryAdmitSelectedEquality(const ScanPlan &plan, RestConditionalBindingAuthor
 	authority.bigint_value = equality->Kind() == PlannedRestScalarKind::BIGINT ? equality->BigintValue() : 0;
 	authority.varchar_value =
 	    equality->Kind() == PlannedRestScalarKind::VARCHAR ? equality->VarcharValue() : std::string();
+	authority.double_value = equality->Kind() == PlannedRestScalarKind::DOUBLE ? equality->DoubleValue() : 0.0;
 	return true;
 }
 
@@ -82,7 +83,7 @@ bool HasResidualOnlyEquality(const ScanPlan &plan) {
 } // namespace
 
 RestConditionalBindingAuthority::RestConditionalBindingAuthority()
-    : enabled(false), kind(PlannedRestScalarKind::VARCHAR), boolean_value(false), bigint_value(0) {
+    : enabled(false), kind(PlannedRestScalarKind::VARCHAR), boolean_value(false), bigint_value(0), double_value(0.0) {
 }
 
 bool TryAdmitRestRelationalEnvelope(const ScanPlan &plan, RestConditionalBindingAuthority &authority) {

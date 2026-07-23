@@ -3,6 +3,7 @@
 #include "duckdb_api/internal/connector/graphql_operation_declaration.hpp"
 #include "duckdb_api/internal/connector/pagination_declaration.hpp"
 
+#include <cstdio>
 #include <ostream>
 #include <stdexcept>
 #include <utility>
@@ -422,6 +423,20 @@ void AppendOrigin(std::ostream &result, const CompiledHttpOrigin &origin) {
 	       << ']';
 }
 
+// RFC 0020: 17 significant decimal digits is the smallest fixed precision
+// proven to round-trip any IEEE-754 double bit-for-bit (Steele & White).
+// Remote Runtime's rest_operation_planner.cpp Encode(...) must independently
+// reach byte-identical output for the same double, mirroring how BIGINT's
+// std::to_string encoding already stays in lockstep across both layers.
+std::string EncodeCanonicalDouble(double value) {
+	char buffer[64];
+	const int written = std::snprintf(buffer, sizeof(buffer), "%.17g", value);
+	if (written <= 0 || static_cast<std::size_t>(written) >= sizeof(buffer)) {
+		throw std::invalid_argument("compiled query DOUBLE could not be canonically encoded");
+	}
+	return std::string(buffer, static_cast<std::size_t>(written));
+}
+
 } // namespace
 
 std::string EncodeCompiledQueryScalar(const CompiledScalarValue &value, CompiledQueryEncoding encoding) {
@@ -441,6 +456,9 @@ std::string EncodeCompiledQueryScalar(const CompiledScalarValue &value, Compiled
 		if (!IsValidUtf8Text(decoded)) {
 			throw std::invalid_argument("compiled query VARCHAR is not valid control-free UTF-8");
 		}
+		break;
+	case CompiledScalarType::DOUBLE:
+		decoded = EncodeCanonicalDouble(value.Double());
 		break;
 	default:
 		throw std::invalid_argument("compiled query scalar has an unknown type");

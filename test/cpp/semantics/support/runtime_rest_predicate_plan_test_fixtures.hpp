@@ -22,6 +22,12 @@ enum class RuntimeRestPredicatePlanCounterexample {
 // binding, an EXACT occurrence proof, and a DuckDB-owned typed residual.
 duckdb_api::ScanPlan BuildRuntimeExactRestPredicatePlanFixture();
 
+// RFC 0020: the same EXACT-occurrence shape as BuildRuntimeExactRestPredicatePlanFixture,
+// but over the double_predicates relation's DOUBLE conditional binding, proving
+// a DOUBLE predicate actually reaches the remote request rather than only the
+// DuckDB residual fallback.
+duckdb_api::ScanPlan BuildRuntimeExactDoubleRestPredicatePlanFixture();
+
 // A matching package predicate whose selected operation remains eligible when
 // selective-predicate capability is unavailable. The real planner retains the
 // typed DuckDB residual and emits no conditional request binding.

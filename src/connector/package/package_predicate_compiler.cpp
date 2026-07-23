@@ -51,6 +51,8 @@ bool SameScalar(const CompiledScalarValue &left, const CompiledScalarValue &righ
 		return left.Bigint() == right.Bigint();
 	case CompiledScalarType::VARCHAR:
 		return left.Varchar() == right.Varchar();
+	case CompiledScalarType::DOUBLE:
+		return left.Double() == right.Double();
 	}
 	return false;
 }

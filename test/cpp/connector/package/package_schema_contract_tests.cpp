@@ -94,6 +94,7 @@ inputs:
   - {id: count, type: BIGINT, nullable: false, default: {kind: value, value: -42}}
   - {id: label, type: VARCHAR, nullable: false, default: {kind: value, value: "private"}}
   - {id: cursor, type: VARCHAR, nullable: true, default: {kind: null}}
+  - {id: rating, type: DOUBLE, nullable: false, default: {kind: value, value: -0.0}}
 auth: {mode: anonymous}
 resources:
   max_response_bytes_per_page: 4096
@@ -120,11 +121,127 @@ operations:
 	const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
 	Require(result.Succeeded(), "valid typed defaults package did not compile");
 	const auto &inputs = result.Generation()->Connector().Relations()[0].Inputs();
-	Require(inputs.size() == 4 && !inputs[0].Default().Value().Boolean() &&
+	Require(inputs.size() == 5 && !inputs[0].Default().Value().Boolean() &&
 	            inputs[1].Default().Value().Bigint() == -42 && inputs[2].Default().Value().Varchar() == "private" &&
 	            inputs[3].Nullable() && inputs[3].Default().Value().IsNull() &&
-	            inputs[3].Default().Value().Type() == duckdb_api::CompiledScalarType::VARCHAR,
+	            inputs[3].Default().Value().Type() == duckdb_api::CompiledScalarType::VARCHAR &&
+	            inputs[4].Default().Value().Double() == 0.0,
 	        "compiler collapsed typed defaults, typed NULL, or source order");
+}
+
+void TestTypedDoubleDefaultsRoundTrip() {
+	// RFC 0020: round-trip boundary values a naive fixed-precision encoder could
+	// lose: the largest finite magnitude and a value requiring all 17
+	// significant digits to reconstruct bit-for-bit.
+	TemporaryPackage package;
+	package.Write("connector.yaml", R"YAML(api_version: duckdb_api/v1
+kind: connector
+id: typed_double_defaults
+version: 1.0.0
+extractor_dialect: duckdb_api/json_path_v1
+network_policy:
+  origins:
+    - {scheme: https, host: defaults.example, port: 443}
+  redirects: deny
+  private_addresses: deny
+  link_local_addresses: deny
+  loopback_addresses: deny
+  max_response_bytes: 4096
+relations: [records]
+)YAML");
+	package.Write("relations/records.yaml", R"YAML(api_version: duckdb_api/v1
+kind: relation
+id: records
+schema: static
+columns:
+  - {id: value, type: VARCHAR, nullable: false, extract: $.value}
+inputs:
+  - {id: maximum, type: DOUBLE, nullable: false, default: {kind: value, value: 1.7976931348623157e+308}}
+  - {id: precise, type: DOUBLE, nullable: false, default: {kind: value, value: 0.12345678901234567}}
+  - {id: subnormal, type: DOUBLE, nullable: false, default: {kind: value, value: 4.9e-324}}
+auth: {mode: anonymous}
+resources:
+  max_response_bytes_per_page: 4096
+  max_response_bytes_per_scan: 4096
+  max_records_per_page: 16
+  max_records_per_scan: 16
+  max_extracted_string_bytes: 256
+operations:
+  - id: all_records
+    fallback: true
+    cardinality: many
+    replay_safety: safe
+    request:
+      protocol: rest
+      method: GET
+      origin: {scheme: https, host: defaults.example, port: 443}
+      path: /records
+      query: []
+      headers: []
+    response: {source: root_array}
+    pagination: {strategy: disabled}
+)YAML");
+	NeverCancel cancellation;
+	const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
+	Require(result.Succeeded(), "valid DOUBLE boundary defaults did not compile");
+	const auto &inputs = result.Generation()->Connector().Relations()[0].Inputs();
+	Require(inputs.size() == 3 && inputs[0].Default().Value().Double() == 1.7976931348623157e+308 &&
+	            inputs[1].Default().Value().Double() == 0.12345678901234567 &&
+	            inputs[2].Default().Value().Double() == 4.9e-324,
+	        "compiler lost a DOUBLE boundary value's exact bits");
+}
+
+void TestDoubleMagnitudeOverflowRejected() {
+	TemporaryPackage package;
+	package.Write("connector.yaml", R"YAML(api_version: duckdb_api/v1
+kind: connector
+id: typed_double_overflow
+version: 1.0.0
+extractor_dialect: duckdb_api/json_path_v1
+network_policy:
+  origins:
+    - {scheme: https, host: defaults.example, port: 443}
+  redirects: deny
+  private_addresses: deny
+  link_local_addresses: deny
+  loopback_addresses: deny
+  max_response_bytes: 4096
+relations: [records]
+)YAML");
+	package.Write("relations/records.yaml", R"YAML(api_version: duckdb_api/v1
+kind: relation
+id: records
+schema: static
+columns:
+  - {id: value, type: VARCHAR, nullable: false, extract: $.value}
+inputs:
+  - {id: overflowed, type: DOUBLE, nullable: false, default: {kind: value, value: 1e400}}
+auth: {mode: anonymous}
+resources:
+  max_response_bytes_per_page: 4096
+  max_response_bytes_per_scan: 4096
+  max_records_per_page: 16
+  max_records_per_scan: 16
+  max_extracted_string_bytes: 256
+operations:
+  - id: all_records
+    fallback: true
+    cardinality: many
+    replay_safety: safe
+    request:
+      protocol: rest
+      method: GET
+      origin: {scheme: https, host: defaults.example, port: 443}
+      path: /records
+      query: []
+      headers: []
+    response: {source: root_array}
+    pagination: {strategy: disabled}
+)YAML");
+	NeverCancel cancellation;
+	const auto result = duckdb_api_test::CompileRoot(package.Root(), cancellation);
+	Require(!result.Succeeded() && result.Generation() == nullptr && !result.Diagnostics().empty(),
+	        "a JSON-number-shaped DOUBLE literal exceeding any finite magnitude compiled successfully");
 }
 
 void TestDiagnosticBudgetAndCancellation() {
@@ -342,6 +459,8 @@ int main() {
 		TestClosedSchemaAndAllOrNothing();
 		TestCrossFileAndPolicyReferences();
 		TestTypedDefaults();
+		TestTypedDoubleDefaultsRoundTrip();
+		TestDoubleMagnitudeOverflowRejected();
 		TestDiagnosticBudgetAndCancellation();
 		TestCompiledModelCounterexamplesStayDiagnostics();
 		TestHeaderValueProfile();

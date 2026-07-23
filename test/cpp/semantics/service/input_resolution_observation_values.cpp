@@ -9,10 +9,11 @@ namespace semantics_service {
 ObservedInputResolution::ObservedInputResolution(std::string input_id_p, ObservedScalarKind kind_p,
                                                  ObservedCallerInputState caller_state_p, ObservedInputState state_p,
                                                  ObservedInputSource source_p, bool completed_p, bool boolean_value_p,
-                                                 std::int64_t bigint_value_p, std::string varchar_value_p)
+                                                 std::int64_t bigint_value_p, std::string varchar_value_p,
+                                                 double double_value_p)
     : input_id(std::move(input_id_p)), kind(kind_p), caller_state(caller_state_p), state(state_p), source(source_p),
       completed(completed_p), boolean_value(boolean_value_p), bigint_value(bigint_value_p),
-      varchar_value(std::move(varchar_value_p)) {
+      varchar_value(std::move(varchar_value_p)), double_value(double_value_p) {
 }
 
 const std::string &ObservedInputResolution::InputId() const noexcept {
@@ -64,11 +65,19 @@ const std::string &ObservedInputResolution::VarcharValue() const {
 	return varchar_value;
 }
 
+double ObservedInputResolution::DoubleValue() const {
+	if (!completed || state != ObservedInputState::BOUND_VALUE || kind != ObservedScalarKind::DOUBLE) {
+		throw std::logic_error("observed input is not a completed concrete DOUBLE");
+	}
+	return double_value;
+}
+
 ObservedRequestBinding::ObservedRequestBinding(std::string name_p, std::string source_id_p, ObservedScalarKind kind_p,
                                                bool boolean_value_p, std::int64_t bigint_value_p,
-                                               std::string varchar_value_p, std::string encoded_value_p)
+                                               std::string varchar_value_p, double double_value_p,
+                                               std::string encoded_value_p)
     : name(std::move(name_p)), source_id(std::move(source_id_p)), kind(kind_p), boolean_value(boolean_value_p),
-      bigint_value(bigint_value_p), varchar_value(std::move(varchar_value_p)),
+      bigint_value(bigint_value_p), varchar_value(std::move(varchar_value_p)), double_value(double_value_p),
       encoded_value(std::move(encoded_value_p)) {
 }
 
@@ -103,6 +112,13 @@ const std::string &ObservedRequestBinding::VarcharValue() const {
 		throw std::logic_error("observed request binding is not a VARCHAR");
 	}
 	return varchar_value;
+}
+
+double ObservedRequestBinding::DoubleValue() const {
+	if (kind != ObservedScalarKind::DOUBLE) {
+		throw std::logic_error("observed request binding is not a DOUBLE");
+	}
+	return double_value;
 }
 
 const std::string &ObservedRequestBinding::EncodedValue() const noexcept {

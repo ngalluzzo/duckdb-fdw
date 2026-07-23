@@ -25,7 +25,8 @@ std::uint64_t BoundedProduct(std::uint64_t left, std::uint64_t right, std::uint6
 namespace {
 
 bool IsSupportedLogicalType(const std::string &logical_type) {
-	return logical_type == "BIGINT" || logical_type == "VARCHAR" || logical_type == "BOOLEAN";
+	return logical_type == "BIGINT" || logical_type == "VARCHAR" || logical_type == "BOOLEAN" ||
+	       logical_type == "DOUBLE";
 }
 
 bool Contains(const std::vector<std::string> &values, const std::string &expected) {
