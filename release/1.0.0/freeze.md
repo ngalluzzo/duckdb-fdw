@@ -8,9 +8,10 @@ read either without inspecting product source.
 
 > **Candidate revision history.** The candidate was produced by the `0.9.0`
 > release (2026-07-21). After publication, accepted RFCs may add entries under
-> `accepted_candidate_revisions` (see that section below) without re-cutting
-> the snapshot; the schema-closed sets and explicit exclusions do not move
-> until a later release graduates a candidate. The first such revision was
+> `accepted_candidate_revisions` or the generic
+> `accepted_contract_revisions` (see those sections below) without re-cutting
+> the snapshot; live closed sets and explicit exclusions do not move until a
+> later release graduates a candidate. The first such revision was
 > [RFC 0016](../docs/rfcs/0016-decide-body-signaled-rest-pagination.md)
 > (Accepted 2026-07-21), adding `response_next` REST pagination pending
 > `0.10.0` implementation. **The `response_next` candidate graduated into the
@@ -33,7 +34,12 @@ read either without inspecting product source.
 > (Accepted 2026-07-22), added flat list-of-scalar output columns directly to
 > the schema-closed set: authored column shapes are now scalar and `ARRAY`,
 > with one required v1 scalar element type and independent outer/child
-> nullability.
+> nullability. A fifth revision,
+> [RFC 0023](../../docs/rfcs/0023-add-durable-credential-providers.md)
+> (Accepted 2026-07-23), decides explicit environment-backed and bounded
+> persistent credential sources plus opaque scan authority/revision snapshots.
+> Its implementation is pending, so `accepted_contract_revisions` records both
+> the current temporary-config boundary and the accepted target contract.
 
 The `1.0.0` contract is not a single document. It is a layered set in which
 each layer draws authority from the one above it:
@@ -261,6 +267,33 @@ are in the closed set. A true opaque body-embedded cursor that drives the
 next request directly (the trust model both RFC 0016 and RFC 0019
 deliberately declined — see their Alternatives sections), and reverse or
 bidirectional traversal, still require their own later accepted RFC.
+
+## Accepted non-schema contract revisions pending implementation
+
+`accepted_contract_revisions` is the generic decided-future ledger for public
+or shared contracts that are not represented by the connector JSON schema.
+Every entry records its accepted RFC, current and target closed contract,
+current executable authority, target release, graduation rule, and the exact
+exclusion set that remains in force. The current authority is bound by scoped
+SHA-256 identities for the Query implementation and installed SQL oracle, so
+an additive provider or storage cannot retain old markers and pass as the old
+product. The freeze gate rejects omission, vocabulary or content drift,
+premature graduation, a non-Accepted RFC, and one-sided or coordinated loss of
+retained exclusions.
+
+### Durable credential providers — **accepted, implementation pending**
+
+[RFC 0023](../../docs/rfcs/0023-add-durable-credential-providers.md) accepts a
+closed two-provider contract: the existing `config` provider and a new exact
+`environment` provider, each usable from temporary `memory` or the bounded
+project-owned `duckdb_api` persistent storage. The installed product remains at
+`config` plus temporary `memory` until implementation graduates this entry.
+Graduation requires the live closed-set section, SQL/restart demonstrations,
+provider/snapshot lifecycle and redaction oracles, and fresh native gates in
+the same coherent change. The retained-exclusion set is exactly authenticator
+expansion, automatic retry/rate-limit waiting, and author-configurable
+caching/single-flight; it cannot contract before graduation even if the
+top-level freeze is changed at the same time.
 
 ## Not yet frozen
 

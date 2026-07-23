@@ -52,6 +52,15 @@ statement ok
 DROP SECRET sql_contract;
 
 statement error
+CREATE TEMPORARY SECRET environment_contract (
+    TYPE duckdb_api,
+    PROVIDER environment,
+    VARIABLE 'DUCKDB_API_RFC_TRIAL'
+);
+----
+Invalid Input Error: Secret provider 'environment' not found for type 'duckdb_api'
+
+statement error
 CREATE SECRET persistent_contract (
     TYPE duckdb_api,
     PROVIDER config,

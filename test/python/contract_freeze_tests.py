@@ -31,6 +31,7 @@ class ContractFreezeTests(unittest.TestCase):
             inventory=self.inventory,
             schema=self.schema if schema is None else schema,
             rfc_directory=self.rfc_directory,
+            repository_root=REPOSITORY_ROOT,
         )
 
     def require_rejected(self, mutation, fragment: str) -> None:
@@ -286,6 +287,84 @@ class ContractFreezeTests(unittest.TestCase):
         with self.assertRaisesRegex(FreezeError, "schema_closed_set_today"):
             self.verify(candidate)
 
+    def test_accepted_contract_revisions_section_removed_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value.pop("accepted_contract_revisions"),
+            "accepted_contract_revisions",
+        )
+
+    def test_expected_contract_revision_omission_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["accepted_contract_revisions"].clear(),
+            "accepted_contract_revisions",
+        )
+
+    def test_credential_provider_current_contract_drift_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["accepted_contract_revisions"][0]["current_contract"]["providers"].append(
+                "environment"
+            ),
+            "current contract drifted",
+        )
+
+    def test_credential_provider_target_contract_drift_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["accepted_contract_revisions"][0]["target_contract"]["providers"].remove(
+                "environment"
+            ),
+            "target contract drifted",
+        )
+
+    def test_credential_provider_premature_graduation_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["accepted_contract_revisions"][0].__setitem__("not_yet_current", False),
+            "prematurely graduated",
+        )
+
+    def test_credential_provider_retained_exclusion_loss_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["exclusions"].remove(
+                "authenticators_beyond_anonymous_bearer_and_static_api_key"
+            ),
+            "lost retained exclusions",
+        )
+
+    def test_credential_provider_coordinated_retained_exclusion_loss_fails(self) -> None:
+        def remove_from_both(value) -> None:
+            exclusion = "authenticators_beyond_anonymous_bearer_and_static_api_key"
+            value["exclusions"].remove(exclusion)
+            value["accepted_contract_revisions"][0]["retained_exclusions"].remove(exclusion)
+
+        self.require_rejected(remove_from_both, "retained exclusions drifted")
+
+    def test_credential_provider_current_artifact_drift_fails(self) -> None:
+        import shutil
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = pathlib.Path(temporary)
+            for relative in (
+                pathlib.Path("src/query/duckdb/secret_integration.cpp"),
+                pathlib.Path("test/sql/duckdb_api.test"),
+            ):
+                target = repository / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(REPOSITORY_ROOT / relative, target)
+            source = repository / "src/query/duckdb/secret_integration.cpp"
+            source.write_text(
+                source.read_text(encoding="utf-8")
+                + "\n// Synthetic additive environment provider registration.\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(FreezeError, "artifact identity drifted"):
+                verify_freeze(
+                    copy.deepcopy(self.freeze),
+                    inventory=self.inventory,
+                    schema=self.schema,
+                    rfc_directory=self.rfc_directory,
+                    repository_root=repository,
+                )
+
     def test_not_yet_frozen_spurious_fails(self) -> None:
         self.require_rejected(
             lambda value: value["not_yet_frozen"].append(
@@ -335,6 +414,7 @@ class ContractFreezeTests(unittest.TestCase):
                     inventory=self.inventory,
                     schema=self.schema,
                     rfc_directory=mirror,
+                    repository_root=REPOSITORY_ROOT,
                 )
 
     def test_schema_third_rest_pagination_strategy_fails(self) -> None:

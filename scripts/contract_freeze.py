@@ -9,6 +9,7 @@ drift between the freeze and the authoritative sources fails closed.
 
 from __future__ import annotations
 
+import hashlib
 import pathlib
 import re
 from typing import Any
@@ -58,6 +59,7 @@ EXPECTED_RFC_AUTHORITIES = frozenset(
         "RFC 0014",
         "RFC 0021",
         "RFC 0022",
+        "RFC 0023",
     }
 )
 
@@ -89,6 +91,66 @@ REQUIRED_CANDIDATE_REVISION_KEYS = (
 # accepted RFCs that introduce new candidate revisions should add their ids
 # here and to release/1.0.0/freeze.json's accepted_candidate_revisions list.
 EXPECTED_CANDIDATE_REVISION_IDS = frozenset()
+
+# Generic accepted decisions whose implementation has not yet graduated into a
+# live closed-set section. Pagination predates this representation and retains
+# its schema-specific accepted_candidate_revisions gate above. New non-schema
+# decisions use this form so acceptance cannot leave the candidate freeze green
+# while the decided future is absent.
+REQUIRED_CONTRACT_REVISION_KEYS = frozenset(
+    {
+        "id",
+        "kind",
+        "scope",
+        "status",
+        "authority",
+        "target_release",
+        "target_release_authority",
+        "current_contract_authority",
+        "current_contract",
+        "target_contract",
+        "graduation_rule",
+        "retained_exclusions",
+        "not_yet_current",
+    }
+)
+
+EXPECTED_CONTRACT_REVISION_IDS = frozenset({"durable_credential_providers"})
+
+EXPECTED_CURRENT_CREDENTIAL_PROVIDER_CONTRACT = {
+    "providers": ["config"],
+    "config_storages": ["memory"],
+    "environment_storages": [],
+    "environment_resolution": "unsupported",
+    "persistent_storage": "unsupported",
+    "scan_snapshot_identity": "implicit_token_ownership_only",
+}
+
+EXPECTED_TARGET_CREDENTIAL_PROVIDER_CONTRACT = {
+    "providers": ["config", "environment"],
+    "config_storages": ["duckdb_api", "memory"],
+    "environment_storages": ["duckdb_api", "memory"],
+    "environment_resolution": "execution_time_exact_variable",
+    "persistent_storage": "bounded_project_duckdb_api",
+    "scan_snapshot_identity": "opaque_authority_and_revision",
+}
+
+EXPECTED_CURRENT_CREDENTIAL_ARTIFACT_IDENTITIES = [
+    {
+        "path": "src/query/duckdb/secret_integration.cpp",
+        "sha256": "d4bd6df48c5cf9e0f6628ccfd145ef35ed9d3b609cd08e3cc1657678be374399",
+    },
+    {
+        "path": "test/sql/duckdb_api.test",
+        "sha256": "45831bdec06b01738b0d4b3d3a1454aa8255079744c6d7d8187b42a6f5880e28",
+    },
+]
+
+EXPECTED_CREDENTIAL_PROVIDER_RETAINED_EXCLUSIONS = [
+    "authenticators_beyond_anonymous_bearer_and_static_api_key",
+    "automatic_retry_or_rate_limit_waiting",
+    "author_configurable_cache_or_single_flight",
+]
 
 MANDATORY_EXCLUSIONS = frozenset(
     {
@@ -330,12 +392,105 @@ def _verify_accepted_candidate_revisions(
         )
 
 
+def _verify_current_credential_provider_artifacts(repository_root: pathlib.Path) -> None:
+    for identity in EXPECTED_CURRENT_CREDENTIAL_ARTIFACT_IDENTITIES:
+        artifact = repository_root / identity["path"]
+        actual = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        if actual != identity["sha256"]:
+            raise FreezeError(
+                "current credential-provider artifact identity drifted before the accepted revision graduated: "
+                f"{identity['path']!r}"
+            )
+
+
+def _verify_accepted_contract_revisions(
+    freeze: dict[str, Any], *, rfc_directory: pathlib.Path, repository_root: pathlib.Path
+) -> None:
+    revisions = freeze.get("accepted_contract_revisions")
+    if not isinstance(revisions, list):
+        raise FreezeError("freeze is missing the accepted_contract_revisions list")
+
+    revision_ids: set[str] = set()
+    for entry in revisions:
+        if not isinstance(entry, dict):
+            raise FreezeError("accepted_contract_revisions entry is not a mapping")
+        missing = REQUIRED_CONTRACT_REVISION_KEYS - set(entry)
+        if missing:
+            raise FreezeError(
+                f"accepted_contract_revisions entry {entry.get('id', '<unknown>')!r} "
+                f"missing required keys: {sorted(missing)}"
+            )
+        revision_id = entry["id"]
+        if revision_id in revision_ids:
+            raise FreezeError(f"accepted_contract_revisions has duplicate id {revision_id!r}")
+        revision_ids.add(revision_id)
+
+        authority = entry["authority"]
+        rfc_match = re.fullmatch(r"RFC ([0-9]{4})", authority)
+        if rfc_match is None:
+            raise FreezeError(
+                f"accepted_contract_revisions entry {revision_id!r} has invalid authority {authority!r}"
+            )
+        status = _rfc_status(authority, rfc_directory)
+        if status != "Accepted":
+            raise FreezeError(
+                f"accepted_contract_revisions entry {revision_id!r} cites {authority} "
+                f"which is {status!r}, not Accepted"
+            )
+        if entry["status"] != "accepted_by_rfc_pending_implementation" or entry["not_yet_current"] is not True:
+            raise FreezeError(
+                f"accepted_contract_revisions entry {revision_id!r} was prematurely graduated"
+            )
+        retained = entry["retained_exclusions"]
+        if not isinstance(retained, list) or not retained:
+            raise FreezeError(
+                f"accepted_contract_revisions entry {revision_id!r} has no retained exclusions"
+            )
+        missing_exclusions = set(retained) - set(freeze.get("exclusions", []))
+        if missing_exclusions:
+            raise FreezeError(
+                f"accepted_contract_revisions entry {revision_id!r} lost retained exclusions: "
+                f"{sorted(missing_exclusions)}"
+            )
+
+        if entry["kind"] == "credential_provider_contract":
+            if retained != EXPECTED_CREDENTIAL_PROVIDER_RETAINED_EXCLUSIONS:
+                raise FreezeError(
+                    "accepted credential-provider revision retained exclusions drifted from RFC 0023"
+                )
+            if entry["current_contract"] != EXPECTED_CURRENT_CREDENTIAL_PROVIDER_CONTRACT:
+                raise FreezeError(
+                    "accepted credential-provider revision current contract drifted from the Query product oracle"
+                )
+            if entry["target_contract"] != EXPECTED_TARGET_CREDENTIAL_PROVIDER_CONTRACT:
+                raise FreezeError("accepted credential-provider revision target contract drifted from RFC 0023")
+            if entry["current_contract_authority"] != EXPECTED_CURRENT_CREDENTIAL_ARTIFACT_IDENTITIES:
+                raise FreezeError("accepted credential-provider revision current authority drifted")
+            _verify_current_credential_provider_artifacts(repository_root)
+        else:
+            raise FreezeError(
+                f"accepted_contract_revisions entry {revision_id!r} has unknown kind {entry['kind']!r}"
+            )
+
+    missing_expected = EXPECTED_CONTRACT_REVISION_IDS - revision_ids
+    if missing_expected:
+        raise FreezeError(
+            f"freeze lost expected accepted_contract_revisions entries: {sorted(missing_expected)}"
+        )
+    unexpected = revision_ids - EXPECTED_CONTRACT_REVISION_IDS
+    if unexpected:
+        raise FreezeError(
+            f"freeze has unexpected accepted_contract_revisions entries: {sorted(unexpected)}"
+        )
+
+
 def verify_freeze(
     freeze: dict[str, Any],
     *,
     inventory: dict[str, Any],
     schema: dict[str, Any],
     rfc_directory: pathlib.Path,
+    repository_root: pathlib.Path,
 ) -> None:
     """Assert the freeze declaration agrees with every authoritative source."""
 
@@ -440,6 +595,9 @@ def verify_freeze(
         raise FreezeError("freeze does not record the end-to-end fixture execution fast-follow")
 
     _verify_accepted_candidate_revisions(freeze, schema=schema, rfc_directory=rfc_directory)
+    _verify_accepted_contract_revisions(
+        freeze, rfc_directory=rfc_directory, repository_root=repository_root
+    )
 
     not_yet_frozen = {entry["item"] for entry in freeze.get("not_yet_frozen", [])}
     if not_yet_frozen != EXPECTED_NOT_YET_FROZEN:
@@ -466,6 +624,7 @@ class FreezePaths:
         self.inventory = repository / "release" / "public-surface" / "inventory.json"
         self.schema = repository / EXPECTED_SCHEMA_AUTHORITY
         self.rfc_directory = repository / "docs" / "rfcs"
+        self.repository = repository
 
 
 def verify_paths(paths: FreezePaths) -> None:
@@ -475,6 +634,7 @@ def verify_paths(paths: FreezePaths) -> None:
             inventory=load_json(paths.inventory),
             schema=load_json(paths.schema),
             rfc_directory=paths.rfc_directory,
+            repository_root=paths.repository,
         )
     except FreezeError:
         raise
