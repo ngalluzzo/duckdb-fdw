@@ -81,7 +81,9 @@ public:
 		if (closed) {
 			return false;
 		}
-		if (scenario == QueryRuntimeScenario::BLOCKING) {
+		const bool blocking =
+		    scenario == QueryRuntimeScenario::BLOCKING || scenario == QueryRuntimeScenario::BLOCKING_ANONYMOUS_ONLY;
+		if (blocking) {
 			probe->active_waiters.fetch_add(1, std::memory_order_relaxed);
 			probe->condition.notify_all();
 			while (!cancelled.load(std::memory_order_relaxed) && !control.IsCancellationRequested()) {
@@ -299,9 +301,12 @@ protected:
 			return std::unique_ptr<duckdb_api::BatchStream>();
 		}
 		const auto prior_streams = probe->streams_opened.fetch_add(1, std::memory_order_relaxed);
-		const auto stream_scenario = scenario == QueryRuntimeScenario::LATE_RESOURCE_ERROR_ONCE && prior_streams > 0
-		                                 ? QueryRuntimeScenario::SUCCESS
-		                                 : scenario;
+		auto stream_scenario = scenario;
+		if (scenario == QueryRuntimeScenario::LATE_RESOURCE_ERROR_ONCE && prior_streams > 0) {
+			stream_scenario = QueryRuntimeScenario::SUCCESS;
+		} else if (scenario == QueryRuntimeScenario::BLOCKING_ANONYMOUS_ONLY && authenticated) {
+			stream_scenario = QueryRuntimeScenario::SUCCESS;
+		}
 		return std::unique_ptr<duckdb_api::BatchStream>(
 		    new QueryScenarioStream(stream_scenario, authenticated, plan.Operation().Protocol(), probe));
 	}

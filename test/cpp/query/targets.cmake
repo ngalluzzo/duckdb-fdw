@@ -232,3 +232,27 @@ target_include_directories(
   duckdb_api_rfc0012_native_coordinator_trial
   PRIVATE test/cpp)
 configure_duckdb_api_cpp_target(duckdb_api_rfc0012_native_coordinator_trial)
+
+# RFC 0026 decision evidence exercises DuckDB's real multi-connection adapter
+# scheduling with one configured execution thread. It remains opt-in until the
+# admission contract is accepted and production oracles replace the trial.
+add_executable(
+  duckdb_api_rfc0026_worker_isolation_trial EXCLUDE_FROM_ALL
+  test/cpp/query/rfc0026/worker_isolation_trial.cpp
+  ${QUERY_DUCKDB_ADAPTER_SUPPORT_SOURCES}
+  src/query/duckdb/table_function_adapter.cpp
+  ${QUERY_ADAPTER_TEST_SUPPORT_SOURCES}
+  ${QUERY_AUTH_ADAPTER_TEST_SUPPORT_SOURCES})
+target_link_libraries(
+  duckdb_api_rfc0026_worker_isolation_trial
+  PRIVATE duckdb_api_connector_fixture_service
+          duckdb_api_query_credential_service
+          duckdb_api_relational_planning_service
+          duckdb_api_runtime_interface_service
+          dummy_static_extension_loader
+          duckdb_static
+          Threads::Threads)
+target_include_directories(
+  duckdb_api_rfc0026_worker_isolation_trial
+  PRIVATE test/cpp src/query/duckdb)
+configure_duckdb_api_cpp_target(duckdb_api_rfc0026_worker_isolation_trial)
