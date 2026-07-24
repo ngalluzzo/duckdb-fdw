@@ -76,9 +76,9 @@ public:
 	std::size_t SeenPageCount() const noexcept;
 
 private:
-	const AdmittedPaginatedRestRequestProfile profile;
+	const AdmittedPaginatedRestRequestProfile &profile;
 	uint64_t current_page;
-	std::vector<uint64_t> seen_pages;
+	std::size_t seen_page_count;
 	bool exhausted;
 	bool failed;
 };

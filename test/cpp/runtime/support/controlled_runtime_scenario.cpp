@@ -2,8 +2,18 @@
 
 #include "runtime/support/controlled_http_transport.hpp"
 
+#include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
+#include "duckdb_api/internal/runtime/transport/http_transport.hpp"
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -13,13 +23,40 @@ struct ControlledRuntimeScenario::State {
 	State(std::shared_ptr<ControlledHttpRuntime> runtime_p, uint64_t expected_request_count_p,
 	      bool has_terminal_stage_p, duckdb_api::ErrorStage terminal_stage_p)
 	    : runtime(std::move(runtime_p)), expected_request_count(expected_request_count_p),
-	      has_terminal_stage(has_terminal_stage_p), terminal_stage(terminal_stage_p) {
+	      has_terminal_stage(has_terminal_stage_p), terminal_stage(terminal_stage_p), executor_close_count(0),
+	      request_count(0), opened_stream_count(0), retained_stream_count(0), peak_retained_stream_count(0),
+	      active_next_count(0), peak_active_next_count(0), completed_stream_count(0), cancelled_stream_count(0),
+	      closed_stream_count(0), local_admission_rejection_count(0), slow_request_count(0),
+	      ordinary_retry_failure_count(0), rate_limited_response_count(0), rate_limit_recovery_delay_milliseconds(0),
+	      recovered_request_count(0), healthy_request_count(0), healthy_during_resilience_pressure_count(0),
+	      unexpected_request_count(0) {
 	}
 
 	std::shared_ptr<ControlledHttpRuntime> runtime;
 	uint64_t expected_request_count;
 	bool has_terminal_stage;
 	duckdb_api::ErrorStage terminal_stage;
+	std::atomic<uint64_t> executor_close_count;
+	std::atomic<uint64_t> request_count;
+	std::atomic<uint64_t> opened_stream_count;
+	std::atomic<uint64_t> retained_stream_count;
+	std::atomic<uint64_t> peak_retained_stream_count;
+	std::atomic<uint64_t> active_next_count;
+	std::atomic<uint64_t> peak_active_next_count;
+	std::atomic<uint64_t> completed_stream_count;
+	std::atomic<uint64_t> cancelled_stream_count;
+	std::atomic<uint64_t> closed_stream_count;
+	std::atomic<uint64_t> local_admission_rejection_count;
+	std::atomic<uint64_t> slow_request_count;
+	std::atomic<uint64_t> ordinary_retry_failure_count;
+	std::atomic<uint64_t> rate_limited_response_count;
+	std::atomic<uint64_t> rate_limit_recovery_delay_milliseconds;
+	std::atomic<uint64_t> recovered_request_count;
+	std::atomic<uint64_t> healthy_request_count;
+	std::atomic<uint64_t> healthy_during_resilience_pressure_count;
+	std::atomic<uint64_t> unexpected_request_count;
+	mutable std::mutex request_mutex;
+	std::condition_variable request_condition;
 };
 
 namespace {
@@ -43,6 +80,314 @@ std::string GraphqlPage(const std::string &node, bool has_next, const char *curs
 	       "}}}},\"errors\":[]}";
 }
 
+std::string RickAndMortyHealthyResponse() {
+	return "{\"info\":{\"count\":1,\"pages\":1,\"next\":null,\"prev\":null},\"results\":["
+	       "{\"id\":1,\"name\":\"Rick Sanchez\",\"status\":\"Alive\",\"species\":\"Human\","
+	       "\"origin\":{\"name\":\"Earth (C-137)\"},\"episode\":[]}]}";
+}
+
+void RecordPeak(std::atomic<uint64_t> &peak, uint64_t observed) noexcept {
+	auto previous = peak.load(std::memory_order_relaxed);
+	while (previous < observed &&
+	       !peak.compare_exchange_weak(previous, observed, std::memory_order_relaxed, std::memory_order_relaxed)) {
+	}
+}
+
+void RecordLocalAdmission(const std::shared_ptr<ControlledRuntimeScenario::State> &state,
+                          const duckdb_api::ExecutionError &error) noexcept {
+	if (error.Classified() && error.Properties().failure_class == duckdb_api::FailureClass::LOCAL_ADMISSION) {
+		state->local_admission_rejection_count.fetch_add(1, std::memory_order_relaxed);
+	}
+}
+
+class ObservedStream final : public duckdb_api::BatchStream {
+public:
+	ObservedStream(std::shared_ptr<ControlledRuntimeScenario::State> state_p,
+	               std::unique_ptr<duckdb_api::BatchStream> inner_p)
+	    : state(std::move(state_p)), inner(std::move(inner_p)), completed(false), cancelled(false), closed(false) {
+		state->opened_stream_count.fetch_add(1, std::memory_order_relaxed);
+		const auto retained = state->retained_stream_count.fetch_add(1, std::memory_order_relaxed) + 1;
+		RecordPeak(state->peak_retained_stream_count, retained);
+	}
+
+	~ObservedStream() noexcept override {
+		Close();
+	}
+
+	bool Next(duckdb_api::ExecutionControl &control, duckdb_api::TypedBatch &batch) override {
+		const auto active = state->active_next_count.fetch_add(1, std::memory_order_relaxed) + 1;
+		RecordPeak(state->peak_active_next_count, active);
+		struct NextGuard {
+			explicit NextGuard(std::atomic<uint64_t> &active_p) : active(active_p) {
+			}
+			~NextGuard() {
+				active.fetch_sub(1, std::memory_order_relaxed);
+			}
+			std::atomic<uint64_t> &active;
+		} guard(state->active_next_count);
+		try {
+			const bool has_batch = inner->Next(control, batch);
+			if (!has_batch) {
+				RecordCompleted();
+			}
+			return has_batch;
+		} catch (const duckdb_api::ExecutionCancelled &) {
+			RecordCancelled();
+			throw;
+		} catch (const duckdb_api::ExecutionError &error) {
+			RecordLocalAdmission(state, error);
+			throw;
+		}
+	}
+
+	void Cancel() noexcept override {
+		RecordCancelled();
+		inner->Cancel();
+	}
+
+	void Close() noexcept override {
+		bool expected = false;
+		if (closed.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+			state->closed_stream_count.fetch_add(1, std::memory_order_relaxed);
+			// This observes the public wrapper lifetime only. Runtime's internal
+			// AdmissionController tests own proof that every permit dimension drains.
+			state->retained_stream_count.fetch_sub(1, std::memory_order_relaxed);
+			inner->Close();
+		}
+	}
+
+	duckdb_api::ExecutionSnapshot Diagnostics() const noexcept override {
+		return inner->Diagnostics();
+	}
+
+private:
+	void RecordCompleted() noexcept {
+		bool expected = false;
+		if (completed.compare_exchange_strong(expected, true, std::memory_order_relaxed)) {
+			state->completed_stream_count.fetch_add(1, std::memory_order_relaxed);
+		}
+	}
+
+	void RecordCancelled() noexcept {
+		bool expected = false;
+		if (cancelled.compare_exchange_strong(expected, true, std::memory_order_relaxed)) {
+			state->cancelled_stream_count.fetch_add(1, std::memory_order_relaxed);
+		}
+	}
+
+	const std::shared_ptr<ControlledRuntimeScenario::State> state;
+	const std::unique_ptr<duckdb_api::BatchStream> inner;
+	std::atomic<bool> completed;
+	std::atomic<bool> cancelled;
+	std::atomic<bool> closed;
+};
+
+uint64_t RetainedFieldBytes(const std::vector<duckdb_api::internal::HttpObservedHeader> &fields) {
+	uint64_t result = static_cast<uint64_t>(fields.capacity()) * sizeof(duckdb_api::internal::HttpObservedHeader);
+	for (const auto &field : fields) {
+		result += static_cast<uint64_t>(field.name.capacity()) + 1;
+		result += static_cast<uint64_t>(field.value.capacity()) + 1;
+	}
+	return result;
+}
+
+class MixedResilienceTransport final : public duckdb_api::internal::HttpTransport {
+public:
+	explicit MixedResilienceTransport(std::shared_ptr<ControlledRuntimeScenario::State> state_p)
+	    : state(std::move(state_p)), api_request_count(0), has_rate_limit_time(false) {
+	}
+
+protected:
+	duckdb_api::internal::HttpResponse Get(const duckdb_api::internal::HttpRequest &request,
+	                                       const duckdb_api::internal::HttpLimits &limits,
+	                                       duckdb_api::ExecutionControl &control) const override {
+		return Respond(request, limits, control);
+	}
+
+	duckdb_api::internal::HttpResponse Post(const duckdb_api::internal::HttpRequest &request,
+	                                        const duckdb_api::internal::HttpLimits &limits,
+	                                        duckdb_api::ExecutionControl &control) const override {
+		return Respond(request, limits, control);
+	}
+
+private:
+	duckdb_api::internal::HttpResponse Respond(const duckdb_api::internal::HttpRequest &request,
+	                                           const duckdb_api::internal::HttpLimits &limits,
+	                                           duckdb_api::ExecutionControl &control) const {
+		if (request.host == "rickandmortyapi.com") {
+			state->healthy_request_count.fetch_add(1, std::memory_order_relaxed);
+			if (state->recovered_request_count.load(std::memory_order_relaxed) == 0) {
+				state->healthy_during_resilience_pressure_count.fetch_add(1, std::memory_order_relaxed);
+			}
+			RecordRequest();
+			return Response(200, RickAndMortyHealthyResponse(), {}, limits);
+		}
+		if (request.host != "api.example.com" || request.target != "/v3/duplicate-events") {
+			state->unexpected_request_count.fetch_add(1, std::memory_order_relaxed);
+			RecordRequest();
+			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::TRANSPORT, "", "HTTP request failed");
+		}
+
+		const auto ordinal = api_request_count.fetch_add(1, std::memory_order_relaxed) + 1;
+		if (ordinal == 1) {
+			state->slow_request_count.fetch_add(1, std::memory_order_relaxed);
+			RecordRequest();
+			while (!control.IsCancellationRequested() && std::chrono::steady_clock::now() < limits.deadline) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
+			if (control.IsCancellationRequested()) {
+				throw duckdb_api::ExecutionCancelled();
+			}
+			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "wall_milliseconds",
+			                                 "execution exceeded its wall-time budget");
+		}
+		if (ordinal == 2) {
+			state->ordinary_retry_failure_count.fetch_add(1, std::memory_order_relaxed);
+			RecordRequest();
+			throw duckdb_api::internal::HttpAttemptFailure(
+			    duckdb_api::internal::HttpTransportFailureKind::RECEIVE_FAILED, {0, 0, 0, 0},
+			    duckdb_api::ExecutionError(duckdb_api::ErrorStage::TRANSPORT, "", "HTTP request failed"));
+		}
+		if (ordinal == 3) {
+			state->rate_limited_response_count.fetch_add(1, std::memory_order_relaxed);
+			{
+				std::lock_guard<std::mutex> guard(rate_limit_mutex);
+				rate_limit_time = std::chrono::steady_clock::now();
+				has_rate_limit_time = true;
+			}
+			RecordRequest();
+			return Response(429, "",
+			                {{"retry-after", "1"}, {"x-ratelimit-remaining", "0"}, {"x-ratelimit-resource", "core"}},
+			                limits);
+		}
+		if (ordinal == 4) {
+			{
+				std::lock_guard<std::mutex> guard(rate_limit_mutex);
+				if (!has_rate_limit_time) {
+					state->unexpected_request_count.fetch_add(1, std::memory_order_relaxed);
+					RecordRequest();
+					throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::TRANSPORT, "", "HTTP request failed");
+				}
+				const auto delay = std::chrono::duration_cast<std::chrono::milliseconds>(
+				                       std::chrono::steady_clock::now() - rate_limit_time)
+				                       .count();
+				state->rate_limit_recovery_delay_milliseconds.store(delay < 0 ? 0 : static_cast<uint64_t>(delay),
+				                                                    std::memory_order_relaxed);
+			}
+			{
+				std::unique_lock<std::mutex> guard(state->request_mutex);
+				state->request_condition.wait_for(guard, std::chrono::seconds(2), [&]() {
+					return control.IsCancellationRequested() ||
+					       state->healthy_request_count.load(std::memory_order_relaxed) != 0;
+				});
+			}
+			if (control.IsCancellationRequested()) {
+				throw duckdb_api::ExecutionCancelled();
+			}
+			state->recovered_request_count.fetch_add(1, std::memory_order_relaxed);
+			RecordRequest();
+			return Response(200,
+			                "[{\"id\":\"duplicate\",\"ordinal\":1},{\"id\":\"duplicate\",\"ordinal\":1},"
+			                "{\"id\":\"other\",\"ordinal\":2}]",
+			                {}, limits);
+		}
+		state->unexpected_request_count.fetch_add(1, std::memory_order_relaxed);
+		RecordRequest();
+		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::TRANSPORT, "", "HTTP request failed");
+	}
+
+	void RecordRequest() const {
+		{
+			std::lock_guard<std::mutex> guard(state->request_mutex);
+			state->request_count.fetch_add(1, std::memory_order_relaxed);
+		}
+		state->request_condition.notify_all();
+	}
+
+	static duckdb_api::internal::HttpResponse Response(uint32_t status, std::string body,
+	                                                   std::vector<duckdb_api::internal::HttpObservedHeader> fields,
+	                                                   const duckdb_api::internal::HttpLimits &limits) {
+		std::vector<duckdb_api::internal::HttpObservedHeader> retained;
+		for (auto &field : fields) {
+			if (std::find(limits.retained_header_names.begin(), limits.retained_header_names.end(), field.name) !=
+			    limits.retained_header_names.end()) {
+				retained.push_back(std::move(field));
+			}
+		}
+		const auto metadata_bytes = RetainedFieldBytes(retained);
+		if (static_cast<uint64_t>(body.size()) > limits.max_response_bytes ||
+		    static_cast<uint64_t>(body.size()) > limits.max_decompressed_bytes ||
+		    metadata_bytes > limits.max_metadata_bytes) {
+			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "response_bytes",
+			                                 "HTTP response exceeded its byte budget");
+		}
+		const auto body_bytes = static_cast<uint64_t>(body.size());
+		return {status,          64,
+		        body_bytes,      body_bytes,
+		        std::move(body), {{}, metadata_bytes, status == 429, std::move(retained), {}}};
+	}
+
+	const std::shared_ptr<ControlledRuntimeScenario::State> state;
+	mutable std::atomic<uint64_t> api_request_count;
+	mutable std::mutex rate_limit_mutex;
+	mutable std::chrono::steady_clock::time_point rate_limit_time;
+	mutable bool has_rate_limit_time;
+};
+
+// Public-interface observer used by Query's lifecycle tests. It forwards every
+// open through ScanExecutor's bounded public envelopes and records content-free
+// stream and idempotent-close transitions; no Runtime-private controller crosses
+// the team service boundary.
+class ObservedExecutor final : public duckdb_api::ScanExecutor {
+public:
+	ObservedExecutor(std::shared_ptr<ControlledRuntimeScenario::State> state_p,
+	                 std::shared_ptr<const duckdb_api::ScanExecutor> inner_p)
+	    : state(std::move(state_p)), inner(std::move(inner_p)), closed(false) {
+	}
+
+	std::unique_ptr<duckdb_api::BatchStream> Open(const duckdb_api::ScanPlan &plan,
+	                                              duckdb_api::ExecutionControl &control) const override {
+		return OpenObserved([&]() { return inner->Open(plan, control); });
+	}
+
+	void Close() const noexcept override {
+		bool expected = false;
+		if (closed.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+			state->executor_close_count.fetch_add(1, std::memory_order_relaxed);
+			inner->Close();
+		}
+	}
+
+protected:
+	std::unique_ptr<duckdb_api::BatchStream>
+	OpenAuthorizationEnvelope(const duckdb_api::ScanPlan &plan, duckdb_api::ScanAuthorization authorization,
+	                          duckdb_api::ExecutionControl &control) const override {
+		return OpenObserved([&]() { return inner->OpenWithAuthorization(plan, std::move(authorization), control); });
+	}
+
+	std::unique_ptr<duckdb_api::BatchStream>
+	OpenCredentialProviderEnvelope(const duckdb_api::ScanPlan &plan, const duckdb_api::CredentialProvider &provider,
+	                               duckdb_api::ExecutionControl &control) const override {
+		return OpenObserved([&]() { return inner->OpenWithCredentialProvider(plan, provider, control); });
+	}
+
+private:
+	template <class OpenFunction>
+	std::unique_ptr<duckdb_api::BatchStream> OpenObserved(OpenFunction open) const {
+		try {
+			auto stream = open();
+			return std::unique_ptr<duckdb_api::BatchStream>(new ObservedStream(state, std::move(stream)));
+		} catch (const duckdb_api::ExecutionError &error) {
+			RecordLocalAdmission(state, error);
+			throw;
+		}
+	}
+
+	const std::shared_ptr<ControlledRuntimeScenario::State> state;
+	const std::shared_ptr<const duckdb_api::ScanExecutor> inner;
+	mutable std::atomic<bool> closed;
+};
+
 } // namespace
 
 ControlledRuntimeScenario::ControlledRuntimeScenario(std::shared_ptr<State> state_p,
@@ -55,15 +400,58 @@ std::shared_ptr<const duckdb_api::ScanExecutor> ControlledRuntimeScenario::Execu
 }
 
 ControlledRuntimeScenarioObservation ControlledRuntimeScenario::Observation() const {
-	return {static_cast<uint64_t>(state->runtime->Observations().size()), state->expected_request_count,
-	        state->has_terminal_stage, state->terminal_stage};
+	const auto requests = state->runtime ? static_cast<uint64_t>(state->runtime->Observations().size())
+	                                     : state->request_count.load(std::memory_order_relaxed);
+	return {requests,
+	        state->expected_request_count,
+	        state->has_terminal_stage,
+	        state->terminal_stage,
+	        state->executor_close_count.load(std::memory_order_relaxed),
+	        state->opened_stream_count.load(std::memory_order_relaxed),
+	        state->retained_stream_count.load(std::memory_order_relaxed),
+	        state->peak_retained_stream_count.load(std::memory_order_relaxed),
+	        state->active_next_count.load(std::memory_order_relaxed),
+	        state->peak_active_next_count.load(std::memory_order_relaxed),
+	        state->completed_stream_count.load(std::memory_order_relaxed),
+	        state->cancelled_stream_count.load(std::memory_order_relaxed),
+	        state->closed_stream_count.load(std::memory_order_relaxed),
+	        state->local_admission_rejection_count.load(std::memory_order_relaxed),
+	        state->slow_request_count.load(std::memory_order_relaxed),
+	        state->ordinary_retry_failure_count.load(std::memory_order_relaxed),
+	        state->rate_limited_response_count.load(std::memory_order_relaxed),
+	        state->rate_limit_recovery_delay_milliseconds.load(std::memory_order_relaxed),
+	        state->recovered_request_count.load(std::memory_order_relaxed),
+	        state->healthy_request_count.load(std::memory_order_relaxed),
+	        state->healthy_during_resilience_pressure_count.load(std::memory_order_relaxed),
+	        state->unexpected_request_count.load(std::memory_order_relaxed)};
+}
+
+bool ControlledRuntimeScenario::WaitForRequestCount(uint64_t count, uint64_t timeout_milliseconds) const {
+	if (state->runtime) {
+		return state->runtime->WaitForRequestCount(count, std::chrono::milliseconds(timeout_milliseconds));
+	}
+	std::unique_lock<std::mutex> guard(state->request_mutex);
+	return state->request_condition.wait_for(guard, std::chrono::milliseconds(timeout_milliseconds), [&]() {
+		return state->request_count.load(std::memory_order_relaxed) >= count;
+	});
 }
 
 std::shared_ptr<ControlledRuntimeScenario> BuildControlledRuntimeScenario(ControlledRuntimeScenarioId scenario) {
+	if (scenario == ControlledRuntimeScenarioId::MIXED_RESILIENCE_PRESSURE) {
+		auto state =
+		    std::make_shared<ControlledRuntimeScenario::State>(nullptr, 5, false, duckdb_api::ErrorStage::INTERNAL);
+		auto runtime = duckdb_api::internal::BuildHttpScanExecutor(
+		    std::unique_ptr<duckdb_api::internal::HttpTransport>(new MixedResilienceTransport(state)));
+		auto observed = std::make_shared<ObservedExecutor>(state, std::move(runtime));
+		return std::shared_ptr<ControlledRuntimeScenario>(
+		    new ControlledRuntimeScenario(std::move(state), std::move(observed)));
+	}
 	std::shared_ptr<ControlledHttpRuntime> runtime;
 	if (scenario == ControlledRuntimeScenarioId::RICKANDMORTY_CHARACTER_EPISODES) {
 		runtime = BuildControlledHttpRuntimeForHost("rickandmortyapi.com");
-	} else if (scenario == ControlledRuntimeScenarioId::REST_RETRY_TRANSIENT_DUPLICATE) {
+	} else if (scenario == ControlledRuntimeScenarioId::REST_RETRY_TRANSIENT_DUPLICATE ||
+	           scenario == ControlledRuntimeScenarioId::ADMISSION_REST_SATURATION ||
+	           scenario == ControlledRuntimeScenarioId::ADMISSION_GRAPHQL_SATURATION) {
 		runtime = BuildControlledPackageHttpRuntime();
 	} else {
 		runtime = BuildControlledHttpRuntime();
@@ -135,16 +523,24 @@ std::shared_ptr<ControlledRuntimeScenario> BuildControlledRuntimeScenario(Contro
 		    {ControlledResponse(503, ""), transient, page, ControlledResponse(503, ""), transient, page});
 		break;
 	}
+	case ControlledRuntimeScenarioId::ADMISSION_REST_SATURATION:
+	case ControlledRuntimeScenarioId::ADMISSION_GRAPHQL_SATURATION:
+		expected_request_count = 2;
+		runtime->BlockHostAndRespondElsewhere("api.github.com", 200, RickAndMortyHealthyResponse());
+		break;
 	case ControlledRuntimeScenarioId::BLOCK_UNTIL_CANCEL:
 		runtime->BlockUntilCancelled();
 		break;
+	case ControlledRuntimeScenarioId::MIXED_RESILIENCE_PRESSURE:
+		throw std::logic_error("mixed resilience scenario was not constructed through its dedicated transport");
 	default:
 		throw std::invalid_argument("unknown controlled Runtime scenario");
 	}
 	auto state = std::make_shared<ControlledRuntimeScenario::State>(runtime, expected_request_count, has_terminal_stage,
 	                                                                terminal_stage);
+	auto observed = std::make_shared<ObservedExecutor>(state, runtime->Executor());
 	return std::shared_ptr<ControlledRuntimeScenario>(
-	    new ControlledRuntimeScenario(std::move(state), runtime->Executor()));
+	    new ControlledRuntimeScenario(std::move(state), std::move(observed)));
 }
 
 } // namespace duckdb_api_test

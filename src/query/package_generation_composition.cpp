@@ -187,6 +187,7 @@ public:
 
 	void Close() const noexcept override {
 		registry->Close();
+		executor->Close();
 	}
 
 private:

@@ -9,7 +9,7 @@
     "ROADMAP.md section '1.0.0 - narrow stable contract' states the public outcome.",
     "RFC 0009 sets the intended stable boundary and the six SemVer-governed categories.",
     "docs/ARCHITECTURE.md, docs/CONNECTOR_SPECIFICATIONS.md, docs/RUNTIME_CONTRACTS.md define current behavior.",
-    "Accepted RFCs 0010, 0011, 0012, 0013, 0014, 0021, 0022, 0023, 0024, and 0025 bind specific decisions propagated into those contracts.",
+    "Accepted RFCs 0010, 0011, 0012, 0013, 0014, 0021, 0022, 0023, 0024, 0025, and 0026 bind specific decisions propagated into those contracts.",
     "release/public-surface/inventory.json is the SQL-surface compatibility oracle.",
     "release/<version>/pins.json and public_contract.json are per-release identity and contract evidence."
   ],
@@ -134,7 +134,7 @@
     "redaction": "Absolute roots, source scalar content, credentials, generated documents, request/response bodies, rows, cursors, and remote messages are never diagnostic fields."
   },
   "failure_taxonomy": {
-    "authority": "RFC 0021; RFC 0024; RFC 0025; docs/RUNTIME_CONTRACTS.md Error ownership and redaction",
+    "authority": "RFC 0021; RFC 0024; RFC 0025; RFC 0026; docs/RUNTIME_CONTRACTS.md Error ownership and redaction",
     "primary_classes": [
       "configuration",
       "authorization",
@@ -148,6 +148,7 @@
       "decode",
       "schema",
       "resource_budget",
+      "local_admission",
       "cancellation",
       "internal"
     ],
@@ -159,7 +160,7 @@
       "indeterminate"
     ],
     "indeterminate_replay_is_non_replayable": true,
-    "binding": "The closed primary-class and replay-classification sets are layered additively on the existing ErrorStage classification. RFC 0024 and RFC 0025 share one bounded resilience controller; caching and circuit breaking remain disabled."
+    "binding": "The closed primary-class and replay-classification sets are layered additively on the existing ErrorStage classification. RFC 0024 and RFC 0025 share one bounded resilience controller; RFC 0026 adds executor-local admission before attempt authority. Caching and circuit breaking remain disabled."
   },
   "bounded_retry": {
     "authority": "RFC 0024; docs/RUNTIME_CONTRACTS.md Replay-safe retry",
@@ -240,8 +241,82 @@
       "queue_saturated",
       "scheduler_closed",
       "repeated_immediate",
-      "bucket_changed"
+      "bucket_changed",
+      "ticket_exhausted"
     ]
+  },
+  "bounded_runtime_admission": {
+    "authority": "RFC 0026; docs/RUNTIME_CONTRACTS.md Executor-local admission",
+    "coordination_domain": "one_runtime_executor_per_duckdb_database_instance",
+    "dimensions": [
+      "global",
+      "connector",
+      "destination",
+      "principal",
+      "bulkhead"
+    ],
+    "bulkhead_identity": [
+      "connector",
+      "relation_operation",
+      "protocol",
+      "destination",
+      "principal"
+    ],
+    "hard_limits": {
+      "credential_resolutions": [16, 8, 8, 0, 0],
+      "queued_credential_resolutions": [64, 16, 16, 0, 0],
+      "active_scans": [64, 16, 16, 8, 4],
+      "in_flight_requests": [32, 8, 8, 4, 2],
+      "queued_scan_admissions": [256, 64, 64, 32, 16],
+      "queued_request_admissions": [256, 64, 64, 32, 16],
+      "ordinary_retry_waiters": [32, 16, 16, 8, 4],
+      "rate_limit_waiters": [32, 16, 16, 8, 4],
+      "buffered_bytes": [268435456, 134217728, 134217728, 67108864, 33554432],
+      "buffered_decoded_rows": [6400, 3200, 3200, 1600, 800]
+    },
+    "provider_scan_request_queue_timeout_milliseconds": 1000,
+    "aggregate_request_admission_wait_milliseconds": 5000,
+    "cancellation_slice_milliseconds": 5,
+    "queue_law": "exact_key_fifo_with_oldest_eligible_cross_key_bypass",
+    "scope_precedence": [
+      "global",
+      "connector",
+      "destination",
+      "principal",
+      "bulkhead"
+    ],
+    "attempt_debit": "after_request_and_buffer_admission",
+    "buffer_admission": "worst_case_colive_capacity_before_allocation_fail_fast",
+    "recovery_wait_response_bytes": 0,
+    "local_rejection_transport_attempts": 0,
+    "local_rejection_replayable": false,
+    "diagnostic_reasons": [
+      "none",
+      "credential_resolution_queue_saturated",
+      "credential_resolution_queue_timeout",
+      "scan_queue_saturated",
+      "scan_queue_timeout",
+      "request_queue_saturated",
+      "request_queue_timeout",
+      "admission_waiting_exhausted",
+      "retry_wait_saturated",
+      "rate_limit_wait_saturated",
+      "buffered_bytes_exhausted",
+      "buffered_rows_exhausted",
+      "runtime_closed",
+      "ticket_exhausted"
+    ],
+    "diagnostic_scopes": [
+      "none",
+      "global",
+      "connector",
+      "destination",
+      "principal",
+      "bulkhead"
+    ],
+    "executor_close": "idempotent_nonthrowing_queue_drain_with_release_safe_live_handles",
+    "public_tuning": false,
+    "circuit_breaking": false
   },
   "credential_providers": {
     "providers": [
@@ -339,7 +414,8 @@
       "RFC 0022",
       "RFC 0023",
       "RFC 0024",
-      "RFC 0025"
+      "RFC 0025",
+      "RFC 0026"
     ]
   }
 }

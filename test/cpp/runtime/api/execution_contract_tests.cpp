@@ -28,6 +28,25 @@ private:
 	mutable std::size_t calls;
 };
 
+class LegacyExecutor final : public duckdb_api::ScanExecutor {
+public:
+	std::unique_ptr<duckdb_api::BatchStream> Open(const duckdb_api::ScanPlan &,
+	                                              duckdb_api::ExecutionControl &) const override {
+		throw std::logic_error("legacy executor must not be opened by the close compatibility test");
+	}
+};
+
+class LegacyStream final : public duckdb_api::BatchStream {
+public:
+	bool Next(duckdb_api::ExecutionControl &, duckdb_api::TypedBatch &) override {
+		return false;
+	}
+	void Cancel() noexcept override {
+	}
+	void Close() noexcept override {
+	}
+};
+
 static_assert(std::is_nothrow_destructible<duckdb_api::ExecutionControl>::value,
               "execution control teardown must be non-throwing");
 static_assert(std::is_nothrow_destructible<duckdb_api::BatchStream>::value,
@@ -252,8 +271,56 @@ void TestFailureClassification() {
 	        "RemoteStatusClassName drifted");
 	Require(std::string(duckdb_api::RateLimitReasonName(duckdb_api::RateLimitReason::POLICY_FAIL)) == "policy_fail" &&
 	            std::string(duckdb_api::RateLimitReasonName(duckdb_api::RateLimitReason::BUCKET_CHANGED)) ==
-	                "bucket_changed",
+	                "bucket_changed" &&
+	            std::string(duckdb_api::RateLimitReasonName(duckdb_api::RateLimitReason::TICKET_EXHAUSTED)) ==
+	                "ticket_exhausted",
 	        "RateLimitReasonName drifted from the freeze strings");
+	Require(std::string(duckdb_api::AdmissionReasonName(duckdb_api::AdmissionReason::RUNTIME_CLOSED)) ==
+	                "runtime_closed" &&
+	            std::string(duckdb_api::AdmissionScopeName(duckdb_api::AdmissionScope::PRINCIPAL)) == "principal",
+	        "admission reason or scope name drifted from the freeze strings");
+	const auto local = duckdb_api::LocalAdmissionFailureProperties(duckdb_api::AdmissionReason::REQUEST_QUEUE_SATURATED,
+	                                                               duckdb_api::AdmissionScope::CONNECTOR, 64, 64, 1, 17,
+	                                                               true, duckdb_api::FailurePhase::REQUEST);
+	Require(local.failure_class == duckdb_api::FailureClass::LOCAL_ADMISSION &&
+	            local.phase == duckdb_api::FailurePhase::REQUEST &&
+	            local.replay_classification == duckdb_api::ReplayClassification::NEVER_REPLAYABLE &&
+	            local.terminating_budget == duckdb_api::BudgetDimension::NONE &&
+	            local.admission_reason == duckdb_api::AdmissionReason::REQUEST_QUEUE_SATURATED &&
+	            local.admission_scope == duckdb_api::AdmissionScope::CONNECTOR && local.admission_limit == 64 &&
+	            local.admission_observed == 64 && local.admission_requested == 1 &&
+	            local.cumulative_admission_waiting_milliseconds == 17 && local.admission_waiting,
+	        "local admission failure properties lost their closed failure contract");
+	LegacyExecutor legacy;
+	legacy.Close();
+	legacy.Close();
+	LegacyStream legacy_stream;
+	const auto legacy_snapshot = legacy_stream.Diagnostics();
+	Require(legacy_snapshot.admission_reason == duckdb_api::AdmissionReason::NONE &&
+	            legacy_snapshot.admission_scope == duckdb_api::AdmissionScope::NONE &&
+	            legacy_snapshot.admission_limit == 0 && legacy_snapshot.admission_observed == 0 &&
+	            legacy_snapshot.admission_requested == 0 &&
+	            legacy_snapshot.cumulative_admission_waiting_milliseconds == 0 && !legacy_snapshot.admission_waiting,
+	        "legacy stream diagnostics did not default every appended admission field closed");
+	Require(rate_limited.admission_reason == duckdb_api::AdmissionReason::NONE &&
+	            rate_limited.admission_scope == duckdb_api::AdmissionScope::NONE && rate_limited.admission_limit == 0 &&
+	            rate_limited.admission_observed == 0 && rate_limited.admission_requested == 0 &&
+	            rate_limited.cumulative_admission_waiting_milliseconds == 0 && !rate_limited.admission_waiting,
+	        "pre-admission failure factories did not default appended admission properties closed");
+	bool rejected_unknown_reason = false;
+	try {
+		(void)duckdb_api::AdmissionReasonName(static_cast<duckdb_api::AdmissionReason>(255));
+	} catch (const std::logic_error &) {
+		rejected_unknown_reason = true;
+	}
+	bool rejected_unknown_scope = false;
+	try {
+		(void)duckdb_api::AdmissionScopeName(static_cast<duckdb_api::AdmissionScope>(255));
+	} catch (const std::logic_error &) {
+		rejected_unknown_scope = true;
+	}
+	Require(rejected_unknown_reason && rejected_unknown_scope,
+	        "admission diagnostic vocabulary did not fail closed on unknown enum values");
 
 	// ClassifyReplay: the AGENTS.md retry invariant (declared safety AND uncommitted
 	// replay unit) as a truth table.
@@ -297,22 +364,16 @@ void TestFailureClassification() {
 	        "accepted or exposed retry diagnostics retained replay authority");
 
 	// Classified ExecutionError carries properties; unclassified does not.
-	const duckdb_api::FailureProperties properties {duckdb_api::FailureClass::RESOURCE_BUDGET,
-	                                                duckdb_api::FailurePhase::DECODE,
-	                                                duckdb_api::ReplayClassification::ATOMIC_TRAVERSAL_STEP,
-	                                                3,
-	                                                1,
-	                                                0,
-	                                                duckdb_api::RemoteStatusClass::NONE,
-	                                                duckdb_api::BudgetDimension::PAGES,
-	                                                0,
-	                                                duckdb_api::ExposureState::UNACCEPTED,
-	                                                0,
-	                                                0,
-	                                                0,
-	                                                0,
-	                                                duckdb_api::RateLimitReason::NONE,
-	                                                false};
+	duckdb_api::FailureProperties properties {};
+	properties.failure_class = duckdb_api::FailureClass::RESOURCE_BUDGET;
+	properties.phase = duckdb_api::FailurePhase::DECODE;
+	properties.replay_classification = duckdb_api::ReplayClassification::ATOMIC_TRAVERSAL_STEP;
+	properties.step = 3;
+	properties.attempt = 1;
+	properties.remote_status_class = duckdb_api::RemoteStatusClass::NONE;
+	properties.terminating_budget = duckdb_api::BudgetDimension::PAGES;
+	properties.exposure_state = duckdb_api::ExposureState::UNACCEPTED;
+	properties.rate_limit_reason = duckdb_api::RateLimitReason::NONE;
 	const duckdb_api::ExecutionError classified(duckdb_api::ErrorStage::RESOURCE, "pages",
 	                                            "scan exhausted its page budget", properties);
 	Require(classified.Classified() &&

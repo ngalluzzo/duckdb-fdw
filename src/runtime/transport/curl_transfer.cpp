@@ -173,13 +173,31 @@ void ValidateInputs(const CurlTransferProfile &profile, const HttpRequest &reque
 
 void BuildHeaders(const HttpRequest &request, CurlHeaderList &headers) {
 	for (std::size_t index = 0; index < request.headers.size(); index++) {
-		const auto header = request.headers[index].name + ": " + request.headers[index].value;
+		const auto size = request.headers[index].name.size() + 2 + request.headers[index].value.size();
+		std::string header;
+		header.reserve(size);
+		if (!HasBoundedHttpStringCapacity(header, static_cast<uint64_t>(size))) {
+			throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP request header exceeded its capacity envelope");
+		}
+		header += request.headers[index].name;
+		header += ": ";
+		header += request.headers[index].value;
 		if (!headers.Append(header)) {
 			throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP request headers exceeded available memory");
 		}
 	}
-	if (!request.content_type.empty() && !headers.Append("Content-Type: " + request.content_type)) {
-		throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP request headers exceeded available memory");
+	if (!request.content_type.empty()) {
+		const auto size = sizeof("Content-Type: ") - 1 + request.content_type.size();
+		std::string header;
+		header.reserve(size);
+		if (!HasBoundedHttpStringCapacity(header, static_cast<uint64_t>(size))) {
+			throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP request header exceeded its capacity envelope");
+		}
+		header += "Content-Type: ";
+		header += request.content_type;
+		if (!headers.Append(header)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP request headers exceeded available memory");
+		}
 	}
 }
 

@@ -13,7 +13,13 @@
 
 namespace duckdb_api_test {
 
-enum class ControlledHttpMode { RESPONSE, TRANSPORT_FAILURE, BLOCK_UNTIL_CANCEL, BEARER_RESPONSE_BARRIER };
+enum class ControlledHttpMode {
+	RESPONSE,
+	TRANSPORT_FAILURE,
+	BLOCK_UNTIL_CANCEL,
+	BLOCK_HOST_AND_RESPOND_ELSEWHERE,
+	BEARER_RESPONSE_BARRIER
+};
 
 struct ControlledHttpResponse {
 	uint32_t status;
@@ -80,6 +86,10 @@ public:
 	                              std::string second_body);
 	void FailWithUnknownTransportDiagnostic(std::string diagnostic);
 	void BlockUntilCancelled();
+	// Blocks only the exact host while returning one bounded response for every
+	// other admitted destination. This lets product tests prove that a saturated
+	// bulkhead cannot prevent unrelated work from reaching the same executor.
+	void BlockHostAndRespondElsewhere(std::string blocked_host, uint32_t status, std::string body);
 	bool WaitForRequestCount(uint64_t count, std::chrono::milliseconds timeout);
 	void ReleaseBearerBarrier();
 	ControlledRequestObservation Observation() const;

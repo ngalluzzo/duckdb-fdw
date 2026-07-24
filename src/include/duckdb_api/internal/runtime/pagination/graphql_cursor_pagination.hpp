@@ -1,9 +1,10 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <string>
-#include <vector>
 
 namespace duckdb_api {
 namespace internal {
@@ -42,7 +43,7 @@ private:
 class GraphqlCursorState {
 public:
 	GraphqlCursorState(uint64_t max_pages, uint64_t max_cursor_bytes);
-	GraphqlCursorState(const GraphqlCursorState &other);
+	GraphqlCursorState(const GraphqlCursorState &) = delete;
 
 	const std::string *CurrentCursor() const noexcept;
 	uint64_t RequestedPages() const noexcept;
@@ -63,7 +64,8 @@ private:
 	uint64_t requested_pages;
 	bool exhausted;
 	bool failed;
-	std::vector<std::string> seen;
+	std::array<std::string, 32> seen;
+	std::size_t seen_count;
 };
 
 } // namespace internal

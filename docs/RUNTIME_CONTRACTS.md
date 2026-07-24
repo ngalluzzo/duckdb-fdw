@@ -612,7 +612,11 @@ Materialized GraphQL strings reserve retained capacity before every possible
 growth and reconcile the allocator's actual capacity immediately. The decoder
 reports row-retained and temporary end-cursor bytes separately; after moving
 the cursor into pagination state, the executor counts that allocation exactly
-once.
+once. At page drain it releases decoded storage and row authority, then
+atomically narrows the still-live page-byte permit to the cursor's exact
+retained capacity. It grows that same permit to the next page's admitted decode
+allowance before allocation. The cursor therefore remains charged continuously
+without a duplicate reservation or an uncharged transfer interval.
 
 ## Pagination
 
@@ -628,9 +632,12 @@ batches of at most the product chunk ceiling and is released before the next
 request begins.
 
 For Link pagination, received metadata contributes only a validated next page
-transition within the exact planned origin/path. For GraphQL, received metadata
-contributes only a validated opaque cursor. Continuations cannot replace fixed
-fields or widen authority.
+transition within the exact planned origin/path. Once validated, the mutable
+Link state retains only the immutable admitted profile by reference and a
+checked scalar page count; exact positive progression makes a dynamic
+seen-target collection unnecessary. For GraphQL, received metadata contributes
+only a validated opaque cursor. Continuations cannot replace fixed fields or
+widen authority.
 
 ### Body-signaled REST pagination (`response_next`)
 
@@ -763,6 +770,63 @@ decoded page is still live. The admitted decoded-page allowance must cover
 that co-live handoff exactly; one byte below the checked sum fails before the
 batch allocation or publication.
 
+### Executor-local admission
+
+One executor-owned `AdmissionController` applies the installed fixed host
+profile to every v1/v2/v3 scan. It atomically checks the complete applicable
+global, connector, destination, provider-principal, and exact-bulkhead vector
+for credential resolution, active scans, in-flight requests, ordinary retry
+waiters, rate-limit waiters, buffered bytes, and buffered decoded rows. The
+bulkhead uses only admitted connector/relation/protocol/operation/destination
+facts plus an anonymous, conservative direct, or opaque provider-authority
+principal. Package versions, credential revisions, response values, and remote
+quota buckets cannot partition general host capacity.
+
+The installed hard profile is:
+
+| Authority | Global | Connector | Destination | Principal | Bulkhead |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Credential resolutions | 16 | 8 | 8 | — | — |
+| Queued credential resolutions | 64 | 16 | 16 | — | — |
+| Active scans | 64 | 16 | 16 | 8 | 4 |
+| In-flight requests | 32 | 8 | 8 | 4 | 2 |
+| Queued scan admissions | 256 | 64 | 64 | 32 | 16 |
+| Queued request admissions | 256 | 64 | 64 | 32 | 16 |
+| Ordinary retry waiters | 32 | 16 | 16 | 8 | 4 |
+| Rate-limit waiters | 32 | 16 | 16 | 8 | 4 |
+| Buffered bytes | 256 MiB | 128 MiB | 128 MiB | 64 MiB | 32 MiB |
+| Buffered decoded rows | 6,400 | 3,200 | 3,200 | 1,600 | 800 |
+
+Private construction profiles may only narrow these values; zero disables the
+class and never means unlimited. Provider, scan, and request queues each have
+their own checked ticket domain, one-second residence ceiling, and
+five-millisecond cancellation slices. Request queue time also debits one
+five-second aggregate admission-wait ceiling and the scan deadline. FIFO is
+exact-key local: on release the scheduler grants the oldest complete vector
+that fits, so an ineligible saturated key cannot head-of-line block an
+independently eligible key. One mutex linearizes grant, cancellation, timeout,
+ticket exhaustion, and close; a move-only permit is the sole release authority.
+
+Every request path acquires quota authority when applicable, then general
+request authority, then the complete worst-case co-live target/header/body,
+raw response, decompressed response, and retained-metadata byte reservation.
+Only then does `BeginAttempt` consume the page/attempt ordinal and the request
+factory place credentials. Decoded-page bytes/rows are reserved before decode
+and retained across every batch, with a separate batch-handoff reservation
+until the next pull. Buffer and recovery-wait reservations fail immediately;
+they never queue while retaining a response or decoded page. A completed
+retry/rate-limit response and its byte charge are destroyed before the
+corresponding waiter reservation is acquired.
+
+Local rejection is terminal and non-replayable. It adds the distinct
+`local_admission` primary class plus a closed reason/scope, effective limit,
+observed/requested checked counts, cumulative admission-wait milliseconds, and
+current-wait flag. It is a coarse `resource` stage, never the reserved remote
+`timeout` class, and `terminating_budget` stays `none` because executor capacity
+is not a scan-plan budget. Identity facts, hashes, queue keys, tickets, and
+timestamps do not render. Circuit breaking and failure-history state remain
+disabled.
+
 For GraphQL, the aggregate serialized-request-body ceiling is no greater than
 the checked product of the effective per-request body ceiling, maximum page
 count, and admitted attempts per step. Semantics intersects that reachable
@@ -803,8 +867,8 @@ time. Absolute guidance uses a valid response `Date`, otherwise the paired
 local wall clock captured at receipt. Malformed/duplicate/overflowing data,
 missing guidance, excessive delay, deadline insufficiency, exhausted attempts
 or waiting, repeated immediate guidance, bucket drift, queue saturation, and
-scheduler close are distinct closed reasons. Remote values are discarded after
-typed observation.
+scheduler close or checked coordinator-ticket exhaustion are distinct closed
+reasons. Remote values are discarded after typed observation.
 
 The coordinator maintains FIFO tickets and at most one move-only in-flight
 permit per exact key. A later response may extend but never shorten the key's
@@ -833,13 +897,15 @@ exhaustion. A failure after prior rows is terminal and repeats the same safe
 failure classification on later pulls; it is never converted to clean
 exhaustion or partial success.
 
-Each terminal failure carries additive structured resilience facts (RFC 0021):
+Each terminal failure carries additive structured resilience facts (RFC 0021
+and RFC 0026):
 a primary failure class, the execution phase, a final attempt ordinal,
 cumulative retry delay, cumulative rate-limit wait, cumulative remote
 transport time, current exposure state, the count of rows exposed to
 DuckDB before the failure, the observed remote-status class, the terminating
 budget dimension, a replay classification, rate-limit event and wait counts,
-the current-wait flag, and the last closed `RateLimitReason`.
+the current-wait flag, the last closed `RateLimitReason`, and closed local
+admission reason/scope/count/wait facts when admission is the terminal owner.
 `BatchStream::Diagnostics`
 provides the same content-free effective policy and progress snapshot after
 successful recovery as well as terminal failure. These are closed
@@ -854,6 +920,17 @@ exhaustion (`memory`/`bytes`/`records`/`pages`) remain distinguishable.
 `scheduler_closed`, `repeated_immediate`, and `bucket_changed`. It is safe to
 render; field values, remote bucket text, authority identity, URLs, wall or
 steady timestamps, and queue keys are not.
+
+`AdmissionReason` is closed at `none`,
+`credential_resolution_queue_saturated`,
+`credential_resolution_queue_timeout`, `scan_queue_saturated`,
+`scan_queue_timeout`, `request_queue_saturated`, `request_queue_timeout`,
+`admission_waiting_exhausted`, `retry_wait_saturated`,
+`rate_limit_wait_saturated`, `buffered_bytes_exhausted`,
+`buffered_rows_exhausted`, `runtime_closed`, and `ticket_exhausted`.
+`AdmissionScope` is closed at `none`, `global`, `connector`, `destination`,
+`principal`, and `bulkhead`; simultaneous shortage selects that fixed order.
+Unknown values fail closed.
 
 Executor instances are immutable services. Each open creates isolated mutable
 stream state. Failure or cancellation of one stream cannot poison another.
@@ -874,11 +951,16 @@ reporting cancellation.
 
 The DatabaseInstance lifecycle sentry first closes Query publication admission
 and then calls the composed staging service's idempotent non-throwing close,
-which closes Runtime generation admission. This order prevents new Query work
-from entering while Runtime drains its current lease holder and rejects queued
-or future staging. Registry generations and retained-root custody release only
-after their final catalog, transaction, prepared-plan, bind, or scan owner
-ends. Destructors contain exceptions. Dynamic DSO unload is not supported.
+which closes Runtime generation admission and then the shared executor. The
+executor closes admission before quota coordination, wakes queued work, and
+rejects future provider, scan, request, or wait authority. Outstanding streams
+and move-only reservations retain release-safe shared controller state; close
+does not destroy or wait for an in-flight transport. This order prevents new
+Query work from entering while Runtime drains its current lease holder and
+rejects queued or future staging. Registry generations and retained-root
+custody release only after their final catalog, transaction, prepared-plan,
+bind, or scan owner ends. Destructors contain exceptions. Dynamic DSO unload is
+not supported.
 
 ## Error ownership and redaction
 
@@ -900,7 +982,7 @@ rows, cursors, or remote messages.
 The primary failure taxonomy (RFC 0021) classifies every terminal failure into
 exactly one of: configuration, authorization, credential-provider,
 destination-policy, transport, timeout, remote-status, rate-limit, protocol,
-decode, schema, resource-budget, cancellation, or internal. It is carried as an
+decode, schema, resource-budget, local-admission, cancellation, or internal. It is carried as an
 additive structured field; the existing error-stage classification and rendered
 strings are preserved. The closed primary-class and replay-classification sets
 are bound to `release/1.0.0/freeze.json` and enforced by

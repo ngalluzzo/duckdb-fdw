@@ -44,7 +44,7 @@ uint64_t ParsePositiveDecimal(const std::string &value) {
 	return result;
 }
 
-uint64_t ValidateNextTarget(const std::string &target, uint64_t current_page, const std::vector<uint64_t> &seen_pages,
+uint64_t ValidateNextTarget(const std::string &target, uint64_t current_page,
                             const AdmittedPaginatedRestRequestProfile &profile) {
 	const std::string authority = profile.Scheme() + "://" + profile.Host();
 	if (target.compare(0, authority.size(), authority) != 0) {
@@ -114,11 +114,6 @@ uint64_t ValidateNextTarget(const std::string &target, uint64_t current_page, co
 	if (parsed_page != next_page) {
 		ThrowPolicy();
 	}
-	for (const auto seen_page : seen_pages) {
-		if (seen_page == parsed_page) {
-			ThrowPolicy();
-		}
-	}
 	return parsed_page;
 }
 
@@ -152,7 +147,6 @@ private:
 };
 
 LinkPageTransition ParseTransition(const std::vector<std::string> &fields, uint64_t current_page,
-                                   const std::vector<uint64_t> &seen_pages,
                                    const AdmittedPaginatedRestRequestProfile &profile) {
 	NextTargetSelector selector;
 	try {
@@ -163,7 +157,7 @@ LinkPageTransition ParseTransition(const std::vector<std::string> &fields, uint6
 	if (!selector.FoundNext()) {
 		return {false, 0};
 	}
-	return {true, ValidateNextTarget(selector.NextTarget(), current_page, seen_pages, profile)};
+	return {true, ValidateNextTarget(selector.NextTarget(), current_page, profile)};
 }
 
 } // namespace
@@ -190,8 +184,7 @@ const std::string &LinkPaginationError::SafeMessage() const noexcept {
 }
 
 LinkPaginationState::LinkPaginationState(const AdmittedPaginatedRestRequestProfile &profile_p)
-    : profile(profile_p), current_page(profile.FirstPage()), seen_pages(1, profile.FirstPage()), exhausted(false),
-      failed(false) {
+    : profile(profile_p), current_page(profile.FirstPage()), seen_page_count(1), exhausted(false), failed(false) {
 }
 
 LinkPageTransition LinkPaginationState::Advance(const std::vector<std::string> &link_field_values) {
@@ -199,12 +192,12 @@ LinkPageTransition LinkPaginationState::Advance(const std::vector<std::string> &
 		ThrowState();
 	}
 	try {
-		const auto transition = ParseTransition(link_field_values, current_page, seen_pages, profile);
+		const auto transition = ParseTransition(link_field_values, current_page, profile);
 		if (!transition.has_next) {
 			exhausted = true;
 			return transition;
 		}
-		seen_pages.push_back(transition.next_page);
+		seen_page_count++;
 		current_page = transition.next_page;
 		return transition;
 	} catch (const LinkPaginationError &) {
@@ -235,8 +228,8 @@ LinkPageTransition LinkPaginationState::AdvanceBody(const std::string &next_url)
 		// would face. The body-extracted candidate must already be in
 		// canonical ASCII percent-encoded form; no normalization is applied
 		// (see docs/RUNTIME_CONTRACTS.md body-signaled REST pagination).
-		const auto parsed_page = ValidateNextTarget(next_url, current_page, seen_pages, profile);
-		seen_pages.push_back(parsed_page);
+		const auto parsed_page = ValidateNextTarget(next_url, current_page, profile);
+		seen_page_count++;
 		current_page = parsed_page;
 		return {true, parsed_page};
 	} catch (const LinkPaginationError &) {
@@ -268,7 +261,7 @@ LinkPageTransition LinkPaginationState::AdvanceByCount(std::size_t decoded_row_c
 			ThrowPolicy();
 		}
 		const auto next_page = current_page + profile.PageIncrement();
-		seen_pages.push_back(next_page);
+		seen_page_count++;
 		current_page = next_page;
 		return {true, next_page};
 	} catch (const LinkPaginationError &) {
@@ -297,7 +290,7 @@ bool LinkPaginationState::Failed() const noexcept {
 }
 
 std::size_t LinkPaginationState::SeenPageCount() const noexcept {
-	return seen_pages.size();
+	return seen_page_count;
 }
 
 } // namespace internal

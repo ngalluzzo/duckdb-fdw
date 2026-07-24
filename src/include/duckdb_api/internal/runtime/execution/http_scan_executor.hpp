@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb_api/execution.hpp"
+#include "duckdb_api/internal/runtime/execution/admission_controller.hpp"
 #include "duckdb_api/internal/runtime/transport/http_transport.hpp"
 
 #include <cstdint>
@@ -31,7 +32,8 @@ struct HttpExecutionProfile {
 	    uint64_t max_retry_delay_milliseconds_p, uint64_t max_retry_waiting_milliseconds_per_scan_p,
 	    uint64_t max_rate_limit_attempts_per_step_p = 0, uint64_t max_rate_limit_attempts_per_scan_p = 0,
 	    uint64_t max_rate_limit_delay_milliseconds_p = 0, uint64_t max_rate_limit_waiting_milliseconds_per_scan_p = 0,
-	    uint64_t max_combined_waiting_milliseconds_per_scan_p = 0)
+	    uint64_t max_combined_waiting_milliseconds_per_scan_p = 0,
+	    AdmissionProfile admission_profile_p = AdmissionProfile::Hard())
 	    : scheme(scheme_p), host(std::move(host_p)), port(port_p),
 	      private_addresses_enabled(private_addresses_enabled_p),
 	      link_local_addresses_enabled(link_local_addresses_enabled_p),
@@ -44,7 +46,8 @@ struct HttpExecutionProfile {
 	      max_rate_limit_attempts_per_scan(max_rate_limit_attempts_per_scan_p),
 	      max_rate_limit_delay_milliseconds(max_rate_limit_delay_milliseconds_p),
 	      max_rate_limit_waiting_milliseconds_per_scan(max_rate_limit_waiting_milliseconds_per_scan_p),
-	      max_combined_waiting_milliseconds_per_scan(max_combined_waiting_milliseconds_per_scan_p) {
+	      max_combined_waiting_milliseconds_per_scan(max_combined_waiting_milliseconds_per_scan_p),
+	      admission_profile(std::move(admission_profile_p)) {
 	}
 
 	PlannedUrlScheme scheme;
@@ -66,6 +69,7 @@ struct HttpExecutionProfile {
 	uint64_t max_rate_limit_delay_milliseconds;
 	uint64_t max_rate_limit_waiting_milliseconds_per_scan;
 	uint64_t max_combined_waiting_milliseconds_per_scan;
+	AdmissionProfile admission_profile;
 };
 
 // Shared origin/network intersection used by protocol-specific admission. It

@@ -2,17 +2,24 @@
 
 #include <sys/socket.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace duckdb_api {
 namespace internal {
 namespace {
+
+static_assert(std::is_nothrow_move_constructible<std::string>::value,
+              "metadata vector growth requires allocation-free string moves");
+static_assert(std::is_nothrow_move_constructible<HttpObservedHeader>::value,
+              "metadata vector growth requires allocation-free observed-header moves");
 
 bool TryAddStringBytes(const std::string &value, uint64_t limit, uint64_t &result) noexcept {
 	const auto object_begin = reinterpret_cast<std::uintptr_t>(&value);
@@ -59,6 +66,206 @@ bool TryRetainedMetadataBytes(const CurlTransferState &state, uint64_t limit, ui
 		}
 	}
 	return result <= limit;
+}
+
+bool TryAddMetadataEnvelope(uint64_t amount, uint64_t limit, uint64_t &result) noexcept {
+	if (result > limit || amount > limit - result) {
+		return false;
+	}
+	result += amount;
+	return true;
+}
+
+uint64_t StringAllocationEnvelope(std::size_t size) noexcept {
+	const std::string inline_probe;
+	return size <= inline_probe.capacity() ? 0 : HttpStringAllocationLimit(static_cast<uint64_t>(size));
+}
+
+bool TryPlanNewString(std::size_t size, uint64_t limit, uint64_t &peak) noexcept {
+	return TryAddMetadataEnvelope(StringAllocationEnvelope(size), limit, peak);
+}
+
+bool TryPlanStringAppend(const std::string &value, std::size_t amount, uint64_t limit, uint64_t &peak,
+                         std::size_t &required_size) noexcept {
+	if (amount > std::numeric_limits<std::size_t>::max() - value.size()) {
+		return false;
+	}
+	required_size = value.size() + amount;
+	return required_size <= value.capacity() ||
+	       TryAddMetadataEnvelope(StringAllocationEnvelope(required_size), limit, peak);
+}
+
+bool PrepareStringCapacity(std::string &value, std::size_t required_size) {
+	if (required_size > value.capacity()) {
+		value.reserve(required_size);
+	}
+	return HasBoundedHttpStringCapacity(value, static_cast<uint64_t>(required_size));
+}
+
+template <class T>
+bool TryPlanVectorAppend(const std::vector<T> &values, std::size_t additions, uint64_t limit, uint64_t &peak,
+                         std::size_t &required_capacity) noexcept {
+	if (additions > std::numeric_limits<std::size_t>::max() - values.size()) {
+		return false;
+	}
+	required_capacity = values.size() + additions;
+	if (required_capacity <= values.capacity()) {
+		required_capacity = values.capacity();
+		return true;
+	}
+	if (required_capacity > limit / sizeof(T)) {
+		return false;
+	}
+	return TryAddMetadataEnvelope(static_cast<uint64_t>(required_capacity) * sizeof(T), limit, peak);
+}
+
+template <class T>
+bool PrepareVectorCapacity(std::vector<T> &values, std::size_t required_capacity) {
+	if (required_capacity > values.capacity()) {
+		values.reserve(required_capacity);
+	}
+	// The supported native cells give reserve(n) exact capacity. Keeping that
+	// property explicit prevents an implementation-defined growth factor from
+	// escaping the envelope preflight above.
+	return values.capacity() == required_capacity;
+}
+
+enum class MetadataMutationStatus : uint8_t { SUCCESS, OVERSIZED, ALLOCATION_FAILED };
+
+MetadataMutationStatus RetainInitialMetadata(CurlTransferState &state, const std::string *retained_name,
+                                             bool retain_date, bool retain_link, const char *value_data,
+                                             std::size_t value_length) {
+	const bool add_rate_limit = retained_name != nullptr;
+	const bool add_date = !add_rate_limit && retain_date;
+	uint64_t peak = 0;
+	if (!TryRetainedMetadataBytes(state, state.limits.max_metadata_bytes, peak)) {
+		return MetadataMutationStatus::OVERSIZED;
+	}
+
+	std::size_t rate_limit_capacity = state.rate_limit_fields.capacity();
+	std::size_t date_capacity = state.date_field_values.capacity();
+	std::size_t link_capacity = state.link_field_values.capacity();
+	if ((add_rate_limit && (!TryPlanVectorAppend(state.rate_limit_fields, 1, state.limits.max_metadata_bytes, peak,
+	                                             rate_limit_capacity) ||
+	                        !TryPlanNewString(retained_name->size(), state.limits.max_metadata_bytes, peak) ||
+	                        !TryPlanNewString(value_length, state.limits.max_metadata_bytes, peak))) ||
+	    (add_date &&
+	     (!TryPlanVectorAppend(state.date_field_values, 1, state.limits.max_metadata_bytes, peak, date_capacity) ||
+	      !TryPlanNewString(value_length, state.limits.max_metadata_bytes, peak))) ||
+	    (retain_link &&
+	     (!TryPlanVectorAppend(state.link_field_values, 1, state.limits.max_metadata_bytes, peak, link_capacity) ||
+	      !TryPlanNewString(value_length, state.limits.max_metadata_bytes, peak)))) {
+		return MetadataMutationStatus::OVERSIZED;
+	}
+
+	if ((add_rate_limit && !PrepareVectorCapacity(state.rate_limit_fields, rate_limit_capacity)) ||
+	    (add_date && !PrepareVectorCapacity(state.date_field_values, date_capacity)) ||
+	    (retain_link && !PrepareVectorCapacity(state.link_field_values, link_capacity))) {
+		return MetadataMutationStatus::ALLOCATION_FAILED;
+	}
+
+	std::size_t rate_limit_index = 0;
+	std::size_t date_index = 0;
+	std::size_t link_index = 0;
+	if (add_rate_limit) {
+		rate_limit_index = state.rate_limit_fields.size();
+		state.rate_limit_fields.emplace_back();
+		auto &field = state.rate_limit_fields.back();
+		if (!PrepareStringCapacity(field.name, retained_name->size()) ||
+		    !PrepareStringCapacity(field.value, value_length)) {
+			return MetadataMutationStatus::ALLOCATION_FAILED;
+		}
+		field.name.assign(*retained_name);
+		field.value.assign(value_data, value_length);
+	} else if (add_date) {
+		date_index = state.date_field_values.size();
+		state.date_field_values.emplace_back();
+		auto &value = state.date_field_values.back();
+		if (!PrepareStringCapacity(value, value_length)) {
+			return MetadataMutationStatus::ALLOCATION_FAILED;
+		}
+		value.assign(value_data, value_length);
+	}
+	if (retain_link) {
+		link_index = state.link_field_values.size();
+		state.link_field_values.emplace_back();
+		auto &value = state.link_field_values.back();
+		if (!PrepareStringCapacity(value, value_length)) {
+			return MetadataMutationStatus::ALLOCATION_FAILED;
+		}
+		value.assign(value_data, value_length);
+	}
+
+	uint64_t retained = 0;
+	if (!TryRetainedMetadataBytes(state, state.limits.max_metadata_bytes, retained)) {
+		return MetadataMutationStatus::ALLOCATION_FAILED;
+	}
+	state.metadata_bytes = retained;
+	if (add_rate_limit) {
+		state.retained_header_index = rate_limit_index;
+		state.retained_header_kind = retain_link ? CurlTransferState::RetainedHeaderKind::RATE_LIMIT_LINK
+		                                         : CurlTransferState::RetainedHeaderKind::RATE_LIMIT;
+	} else if (add_date) {
+		state.retained_header_index = date_index;
+		state.retained_header_kind = CurlTransferState::RetainedHeaderKind::DATE;
+	} else {
+		state.retained_header_index = link_index;
+		state.retained_header_kind = CurlTransferState::RetainedHeaderKind::LINK;
+	}
+	state.retained_link_index = link_index;
+	return MetadataMutationStatus::SUCCESS;
+}
+
+MetadataMutationStatus AppendFoldedMetadata(CurlTransferState &state, const char *data, std::size_t length) {
+	std::string *rate_limit_value = nullptr;
+	std::string *date_value = nullptr;
+	std::string *link_value = nullptr;
+	if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::RATE_LIMIT ||
+	    state.retained_header_kind == CurlTransferState::RetainedHeaderKind::RATE_LIMIT_LINK) {
+		rate_limit_value = &state.rate_limit_fields.at(state.retained_header_index).value;
+	} else if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::DATE) {
+		date_value = &state.date_field_values.at(state.retained_header_index);
+	}
+	if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::LINK) {
+		link_value = &state.link_field_values.at(state.retained_header_index);
+	} else if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::RATE_LIMIT_LINK) {
+		link_value = &state.link_field_values.at(state.retained_link_index);
+	}
+
+	uint64_t peak = 0;
+	if (!TryRetainedMetadataBytes(state, state.limits.max_metadata_bytes, peak)) {
+		return MetadataMutationStatus::OVERSIZED;
+	}
+	std::size_t rate_limit_size = 0;
+	std::size_t date_size = 0;
+	std::size_t link_size = 0;
+	if ((rate_limit_value &&
+	     !TryPlanStringAppend(*rate_limit_value, length, state.limits.max_metadata_bytes, peak, rate_limit_size)) ||
+	    (date_value && !TryPlanStringAppend(*date_value, length, state.limits.max_metadata_bytes, peak, date_size)) ||
+	    (link_value && !TryPlanStringAppend(*link_value, length, state.limits.max_metadata_bytes, peak, link_size))) {
+		return MetadataMutationStatus::OVERSIZED;
+	}
+	if ((rate_limit_value && !PrepareStringCapacity(*rate_limit_value, rate_limit_size)) ||
+	    (date_value && !PrepareStringCapacity(*date_value, date_size)) ||
+	    (link_value && !PrepareStringCapacity(*link_value, link_size))) {
+		return MetadataMutationStatus::ALLOCATION_FAILED;
+	}
+	if (rate_limit_value) {
+		rate_limit_value->append(data, length);
+	}
+	if (date_value) {
+		date_value->append(data, length);
+	}
+	if (link_value) {
+		link_value->append(data, length);
+	}
+
+	uint64_t retained = 0;
+	if (!TryRetainedMetadataBytes(state, state.limits.max_metadata_bytes, retained)) {
+		return MetadataMutationStatus::ALLOCATION_FAILED;
+	}
+	state.metadata_bytes = retained;
+	return MetadataMutationStatus::SUCCESS;
 }
 
 bool AddWithin(uint64_t current, std::size_t amount, uint64_t limit, uint64_t &result) noexcept {
@@ -137,6 +344,16 @@ CurlTransferState::CurlTransferState(ExecutionControl &control_p, const HttpLimi
       retry_after_present(false), transfer_encoding_seen(false), transfer_chunked(false),
       transfer_encoding_unsupported(false), content_encoded(false), retained_header_kind(RetainedHeaderKind::NONE),
       retained_header_index(0), retained_link_index(0), easy_handle(nullptr) {
+	try {
+		body.reserve(static_cast<std::size_t>(std::max(limits.max_response_bytes, limits.max_decompressed_bytes)));
+		if (!HasBoundedHttpStringCapacity(body, std::max(limits.max_response_bytes, limits.max_decompressed_bytes))) {
+			body_allocation_failed = true;
+			std::string().swap(body);
+		}
+	} catch (...) {
+		body_allocation_failed = true;
+		std::string().swap(body);
+	}
 }
 
 bool CurlTransferState::ShouldContinue() noexcept {
@@ -166,7 +383,7 @@ void ReleaseAllCurlMetadata(CurlTransferState &state) noexcept {
 
 std::size_t WriteCurlBody(char *data, std::size_t size, std::size_t count, void *opaque) noexcept {
 	auto &state = *static_cast<CurlTransferState *>(opaque);
-	if (state.response_oversized) {
+	if (state.response_oversized || state.body_allocation_failed) {
 		return 0;
 	}
 	if (!state.ShouldContinue()) {
@@ -257,24 +474,17 @@ std::size_t ReadCurlHeader(char *data, std::size_t size, std::size_t count, void
 			value_end--;
 		}
 		try {
-			if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::RATE_LIMIT ||
-			    state.retained_header_kind == CurlTransferState::RetainedHeaderKind::RATE_LIMIT_LINK) {
-				state.rate_limit_fields.at(state.retained_header_index).value.append(data, value_end);
-			} else if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::DATE) {
-				state.date_field_values.at(state.retained_header_index).append(data, value_end);
-			}
-			if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::LINK) {
-				state.link_field_values.at(state.retained_header_index).append(data, value_end);
-			} else if (state.retained_header_kind == CurlTransferState::RetainedHeaderKind::RATE_LIMIT_LINK) {
-				state.link_field_values.at(state.retained_link_index).append(data, value_end);
-			}
-			uint64_t retained = 0;
-			if (!TryRetainedMetadataBytes(state, state.limits.max_metadata_bytes, retained)) {
+			const auto status = AppendFoldedMetadata(state, data, value_end);
+			if (status == MetadataMutationStatus::OVERSIZED) {
 				state.metadata_oversized = true;
 				ReleaseAllCurlMetadata(state);
 				return 0;
 			}
-			state.metadata_bytes = retained;
+			if (status == MetadataMutationStatus::ALLOCATION_FAILED) {
+				state.metadata_allocation_failed = true;
+				ReleaseAllCurlMetadata(state);
+				return 0;
+			}
 		} catch (...) {
 			state.metadata_allocation_failed = true;
 			ReleaseAllCurlMetadata(state);
@@ -330,28 +540,18 @@ std::size_t ReadCurlHeader(char *data, std::size_t size, std::size_t count, void
 			value_end--;
 		}
 		try {
-			const std::string value(data + value_offset, value_end - value_offset);
-			if (retained_name != nullptr) {
-				state.rate_limit_fields.push_back({*retained_name, value});
-				state.retained_header_index = state.rate_limit_fields.size() - 1;
-				state.retained_header_kind = retain_link ? CurlTransferState::RetainedHeaderKind::RATE_LIMIT_LINK
-				                                         : CurlTransferState::RetainedHeaderKind::RATE_LIMIT;
-			} else {
-				state.date_field_values.push_back(value);
-				state.retained_header_kind = CurlTransferState::RetainedHeaderKind::DATE;
-				state.retained_header_index = state.date_field_values.size() - 1;
-			}
-			if (retain_link) {
-				state.link_field_values.push_back(value);
-				state.retained_link_index = state.link_field_values.size() - 1;
-			}
-			uint64_t retained = 0;
-			if (!TryRetainedMetadataBytes(state, state.limits.max_metadata_bytes, retained)) {
+			const auto status = RetainInitialMetadata(state, retained_name, retain_date, retain_link,
+			                                          data + value_offset, value_end - value_offset);
+			if (status == MetadataMutationStatus::OVERSIZED) {
 				state.metadata_oversized = true;
 				ReleaseAllCurlMetadata(state);
 				return 0;
 			}
-			state.metadata_bytes = retained;
+			if (status == MetadataMutationStatus::ALLOCATION_FAILED) {
+				state.metadata_allocation_failed = true;
+				ReleaseAllCurlMetadata(state);
+				return 0;
+			}
 		} catch (...) {
 			state.metadata_allocation_failed = true;
 			ReleaseAllCurlMetadata(state);
@@ -374,24 +574,21 @@ std::size_t ReadCurlHeader(char *data, std::size_t size, std::size_t count, void
 		value_end--;
 	}
 	const auto value_length = value_end - value_offset;
-	if (value_length > state.limits.max_metadata_bytes) {
-		state.metadata_oversized = true;
-		return 0;
-	}
 	try {
-		state.link_field_values.push_back(std::string(data + value_offset, value_length));
-		state.retained_header_kind = CurlTransferState::RetainedHeaderKind::LINK;
-		state.retained_header_index = state.link_field_values.size() - 1;
-		uint64_t retained = 0;
-		if (!TryRetainedMetadataBytes(state, state.limits.max_metadata_bytes, retained)) {
+		const auto status = RetainInitialMetadata(state, nullptr, false, true, data + value_offset, value_length);
+		if (status == MetadataMutationStatus::OVERSIZED) {
 			state.metadata_oversized = true;
-			ReleaseCurlLinkMetadata(state);
+			ReleaseAllCurlMetadata(state);
 			return 0;
 		}
-		state.metadata_bytes = retained;
+		if (status == MetadataMutationStatus::ALLOCATION_FAILED) {
+			state.metadata_allocation_failed = true;
+			ReleaseAllCurlMetadata(state);
+			return 0;
+		}
 	} catch (...) {
 		state.metadata_allocation_failed = true;
-		ReleaseCurlLinkMetadata(state);
+		ReleaseAllCurlMetadata(state);
 		return 0;
 	}
 	return length;

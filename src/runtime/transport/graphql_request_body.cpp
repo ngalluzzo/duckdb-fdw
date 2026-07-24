@@ -2,12 +2,80 @@
 
 #include "duckdb_api/execution.hpp"
 
+#include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <new>
 
 namespace duckdb_api {
 namespace internal {
 namespace {
+
+constexpr char BODY_PREFIX[] = "{\"query\":";
+constexpr char VARIABLES_PREFIX[] = ",\"variables\":{";
+constexpr char BODY_SUFFIX[] = "}}";
+
+bool TryAddSerializedBytes(uint64_t bytes, uint64_t limit, uint64_t &result) noexcept {
+	if (result > limit || bytes > limit - result) {
+		return false;
+	}
+	result += bytes;
+	return true;
+}
+
+uint64_t DecimalDigits(uint64_t value) noexcept {
+	uint64_t result = 1;
+	while (value >= 10) {
+		value /= 10;
+		result++;
+	}
+	return result;
+}
+
+bool TryAddJsonStringBytes(const std::string &value, uint64_t limit, uint64_t &result) noexcept {
+	if (!TryAddSerializedBytes(2, limit, result)) {
+		return false;
+	}
+	for (const auto character : value) {
+		const auto byte = static_cast<unsigned char>(character);
+		uint64_t bytes = 1;
+		switch (byte) {
+		case '"':
+		case '\\':
+		case '\b':
+		case '\f':
+		case '\n':
+		case '\r':
+		case '\t':
+			bytes = 2;
+			break;
+		default:
+			if (byte < 0x20) {
+				bytes = 6;
+			}
+		}
+		if (!TryAddSerializedBytes(bytes, limit, result)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool TryGraphqlBodyBytes(const AdmittedGraphqlRequestProfile &profile, const std::string *cursor, uint64_t limit,
+                         uint64_t &result) noexcept {
+	limit = std::min(limit, profile.MaxRequestBodyBytes());
+	result = 0;
+	return TryAddSerializedBytes(sizeof(BODY_PREFIX) - 1, limit, result) &&
+	       TryAddJsonStringBytes(profile.Document(), limit, result) &&
+	       TryAddSerializedBytes(sizeof(VARIABLES_PREFIX) - 1, limit, result) &&
+	       TryAddJsonStringBytes(profile.PageSizeVariable(), limit, result) &&
+	       TryAddSerializedBytes(1, limit, result) &&
+	       TryAddSerializedBytes(DecimalDigits(profile.PageSize()), limit, result) &&
+	       TryAddSerializedBytes(1, limit, result) && TryAddJsonStringBytes(profile.CursorVariable(), limit, result) &&
+	       TryAddSerializedBytes(1, limit, result) &&
+	       (cursor ? TryAddJsonStringBytes(*cursor, limit, result) : TryAddSerializedBytes(4, limit, result)) &&
+	       TryAddSerializedBytes(sizeof(BODY_SUFFIX) - 1, limit, result);
+}
 
 void AppendHexByte(unsigned char value, std::string &result) {
 	static const char HEX[] = "0123456789abcdef";
@@ -164,16 +232,31 @@ bool IsCanonicalCursorToken(const std::string &body, std::size_t begin, std::siz
 } // namespace
 
 HttpRequest BuildAdmittedGraphqlRequest(const AdmittedGraphqlRequestProfile &profile, const std::string *cursor) {
+	return BuildAdmittedGraphqlRequest(profile, cursor, profile.MaxRequestBodyBytes());
+}
+
+HttpRequest BuildAdmittedGraphqlRequest(const AdmittedGraphqlRequestProfile &profile, const std::string *cursor,
+                                        uint64_t serialized_body_allowance) {
 	try {
 		if (cursor && !IsValidBoundedCursorBytes(*cursor)) {
 			throw ExecutionError(ErrorStage::POLICY, "pagination.cursor",
 			                     "GraphQL continuation cursor is invalid or exceeds its byte budget");
 		}
+		uint64_t serialized_body_bytes = 0;
+		if (!TryGraphqlBodyBytes(profile, cursor, serialized_body_allowance, serialized_body_bytes) ||
+		    serialized_body_bytes > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max())) {
+			throw ExecutionError(ErrorStage::RESOURCE, "request_body_bytes",
+			                     "GraphQL request exceeded its serialized-body budget");
+		}
 		std::string body;
-		body.reserve(profile.Document().size() + (cursor ? cursor->size() : 0) + 80);
-		body += "{\"query\":";
+		body.reserve(static_cast<std::size_t>(serialized_body_bytes));
+		if (!HasBoundedHttpStringCapacity(body, serialized_body_bytes)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "request_body_bytes",
+			                     "GraphQL request allocation exceeded its admitted capacity envelope");
+		}
+		body += BODY_PREFIX;
 		AppendJsonString(profile.Document(), body);
-		body += ",\"variables\":{";
+		body += VARIABLES_PREFIX;
 		AppendJsonString(profile.PageSizeVariable(), body);
 		body += ":" + std::to_string(profile.PageSize()) + ",";
 		AppendJsonString(profile.CursorVariable(), body);
@@ -183,10 +266,11 @@ HttpRequest BuildAdmittedGraphqlRequest(const AdmittedGraphqlRequestProfile &pro
 		} else {
 			body += "null";
 		}
-		body += "}}";
-		if (body.empty() || static_cast<uint64_t>(body.size()) > profile.MaxRequestBodyBytes()) {
+		body += BODY_SUFFIX;
+		if (static_cast<uint64_t>(body.size()) != serialized_body_bytes ||
+		    !HasBoundedHttpStringCapacity(body, serialized_body_bytes)) {
 			throw ExecutionError(ErrorStage::RESOURCE, "request_body_bytes",
-			                     "GraphQL request exceeded its serialized-body budget");
+			                     "GraphQL request allocation exceeded its admitted capacity envelope");
 		}
 
 		HttpRequest request;

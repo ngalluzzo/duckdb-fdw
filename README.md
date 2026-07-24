@@ -166,6 +166,14 @@ or resource exhaustion fail the statement instead of returning a
 complete-looking partial result. Plans and active package generations are
 immutable for the lifetime of a scan.
 
+One executor-local admission service also bounds concurrent provider work,
+active scans, requests, retry/rate-limit waits, buffered bytes, and decoded
+rows across global, connector, destination, credential-principal, and exact
+operation bulkheads. Saturated work queues only within fixed deadlines or
+fails locally before transport; an independently eligible connector can still
+progress. The policy is a fixed host safety floor—there is no public tuning or
+circuit breaker.
+
 ## Development
 
 The root Makefile is the supported interface:

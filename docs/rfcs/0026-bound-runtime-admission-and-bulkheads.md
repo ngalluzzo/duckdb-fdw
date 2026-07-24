@@ -379,9 +379,13 @@ Query consumes that batch synchronously into its DuckDB `DataChunk`; the next
 only the prior batch-handoff charge. The decoded-page reservation releases only
 after the page is fully drained, immediately before a later page reservation,
 or on clean exhaustion, terminal failure, cancellation, close, or stream
-destruction. This conservative handoff closes the interval between Runtime's
-return and Query's copy without adding a Runtime-private lease to `TypedBatch`
-or teaching Query about admission state. A multi-batch REST/GraphQL page oracle
+destruction. At a continuing GraphQL boundary, the page-byte reservation
+atomically narrows to exact retained cursor capacity and grows before the next
+decode; Link state retains no dynamic continuation collection after exact
+transition validation. This conservative handoff closes the interval between
+Runtime's return and Query's copy without adding a Runtime-private lease to
+`TypedBatch` or teaching Query about admission state. A multi-batch
+REST/GraphQL page oracle
 observes the page and handoff byte/row counters after each pull, immediately
 before page drain, and before the next page allocation.
 
@@ -610,10 +614,10 @@ release's proven capacity.
 | Existing facts suffice without Connector or Semantics change | Source trace from plan/provider through Runtime | Inspect `ScanPlan`, admitted REST/GraphQL profiles, `CredentialAuthorityIdentity`, and the v3 quota-key adapter | Confirmed: connector/package/operation, exact origin, resource envelopes, and opaque authority already reach Runtime after complete admission; direct authorization needs the conservative tag recorded above |
 | Current accounting is only scan-local | Source and concurrency counterexample | Inspect `ScanResourceAccounting`, `HttpScanExecutor`, and curl transport construction; open controlled streams concurrently | Confirmed by source: every stream owns its own ledger and every attempt may construct a curl handle; only v3 same-quota work has shared coordination |
 | Synchronous adapter waits do not exhaust DuckDB's shared execution workers | Pinned finite-worker DuckDB trial | Build and run `duckdb_api_rfc0026_worker_isolation_trial` with DuckDB 1.5.4, `threads=1`, sixteen blocking anonymous adapter scans, and one authenticated healthy scan; source SHA-256 `6afaa60c4d848324a1e816594c15fd00a882086b01da25ac6e4bd6a65ee62148` | Passed 2026-07-23: the healthy scan completed inside the two-second bound; all sixteen slow scans then canceled and all seventeen streams released exactly once. The adapter retains invoking connection threads, not a shared DuckDB worker; embedding-application caller scheduling remains outside Runtime authority |
-| Atomic eligible-ticket scheduling avoids cross-key head-of-line blocking | Deterministic scheduler transcript | Injected steady clock/control; saturate A's exact/destination/principal dimensions, queue A2 then independently eligible B, release and compare grant order | Pending delivery oracle; decision fixes the grant law and forbids nested semaphores |
-| Permit ordering composes with replay and v3 quota authority | Deterministic resilience transcript | Initial, ordinary retry, and rate-limit repeat with blocked request capacity, cancellation, coincident deadlines, close, response-byte counters, and attempt-count observations | Pending delivery oracle; no attempt may be charged before admission, and response bytes must be zero during recovery waiting |
-| Shared buffer reservations precede allocation | Boundary and one-over fixture | Maximum/one-over planned response, decoded memory, and row reservations with two bulkheads; multi-batch REST/GraphQL pages inspect page and handoff counters between pulls, at page drain, and before the next page | Pending delivery oracle; controlled transport must observe zero calls on rejection and a partially drained page must remain charged |
-| Runtime close drains queued work and preserves handle lifetime | Lifecycle transcript | Two queued scans and requests, explicit executor close, executor destruction with live streams/handles, clean exhaustion with retained stream, repeated close, and Query DatabaseInstance shutdown | Pending delivery oracle; actual DatabaseInstance teardown is quiescent and makes no active-wakeup claim |
+| Atomic eligible-ticket scheduling avoids cross-key head-of-line blocking | Deterministic scheduler transcript | Injected steady clock/control; saturate A's exact/destination/principal dimensions, queue A2 then independently eligible B, release and compare grant order | Passed: focused controller oracles bind exact-key FIFO, eligible-key bypass, repeated-arrival starvation resistance, every simultaneous scope precedence, and exact equality despite forced hash collision |
+| Permit ordering composes with replay and v3 quota authority | Deterministic resilience transcript | Initial, ordinary retry, and rate-limit repeat with blocked request capacity, cancellation, coincident deadlines, close, response-byte counters, and attempt-count observations | Passed: request/buffer authority precedes `BeginAttempt`; local rejection leaves page/attempt counts at zero; response charge is zero during both recovery waits; close during quota wait preserves `runtime_closed` as the primary cause |
+| Shared buffer reservations precede allocation | Boundary and one-over fixture | Maximum/one-over planned response, decoded memory, and row reservations with two bulkheads; multi-batch REST/GraphQL pages inspect page and handoff counters between pulls, at page drain, and before the next page | Passed: request, GraphQL body, curl body/retained metadata, chunk/decompressed, decoded-page, row, cursor-transfer, and batch-handoff capacity is charged before growth; REST/GraphQL multi-batch oracles retain page authority until drain; actual DuckDB same-bulkhead rejection performs zero transport |
+| Runtime close drains queued work and preserves handle lifetime | Lifecycle transcript | Two queued scans and requests, explicit executor close, executor destruction with live streams/handles, clean exhaustion with retained stream, repeated close, and Query DatabaseInstance shutdown | Passed: controller close drains all three queues, permits outlive the controller, clean exhaustion releases scan capacity, package composition orders registry then executor close, and actual DatabaseInstance teardown closes the executor exactly once after quiescence |
 
 ## Alternatives considered
 
@@ -686,11 +690,14 @@ approved it as the follow-on only after admission evidence passes. Excluded.
 
 ## Acceptance and verification
 
-- **End-to-end demonstration:** Saturate one connector/destination/principal
-  with slow, retrying, and rate-limited scans while a distinct healthy
-  connector executes within declared queue and resource bounds. Show local
+- **End-to-end demonstration:** Actual-DuckDB REST and GraphQL cases each
+  saturate one connector/destination/principal and reject same-key work before
+  transport while a distinct healthy connector completes. A named v3 REST
+  pressure case keeps a slow scan beside a second scan that traverses ordinary
+  retry and a measured rate-limit wait, with deterministic provider evidence
+  that both waiter classes can coexist in one exact bulkhead. Show local
   saturation/timeout/cancellation diagnostics, zero transport for rejected
-  attempts, clean DatabaseInstance shutdown, and healthy completion after both
+  attempts, clean DatabaseInstance shutdown, and healthy completion after the
   calls have entered DuckDB. The accepted finite-worker trial already proves
   blocked connection callbacks do not monopolize DuckDB's configured shared
   execution threads; delivery replaces its fake stream with admitted Runtime

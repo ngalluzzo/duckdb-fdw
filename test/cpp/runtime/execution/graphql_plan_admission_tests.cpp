@@ -139,6 +139,35 @@ void TestAnonymousGraphqlAlternativeAdmits() {
 	        "anonymous GraphQL profile acquired bearer decoration authority");
 }
 
+void TestRequestBodyEscapingReservesExactBoundedCapacity() {
+	const auto plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("body_capacity_secret");
+	auto admitted = duckdb_api::internal::TryAdmitGraphqlPlan(plan, PublicProfile());
+	Require(static_cast<bool>(admitted), "body-capacity plan must be admitted");
+
+	const auto first = duckdb_api::internal::BuildAdmittedGraphqlRequest(*admitted, nullptr);
+	Require(duckdb_api::internal::HasBoundedHttpStringCapacity(first.body, first.body.size()),
+	        "first GraphQL body capacity exceeded its exact serialized-size envelope");
+
+	const std::string exact_worst_case_cursor(512, '\x01');
+	const auto exact = duckdb_api::internal::BuildAdmittedGraphqlRequest(*admitted, &exact_worst_case_cursor);
+	const auto expected_bytes = first.body.size() - 4 + 2 + exact_worst_case_cursor.size() * 6;
+	Require(exact.body.size() == expected_bytes &&
+	            exact.body.find("\"cursor\":\"\\u0001\\u0001") != std::string::npos &&
+	            duckdb_api::internal::IsCanonicalAdmittedGraphqlBody(exact.body),
+	        "exact 512-byte worst-case cursor did not use its exact canonical escaped size");
+	Require(duckdb_api::internal::HasBoundedHttpStringCapacity(exact.body, exact.body.size()),
+	        "worst-case escaped GraphQL body capacity exceeded its exact serialized-size envelope");
+
+	const std::string one_over_worst_case_cursor(513, '\x01');
+	try {
+		(void)duckdb_api::internal::BuildAdmittedGraphqlRequest(*admitted, &one_over_worst_case_cursor);
+		throw std::runtime_error("513-byte worst-case cursor entered a request allocation");
+	} catch (const duckdb_api::ExecutionError &error) {
+		Require(error.Stage() == duckdb_api::ErrorStage::POLICY && error.Field() == "pagination.cursor",
+		        "513-byte worst-case cursor used the wrong pre-allocation denial");
+	}
+}
+
 void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 	const auto plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("body_accounting_secret");
 	auto admitted = duckdb_api::internal::TryAdmitGraphqlPlan(plan, PublicProfile());
@@ -146,7 +175,6 @@ void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 	auto request = duckdb_api::internal::BuildAdmittedGraphqlRequest(*admitted, nullptr);
 	const auto body_bytes = static_cast<uint64_t>(request.body.size());
 	using duckdb_api::internal::ScanResourceAccounting;
-	using duckdb_api::internal::ScanResourceError;
 	using duckdb_api::internal::ScanResourceProfile;
 	const auto now = std::chrono::steady_clock::time_point();
 	const ScanResourceProfile exact_profile {
@@ -171,15 +199,19 @@ void TestRequestBodyExactOneOverAggregateAndPreBearerOrdering() {
 	one_under_profile.scan.request_attempts = 1;
 	one_under_profile.scan.pages = 1;
 	ScanResourceAccounting one_under(one_under_profile);
-	one_under.BeginPage(now);
+	const auto one_under_allowance = one_under.BeginPage(now);
 	bool rejected = false;
 	try {
-		one_under.CommitRequestBody(body_bytes);
-	} catch (const ScanResourceError &error) {
-		rejected = error.Field() == "request_body_bytes";
+		(void)duckdb_api::internal::BuildAdmittedGraphqlRequest(*admitted, nullptr,
+		                                                        one_under_allowance.serialized_request_body_bytes);
+	} catch (const duckdb_api::ExecutionError &error) {
+		rejected = error.Stage() == duckdb_api::ErrorStage::RESOURCE && error.Field() == "request_body_bytes";
 	}
 	Require(rejected && one_under.Counters().serialized_request_body_bytes == 0,
-	        "one-byte-over GraphQL body must fail without an aggregate debit");
+	        "one-byte-over GraphQL body must fail sizing before allocation or aggregate debit");
+	auto exact_request = duckdb_api::internal::BuildAdmittedGraphqlRequest(*admitted, nullptr, body_bytes);
+	Require(exact_request.body.size() == body_bytes,
+	        "exact remaining GraphQL body allowance did not permit canonical serialization");
 	for (const auto &header : request.headers) {
 		Require(header.name != "Authorization", "body debit failure occurred after bearer placement");
 	}
@@ -372,6 +404,7 @@ int main() {
 		TestValidPlanProducesClosedProfileAndCanonicalBodies();
 		TestPackageGeneratedDocumentFailsClosedWithoutRendererMembership();
 		TestAnonymousGraphqlAlternativeAdmits();
+		TestRequestBodyEscapingReservesExactBoundedCapacity();
 		TestRequestBodyExactOneOverAggregateAndPreBearerOrdering();
 		TestDocumentAdmissionRequiresIntegrityAndCanonicalMembership();
 		TestUnknownProfileDiscriminatorsFailClosed();

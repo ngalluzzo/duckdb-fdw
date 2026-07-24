@@ -34,6 +34,7 @@ struct ControlledHttpRuntime::State {
 	uint32_t status;
 	std::string body;
 	std::string diagnostic;
+	std::string blocked_host;
 	std::vector<ControlledHttpResponse> responses;
 	std::size_t next_response;
 	std::string expected_bearer;
@@ -106,6 +107,7 @@ private:
 		uint32_t transport_response_status = 0;
 		bool scripted_transport_failure = false;
 		bool wait_for_bearer_barrier = false;
+		bool block_request = false;
 		{
 			std::lock_guard<std::mutex> guard(state->mutex);
 			state->observation.request_count++;
@@ -138,6 +140,9 @@ private:
 			state->observations.push_back(state->observation);
 			mode = state->mode;
 			status = state->status;
+			block_request =
+			    mode == ControlledHttpMode::BLOCK_UNTIL_CANCEL ||
+			    (mode == ControlledHttpMode::BLOCK_HOST_AND_RESPOND_ELSEWHERE && request.host == state->blocked_host);
 			if (mode == ControlledHttpMode::BEARER_RESPONSE_BARRIER) {
 				wait_for_bearer_barrier = true;
 				for (std::size_t response_index = 0; response_index < state->bearer_responses.size();
@@ -212,7 +217,7 @@ private:
 			}
 			throw std::runtime_error(diagnostic);
 		}
-		if (mode == ControlledHttpMode::BLOCK_UNTIL_CANCEL) {
+		if (block_request) {
 			while (!control.IsCancellationRequested() && std::chrono::steady_clock::now() < limits.deadline) {
 				std::this_thread::sleep_for(std::chrono::milliseconds(1));
 			}
@@ -346,6 +351,24 @@ void ControlledHttpRuntime::BlockUntilCancelled() {
 	std::lock_guard<std::mutex> guard(state->mutex);
 	state->mode = ControlledHttpMode::BLOCK_UNTIL_CANCEL;
 	state->body.clear();
+	state->diagnostic.clear();
+	state->responses.clear();
+	state->next_response = 0;
+	state->bearer_responses.clear();
+	state->bearer_barrier_released = true;
+	state->condition.notify_all();
+}
+
+void ControlledHttpRuntime::BlockHostAndRespondElsewhere(std::string blocked_host_p, uint32_t status_p,
+                                                         std::string body_p) {
+	if (blocked_host_p.empty()) {
+		throw std::invalid_argument("controlled blocked host cannot be empty");
+	}
+	std::lock_guard<std::mutex> guard(state->mutex);
+	state->mode = ControlledHttpMode::BLOCK_HOST_AND_RESPOND_ELSEWHERE;
+	state->status = status_p;
+	state->body = std::move(body_p);
+	state->blocked_host = std::move(blocked_host_p);
 	state->diagnostic.clear();
 	state->responses.clear();
 	state->next_response = 0;

@@ -24,7 +24,9 @@ struct ProductComposition {
 // state. Runtime initialization is checked before DuckDB registers the
 // function, and this path has no authority or test-scenario override. The
 // package staging service consumes the same executor while retaining its own
-// database-scoped generation registry.
+// database-scoped generation registry. Database teardown closes Query
+// publication first, then that registry, then this shared executor; the
+// executor's reference-counted stream state outlives only for bounded release.
 ProductComposition BuildProductComposition();
 
 } // namespace duckdb_api

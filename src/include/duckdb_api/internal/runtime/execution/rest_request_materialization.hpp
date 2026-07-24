@@ -27,6 +27,7 @@ bool FitsRestRequestTarget(const std::string &path, const std::vector<AdmittedQu
 // form_urlencoded encoding shared by REST query-field materialization and the
 // api_key query-placement authenticator.
 std::string FormUrlEncode(const std::string &value);
+bool TryFormUrlEncodedSize(const std::string &value, uint64_t &result) noexcept;
 const char *RestSchemeName(PlannedUrlScheme scheme);
 std::string BuildRestTarget(const std::string &path, const std::vector<AdmittedQueryParameter> &query,
                             const std::string *page_name, uint64_t page,

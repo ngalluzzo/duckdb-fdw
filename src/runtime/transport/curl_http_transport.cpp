@@ -91,11 +91,26 @@ bool HasSafeCommonRequest(const HttpRequest &request) {
 }
 
 std::string BuildExactHttpsUrl(const HttpRequest &request) {
-	std::string result = "https://" + request.host;
+	uint64_t size = sizeof("https://") - 1;
+	size += static_cast<uint64_t>(request.host.size());
+	if (request.port != 443) {
+		size += 1 + static_cast<uint64_t>(std::to_string(request.port).size());
+	}
+	size += static_cast<uint64_t>(request.target.size());
+	std::string result;
+	result.reserve(static_cast<std::size_t>(size));
+	if (!HasBoundedHttpStringCapacity(result, size)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP URL exceeded its admitted capacity envelope");
+	}
+	result = "https://";
+	result += request.host;
 	if (request.port != 443) {
 		result += ":" + std::to_string(request.port);
 	}
 	result += request.target;
+	if (static_cast<uint64_t>(result.size()) != size || !HasBoundedHttpStringCapacity(result, size)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP URL exceeded its admitted capacity envelope");
+	}
 	return result;
 }
 

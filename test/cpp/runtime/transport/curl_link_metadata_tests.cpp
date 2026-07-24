@@ -30,6 +30,31 @@ uint64_t RetainedBytes(const std::vector<std::string> &values) {
 	return result;
 }
 
+uint64_t RetainedBytes(const std::vector<duckdb_api::internal::HttpObservedHeader> &fields) {
+	uint64_t result = static_cast<uint64_t>(fields.capacity()) * sizeof(duckdb_api::internal::HttpObservedHeader);
+	for (const auto &field : fields) {
+		const std::string *const values[] = {&field.name, &field.value};
+		for (const auto *value : values) {
+			const auto begin = reinterpret_cast<std::uintptr_t>(value);
+			const auto end = begin + sizeof(*value);
+			const auto data = reinterpret_cast<std::uintptr_t>(value->data());
+			if (data < begin || data >= end) {
+				result += static_cast<uint64_t>(value->capacity()) + 1;
+			}
+		}
+	}
+	return result;
+}
+
+uint64_t RetainedBytes(const duckdb_api::internal::CurlTransferState &state) {
+	return RetainedBytes(state.link_field_values) + RetainedBytes(state.rate_limit_fields) +
+	       RetainedBytes(state.date_field_values);
+}
+
+bool HasExactBoundedCapacity(const std::string &value) {
+	return duckdb_api::internal::HasBoundedHttpStringCapacity(value, static_cast<uint64_t>(value.size()));
+}
+
 duckdb_api_test::PrivateCurlProbeOptions Options(uint16_t port, uint64_t *policy_checks) {
 	return {"http://127.0.0.1:" + std::to_string(port) + "/search/users?q=duckdb+in%3Alogin&per_page=3",
 	        "http",
@@ -69,9 +94,14 @@ void TestMetadataCapacityGrowthIsCharged() {
 	uint64_t checks = 0;
 	const auto result = duckdb_api_test::PerformPrivateCurlProbe(Options(service.Port(), &checks), control);
 	duckdb_api_test::Require(result.response.metadata.link_field_values.size() == 40 &&
+	                             result.response.metadata.link_field_values.capacity() == 40 &&
 	                             result.response.metadata.retained_bytes ==
 	                                 RetainedBytes(result.response.metadata.link_field_values),
-	                         "Link vector or string capacity was not charged as retained metadata");
+	                         "Link vector growth was not exact or its capacity was not charged as retained metadata");
+	for (const auto &value : result.response.metadata.link_field_values) {
+		duckdb_api_test::Require(HasExactBoundedCapacity(value),
+		                         "Link value exceeded its pinned exact-size allocation envelope");
+	}
 }
 
 void TestInterimMetadataResetAndFailureCleanup() {
@@ -114,6 +144,97 @@ void FeedHeader(duckdb_api::internal::CurlTransferState &state, const std::strin
 	duckdb_api_test::Require(duckdb_api::internal::ReadCurlHeader(&mutable_line[0], 1, mutable_line.size(), &state) ==
 	                             mutable_line.size(),
 	                         "curl accumulator rejected a bounded regression header");
+}
+
+std::size_t FeedHeaderResult(duckdb_api::internal::CurlTransferState &state, const std::string &line) {
+	auto mutable_line = line;
+	return duckdb_api::internal::ReadCurlHeader(&mutable_line[0], 1, mutable_line.size(), &state);
+}
+
+void TestMetadataPreallocationBoundaries() {
+	duckdb_api_test::ManualControl control;
+	const duckdb_api::internal::CurlTransferProfile profile {"",      "",      nullptr, nullptr, nullptr,
+	                                                         nullptr, nullptr, nullptr, nullptr, nullptr};
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+	{
+		const duckdb_api::internal::HttpLimits limits {0,        4096, 4096, 4096, sizeof(std::string) - 1,
+		                                               deadline, {},   false};
+		duckdb_api::internal::CurlTransferState state(control, limits, profile);
+		FeedHeader(state, "HTTP/1.1 200 OK\r\n");
+		duckdb_api_test::Require(FeedHeaderResult(state, "Link: x\r\n") == 0 && state.metadata_oversized &&
+		                             state.link_field_values.empty() && state.link_field_values.capacity() == 0 &&
+		                             state.metadata_bytes == 0,
+		                         "initial Link metadata allocated before its vector lower bound was admitted");
+	}
+	{
+		const auto metadata_limit = static_cast<uint64_t>(sizeof(duckdb_api::internal::HttpObservedHeader)) + 64;
+		const duckdb_api::internal::HttpLimits limits {0,        4096,        4096, 4096, metadata_limit,
+		                                               deadline, {"x-reset"}, false};
+		duckdb_api::internal::CurlTransferState state(control, limits, profile);
+		FeedHeader(state, "HTTP/1.1 429 Too Many Requests\r\n");
+		FeedHeader(state, "X-Reset: 1\r\n");
+		duckdb_api_test::Require(state.metadata_bytes == RetainedBytes(state) &&
+		                             state.rate_limit_fields.capacity() == 1,
+		                         "folded-metadata fixture did not establish exact initial capacity");
+		const std::string oversized_fold = " " + std::string(128, 'x') + "\r\n";
+		duckdb_api_test::Require(FeedHeaderResult(state, oversized_fold) == 0 && state.metadata_oversized &&
+		                             state.rate_limit_fields.empty() && state.rate_limit_fields.capacity() == 0 &&
+		                             state.metadata_bytes == 0,
+		                         "folded metadata grew before its replacement allocation was admitted");
+	}
+	{
+		const auto metadata_limit =
+		    static_cast<uint64_t>(sizeof(duckdb_api::internal::HttpObservedHeader) + sizeof(std::string) - 1);
+		const duckdb_api::internal::HttpLimits limits {0, 4096, 4096, 4096, metadata_limit, deadline, {"link"}, false};
+		duckdb_api::internal::CurlTransferState state(control, limits, profile);
+		FeedHeader(state, "HTTP/1.1 200 OK\r\n");
+		duckdb_api_test::Require(FeedHeaderResult(state, "Link: x\r\n") == 0 && state.metadata_oversized &&
+		                             state.rate_limit_fields.capacity() == 0 &&
+		                             state.link_field_values.capacity() == 0 && state.metadata_bytes == 0,
+		                         "dual-role Link metadata mutated one role before both vector bounds were admitted");
+	}
+	{
+		const auto exact_limit =
+		    static_cast<uint64_t>(sizeof(duckdb_api::internal::HttpObservedHeader) + sizeof(std::string));
+		const duckdb_api::internal::HttpLimits limits {0, 4096, 4096, 4096, exact_limit, deadline, {"link"}, false};
+		duckdb_api::internal::CurlTransferState state(control, limits, profile);
+		FeedHeader(state, "HTTP/1.1 200 OK\r\n");
+		FeedHeader(state, "Link: x\r\n");
+		duckdb_api_test::Require(state.rate_limit_fields.size() == 1 && state.rate_limit_fields.capacity() == 1 &&
+		                             state.link_field_values.size() == 1 && state.link_field_values.capacity() == 1 &&
+		                             state.metadata_bytes == exact_limit &&
+		                             state.metadata_bytes == RetainedBytes(state),
+		                         "dual-role Link metadata did not consume its exact vector-capacity boundary");
+	}
+	{
+		const auto transient_limit = static_cast<uint64_t>(5 * sizeof(std::string));
+		const duckdb_api::internal::HttpLimits limits {0, 4096, 4096, 4096, transient_limit, deadline, {}, false};
+		duckdb_api::internal::CurlTransferState state(control, limits, profile);
+		FeedHeader(state, "HTTP/1.1 200 OK\r\n");
+		for (std::size_t index = 0; index < 3; index++) {
+			FeedHeader(state, "Link: x\r\n");
+			duckdb_api_test::Require(state.link_field_values.size() == index + 1 &&
+			                             state.link_field_values.capacity() == index + 1 &&
+			                             state.metadata_bytes == RetainedBytes(state),
+			                         "Link vector did not retain exact admitted growth capacity");
+		}
+		duckdb_api_test::Require(FeedHeaderResult(state, "Link: x\r\n") == 0 && state.metadata_oversized &&
+		                             state.link_field_values.capacity() == 0 && state.metadata_bytes == 0,
+		                         "Link vector replacement ignored its co-live old-plus-new capacity");
+	}
+	{
+		const std::string value(64, 'x');
+		const auto metadata_limit =
+		    static_cast<uint64_t>(sizeof(std::string)) + duckdb_api::internal::HttpStringAllocationLimit(value.size());
+		const duckdb_api::internal::HttpLimits limits {0, 4096, 4096, 4096, metadata_limit, deadline, {}, false};
+		duckdb_api::internal::CurlTransferState state(control, limits, profile);
+		FeedHeader(state, "HTTP/1.1 200 OK\r\n");
+		FeedHeader(state, "Link: " + value + "\r\n");
+		duckdb_api_test::Require(
+		    state.link_field_values.size() == 1 && HasExactBoundedCapacity(state.link_field_values[0]) &&
+		        state.metadata_bytes == RetainedBytes(state) && state.metadata_bytes <= metadata_limit,
+		    "retained Link string capacity escaped its preflight allocation envelope");
+	}
 }
 
 void TestTargetedFoldAndProtocolRoleOverlap() {
@@ -198,6 +319,7 @@ int main() {
 		TestMetadataCapacityGrowthIsCharged();
 		TestInterimMetadataResetAndFailureCleanup();
 		TestTrailerCannotGrantContinuationAuthority();
+		TestMetadataPreallocationBoundaries();
 		TestTargetedFoldAndProtocolRoleOverlap();
 		std::cout << "curl Link metadata tests passed" << std::endl;
 		return EXIT_SUCCESS;

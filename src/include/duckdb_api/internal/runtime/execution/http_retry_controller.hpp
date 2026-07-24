@@ -1,5 +1,6 @@
 #pragma once
 
+#include "duckdb_api/internal/runtime/execution/admission_controller.hpp"
 #include "duckdb_api/internal/runtime/execution/rate_limit_coordinator.hpp"
 #include "duckdb_api/internal/runtime/execution/rate_limit_guidance.hpp"
 #include "duckdb_api/internal/runtime/execution/rate_limit_policy_admission.hpp"
@@ -25,6 +26,7 @@ namespace internal {
 struct RetriedHttpResponse {
 	HttpResponse response;
 	PageResourceAllowance allowance;
+	AdmissionController::Permit buffer_reservation;
 };
 
 class RateLimitWaitDiagnostics {
@@ -138,7 +140,14 @@ inline ExecutionSnapshot BuildExecutionSnapshot(const RetryPlan &retry, const Ad
 	        state.rate_limit_events,
 	        state.rate_limit_waits,
 	        state.rate_limit_reason,
-	        state.rate_limit_waiting};
+	        state.rate_limit_waiting,
+	        AdmissionReason::NONE,
+	        AdmissionScope::NONE,
+	        0,
+	        0,
+	        0,
+	        counters.cumulative_admission_waiting_milliseconds,
+	        false};
 }
 
 namespace rate_limit_detail {
@@ -359,7 +368,7 @@ inline void DiscardRateLimitMetadata(HttpResponse &response) noexcept {
 	response.metadata.retained_bytes = RetainedStringVectorBytes(response.metadata.link_field_values);
 }
 
-class CancellationView final : public RateLimitCancellation {
+class CancellationView final : public RateLimitCancellation, public AdmissionCancellation {
 public:
 	explicit CancellationView(ExecutionControl &control_p) : control(control_p) {
 	}
@@ -399,6 +408,198 @@ private:
 	bool active;
 };
 
+class AdmissionWaitPublication final {
+public:
+	AdmissionWaitPublication(RateLimitWaitDiagnostics &diagnostics_p, ExecutionSnapshot snapshot)
+	    : diagnostics(diagnostics_p), active(true) {
+		snapshot.admission_waiting = true;
+		diagnostics.Publish(snapshot);
+	}
+
+	~AdmissionWaitPublication() noexcept {
+		Complete();
+	}
+
+	void Complete() noexcept {
+		if (!active) {
+			return;
+		}
+		diagnostics.Clear();
+		active = false;
+	}
+
+private:
+	RateLimitWaitDiagnostics &diagnostics;
+	bool active;
+};
+
+inline AdmissionController::Permit
+AcquireRequestAdmission(AdmissionRuntimeContext &runtime, RateLimitRuntimeContext &rate_runtime, const RetryPlan &retry,
+                        const AdmittedRateLimitPolicy &rate_limit, const AdmittedResiliencePolicy &resilience,
+                        ScanResourceAccounting &accounting, ResilienceExecutionState &execution_state,
+                        ExecutionControl &control) {
+	const auto profile = runtime.controller->Profile();
+	const auto used = accounting.Counters().cumulative_admission_waiting_milliseconds;
+	const auto remaining = Remaining(profile.aggregate_request_waiting_milliseconds, used);
+	const auto started = rate_runtime.clock->SteadyNowMilliseconds();
+	const AdmissionWaitPolicy wait {AddBounded(started, profile.request_queue_timeout_milliseconds), true,
+	                                AddBounded(started, remaining), true, SteadyMilliseconds(accounting.Deadline())};
+	CancellationView cancellation(control);
+	AdmissionController::Permit permit;
+	AdmissionObservation observation {};
+	AdmissionWaitPublication publication(*rate_runtime.wait_diagnostics,
+	                                     BuildExecutionSnapshot(retry, rate_limit, resilience, accounting.Counters(),
+	                                                            execution_state, ExposureState::UNACCEPTED));
+	const auto status = runtime.controller->AcquireRequest(runtime.identity, wait, cancellation, &permit, &observation);
+	publication.Complete();
+	if (observation.waited_milliseconds != 0) {
+		accounting.CommitAdmissionWait(observation.waited_milliseconds, profile.aggregate_request_waiting_milliseconds);
+	}
+	if (status == AdmissionAcquireStatus::ACQUIRED) {
+		return permit;
+	}
+	if (status == AdmissionAcquireStatus::CANCELLED) {
+		throw ExecutionCancelled();
+	}
+	if (status == AdmissionAcquireStatus::SCAN_DEADLINE_REACHED) {
+		throw ScanResourceError("wall_milliseconds", "scan exceeded its wall-time budget");
+	}
+	throw ExecutionError(ErrorStage::RESOURCE, "admission", "local Runtime admission rejected work",
+	                     LocalAdmissionFailureProperties(
+	                         observation.reason, observation.scope, observation.limit, observation.observed,
+	                         observation.requested, accounting.Counters().cumulative_admission_waiting_milliseconds,
+	                         false, FailurePhase::REQUEST));
+}
+
+inline AdmissionController::Permit AcquireRecoveryWaitAdmission(AdmissionRuntimeContext &runtime,
+                                                                ScanResourceAccounting &accounting,
+                                                                bool rate_limit_wait) {
+	AdmissionController::Permit permit;
+	AdmissionObservation observation {};
+	const auto status = rate_limit_wait
+	                        ? runtime.controller->AcquireRateLimitWaiter(runtime.identity, &permit, &observation)
+	                        : runtime.controller->AcquireRetryWaiter(runtime.identity, &permit, &observation);
+	if (status == AdmissionAcquireStatus::ACQUIRED) {
+		return permit;
+	}
+	throw ExecutionError(ErrorStage::RESOURCE, "admission", "local Runtime admission rejected recovery waiting",
+	                     LocalAdmissionFailureProperties(
+	                         observation.reason, observation.scope, observation.limit, observation.observed,
+	                         observation.requested, accounting.Counters().cumulative_admission_waiting_milliseconds,
+	                         false, FailurePhase::REQUEST));
+}
+
+inline uint64_t AddEnvelopeBytes(uint64_t total, uint64_t amount) noexcept {
+	return amount > std::numeric_limits<uint64_t>::max() - total ? std::numeric_limits<uint64_t>::max()
+	                                                             : total + amount;
+}
+
+inline uint64_t AttemptBufferEnvelope(const PageResourceLimits &limits, uint64_t max_metadata_bytes) noexcept {
+	// One admitted request can own at most 32 fixed fields plus one
+	// credential field and Content-Type. A credential append may grow the
+	// request vector from 32 to 64 elements. The remaining 34-element payloads
+	// cover the installed classifier's two structural copies, retained-name
+	// selection, and curl's duplicated linked-list nodes. Six header-byte
+	// budgets cover the corresponding string/curl-line capacities and the one
+	// construction temporary without relying on allocator growth factors.
+	static const uint64_t MAX_REQUEST_FIELDS = 34;
+	static const uint64_t MAX_REQUEST_VECTOR_CAPACITY = 64;
+	static const uint64_t MAX_HTTPS_URL_BYTES = 8 + 253 + 1 + 5 + 8192;
+	uint64_t result = HttpStringAllocationLimit(8192);                  // request.target
+	result = AddEnvelopeBytes(result, HttpStringAllocationLimit(8192)); // query credential copy
+	result = AddEnvelopeBytes(result, HttpStringAllocationLimit(8192)); // encoded query credential
+	result = AddEnvelopeBytes(result, HttpStringAllocationLimit(8192)); // replacement target
+	result = AddEnvelopeBytes(result, HttpStringAllocationLimit(253));
+	result = AddEnvelopeBytes(result, HttpStringAllocationLimit(MAX_HTTPS_URL_BYTES));
+	for (uint64_t copy = 0; copy < 6; copy++) {
+		result = AddEnvelopeBytes(result, limits.header_bytes);
+	}
+	result = AddEnvelopeBytes(result, MAX_REQUEST_VECTOR_CAPACITY * sizeof(HttpHeader));
+	result = AddEnvelopeBytes(result, MAX_REQUEST_FIELDS * sizeof(HttpHeader) * 2);
+	result = AddEnvelopeBytes(result, MAX_REQUEST_FIELDS * sizeof(std::string));
+	result = AddEnvelopeBytes(result, MAX_REQUEST_FIELDS * sizeof(void *) * 2);
+	result = AddEnvelopeBytes(result, HttpStringAllocationLimit(limits.serialized_request_body_bytes));
+	result = AddEnvelopeBytes(
+	    result, HttpStringAllocationLimit(std::max(limits.wire_response_bytes, limits.decompressed_response_bytes)));
+	result = AddEnvelopeBytes(result, HttpStringAllocationLimit(limits.decompressed_response_bytes));
+	return AddEnvelopeBytes(result, max_metadata_bytes);
+}
+
+inline AdmissionController::Permit ReserveAttemptBuffers(AdmissionRuntimeContext &runtime,
+                                                         const ScanResourceAccounting &accounting,
+                                                         uint64_t max_metadata_bytes) {
+	AdmissionController::Permit permit;
+	AdmissionObservation observation {};
+	const auto status = runtime.controller->ReserveBufferedBytes(
+	    runtime.identity, AttemptBufferEnvelope(accounting.Profile().page, max_metadata_bytes), &permit, &observation);
+	if (status == AdmissionAcquireStatus::ACQUIRED) {
+		return permit;
+	}
+	throw ExecutionError(ErrorStage::RESOURCE, "admission", "local Runtime admission rejected request buffers",
+	                     LocalAdmissionFailureProperties(
+	                         observation.reason, observation.scope, observation.limit, observation.observed,
+	                         observation.requested, accounting.Counters().cumulative_admission_waiting_milliseconds,
+	                         false, FailurePhase::REQUEST));
+}
+
+inline AdmissionController::Permit ReserveDecodedBytes(AdmissionRuntimeContext &runtime,
+                                                       const ScanResourceAccounting &accounting, uint64_t bytes) {
+	AdmissionController::Permit permit;
+	AdmissionObservation observation {};
+	const auto status = runtime.controller->ReserveBufferedBytes(runtime.identity, bytes, &permit, &observation);
+	if (status == AdmissionAcquireStatus::ACQUIRED) {
+		return permit;
+	}
+	throw ExecutionError(ErrorStage::RESOURCE, "admission", "local Runtime admission rejected decoded bytes",
+	                     LocalAdmissionFailureProperties(
+	                         observation.reason, observation.scope, observation.limit, observation.observed,
+	                         observation.requested, accounting.Counters().cumulative_admission_waiting_milliseconds,
+	                         false, FailurePhase::REQUEST));
+}
+
+inline void ResizeDecodedBytes(AdmissionRuntimeContext &runtime, const ScanResourceAccounting &accounting,
+                               AdmissionController::Permit &permit, uint64_t bytes) {
+	AdmissionObservation observation {};
+	const auto status = runtime.controller->ResizeBufferedBytes(&permit, bytes, &observation);
+	if (status == AdmissionAcquireStatus::ACQUIRED) {
+		return;
+	}
+	throw ExecutionError(ErrorStage::RESOURCE, "admission", "local Runtime admission rejected decoded bytes",
+	                     LocalAdmissionFailureProperties(
+	                         observation.reason, observation.scope, observation.limit, observation.observed,
+	                         observation.requested, accounting.Counters().cumulative_admission_waiting_milliseconds,
+	                         false, FailurePhase::REQUEST));
+}
+
+inline void RetainOnlyCompleteResponseBytes(AdmissionRuntimeContext &runtime, const ScanResourceAccounting &accounting,
+                                            AdmissionController::Permit &permit, const HttpResponse &response) {
+	uint64_t retained = 0;
+	if (!TryRetainedHttpResponseBytes(response, &retained)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+		                     "HTTP response storage exceeded its admitted capacity envelope");
+	}
+	if (retained == 0) {
+		permit.Release();
+		return;
+	}
+	ResizeDecodedBytes(runtime, accounting, permit, retained);
+}
+
+inline AdmissionController::Permit ReserveDecodedRows(AdmissionRuntimeContext &runtime,
+                                                      const ScanResourceAccounting &accounting, uint64_t rows) {
+	AdmissionController::Permit permit;
+	AdmissionObservation observation {};
+	const auto status = runtime.controller->ReserveBufferedRows(runtime.identity, rows, &permit, &observation);
+	if (status == AdmissionAcquireStatus::ACQUIRED) {
+		return permit;
+	}
+	throw ExecutionError(ErrorStage::RESOURCE, "admission", "local Runtime admission rejected decoded rows",
+	                     LocalAdmissionFailureProperties(
+	                         observation.reason, observation.scope, observation.limit, observation.observed,
+	                         observation.requested, accounting.Counters().cumulative_admission_waiting_milliseconds,
+	                         false, FailurePhase::REQUEST));
+}
+
 [[noreturn]] inline void ThrowRateLimitFailure(uint32_t status, RateLimitReason reason,
                                                const ScanResourceAccounting &accounting,
                                                ResilienceExecutionState &state) {
@@ -415,12 +616,28 @@ private:
 	throw ExecutionError(ErrorStage::HTTP_STATUS, "", "HTTP endpoint returned a non-success status", properties);
 }
 
+[[noreturn]] inline void ThrowClosedAdmissionDuringRateLimit(uint32_t status, AdmissionReason reason,
+                                                             const ScanResourceAccounting &accounting,
+                                                             ResilienceExecutionState &state) {
+	state.rate_limit_reason = RateLimitReason::SCHEDULER_CLOSED;
+	state.rate_limit_waiting = false;
+	auto properties = LocalAdmissionFailureProperties(reason, AdmissionScope::NONE, 0, 0, 0,
+	                                                  accounting.Counters().cumulative_admission_waiting_milliseconds,
+	                                                  false, FailurePhase::REQUEST);
+	properties.remote_status_class = HttpStatusFailureProperties(status, false, true).remote_status_class;
+	properties = EnrichRateLimitFailureProperties(properties, accounting.Counters(), state);
+	throw ExecutionError(ErrorStage::RESOURCE, "admission", "local Runtime admission closed during quota waiting",
+	                     properties);
+}
+
 inline RateLimitReason AcquireReason(RateLimitAcquireStatus status, bool budget_bound) noexcept {
 	switch (status) {
 	case RateLimitAcquireStatus::QUEUE_SATURATED:
 		return RateLimitReason::QUEUE_SATURATED;
 	case RateLimitAcquireStatus::SCHEDULER_CLOSED:
 		return RateLimitReason::SCHEDULER_CLOSED;
+	case RateLimitAcquireStatus::TICKET_EXHAUSTED:
+		return RateLimitReason::TICKET_EXHAUSTED;
 	case RateLimitAcquireStatus::DEADLINE_REACHED:
 		return budget_bound ? RateLimitReason::WAITING_EXHAUSTED : RateLimitReason::DEADLINE_INSUFFICIENT;
 	case RateLimitAcquireStatus::ACQUIRED:
@@ -486,6 +703,60 @@ inline TransportResourceUsage AttemptUsage(const HttpResponse &response) noexcep
 	return {response.header_bytes, response.response_bytes, response.decompressed_response_bytes};
 }
 
+struct CompletedTransportAttempt {
+	HttpResponse response;
+	uint64_t request_body_bytes;
+};
+
+// Own request and HttpLimits storage inside one lexical attempt boundary. A
+// successful return therefore proves both have been destroyed before the
+// caller can narrow the worst-case reservation to complete-response bytes.
+inline CompletedTransportAttempt
+ExecuteOneAdmittedTransportAttempt(const std::function<HttpRequest(uint64_t)> &request_factory,
+                                   const PageResourceAllowance &allowance, const AdmittedRateLimitPolicy &rate_limit,
+                                   uint64_t max_metadata_bytes, ScanResourceAccounting &accounting,
+                                   const std::shared_ptr<const HttpTransport> &transport, ExecutionControl &control,
+                                   uint64_t *request_body_bytes_out) {
+	auto request = request_factory(allowance.serialized_request_body_bytes);
+	if (!HasBoundedHttpStringCapacity(request.target, 8192) ||
+	    (!request.body.empty() &&
+	     !HasBoundedHttpStringCapacity(request.body, allowance.serialized_request_body_bytes))) {
+		throw ExecutionError(ErrorStage::RESOURCE, "request_body_bytes",
+		                     "HTTP request allocation exceeded its admitted capacity envelope");
+	}
+	const auto request_body_bytes = static_cast<uint64_t>(request.body.size());
+	*request_body_bytes_out = request_body_bytes;
+	if (!request.body.empty()) {
+		accounting.CommitRequestBody(request_body_bytes);
+	}
+	const HttpLimits limits {allowance.serialized_request_body_bytes,
+	                         allowance.header_bytes,
+	                         allowance.wire_response_bytes,
+	                         allowance.decompressed_response_bytes,
+	                         max_metadata_bytes,
+	                         allowance.deadline,
+	                         rate_limit_detail::RetainedHeaderNames(rate_limit),
+	                         rate_limit_detail::RetainDate(rate_limit)};
+	const auto transport_started = std::chrono::steady_clock::now();
+	HttpResponse response;
+	try {
+		response = transport->Execute(request, limits, control);
+	} catch (...) {
+		accounting.CommitRemoteTransportTime(
+		    rate_limit_detail::ElapsedMilliseconds(transport_started, std::chrono::steady_clock::now()));
+		throw;
+	}
+	accounting.CommitRemoteTransportTime(
+	    rate_limit_detail::ElapsedMilliseconds(transport_started, std::chrono::steady_clock::now()));
+	if (response.header_bytes > limits.max_header_bytes || response.response_bytes > limits.max_response_bytes ||
+	    response.decompressed_response_bytes > limits.max_decompressed_bytes ||
+	    static_cast<uint64_t>(response.body.size()) > response.decompressed_response_bytes ||
+	    response.metadata.retained_bytes > limits.max_metadata_bytes) {
+		throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP response exceeded an execution budget");
+	}
+	return {std::move(response), request_body_bytes};
+}
+
 // The sole Runtime retry loop. It repeats only a freshly rebuilt admitted
 // request for the current unaccepted step, while one ScanResourceAccounting
 // instance retains every attempt, byte, wait, page, and deadline debit. The
@@ -495,54 +766,94 @@ inline TransportResourceUsage AttemptUsage(const HttpResponse &response) noexcep
 inline RetriedHttpResponse
 ExecuteHttpStepWithRetry(const RetryPlan &policy, const AdmittedRateLimitPolicy &rate_limit,
                          RateLimitRuntimeContext &rate_runtime, ResilienceExecutionState &execution_state,
-                         ScanResourceAccounting &accounting, const std::shared_ptr<const HttpTransport> &transport,
-                         uint64_t max_metadata_bytes, uint64_t jitter_seed,
-                         const std::function<HttpRequest()> &request_factory, ExecutionControl &control) {
+                         AdmissionRuntimeContext &admission_runtime, ScanResourceAccounting &accounting,
+                         const std::shared_ptr<const HttpTransport> &transport, uint64_t max_metadata_bytes,
+                         uint64_t jitter_seed, const std::function<HttpRequest(uint64_t)> &request_factory,
+                         ExecutionControl &control) {
 	using namespace rate_limit_detail;
-	auto allowance = accounting.BeginPage(std::chrono::steady_clock::now());
+	accounting.BeginStep(std::chrono::steady_clock::now());
+	PageResourceAllowance allowance {};
 	uint64_t ordinary_step_repeats = 0;
 	uint64_t rate_limit_step_repeats = 0;
 	bool immediate_seen = false;
 	bool bucket_frozen = false;
 	bool frozen_bucket_present = false;
 	std::string frozen_bucket;
+	uint32_t frozen_rate_limit_status = 0;
+	std::unique_ptr<QuotaBucketKey> quota_key;
 	RateLimitCoordinator::Permit permit;
 	while (true) {
 		if (control.IsCancellationRequested()) {
 			throw ExecutionCancelled();
 		}
-		auto request = request_factory();
-		const auto request_body_bytes = static_cast<uint64_t>(request.body.size());
-		if (!request.body.empty()) {
-			accounting.CommitRequestBody(static_cast<uint64_t>(request.body.size()));
+		const AdmittedResiliencePolicy observed_resilience {accounting.Profile().page.request_attempts,
+		                                                    accounting.Profile().scan.request_attempts,
+		                                                    accounting.Profile().scan.cumulative_waiting_milliseconds};
+		if (quota_key && !permit.IsValid()) {
+			const auto &counters = accounting.Counters();
+			const auto aggregate_remaining = Remaining(accounting.Profile().scan.cumulative_waiting_milliseconds,
+			                                           counters.cumulative_waiting_milliseconds);
+			const auto rate_remaining = Remaining(rate_limit.max_cumulative_waiting_milliseconds_per_scan,
+			                                      counters.cumulative_rate_limit_waiting_milliseconds);
+			const auto local_wait_authority = std::min(aggregate_remaining, rate_remaining);
+			if (local_wait_authority == 0) {
+				ThrowRateLimitFailure(frozen_rate_limit_status, RateLimitReason::WAITING_EXHAUSTED, accounting,
+				                      execution_state);
+			}
+			const auto wait_started = rate_runtime.clock->SteadyNowMilliseconds();
+			const auto scan_deadline = SteadyMilliseconds(accounting.Deadline());
+			const auto budget_limit = AddBounded(wait_started, local_wait_authority);
+			const auto coordinator_deadline = std::min(scan_deadline, budget_limit);
+			const bool budget_bound = budget_limit <= scan_deadline;
+			auto wait_reservation = AcquireRecoveryWaitAdmission(admission_runtime, accounting, true);
+			CancellationView cancellation(control);
+			execution_state.rate_limit_waiting = true;
+			WaitPublication wait_publication(*rate_runtime.wait_diagnostics, execution_state,
+			                                 BuildExecutionSnapshot(policy, rate_limit, observed_resilience,
+			                                                        accounting.Counters(), execution_state,
+			                                                        ExposureState::UNACCEPTED));
+			const auto acquire_status = rate_runtime.coordinator->Acquire(*quota_key, wait_started,
+			                                                              coordinator_deadline, cancellation, &permit);
+			const auto wait_completed = rate_runtime.clock->SteadyNowMilliseconds();
+			wait_publication.Complete();
+			const auto waited =
+			    wait_completed > wait_started ? static_cast<uint64_t>(wait_completed - wait_started) : 0;
+			if (waited != 0) {
+				accounting.CommitRateLimitWait(waited);
+				execution_state.rate_limit_waits++;
+			}
+			if (acquire_status == RateLimitAcquireStatus::CANCELLED) {
+				throw ExecutionCancelled();
+			}
+			if (acquire_status != RateLimitAcquireStatus::ACQUIRED) {
+				const auto terminal_admission = admission_runtime.controller->TerminalReason();
+				if (acquire_status == RateLimitAcquireStatus::SCHEDULER_CLOSED &&
+				    terminal_admission != AdmissionReason::NONE) {
+					ThrowClosedAdmissionDuringRateLimit(frozen_rate_limit_status, terminal_admission, accounting,
+					                                    execution_state);
+				}
+				ThrowRateLimitFailure(frozen_rate_limit_status, AcquireReason(acquire_status, budget_bound), accounting,
+				                      execution_state);
+			}
+			wait_reservation.Release();
 		}
-		const HttpLimits limits {
-		    allowance.serialized_request_body_bytes, allowance.header_bytes, allowance.wire_response_bytes,
-		    allowance.decompressed_response_bytes,   max_metadata_bytes,     allowance.deadline,
-		    RetainedHeaderNames(rate_limit),         RetainDate(rate_limit)};
-		const auto transport_started = std::chrono::steady_clock::now();
+		auto request_permit = AcquireRequestAdmission(admission_runtime, rate_runtime, policy, rate_limit,
+		                                              observed_resilience, accounting, execution_state, control);
+		auto buffer_reservation = ReserveAttemptBuffers(admission_runtime, accounting, max_metadata_bytes);
+		allowance = accounting.BeginAttempt(std::chrono::steady_clock::now());
+		uint64_t request_body_bytes = 0;
 		try {
-			HttpResponse response;
+			CompletedTransportAttempt completed {};
 			try {
-				response = transport->Execute(request, limits, control);
-			} catch (const HttpAttemptCancelled &) {
-				throw;
-			} catch (const HttpAttemptFailure &) {
-				throw;
+				completed =
+				    ExecuteOneAdmittedTransportAttempt(request_factory, allowance, rate_limit, max_metadata_bytes,
+				                                       accounting, transport, control, &request_body_bytes);
 			} catch (...) {
-				accounting.CommitRemoteTransportTime(
-				    ElapsedMilliseconds(transport_started, std::chrono::steady_clock::now()));
+				request_permit.Release();
 				throw;
 			}
-			const auto transport_completed = std::chrono::steady_clock::now();
-			accounting.CommitRemoteTransportTime(ElapsedMilliseconds(transport_started, transport_completed));
-			if (response.header_bytes > limits.max_header_bytes ||
-			    response.response_bytes > limits.max_response_bytes ||
-			    response.decompressed_response_bytes > limits.max_decompressed_bytes ||
-			    static_cast<uint64_t>(response.body.size()) > response.decompressed_response_bytes ||
-			    response.metadata.retained_bytes > limits.max_metadata_bytes) {
-				throw ExecutionError(ErrorStage::RESOURCE, "", "HTTP response exceeded an execution budget");
-			}
+			request_permit.Release();
+			HttpResponse response = std::move(completed.response);
 			if (rate_limit.MatchesStatus(response.status)) {
 				const auto status = response.status;
 				const auto receipt =
@@ -617,15 +928,17 @@ ExecuteHttpStepWithRetry(const RetryPlan &policy, const AdmittedRateLimitPolicy 
 					ThrowRateLimitFailure(status, RateLimitReason::WAITING_EXHAUSTED, accounting, execution_state);
 				}
 
-				QuotaBucketKey key(
-				    {request.scheme, request.host, request.port},
+				response = HttpResponse {};
+				buffer_reservation.Release();
+				auto wait_reservation = AcquireRecoveryWaitAdmission(admission_runtime, accounting, true);
+				const auto &admission_destination = admission_runtime.identity.Destination();
+				quota_key.reset(new QuotaBucketKey(
+				    {admission_destination.scheme, admission_destination.host, admission_destination.explicit_port},
 				    {rate_limit.connector_id, rate_limit.package_major_version, rate_limit.operation_family},
-				    rate_runtime.principal, frozen_bucket_present, frozen_bucket);
+				    rate_runtime.principal, frozen_bucket_present, frozen_bucket));
+				frozen_rate_limit_status = status;
 				CancellationView cancellation(control);
 				execution_state.rate_limit_waiting = true;
-				const AdmittedResiliencePolicy observed_resilience {
-				    accounting.Profile().page.request_attempts, accounting.Profile().scan.request_attempts,
-				    accounting.Profile().scan.cumulative_waiting_milliseconds};
 				WaitPublication wait_publication(*rate_runtime.wait_diagnostics, execution_state,
 				                                 BuildExecutionSnapshot(policy, rate_limit, observed_resilience,
 				                                                        accounting.Counters(), execution_state,
@@ -635,8 +948,8 @@ ExecuteHttpStepWithRetry(const RetryPlan &policy, const AdmittedRateLimitPolicy 
 					acquire_status = rate_runtime.coordinator->Requeue(&permit, guidance.eligible_steady_milliseconds,
 					                                                   coordinator_deadline, cancellation);
 				} else {
-					acquire_status = rate_runtime.coordinator->Acquire(key, guidance.eligible_steady_milliseconds,
-					                                                   coordinator_deadline, cancellation, &permit);
+					acquire_status = rate_runtime.coordinator->Acquire(
+					    *quota_key, guidance.eligible_steady_milliseconds, coordinator_deadline, cancellation, &permit);
 				}
 				const auto wait_completed = rate_runtime.clock->SteadyNowMilliseconds();
 				wait_publication.Complete();
@@ -650,18 +963,24 @@ ExecuteHttpStepWithRetry(const RetryPlan &policy, const AdmittedRateLimitPolicy 
 					throw ExecutionCancelled();
 				}
 				if (acquire_status != RateLimitAcquireStatus::ACQUIRED) {
+					const auto terminal_admission = admission_runtime.controller->TerminalReason();
+					if (acquire_status == RateLimitAcquireStatus::SCHEDULER_CLOSED &&
+					    terminal_admission != AdmissionReason::NONE) {
+						ThrowClosedAdmissionDuringRateLimit(status, terminal_admission, accounting, execution_state);
+					}
 					ThrowRateLimitFailure(status, AcquireReason(acquire_status, budget_bound), accounting,
 					                      execution_state);
 				}
 				rate_limit_step_repeats++;
 				execution_state.rate_limit_repeats++;
-				allowance = accounting.BeginRetryAttempt(std::chrono::steady_clock::now());
+				wait_reservation.Release();
 				continue;
 			}
 			if (!IsRetryableGatewayResponse(response)) {
 				accounting.CommitTransport(AttemptUsage(response));
 				DiscardRateLimitMetadata(response);
-				return {std::move(response), allowance};
+				RetainOnlyCompleteResponseBytes(admission_runtime, accounting, buffer_reservation, response);
+				return {std::move(response), allowance, std::move(buffer_reservation)};
 			}
 			accounting.CommitAttemptFailure(AttemptUsage(response));
 			const auto page_count = accounting.Profile().scan.pages;
@@ -682,15 +1001,11 @@ ExecuteHttpStepWithRetry(const RetryPlan &policy, const AdmittedRateLimitPolicy 
 			// A transport cancellation remains a cancellation, but any response
 			// bytes observed before the cancellation consume the current attempt's
 			// scan authority exactly once.
-			accounting.CommitRemoteTransportTime(
-			    ElapsedMilliseconds(transport_started, std::chrono::steady_clock::now()));
 			accounting.CommitAttemptFailure(AttemptUsage(cancelled.Facts()));
 			throw ExecutionCancelled();
 		} catch (const HttpAttemptFailure &failure) {
 			// HttpAttemptFailure carries every received byte but no complete
 			// response, so rate-limit dispatch is deliberately impossible.
-			accounting.CommitRemoteTransportTime(
-			    ElapsedMilliseconds(transport_started, std::chrono::steady_clock::now()));
 			accounting.CommitAttemptFailure(AttemptUsage(failure.Facts()));
 			const bool retryable = IsRetryableTransportFailure(failure);
 			const auto page_count = accounting.Profile().scan.pages;
@@ -722,6 +1037,8 @@ ExecuteHttpStepWithRetry(const RetryPlan &policy, const AdmittedRateLimitPolicy 
 			accounting.RequireRetryAttemptResources(request_body_bytes);
 		}
 
+		buffer_reservation.Release();
+		permit.Complete();
 		const auto used_retry_wait = accounting.Counters().cumulative_retry_waiting_milliseconds;
 		const auto used_combined_wait = accounting.Counters().cumulative_waiting_milliseconds;
 		if (used_retry_wait >= policy.max_cumulative_waiting_milliseconds_per_scan ||
@@ -735,6 +1052,12 @@ ExecuteHttpStepWithRetry(const RetryPlan &policy, const AdmittedRateLimitPolicy 
 		if (delay == 0) {
 			throw ScanResourceError("cumulative_waiting_milliseconds", "scan exhausted its cumulative-waiting budget");
 		}
+		auto wait_reservation = AcquireRecoveryWaitAdmission(admission_runtime, accounting, false);
+		std::mutex wait_mutex;
+		std::condition_variable wait_condition;
+		std::unique_lock<std::mutex> wait_lock(wait_mutex);
+		const auto wait_started = rate_runtime.clock->SteadyNowMilliseconds();
+		const auto wait_deadline = AddBounded(wait_started, delay);
 		uint64_t waited = 0;
 		while (waited < delay) {
 			if (control.IsCancellationRequested()) {
@@ -744,17 +1067,30 @@ ExecuteHttpStepWithRetry(const RetryPlan &policy, const AdmittedRateLimitPolicy 
 			if (now >= accounting.Deadline()) {
 				throw ScanResourceError("wall_milliseconds", "scan exceeded its wall-time budget");
 			}
-			const auto slice = std::min<uint64_t>(5, delay - waited);
-			accounting.CommitRetryWait(slice);
-			std::this_thread::sleep_for(std::chrono::milliseconds(slice));
-			waited += slice;
+			const auto before = rate_runtime.clock->SteadyNowMilliseconds();
+			if (before >= wait_deadline) {
+				const auto remaining = delay - waited;
+				accounting.CommitRetryWait(remaining);
+				waited = delay;
+				break;
+			}
+			const auto slice = std::min<uint64_t>(5, static_cast<uint64_t>(wait_deadline - before));
+			rate_runtime.clock->WaitFor(wait_condition, wait_lock, slice);
+			const auto after = rate_runtime.clock->SteadyNowMilliseconds();
+			if (after <= before) {
+				continue;
+			}
+			const auto elapsed = static_cast<uint64_t>(after - before);
+			const auto debit = std::min(delay - waited, elapsed);
+			accounting.CommitRetryWait(debit);
+			waited += debit;
 		}
 		if (control.IsCancellationRequested()) {
 			throw ExecutionCancelled();
 		}
 		ordinary_step_repeats++;
 		execution_state.ordinary_retry_repeats++;
-		allowance = accounting.BeginRetryAttempt(std::chrono::steady_clock::now());
+		wait_reservation.Release();
 	}
 }
 

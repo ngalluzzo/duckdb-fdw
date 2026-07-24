@@ -232,6 +232,38 @@ class ContractFreezeTests(unittest.TestCase):
             "bounded reactive rate-limit contract",
         )
 
+    def test_runtime_admission_request_ceiling_drift_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["bounded_runtime_admission"]["hard_limits"].__setitem__(
+                "in_flight_requests", [33, 8, 8, 4, 2]
+            ),
+            "bounded Runtime admission contract",
+        )
+
+    def test_runtime_admission_reason_removed_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["bounded_runtime_admission"]["diagnostic_reasons"].remove(
+                "buffered_bytes_exhausted"
+            ),
+            "bounded Runtime admission contract",
+        )
+
+    def test_runtime_admission_circuit_breaker_widening_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["bounded_runtime_admission"].__setitem__(
+                "circuit_breaking", True
+            ),
+            "bounded Runtime admission contract",
+        )
+
+    def test_rate_limit_ticket_exhaustion_reason_removed_fails(self) -> None:
+        self.require_rejected(
+            lambda value: value["bounded_reactive_rate_limit"]["diagnostic_reasons"].remove(
+                "ticket_exhausted"
+            ),
+            "bounded reactive rate-limit contract",
+        )
+
     def test_column_shape_omission_fails(self) -> None:
         self.require_rejected(
             lambda value: value["column_shapes"]["authored"].remove("ARRAY"),

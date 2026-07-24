@@ -7,18 +7,23 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 namespace {
 
+using duckdb_api::AdmissionReason;
+using duckdb_api::AdmissionScope;
 using duckdb_api::ExecutionControl;
 using duckdb_api::ExecutionError;
+using duckdb_api::FailureClass;
 using duckdb_api::FailureProperties;
 using duckdb_api::PlannedRateLimitGuidance;
 using duckdb_api::PlannedRateLimitGuidanceFormat;
@@ -26,6 +31,11 @@ using duckdb_api::PlannedRateLimitMode;
 using duckdb_api::PlannedRateLimitPrincipalScope;
 using duckdb_api::RateLimitReason;
 using duckdb_api::RetryPlan;
+using duckdb_api::internal::AdmissionController;
+using duckdb_api::internal::AdmissionIdentity;
+using duckdb_api::internal::AdmissionPrincipalToken;
+using duckdb_api::internal::AdmissionProtocol;
+using duckdb_api::internal::AdmissionRuntimeContext;
 using duckdb_api::internal::AdmittedRateLimitPolicy;
 using duckdb_api::internal::ExecuteHttpStepWithRetry;
 using duckdb_api::internal::HttpAttemptCancelled;
@@ -36,6 +46,8 @@ using duckdb_api::internal::HttpRequest;
 using duckdb_api::internal::HttpResponse;
 using duckdb_api::internal::HttpTransport;
 using duckdb_api::internal::HttpTransportFailureKind;
+using duckdb_api::internal::RateLimitAcquireStatus;
+using duckdb_api::internal::RateLimitCancellation;
 using duckdb_api::internal::RateLimitClock;
 using duckdb_api::internal::RateLimitClockReceipt;
 using duckdb_api::internal::RateLimitCoordinator;
@@ -48,6 +60,13 @@ using duckdb_api::internal::ScanResourceProfile;
 using duckdb_api_test::Require;
 
 class NeverCancelled final : public ExecutionControl {
+public:
+	bool IsCancellationRequested() const noexcept override {
+		return false;
+	}
+};
+
+class NeverRateCancelled final : public RateLimitCancellation {
 public:
 	bool IsCancellationRequested() const noexcept override {
 		return false;
@@ -76,6 +95,97 @@ private:
 	mutable std::atomic<int64_t> steady;
 };
 
+class ObservableBlockingClock final : public RateLimitClock {
+public:
+	ObservableBlockingClock() : waits(0) {
+	}
+
+	RateLimitClockReceipt CaptureReceipt() const noexcept override {
+		return {100000, 0};
+	}
+
+	int64_t SteadyNowMilliseconds() const noexcept override {
+		return 0;
+	}
+
+	void WaitFor(std::condition_variable &condition, std::unique_lock<std::mutex> &lock, uint64_t) const override {
+		waits.fetch_add(1, std::memory_order_acq_rel);
+		condition.wait_for(lock, std::chrono::milliseconds(1));
+	}
+
+	uint64_t WaitCount() const noexcept {
+		return waits.load(std::memory_order_acquire);
+	}
+
+private:
+	mutable std::atomic<uint64_t> waits;
+};
+
+class FirstWaitGateClock final : public RateLimitClock {
+public:
+	FirstWaitGateClock() : entered(false), proceed(false), first_wait(true) {
+	}
+
+	RateLimitClockReceipt CaptureReceipt() const noexcept override {
+		const auto steady = SteadyNowMilliseconds();
+		return {100000 + steady, steady};
+	}
+
+	int64_t SteadyNowMilliseconds() const noexcept override {
+		return std::chrono::duration_cast<std::chrono::milliseconds>(
+		           std::chrono::steady_clock::now().time_since_epoch())
+		    .count();
+	}
+
+	void WaitFor(std::condition_variable &condition, std::unique_lock<std::mutex> &lock,
+	             uint64_t milliseconds) const override {
+		bool gate_this_wait = false;
+		{
+			std::lock_guard<std::mutex> guard(gate_mutex);
+			if (first_wait) {
+				first_wait = false;
+				entered = true;
+				gate_this_wait = true;
+				gate_condition.notify_all();
+			}
+		}
+		if (gate_this_wait) {
+			std::unique_lock<std::mutex> gate_lock(gate_mutex);
+			gate_condition.wait(gate_lock, [&]() { return proceed; });
+			return;
+		}
+		condition.wait_for(lock, std::chrono::milliseconds(milliseconds));
+	}
+
+	bool WaitUntilEntered() const {
+		std::unique_lock<std::mutex> lock(gate_mutex);
+		return gate_condition.wait_for(lock, std::chrono::seconds(2), [&]() { return entered; });
+	}
+
+	void Proceed() const {
+		{
+			std::lock_guard<std::mutex> guard(gate_mutex);
+			proceed = true;
+		}
+		gate_condition.notify_all();
+	}
+
+private:
+	mutable std::mutex gate_mutex;
+	mutable std::condition_variable gate_condition;
+	mutable bool entered;
+	mutable bool proceed;
+	mutable bool first_wait;
+};
+
+bool WaitUntil(const std::function<bool()> &predicate) {
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+	while (!predicate() && std::chrono::steady_clock::now() < deadline) {
+		std::this_thread::yield();
+	}
+	return predicate();
+}
+
 struct ScriptedStep {
 	HttpResponse response;
 	bool partial;
@@ -90,6 +200,16 @@ HttpResponse Response(uint32_t status, std::vector<HttpObservedHeader> fields = 
 ScriptedStep Complete(uint32_t status, std::vector<HttpObservedHeader> fields = {},
                       std::vector<std::string> dates = {}) {
 	return {Response(status, std::move(fields), std::move(dates)), false, false};
+}
+
+ScriptedStep CompleteWithPayload(uint32_t status, std::string body, uint64_t retained_metadata_bytes,
+                                 std::vector<HttpObservedHeader> fields = {}, std::vector<std::string> dates = {}) {
+	auto response = Response(status, std::move(fields), std::move(dates));
+	response.response_bytes = static_cast<uint64_t>(body.size());
+	response.decompressed_response_bytes = static_cast<uint64_t>(body.size());
+	response.body = std::move(body);
+	response.metadata.retained_bytes = retained_metadata_bytes;
+	return {std::move(response), false, false};
 }
 
 ScriptedStep Partial(uint32_t status) {
@@ -221,6 +341,11 @@ Outcome Run(const RetryPlan &retry, const AdmittedRateLimitPolicy &rate_limit, s
 	auto clock = injected_clock ? std::move(injected_clock) : duckdb_api::internal::NewSystemRateLimitClock();
 	auto coordinator = std::make_shared<RateLimitCoordinator>(RateLimitCoordinator::HardLimits(), clock);
 	RateLimitRuntimeContext runtime(coordinator, clock, RateLimitPrincipalToken::Anonymous());
+	auto admission = std::make_shared<AdmissionController>(duckdb_api::internal::AdmissionProfile::Hard(), clock);
+	AdmissionRuntimeContext admission_runtime(
+	    admission,
+	    AdmissionIdentity::Complete("rate_limit_fixture", {"https", "api.example.test", 443}, "events",
+	                                AdmissionProtocol::REST, "events", AdmissionPrincipalToken::Anonymous()));
 	ResilienceExecutionState state;
 	NeverCancelled control;
 	bool failed = false;
@@ -229,8 +354,9 @@ Outcome Run(const RetryPlan &retry, const AdmittedRateLimitPolicy &rate_limit, s
 	uint32_t response_status = 0;
 	try {
 		auto result = ExecuteHttpStepWithRetry(
-		    retry, rate_limit, runtime, state, accounting, transport_view, 4096, 7,
-		    []() { return HttpRequest {"GET", "https", "api.example.test", 443, "/events", {}, "", ""}; }, control);
+		    retry, rate_limit, runtime, state, admission_runtime, accounting, transport_view, 4096, 7,
+		    [](uint64_t) { return HttpRequest {"GET", "https", "api.example.test", 443, "/events", {}, "", ""}; },
+		    control);
 		response_status = result.response.status;
 	} catch (const ExecutionError &error) {
 		failed = true;
@@ -359,6 +485,182 @@ void TestPositiveWaitAndExactWaitingBoundary() {
 	        "positive guidance at the exact waiting-budget boundary did not recover with exact accounting");
 }
 
+void TestRuntimeCloseRemainsPrimaryDuringQuotaWait() {
+	const auto clock = std::make_shared<ObservableBlockingClock>();
+	auto coordinator = std::make_shared<RateLimitCoordinator>(RateLimitCoordinator::HardLimits(), clock);
+	auto admission = std::make_shared<AdmissionController>(duckdb_api::internal::AdmissionProfile::Hard(), clock);
+	RateLimitRuntimeContext rate_runtime(coordinator, clock, RateLimitPrincipalToken::Anonymous());
+	AdmissionRuntimeContext admission_runtime(
+	    admission,
+	    AdmissionIdentity::Complete("rate_limit_fixture", {"https", "api.example.test", 443}, "events",
+	                                AdmissionProtocol::REST, "events", AdmissionPrincipalToken::Anonymous()));
+	const auto policy = WaitingPolicy(PlannedRateLimitMode::WAIT, 2, 30000, 30000);
+	const ScanResourceProfile profile = {{2, 4096, 4096, 4096, 1, 4096, 1, 0},
+	                                     {2, 1, 8192, 8192, 8192, 1, 4096, 5000, 1, 0, 30000, 0, 30000, 5000}};
+	ScanResourceAccounting accounting(profile);
+	auto transport = std::make_shared<ScriptedTransport>(std::vector<ScriptedStep> {Complete(429, {{"x-reset", "1"}})});
+	std::shared_ptr<const HttpTransport> transport_view = transport;
+	ResilienceExecutionState state;
+	NeverCancelled control;
+	FailureProperties properties {};
+	std::atomic<bool> failed(false);
+	std::thread execution([&]() {
+		try {
+			(void)ExecuteHttpStepWithRetry(
+			    NO_RETRY, policy, rate_runtime, state, admission_runtime, accounting, transport_view, 4096, 7,
+			    [](uint64_t) { return HttpRequest {"GET", "https", "api.example.test", 443, "/events", {}, "", ""}; },
+			    control);
+		} catch (const ExecutionError &error) {
+			properties = error.Properties();
+			failed.store(error.Classified(), std::memory_order_release);
+		}
+	});
+	const bool entered_wait = WaitUntil([&]() { return clock->WaitCount() != 0; });
+	const auto waiting_usage = admission->Usage();
+	admission->Close();
+	coordinator->Close();
+	execution.join();
+	Require(entered_wait, "quota-close fixture did not enter coordinator waiting");
+	Require(waiting_usage.in_flight_requests == 0 && waiting_usage.buffered_bytes == 0 &&
+	            waiting_usage.rate_limit_waiters == 1,
+	        "rate-limit wait retained request/response authority or lost its waiter reservation");
+	Require(failed.load(std::memory_order_acquire) && properties.failure_class == FailureClass::LOCAL_ADMISSION &&
+	            properties.admission_reason == AdmissionReason::RUNTIME_CLOSED &&
+	            properties.admission_scope == AdmissionScope::NONE && properties.admission_limit == 0 &&
+	            properties.admission_observed == 0 && properties.admission_requested == 0 &&
+	            properties.rate_limit_reason == RateLimitReason::SCHEDULER_CLOSED && !properties.rate_limit_waiting &&
+	            transport->RequestCount() == 1,
+	        "executor close during quota wait replaced local runtime_closed with a remote rate-limit failure");
+	const auto usage = admission->Usage();
+	Require(usage.in_flight_requests == 0 && usage.rate_limit_waiters == 0 && usage.buffered_bytes == 0,
+	        "quota-close failure retained request, waiter, or response-buffer authority");
+}
+
+void TestOrdinaryRetryReleasesResponseBeforeWaiting() {
+	const RetryPlan retry {2, 2, 100, 1000};
+	const ScanResourceProfile profile = {{2, 4096, 4096, 4096, 1, 4096, 1, 0},
+	                                     {2, 1, 8192, 8192, 8192, 1, 4096, 5000, 1, 0, 1000, 1000, 0, 5000}};
+	ScanResourceAccounting accounting(profile);
+	auto clock = std::make_shared<FirstWaitGateClock>();
+	auto coordinator = std::make_shared<RateLimitCoordinator>(RateLimitCoordinator::HardLimits(), clock);
+	auto admission = std::make_shared<AdmissionController>(duckdb_api::internal::AdmissionProfile::Hard(), clock);
+	RateLimitRuntimeContext rate_runtime(coordinator, clock, RateLimitPrincipalToken::Anonymous());
+	AdmissionRuntimeContext admission_runtime(
+	    admission,
+	    AdmissionIdentity::Complete("rate_limit_fixture", {"https", "api.example.test", 443}, "events",
+	                                AdmissionProtocol::REST, "events", AdmissionPrincipalToken::Anonymous()));
+	auto transport = std::make_shared<ScriptedTransport>(std::vector<ScriptedStep> {
+	    CompleteWithPayload(503, "retryable-response-body", 7, {{"x-retained", "value"}}, {"date-value"}),
+	    Complete(200)});
+	std::shared_ptr<const HttpTransport> transport_view = transport;
+	ResilienceExecutionState state;
+	NeverCancelled control;
+	std::atomic<bool> completed(false);
+	std::thread execution([&]() {
+		try {
+			const auto result = ExecuteHttpStepWithRetry(
+			    retry, FailPolicy(), rate_runtime, state, admission_runtime, accounting, transport_view, 4096, 7,
+			    [](uint64_t) { return HttpRequest {"GET", "https", "api.example.test", 443, "/events", {}, "", ""}; },
+			    control);
+			completed.store(result.response.status == 200, std::memory_order_release);
+		} catch (...) {
+		}
+	});
+	const bool entered_wait = clock->WaitUntilEntered();
+	const auto waiting_usage = admission->Usage();
+	clock->Proceed();
+	if (!entered_wait) {
+		admission->Close();
+		coordinator->Close();
+	}
+	execution.join();
+	Require(entered_wait, "ordinary retry fixture did not enter its admitted wait");
+	Require(waiting_usage.in_flight_requests == 0 && waiting_usage.buffered_bytes == 0 &&
+	            waiting_usage.retry_waiters == 1,
+	        "ordinary retry retained request/response authority while its waiter was live");
+	Require(completed.load(std::memory_order_acquire) && transport->RequestCount() == 2,
+	        "ordinary retry response-release probe did not recover");
+	const auto drained = admission->Usage();
+	Require(drained.in_flight_requests == 0 && drained.buffered_bytes == 0 && drained.retry_waiters == 0,
+	        "ordinary retry response-release probe did not drain admission authority");
+}
+
+void TestOrdinaryRetryRequeuesRateLimitQuotaAuthority() {
+	const RetryPlan retry {3, 3, 100, 1000};
+	const auto rate_limit = WaitingPolicy(PlannedRateLimitMode::WAIT, 3, 1000, 1000);
+	const ScanResourceProfile profile = {{3, 4096, 4096, 4096, 1, 4096, 1, 0},
+	                                     {3, 1, 12288, 12288, 12288, 1, 4096, 5000, 1, 0, 2000, 1000, 1000, 5000}};
+	ScanResourceAccounting accounting(profile);
+	auto clock = std::make_shared<FirstWaitGateClock>();
+	auto coordinator = std::make_shared<RateLimitCoordinator>(RateLimitCoordinator::HardLimits(), clock);
+	auto admission = std::make_shared<AdmissionController>(duckdb_api::internal::AdmissionProfile::Hard(), clock);
+	RateLimitRuntimeContext rate_runtime(coordinator, clock, RateLimitPrincipalToken::Anonymous());
+	AdmissionRuntimeContext admission_runtime(
+	    admission,
+	    AdmissionIdentity::Complete("rate_limit_fixture", {"https", "api.example.test", 443}, "events",
+	                                AdmissionProtocol::REST, "events", AdmissionPrincipalToken::Anonymous()));
+	auto transport = std::make_shared<ScriptedTransport>(
+	    std::vector<ScriptedStep> {Complete(429, {{"x-reset", "0"}}), Complete(503), Complete(200)});
+	std::shared_ptr<const HttpTransport> transport_view = transport;
+	ResilienceExecutionState state;
+	NeverCancelled control;
+	std::atomic<bool> completed(false);
+	std::thread execution([&]() {
+		try {
+			const auto result = ExecuteHttpStepWithRetry(
+			    retry, rate_limit, rate_runtime, state, admission_runtime, accounting, transport_view, 4096, 7,
+			    [](uint64_t) { return HttpRequest {"GET", "https", "api.example.test", 443, "/events", {}, "", ""}; },
+			    control);
+			completed.store(result.response.status == 200, std::memory_order_release);
+		} catch (...) {
+		}
+	});
+	const bool entered_retry_wait = clock->WaitUntilEntered();
+	const auto retry_wait_usage = admission->Usage();
+	const auto requests_at_retry_gate = transport->RequestCount();
+
+	const duckdb_api::internal::QuotaBucketKey key({"https", "api.example.test", 443},
+	                                               {"rate_limit_fixture", 3, "core_requests"},
+	                                               RateLimitPrincipalToken::Anonymous(), false, {});
+	NeverRateCancelled rate_cancellation;
+	RateLimitCoordinator::Permit peer;
+	std::atomic<bool> peer_finished(false);
+	RateLimitAcquireStatus peer_status = RateLimitAcquireStatus::SCHEDULER_CLOSED;
+	const auto now = clock->SteadyNowMilliseconds();
+	std::thread peer_waiter([&]() {
+		peer_status = coordinator->Acquire(key, now, now + 2000, rate_cancellation, &peer);
+		peer_finished.store(true, std::memory_order_release);
+	});
+	if (!WaitUntil([&]() { return peer_finished.load(std::memory_order_acquire); })) {
+		coordinator->Close();
+	}
+	peer_waiter.join();
+	const bool peer_acquired = peer_status == RateLimitAcquireStatus::ACQUIRED && peer.IsValid();
+	clock->Proceed();
+	const bool entered_rate_limit_wait =
+	    peer_acquired && WaitUntil([&]() { return admission->Usage().rate_limit_waiters == 1; });
+	const auto rate_wait_usage = admission->Usage();
+	const auto requests_while_peer_held = transport->RequestCount();
+	peer.Complete();
+	if (!entered_retry_wait || !peer_acquired || !entered_rate_limit_wait) {
+		admission->Close();
+		coordinator->Close();
+	}
+	execution.join();
+	Require(entered_retry_wait && retry_wait_usage.retry_waiters == 1 && requests_at_retry_gate == 2,
+	        "mixed resilience fixture did not reach ordinary retry after rate-limit admission");
+	Require(peer_acquired, "ordinary retry retained its one-attempt quota permit instead of admitting the FIFO peer");
+	Require(entered_rate_limit_wait && rate_wait_usage.rate_limit_waiters == 1 && requests_while_peer_held == 2,
+	        "mixed retry started transport while its same-key quota peer still held authority");
+	Require(completed.load(std::memory_order_acquire) && transport->RequestCount() == 3 &&
+	            state.rate_limit_repeats == 1 && state.ordinary_retry_repeats == 1,
+	        "mixed rate-limit/ordinary retry did not rejoin FIFO and recover exactly once");
+	const auto drained = admission->Usage();
+	Require(drained.in_flight_requests == 0 && drained.buffered_bytes == 0 && drained.retry_waiters == 0 &&
+	            drained.rate_limit_waiters == 0,
+	        "mixed retry quota handoff did not drain admission authority");
+}
+
 } // namespace
 
 int main() {
@@ -371,6 +673,9 @@ int main() {
 		TestCancelledAttemptCommitsObservedBytes();
 		TestDeadlinePrecheck();
 		TestPositiveWaitAndExactWaitingBoundary();
+		TestRuntimeCloseRemainsPrimaryDuringQuotaWait();
+		TestOrdinaryRetryReleasesResponseBeforeWaiting();
+		TestOrdinaryRetryRequeuesRateLimitQuotaAuthority();
 		std::cout << "Rate-limit execution tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

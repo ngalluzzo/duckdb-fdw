@@ -13,6 +13,12 @@ namespace internal {
 // credential and must be debited by scan accounting before authorization.
 HttpRequest BuildAdmittedGraphqlRequest(const AdmittedGraphqlRequestProfile &profile, const std::string *cursor);
 
+// The executor supplies the current attempt's remaining aggregate body
+// authority. Exact sizing rejects a body that cannot fit before reserve or any
+// serialization allocation occurs.
+HttpRequest BuildAdmittedGraphqlRequest(const AdmittedGraphqlRequestProfile &profile, const std::string *cursor,
+                                        uint64_t serialized_body_allowance);
+
 // Revalidates exact serialized bytes against one immutable admitted profile.
 // This is used before bearer placement; callers cannot substitute a document,
 // variable name, page size, cursor grammar, or noncanonical JSON spelling.

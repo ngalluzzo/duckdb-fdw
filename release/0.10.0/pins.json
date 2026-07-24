@@ -93,6 +93,7 @@
         "src/runtime/generation/generation_snapshot.cpp",
         "src/runtime/generation/generation_publication.cpp",
         "src/runtime/generation/generation_registry.cpp",
+        "src/runtime/execution/admission_controller.cpp",
         "src/runtime/execution/rate_limit_clock.cpp",
         "src/runtime/execution/rate_limit_guidance.cpp",
         "src/runtime/execution/rate_limit_coordinator.cpp",
@@ -222,6 +223,7 @@
         "src/runtime/generation/generation_snapshot.cpp",
         "src/runtime/generation/generation_publication.cpp",
         "src/runtime/generation/generation_registry.cpp",
+        "src/runtime/execution/admission_controller.cpp",
         "src/runtime/execution/rate_limit_clock.cpp",
         "src/runtime/execution/rate_limit_guidance.cpp",
         "src/runtime/execution/rate_limit_coordinator.cpp",
@@ -403,6 +405,7 @@
         "src/include/duckdb_api/internal/runtime/decoding/graphql_response_decoder.hpp",
         "src/include/duckdb_api/internal/runtime/decoding/json_decoder.hpp",
         "src/include/duckdb_api/internal/runtime/decoding/strict_json_reader.hpp",
+        "src/include/duckdb_api/internal/runtime/execution/admission_controller.hpp",
         "src/include/duckdb_api/internal/runtime/execution/graphql_paginated_scan.hpp",
         "src/include/duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp",
         "src/include/duckdb_api/internal/runtime/execution/graphql_recipe_admission.hpp",
@@ -498,6 +501,7 @@
         "src/runtime/decoding/graphql_response_decoder.cpp",
         "src/runtime/decoding/json_decoder.cpp",
         "src/runtime/decoding/strict_json_reader.cpp",
+        "src/runtime/execution/admission_controller.cpp",
         "src/runtime/execution/graphql_paginated_scan.cpp",
         "src/runtime/execution/graphql_plan_admission.cpp",
         "src/runtime/execution/graphql_recipe_admission.cpp",
@@ -558,7 +562,7 @@
         "src/semantics/sources.cmake",
         "src/semantics/targets.cmake"
       ],
-      "sha256": "594fa7f588fc6820c29bd2e3ee315c4aa8702326ce5f61ebda9036e9030512d5"
+      "sha256": "e878f359dc6266766995b49de1a1cfff57510397f46186fcd8db05a63912a81d"
     },
     "public_contract": {
       "canonical_json_sha256": "8d6c37d0071717c25a9822a76dd2b9e51a2ab5600cf7f00ec2a0750324a6e8cb",

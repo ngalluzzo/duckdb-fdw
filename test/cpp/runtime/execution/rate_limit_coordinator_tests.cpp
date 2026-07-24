@@ -402,6 +402,45 @@ void TestCloseDrainsQueuedButNotInFlightPermit() {
 	retained.Complete();
 }
 
+void TestCheckedTicketExhaustionIsFirstTerminalCause() {
+	auto clock = std::make_shared<ManualClock>();
+	RateLimitCoordinator coordinator({4, 8, 5}, clock, std::numeric_limits<uint64_t>::max() - 2);
+	NeverCancelled cancellation;
+	const auto key = Key(RateLimitPrincipalToken::Anonymous(), "ticket-exhaustion");
+	RateLimitCoordinator::Permit active;
+	Require(Acquire(coordinator, key, cancellation, &active) == RateLimitAcquireStatus::ACQUIRED,
+	        "near-maximum ticket fixture did not grant its first active permit");
+
+	RateLimitAcquireStatus queued_status = RateLimitAcquireStatus::ACQUIRED;
+	RateLimitCoordinator::Permit queued;
+	std::thread waiter([&]() { queued_status = Acquire(coordinator, key, cancellation, &queued); });
+	Require(WaitUntil([&]() { return clock->WaitCount() >= 1; }),
+	        "near-maximum ticket fixture did not enqueue its existing waiter");
+	RateLimitCoordinator::Permit trigger;
+	Require(Acquire(coordinator, Key(RateLimitPrincipalToken::Shared("independent")), cancellation, &trigger) ==
+	            RateLimitAcquireStatus::TICKET_EXHAUSTED,
+	        "rate-limit ticket ordinal wrapped instead of entering terminal exhaustion");
+	waiter.join();
+	Require(queued_status == RateLimitAcquireStatus::TICKET_EXHAUSTED && !queued.IsValid() && active.IsValid(),
+	        "ticket exhaustion did not wake queued quota work or preserve active release authority");
+	RateLimitCoordinator::Permit future;
+	Require(Acquire(coordinator, key, cancellation, &future) == RateLimitAcquireStatus::TICKET_EXHAUSTED,
+	        "future quota work did not retain the ticket-exhausted cause");
+	coordinator.Close();
+	Require(Acquire(coordinator, key, cancellation, &future) == RateLimitAcquireStatus::TICKET_EXHAUSTED,
+	        "later close rewrote the rate-limit coordinator's first terminal cause");
+	active.Complete();
+
+	RateLimitCoordinator requeue({4, 8, 5}, clock, std::numeric_limits<uint64_t>::max() - 1);
+	RateLimitCoordinator::Permit requeued;
+	Require(Acquire(requeue, key, cancellation, &requeued) == RateLimitAcquireStatus::ACQUIRED &&
+	            requeue.Requeue(&requeued, 0, NO_DEADLINE, cancellation) == RateLimitAcquireStatus::TICKET_EXHAUSTED &&
+	            !requeued.IsValid(),
+	        "active quota requeue wrapped or retained a permit after ticket exhaustion");
+	Require(Acquire(requeue, key, cancellation, &future) == RateLimitAcquireStatus::TICKET_EXHAUSTED,
+	        "requeue exhaustion did not reject future quota work with the same cause");
+}
+
 } // namespace
 
 int main() {
@@ -415,6 +454,7 @@ int main() {
 		TestCancellationAndDeadlineRemoveTickets();
 		TestPerKeyAndExecutorSaturation();
 		TestCloseDrainsQueuedButNotInFlightPermit();
+		TestCheckedTicketExhaustionIsFirstTerminalCause();
 		std::cout << "Rate-limit coordinator tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

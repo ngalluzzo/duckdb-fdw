@@ -102,15 +102,38 @@ HttpRequest ApiKeyAuthenticator::AppendApiKey(uint64_t max_header_bytes, bool he
 	if (value.size() > ScanAuthorization::CredentialByteLimit()) {
 		throw ExecutionError(ErrorStage::RESOURCE, "header_bytes", "api-key value exceeds its request-field limit");
 	}
-	const auto encoded = FormUrlEncode(value);
-	const std::string separator = request.target.find('?') == std::string::npos ? "?" : "&";
-	const uint64_t growth = separator.size() + placement_name.size() + 1 + encoded.size();
+	uint64_t encoded_bytes = 0;
+	if (!TryFormUrlEncodedSize(value, encoded_bytes)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "header_bytes", "api-key value exceeds its request-field limit");
+	}
+	const char separator = request.target.find('?') == std::string::npos ? '?' : '&';
+	const uint64_t growth = 1 + placement_name.size() + 1 + encoded_bytes;
 	if (request.target.size() > 8192 || growth > 8192 - request.target.size()) {
 		throw ExecutionError(ErrorStage::RESOURCE, "header_bytes", "REST request target exceeds its length limit");
 	}
 	try {
-		request.target += separator + placement_name + "=" + encoded;
+		const auto encoded = FormUrlEncode(value);
+		const auto final_size = static_cast<uint64_t>(request.target.size()) + growth;
+		std::string replacement;
+		replacement.reserve(static_cast<std::size_t>(final_size));
+		if (!HasBoundedHttpStringCapacity(replacement, final_size)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "authorization",
+			                     "api-key query parameter exceeded its admitted capacity envelope");
+		}
+		replacement += request.target;
+		replacement.push_back(separator);
+		replacement += placement_name;
+		replacement.push_back('=');
+		replacement += encoded;
+		if (static_cast<uint64_t>(replacement.size()) != final_size ||
+		    !HasBoundedHttpStringCapacity(replacement, final_size)) {
+			throw ExecutionError(ErrorStage::RESOURCE, "authorization",
+			                     "api-key query parameter exceeded its admitted capacity envelope");
+		}
+		request.target.swap(replacement);
 		return request;
+	} catch (const ExecutionError &) {
+		throw;
 	} catch (const std::bad_alloc &) {
 		throw ExecutionError(ErrorStage::RESOURCE, "authorization",
 		                     "api-key query parameter could not be allocated within its memory budget");

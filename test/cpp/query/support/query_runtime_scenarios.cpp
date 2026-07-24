@@ -138,6 +138,24 @@ public:
 			probe->rows.fetch_add(1, std::memory_order_relaxed);
 			return true;
 		}
+		if (scenario == QueryRuntimeScenario::LATE_LOCAL_ADMISSION_ERROR_ONCE) {
+			if (probe->late_failure_enabled.load(std::memory_order_acquire)) {
+				auto properties = duckdb_api::LocalAdmissionFailureProperties(
+				    duckdb_api::AdmissionReason::BUFFERED_ROWS_EXHAUSTED, duckdb_api::AdmissionScope::BULKHEAD, 800,
+				    800, 64, 37, false, duckdb_api::FailurePhase::REQUEST);
+				properties.step = 2;
+				properties.attempt = 1;
+				properties.rows_exposed = 1;
+				properties.exposure_state = duckdb_api::ExposureState::EXPOSED;
+				throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "admission",
+				                                 "local Runtime admission rejected decoded rows", properties);
+			}
+			batch.rows.push_back(Row(static_cast<int64_t>(offset + 17), "before-admission-error", false));
+			offset++;
+			probe->batches.fetch_add(1, std::memory_order_relaxed);
+			probe->rows.fetch_add(1, std::memory_order_relaxed);
+			return true;
+		}
 		if (authenticated) {
 			if (offset != 0) {
 				return false;
@@ -294,6 +312,13 @@ protected:
 			throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::RESOURCE, "response_bytes",
 			                                 "response exceeds its byte budget");
 		}
+		if (scenario == QueryRuntimeScenario::OPEN_LOCAL_ADMISSION_ERROR) {
+			throw duckdb_api::ExecutionError(
+			    duckdb_api::ErrorStage::RESOURCE, "admission", "local Runtime admission rejected scan",
+			    duckdb_api::LocalAdmissionFailureProperties(duckdb_api::AdmissionReason::SCAN_QUEUE_SATURATED,
+			                                                duckdb_api::AdmissionScope::DESTINATION, 16, 16, 1, 0,
+			                                                false, duckdb_api::FailurePhase::ADMIT));
+		}
 		if (scenario == QueryRuntimeScenario::OPEN_UNKNOWN_EXCEPTION) {
 			throw std::runtime_error("top-secret-open-unknown-detail");
 		}
@@ -302,7 +327,9 @@ protected:
 		}
 		const auto prior_streams = probe->streams_opened.fetch_add(1, std::memory_order_relaxed);
 		auto stream_scenario = scenario;
-		if (scenario == QueryRuntimeScenario::LATE_RESOURCE_ERROR_ONCE && prior_streams > 0) {
+		if ((scenario == QueryRuntimeScenario::LATE_RESOURCE_ERROR_ONCE ||
+		     scenario == QueryRuntimeScenario::LATE_LOCAL_ADMISSION_ERROR_ONCE) &&
+		    prior_streams > 0) {
 			stream_scenario = QueryRuntimeScenario::SUCCESS;
 		} else if (scenario == QueryRuntimeScenario::BLOCKING_ANONYMOUS_ONLY && authenticated) {
 			stream_scenario = QueryRuntimeScenario::SUCCESS;

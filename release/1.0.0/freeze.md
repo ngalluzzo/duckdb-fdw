@@ -48,7 +48,12 @@ read either without inspecting product source.
 > [RFC 0025](../../docs/rfcs/0025-enable-bounded-reactive-rate-limit-handling.md)
 > (Accepted 2026-07-23), added `duckdb_api/v3` as v2 plus optional bounded
 > reactive rate-limit policy. It likewise graduated directly into the live
-> connector, planning, runtime, diagnostic, and lifecycle contracts;
+> connector, planning, runtime, diagnostic, and lifecycle contracts. An
+> eighth revision,
+> [RFC 0026](../../docs/rfcs/0026-bound-runtime-admission-and-bulkheads.md)
+> (Accepted 2026-07-23), added fixed executor-local admission and bulkhead
+> isolation without changing connector syntax. It graduated directly into the
+> live Runtime resource, diagnostic, and lifecycle contracts;
 > `accepted_contract_revisions` is therefore empty.
 
 The `1.0.0` contract is not a single document. It is a layered set in which
@@ -158,14 +163,16 @@ because the project reaches `1.0.0`.
   attempt, while an opted-in v2 replayable read may repeat only an unaccepted
   step within the closed three-attempt/96-scan-attempt policy; v3 may react to
   declared complete quota responses through the same attempt ledger and one
-  bounded executor-local coordination domain; checked unsigned
-  resource arithmetic; immutable
+  bounded executor-local coordination domain; all scans share fixed atomic
+  global/connector/destination/principal/bulkhead admission for providers,
+  active scans, requests, waits, buffered bytes, and decoded rows; checked
+  unsigned resource arithmetic; immutable
   plans and snapshots for active scans; strict lossless conversion; atomic
   catalog publication with `Runtime lease -> Query catalog` lock order;
   cancelable, idempotent close; dynamic DSO unload unsupported.
 - Authority: `docs/ARCHITECTURE.md` Relational correctness, Execution and
   authorization, Bounded streaming lifecycle; `docs/RUNTIME_CONTRACTS.md`;
-  RFCs 0006, 0007, 0008, 0010, 0011.
+  RFCs 0006, 0007, 0008, 0010, 0011, 0021, 0024, 0025, and 0026.
 
 ### 6. Compatibility matrix, distribution, support, migration, and exclusions
 
@@ -358,6 +365,36 @@ are 64 queued-or-permitted waiters per key and 4096 per executor. Cancellation
 and close drain queued work without overlapping same-key transport. Remaining
 quota never proactively paces success; distributed coordination, caching,
 circuit breaking, and parallel pages remain excluded.
+
+### Bounded Runtime admission — **accepted and live**
+
+[RFC 0026](../../docs/rfcs/0026-bound-runtime-admission-and-bulkheads.md)
+applies one fixed safety floor to every v1/v2/v3 scan. Each executor atomically
+checks global, connector, destination, opaque provider-principal, and exact
+operation bulkhead dimensions for credential resolution, active scans,
+in-flight requests, retry/rate-limit waiters, buffered bytes, and decoded rows.
+Provider, scan, and request queues are independently finite with one-second
+residence limits, five-millisecond cancellation slices, exact-key FIFO, and
+oldest-eligible cross-key bypass. Request admission has one five-second
+aggregate wait ceiling.
+
+The hard vectors are machine-bound in `freeze.json`: active scans
+`[64,16,16,8,4]`, requests `[32,8,8,4,2]`, retry and rate waiters
+`[32,16,16,8,4]`, buffered bytes
+`[256 MiB,128 MiB,128 MiB,64 MiB,32 MiB]`, and decoded rows
+`[6400,3200,3200,1600,800]`; provider and queue vectors are frozen alongside
+them. Profiles may narrow but never widen, and zero disables rather than
+unbounds a class.
+
+Request and worst-case co-live buffer authority precede attempt debit and
+credentialed request construction. Buffer/recovery-wait shortages fail fast,
+and completed responses release all byte charge before recovery waiting. A
+local rejection performs zero transport and is never replayable. The closed
+`local_admission` class exposes only reason, scope, limit, observed/requested
+counts, and wait state. Executor close is idempotent, drains queues, and leaves
+live handles release-safe. Public tuning, distributed coordination, and
+circuit breaking remain excluded. The existing rate-limit coordinator also
+fails closed as `ticket_exhausted` before its FIFO ticket ordinal can wrap.
 
 ## Not yet frozen
 

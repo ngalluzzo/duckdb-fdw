@@ -1,5 +1,7 @@
 #include "duckdb_api/internal/runtime/transport/http_chunk_decoder.hpp"
 
+#include "duckdb_api/internal/runtime/transport/http_transport.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <limits>
@@ -209,6 +211,10 @@ std::string DecodeHttpChunkedBody(const std::string &encoded, uint64_t max_body_
 	}
 	std::string decoded;
 	decoded.reserve(static_cast<std::size_t>(std::min<uint64_t>(encoded.size(), max_body_bytes)));
+	if (!HasBoundedHttpStringCapacity(decoded, max_body_bytes)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "decompressed_bytes",
+		                     "HTTP chunk decoding exceeded its admitted capacity envelope");
+	}
 	std::size_t offset = 0;
 	while (true) {
 		CheckExecutionState(control, deadline);

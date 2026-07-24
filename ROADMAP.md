@@ -542,6 +542,26 @@ do not block one another. Successful responses never trigger proactive pacing;
 distributed coordination, caching, parallel pages, and circuit breaking remain
 excluded.
 
+### `0.18.0` — bounded Runtime admission and bulkhead isolation
+
+Concurrent remote work shares one executor-local capacity authority that
+atomically bounds provider resolution, active scans, transport requests,
+ordinary retry and rate-limit waiters, co-live buffered bytes, and decoded
+rows. Every acquisition checks global, connector, destination, opaque
+credential-principal, and exact operation bulkhead dimensions without nested
+partial permits. Fixed finite provider, scan, and request queues are
+cancellable, deadline-aware, FIFO within an exact key, and allow independently
+eligible keys to bypass a saturated key.
+
+Local saturation or queue timeout is a stable redacted `local_admission`
+resource failure, performs no transport, consumes no attempt/replay authority,
+and never masquerades as a remote timeout. Runtime close drains queued work;
+live streams and reservations remain safe to release. Actual DuckDB REST and
+GraphQL saturation evidence must show that a distinct connector completes on
+the same executor while same-bulkhead work is rejected. There is no connector
+syntax, SQL setting, distributed coordination, public tuning, or circuit
+breaking; circuit state remains the separately governed follow-on.
+
 ### `1.0.0-rc.N` — compatibility rehearsal
 
 Each release candidate is an immutable build of the frozen `1.0.0` contract.

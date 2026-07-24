@@ -11,11 +11,14 @@
 #include "support/require.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -53,6 +56,22 @@ void CreatePackageRuntimeSecret(duckdb::Connection &connection) {
 	auto secret = connection.Query("CREATE TEMPORARY SECRET package_runtime "
 	                               "(TYPE duckdb_api, PROVIDER config, TOKEN 'package-runtime-token')");
 	Require(!secret->HasError(), "actual DuckDB could not create the package Runtime secret");
+}
+
+uint64_t DiagnosticCount(const std::string &diagnostic, const std::string &field) {
+	const auto begin = diagnostic.find(field);
+	if (begin == std::string::npos) {
+		throw std::runtime_error("local-admission diagnostic omitted " + field + ": " + diagnostic);
+	}
+	const auto value_begin = begin + field.size();
+	auto value_end = value_begin;
+	while (value_end < diagnostic.size() && diagnostic[value_end] >= '0' && diagnostic[value_end] <= '9') {
+		value_end++;
+	}
+	if (value_end == value_begin) {
+		throw std::runtime_error("local-admission diagnostic has a non-numeric " + field + ": " + diagnostic);
+	}
+	return std::stoull(diagnostic.substr(value_begin, value_end - value_begin));
 }
 
 duckdb_api::ValueKind KindFor(const std::string &logical_type) {
@@ -542,6 +561,223 @@ void TestRetryRecoveryPreservesActualDuckdbRelationalResults(const std::string &
 	        "actual-DuckDB equivalence queries did not each execute the 503/reset/success retry transcript");
 }
 
+void TestActualDuckdbAdmissionBulkheadIsolation(const std::string &repository_root) {
+	struct SaturationCase {
+		duckdb_api_test::ControlledRuntimeScenarioId scenario;
+		const char *slow_sql;
+		const char *relation;
+	};
+	const SaturationCase cases[] = {
+	    {duckdb_api_test::ControlledRuntimeScenarioId::ADMISSION_REST_SATURATION,
+	     "SELECT * FROM system.main.github_authenticated_repositories(secret := 'package_runtime')",
+	     "authenticated_repositories"},
+	    {duckdb_api_test::ControlledRuntimeScenarioId::ADMISSION_GRAPHQL_SATURATION,
+	     "SELECT * FROM system.main.github_viewer_repository_metrics(secret := 'package_runtime')",
+	     "viewer_repository_metrics"},
+	};
+
+	for (const auto &entry : cases) {
+		auto scenario = duckdb_api_test::BuildControlledRuntimeScenario(entry.scenario);
+		duckdb::DuckDB database(nullptr);
+		duckdb_api_test::ConfigureIsolatedCredentialRoot(database);
+		duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_admission_bulkhead_product_test");
+		duckdb::RegisterDuckdbApiSecrets(loader);
+		duckdb::RegisterDuckdbApiPackageSurface(loader,
+		                                        duckdb_api::BuildPackageGenerationComposition(scenario->Executor()));
+		duckdb::Connection setup(database);
+		auto threads = setup.Query("SET threads=1");
+		Require(!threads->HasError(), "actual DuckDB could not select the one-worker admission test cell");
+		LoadRepositoryPackage(setup, repository_root);
+		LoadRickAndMortyPackage(setup, repository_root);
+		CreatePackageRuntimeSecret(setup);
+
+		duckdb::Connection slow(database);
+		duckdb::Connection rejected(database);
+		duckdb::Connection healthy(database);
+		std::string slow_error;
+		std::thread slow_worker([&]() {
+			auto result = slow.Query(entry.slow_sql);
+			slow_error = result->HasError() ? result->GetError() : "blocked admission scan unexpectedly completed";
+		});
+		const bool slow_reached_transport = scenario->WaitForRequestCount(1, 5000);
+		if (!slow_reached_transport) {
+			slow.Interrupt();
+			slow_worker.join();
+			throw std::runtime_error("actual-DuckDB admission scan did not reach its controlled transport");
+		}
+
+		auto rejected_result = rejected.Query(entry.slow_sql);
+		const auto rejected_error = rejected_result->GetError();
+		const auto requests_after_rejection = scenario->Observation().request_count;
+		auto healthy_future = std::async(std::launch::async, [&]() {
+			return healthy.Query("SELECT id, name FROM system.main.rickandmorty_character_search(status := 'Alive')");
+		});
+		const bool healthy_ready = healthy_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+		if (!healthy_ready) {
+			healthy.Interrupt();
+		}
+		slow.Interrupt();
+		slow_worker.join();
+		auto healthy_result = healthy_future.get();
+
+		const std::string prefix =
+		    "Invalid Input Error: [duckdb_api][resource] connector=github relation=" + std::string(entry.relation) +
+		    " field=admission: local Runtime admission rejected request buffers [class=local_admission attempt=0 "
+		    "cumulative_delay_ms=0 exposure=unaccepted rows_exposed=0 admission_reason=buffered_bytes_exhausted "
+		    "admission_scope=bulkhead admission_limit=33554432 ";
+		Require(rejected_result->HasError() && rejected_error.find(prefix) == 0 &&
+		            rejected_error.find(" admission_wait_ms=0 admission_waiting=false]") != std::string::npos,
+		        "actual-DuckDB saturation changed its safe local-admission diagnostic: " + rejected_error);
+		const auto limit = DiagnosticCount(rejected_error, "admission_limit=");
+		const auto observed = DiagnosticCount(rejected_error, "admission_observed=");
+		const auto requested = DiagnosticCount(rejected_error, "admission_requested=");
+		Require(limit == 32ULL * 1024ULL * 1024ULL && observed == requested && observed > limit / 2 &&
+		            observed <= limit && requested > limit - observed,
+		        "actual-DuckDB saturation diagnostic did not report its exact limiting byte vector");
+		Require(requests_after_rejection == 1,
+		        "locally rejected same-bulkhead work reached transport before receiving authority");
+		Require(healthy_ready && !healthy_result->HasError() && healthy_result->RowCount() == 1 &&
+		            healthy_result->GetValue(0, 0).GetValue<int64_t>() == 1 &&
+		            healthy_result->GetValue(1, 0).ToString() == "Rick Sanchez",
+		        "an unrelated destination did not complete while the GitHub bulkhead was saturated");
+		Require(slow_error.find("Interrupt") != std::string::npos || slow_error.find("interrupt") != std::string::npos,
+		        "the blocked admission scan did not settle as cancellation: " + slow_error);
+		const auto observation = scenario->Observation();
+		Require(observation.request_count == observation.expected_request_count && observation.request_count == 2 &&
+		            observation.opened_stream_count == 3 && observation.peak_retained_stream_count >= 2 &&
+		            observation.peak_retained_stream_count <= 3 && observation.peak_active_next_count >= 2 &&
+		            observation.peak_active_next_count <= 3 && observation.completed_stream_count >= 1 &&
+		            observation.cancelled_stream_count >= 1 && observation.closed_stream_count == 3 &&
+		            observation.local_admission_rejection_count == 1 && observation.retained_stream_count == 0 &&
+		            observation.active_next_count == 0,
+		        "bulkhead isolation did not preserve public stream lifecycle counts and zero rejected transport");
+	}
+}
+
+void TestActualDuckdbMixedResiliencePressureClosesPublicStreams(const std::string &repository_root) {
+	auto scenario = duckdb_api_test::BuildControlledRuntimeScenario(
+	    duckdb_api_test::ControlledRuntimeScenarioId::MIXED_RESILIENCE_PRESSURE);
+	duckdb::DuckDB database(nullptr);
+	duckdb_api_test::ConfigureIsolatedCredentialRoot(database);
+	duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_mixed_resilience_pressure_product_test");
+	duckdb::RegisterDuckdbApiSecrets(loader);
+	duckdb::RegisterDuckdbApiPackageSurface(loader,
+	                                        duckdb_api::BuildPackageGenerationComposition(scenario->Executor()));
+	duckdb::Connection setup(database);
+	auto threads = setup.Query("SET threads=1");
+	Require(!threads->HasError(), "actual DuckDB could not select the one-worker mixed-pressure test cell");
+	LoadRateLimitV3Package(setup, repository_root);
+	LoadRickAndMortyPackage(setup, repository_root);
+
+	duckdb::Connection slow(database);
+	duckdb::Connection resilient(database);
+	duckdb::Connection healthy(database);
+	std::string slow_error;
+	std::thread slow_worker([&]() {
+		auto result = slow.Query("SELECT * FROM system.main.rate_limit_demo_duplicate_events()");
+		slow_error = result->HasError() ? result->GetError() : "blocked mixed-pressure scan unexpectedly completed";
+	});
+	if (!scenario->WaitForRequestCount(1, 5000)) {
+		slow.Interrupt();
+		slow_worker.join();
+		throw std::runtime_error("mixed-pressure slow scan did not reach its controlled transport");
+	}
+
+	auto resilient_future = std::async(std::launch::async, [&]() {
+		return resilient.Query("SELECT event_id, ordinal FROM system.main.rate_limit_demo_duplicate_events() "
+		                       "ORDER BY ordinal, event_id");
+	});
+	if (!scenario->WaitForRequestCount(3, 5000)) {
+		slow.Interrupt();
+		resilient.Interrupt();
+		slow_worker.join();
+		(void)resilient_future.get();
+		throw std::runtime_error("mixed-pressure scan did not reach its transient retry and rate-limit response");
+	}
+	const auto pressure = scenario->Observation();
+	const bool pressure_observed = pressure.slow_request_count == 1 && pressure.ordinary_retry_failure_count == 1 &&
+	                               pressure.rate_limited_response_count == 1 && pressure.retained_stream_count == 2 &&
+	                               pressure.active_next_count == 2;
+	if (!pressure_observed) {
+		slow.Interrupt();
+		resilient.Interrupt();
+		slow_worker.join();
+		(void)resilient_future.get();
+		throw std::runtime_error(
+		    "named mixed-pressure scenario did not retain one slow scan beside one retrying/rate-limited scan");
+	}
+
+	auto healthy_future = std::async(std::launch::async, [&]() {
+		return healthy.Query("SELECT id, name FROM system.main.rickandmorty_character_search(status := 'Alive')");
+	});
+	const bool healthy_ready = healthy_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+	if (!healthy_ready) {
+		healthy.Interrupt();
+	}
+	slow.Interrupt();
+	slow_worker.join();
+	auto healthy_result = healthy_future.get();
+	const bool resilient_ready = resilient_future.wait_for(std::chrono::seconds(3)) == std::future_status::ready;
+	if (!resilient_ready) {
+		resilient.Interrupt();
+	}
+	auto resilient_result = resilient_future.get();
+
+	Require(healthy_ready && !healthy_result->HasError() && healthy_result->RowCount() == 1 &&
+	            healthy_result->GetValue(0, 0).GetValue<int64_t>() == 1 &&
+	            healthy_result->GetValue(1, 0).ToString() == "Rick Sanchez",
+	        "unrelated healthy work did not complete during mixed slow/retry/rate-limit pressure");
+	Require(resilient_ready && !resilient_result->HasError() && resilient_result->RowCount() == 3 &&
+	            resilient_result->GetValue(0, 0).ToString() == "duplicate" &&
+	            resilient_result->GetValue(0, 1).ToString() == "duplicate" &&
+	            resilient_result->GetValue(0, 2).ToString() == "other",
+	        "the retrying/rate-limited actual-DuckDB scan did not recover its duplicate-bearing bag");
+	Require(slow_error.find("Interrupt") != std::string::npos || slow_error.find("interrupt") != std::string::npos,
+	        "the mixed-pressure slow scan did not settle as cancellation: " + slow_error);
+
+	const auto drain_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+	auto drained = scenario->Observation();
+	while ((drained.retained_stream_count != 0 || drained.active_next_count != 0) &&
+	       std::chrono::steady_clock::now() < drain_deadline) {
+		std::this_thread::yield();
+		drained = scenario->Observation();
+	}
+	Require(drained.request_count == drained.expected_request_count && drained.request_count == 5 &&
+	            drained.slow_request_count == 1 && drained.ordinary_retry_failure_count == 1 &&
+	            drained.rate_limited_response_count == 1 && drained.rate_limit_recovery_delay_milliseconds >= 900 &&
+	            drained.recovered_request_count == 1 && drained.healthy_request_count == 1 &&
+	            drained.healthy_during_resilience_pressure_count == 1 && drained.unexpected_request_count == 0 &&
+	            drained.opened_stream_count == 3 && drained.peak_retained_stream_count == 3 &&
+	            drained.peak_active_next_count == 3 && drained.completed_stream_count == 2 &&
+	            drained.cancelled_stream_count == 1 && drained.closed_stream_count == 3 &&
+	            drained.local_admission_rejection_count == 0 && drained.retained_stream_count == 0 &&
+	            drained.active_next_count == 0,
+	        "mixed-pressure cancellation/completion did not preserve bounded public stream lifecycle counts");
+	scenario->Executor()->Close();
+	scenario->Executor()->Close();
+	Require(scenario->Observation().executor_close_count == 1,
+	        "mixed-pressure executor close was not idempotent after all public streams closed");
+}
+
+void TestDatabaseTeardownClosesRuntimeExecutor() {
+	auto scenario = duckdb_api_test::BuildControlledRuntimeScenario(
+	    duckdb_api_test::ControlledRuntimeScenarioId::RETAINED_REST_USER);
+	{
+		duckdb::DuckDB database(nullptr);
+		duckdb::ExtensionLoader loader(*database.instance, "duckdb_api_executor_close_product_test");
+		duckdb::RegisterDuckdbApiPackageSurface(loader,
+		                                        duckdb_api::BuildPackageGenerationComposition(scenario->Executor()));
+		Require(scenario->Observation().executor_close_count == 0,
+		        "actual DuckDB closed Runtime before its DatabaseInstance teardown");
+	}
+	Require(scenario->Observation().executor_close_count == 1,
+	        "DatabaseInstance teardown did not close the shared Runtime executor exactly once");
+	scenario->Executor()->Close();
+	scenario->Executor()->Close();
+	Require(scenario->Observation().executor_close_count == 1,
+	        "repeated Runtime close changed the idempotent executor lifecycle transition");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -555,6 +791,9 @@ int main(int argc, char **argv) {
 		TestDoubleColumnReachesRealDescribeAndSelectOutput(argv[1]);
 		TestGeneratedRelationsExecuteThroughRuntime(argv[1]);
 		TestRetryRecoveryPreservesActualDuckdbRelationalResults(argv[1]);
+		TestActualDuckdbAdmissionBulkheadIsolation(argv[1]);
+		TestActualDuckdbMixedResiliencePressureClosesPublicStreams(argv[1]);
+		TestDatabaseTeardownClosesRuntimeExecutor();
 		std::cout << "actual-DuckDB package product contract tests passed\n";
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

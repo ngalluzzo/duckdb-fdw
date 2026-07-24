@@ -335,9 +335,35 @@ bool TryCopyLegacyQuery(const std::vector<PlannedQueryParameter> &planned, std::
 
 } // namespace
 
+bool TryFormUrlEncodedSize(const std::string &value, uint64_t &result) noexcept {
+	result = 0;
+	for (const auto character : value) {
+		const auto byte = static_cast<unsigned char>(character);
+		const bool one_byte = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
+		                      (byte >= '0' && byte <= '9') || byte == '-' || byte == '.' || byte == '_' ||
+		                      byte == '~' || byte == 0x20;
+		const uint64_t addition = one_byte ? 1 : 3;
+		if (addition > std::numeric_limits<uint64_t>::max() - result) {
+			return false;
+		}
+		result += addition;
+	}
+	return true;
+}
+
 std::string FormUrlEncode(const std::string &value) {
 	static const char HEX[] = "0123456789ABCDEF";
+	uint64_t encoded_bytes = 0;
+	if (!TryFormUrlEncodedSize(value, encoded_bytes) ||
+	    encoded_bytes > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max())) {
+		throw ExecutionError(ErrorStage::RESOURCE, "request_target", "form value exceeded its encoded byte budget");
+	}
 	std::string result;
+	result.reserve(static_cast<std::size_t>(encoded_bytes));
+	if (!HasBoundedHttpStringCapacity(result, encoded_bytes)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "request_target",
+		                     "form value exceeded its admitted capacity envelope");
+	}
 	for (const auto character : value) {
 		const auto byte = static_cast<unsigned char>(character);
 		const bool unreserved = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
@@ -352,6 +378,10 @@ std::string FormUrlEncode(const std::string &value) {
 			result.push_back(HEX[(byte >> 4U) & 0x0FU]);
 			result.push_back(HEX[byte & 0x0FU]);
 		}
+	}
+	if (static_cast<uint64_t>(result.size()) != encoded_bytes || !HasBoundedHttpStringCapacity(result, encoded_bytes)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "request_target",
+		                     "form value exceeded its admitted capacity envelope");
 	}
 	return result;
 }
@@ -397,10 +427,9 @@ bool TryMaterializeRestRequest(const ScanPlan &plan, const RestConditionalBindin
 	// request.headers/request.query themselves (they must stay out of
 	// AdmittedRestRequestProfile::Headers()/QueryParameters()/EXPLAIN's
 	// rendered facts) — ApiKeyAuthenticator places them directly into the
-	// materialized request at authorization time, and its own authorization-
-	// time checks (not an admission-time byte reservation, which cannot
-	// account for the credential's eventual form_urlencoded expansion) bound
-	// the resulting header or target size.
+	// materialized request at authorization time. The attempt reservation
+	// covers the hard credential ceiling, exact encoded value, and
+	// old-plus-replacement target peak before that materialization.
 	const auto &authentication = plan.AuthenticationObligation();
 	if (authentication.Requirement() == PlannedCredentialRequirement::REQUIRED &&
 	    authentication.Authenticator() == PlannedAuthenticator::API_KEY) {
@@ -450,19 +479,49 @@ const char *RestSchemeName(PlannedUrlScheme scheme) {
 std::string BuildRestTarget(const std::string &path, const std::vector<AdmittedQueryParameter> &query,
                             const std::string *page_name, uint64_t page,
                             AdmittedPaginatedRestConditionalInput conditional) {
-	std::string result = path;
+	const auto page_text = std::to_string(page);
+	uint64_t target_bytes = static_cast<uint64_t>(path.size());
+	for (const auto &parameter : query) {
+		const auto &value = page_name && parameter.name == *page_name ? page_text : parameter.encoded_value;
+		const auto addition = 2 + static_cast<uint64_t>(parameter.name.size()) + static_cast<uint64_t>(value.size());
+		if (target_bytes > 8192 || addition > 8192 - target_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "request_target",
+			                     "HTTP request target exceeded its byte budget");
+		}
+		target_bytes += addition;
+	}
+	if (conditional == AdmittedPaginatedRestConditionalInput::LEGACY_VISIBILITY_PRIVATE) {
+		static const uint64_t VISIBILITY_BYTES = sizeof("?visibility=private") - 1;
+		if (target_bytes > 8192 || VISIBILITY_BYTES > 8192 - target_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "request_target",
+			                     "HTTP request target exceeded its byte budget");
+		}
+		target_bytes += VISIBILITY_BYTES;
+	}
+	std::string result;
+	result.reserve(static_cast<std::size_t>(target_bytes));
+	if (!HasBoundedHttpStringCapacity(result, target_bytes)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "request_target",
+		                     "HTTP request target exceeded its admitted capacity envelope");
+	}
+	result += path;
 	bool first = true;
 	for (const auto &parameter : query) {
 		result += first ? "?" : "&";
 		first = false;
-		result += parameter.name + "=";
-		result += page_name && parameter.name == *page_name ? std::to_string(page) : parameter.encoded_value;
+		result += parameter.name;
+		result += "=";
+		result += page_name && parameter.name == *page_name ? page_text : parameter.encoded_value;
 	}
 	// Bounded 0.7 compatibility bridge. Native visibility authority remains a
 	// distinct plan discriminant rather than a package query binding.
 	if (conditional == AdmittedPaginatedRestConditionalInput::LEGACY_VISIBILITY_PRIVATE) {
 		result += first ? "?" : "&";
 		result += "visibility=private";
+	}
+	if (static_cast<uint64_t>(result.size()) != target_bytes || !HasBoundedHttpStringCapacity(result, target_bytes)) {
+		throw ExecutionError(ErrorStage::RESOURCE, "request_target",
+		                     "HTTP request target exceeded its admitted capacity envelope");
 	}
 	return result;
 }

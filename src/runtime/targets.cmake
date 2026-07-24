@@ -28,6 +28,19 @@ target_link_libraries(
   duckdb_api_runtime_resilience_service
   PRIVATE Threads::Threads)
 
+# Runtime's executor-local admission provider owns only structural identities,
+# bounded counters, queues, and move-only release authority. It consumes the
+# injected steady-clock interface from resilience but exposes no retry, quota,
+# protocol, transport, credential, Query, or DuckDB implementation.
+add_library(
+  duckdb_api_runtime_admission_service STATIC
+  ${REMOTE_RUNTIME_ADMISSION_SOURCES})
+configure_duckdb_api_cpp_target(duckdb_api_runtime_admission_service)
+target_link_libraries(
+  duckdb_api_runtime_admission_service
+  PRIVATE duckdb_api_runtime_resilience_service
+          Threads::Threads)
+
 add_library(
   duckdb_api_runtime_executor_service STATIC
   ${REMOTE_RUNTIME_EXECUTOR_SOURCES})
@@ -37,4 +50,5 @@ target_link_libraries(
   PUBLIC duckdb_api_runtime_interface_service
          duckdb_api_scan_plan_service
          duckdb_api_content_digest_service
-  PRIVATE duckdb_api_runtime_resilience_service)
+  PRIVATE duckdb_api_runtime_admission_service
+          duckdb_api_runtime_resilience_service)

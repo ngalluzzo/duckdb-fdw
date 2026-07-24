@@ -125,6 +125,41 @@ void TestLateStructuredFailureAndRecovery() {
 	        "recovery scan shared failed state or changed false-only exhaustion");
 }
 
+void TestLateAdmissionFailureAndRecovery() {
+	duckdb::DuckDB database(nullptr);
+	auto probe = RegisterNativeAdapter(database, QueryRuntimeScenario::LATE_LOCAL_ADMISSION_ERROR_ONCE);
+	duckdb::Connection connection(database);
+	const std::string streaming_sql =
+	    "SELECT id, login, site_admin FROM duckdb_api_scan(connector := 'github', relation := "
+	    "'duckdb_login_search_page')";
+
+	auto result = connection.SendQuery(streaming_sql);
+	Require(!result->HasError(), "late admission fixture failed before its first batch");
+	probe->late_failure_enabled.store(true, std::memory_order_release);
+	auto first = result->Fetch();
+	Require(first && first->size() == 1 && first->GetValue(0, 0).GetValue<int64_t>() == 17,
+	        "late admission fixture did not deliver its first batch");
+	while (result->Fetch()) {
+	}
+	const std::string expected =
+	    "Invalid Input Error: [duckdb_api][resource] connector=github relation=duckdb_login_search_page "
+	    "field=admission: local Runtime admission rejected decoded rows [class=local_admission attempt=1 "
+	    "cumulative_delay_ms=0 exposure=exposed rows_exposed=1 admission_reason=buffered_rows_exhausted "
+	    "admission_scope=bulkhead admission_limit=800 admission_observed=800 admission_requested=64 "
+	    "admission_wait_ms=37 admission_waiting=false]";
+	Require(result->HasError() && result->GetError() == expected,
+	        "late admission failure changed its exact safe rendering: " + result->GetError());
+	result.reset();
+
+	auto recovered = connection.Query(ACCEPTED_LIVE_SQL);
+	Require(!recovered->HasError() && recovered->RowCount() == 3,
+	        "independent scan did not recover after a late local admission failure");
+	Require(probe->streams_opened.load(std::memory_order_relaxed) == 2 &&
+	            probe->cancellations.load(std::memory_order_relaxed) == 1 &&
+	            probe->streams_closed.load(std::memory_order_relaxed) == 2,
+	        "late admission failure did not preserve terminal cleanup and independent recovery");
+}
+
 } // namespace
 
 int main() {
@@ -133,6 +168,7 @@ int main() {
 		TestSuccessfulEmptyBatchFailsClosed();
 		TestRowsWithFalseFailClosed();
 		TestLateStructuredFailureAndRecovery();
+		TestLateAdmissionFailureAndRecovery();
 		std::cout << "DuckDB adapter stream contract tests passed" << std::endl;
 		return EXIT_SUCCESS;
 	} catch (const std::exception &error) {

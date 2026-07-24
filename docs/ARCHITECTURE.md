@@ -364,6 +364,25 @@ remote bucket. It grants at most one move-only in-flight permit per exact key,
 uses FIFO tail requeue, and never proactively paces an initial or successful
 request. Distinct keys progress independently.
 
+The same executor owns one protocol-neutral `AdmissionController` as the
+general host-capacity authority. It atomically checks global, connector,
+destination, provider-principal, and exact-bulkhead dimensions for credential
+resolution, active scans, requests, retry/rate-limit waiters, buffered bytes,
+and decoded rows. The exact bulkhead is the already-admitted connector,
+relation-local operation, protocol, destination, and anonymous/direct/opaque
+principal tuple; package versions and response-derived quota buckets cannot
+create new capacity pools. Anonymous and direct compatibility paths skip the
+standalone principal dimension but remain isolated by their exact bulkhead.
+
+Provider, scan, and request queues are finite, cancellable, and FIFO within an
+exact key while allowing an independently eligible key to bypass an older
+ineligible ticket. Byte, row, and recovery-wait reservations fail immediately
+instead of waiting while scarce response or recovery state is retained. Every
+grant is one complete vector under one mutex and one move-only release
+authority—there is no nested partial acquisition. Admission is a fixed host
+safety floor: connector syntax, SQL, environment variables, and per-scan input
+cannot widen it. Circuit state and failure-history suppression remain disabled.
+
 Response decoding is strict and lossless for the planned structural type.
 Arrays preserve child order, duplicates, empty lists, outer NULL, and admitted
 child NULLs as distinct states. Every output batch has the planned arity,
@@ -383,12 +402,17 @@ pull begins the single scan deadline and the first possible request. A
 - any error is terminal and stable on repeated pulls.
 
 Work is bounded by page, scan, response, record, extracted-string, generated
-document/body, retained-memory, and elapsed-time ceilings. Arithmetic is
-checked unsigned arithmetic; values are never wrapped, clamped, or treated as
-unlimited.
+document/body, retained-memory, elapsed-time, and executor-local admission
+ceilings. Runtime reserves every co-live request/raw/decompressed/metadata
+capacity before transport, then the decoded page and batch handoff while they
+are live. Arithmetic is checked unsigned arithmetic; values are never wrapped,
+clamped, or treated as unlimited.
 
 Pagination respects backpressure and has at most one request in progress.
-Decoded page state is released before requesting the next page. Cancellation
+Decoded page state is released before requesting the next page; a continuing
+GraphQL scan retains only the exactly charged opaque cursor, and validated
+Link state retains only immutable profile authority plus a scalar page count.
+Cancellation
 is checked during request construction, transport, decode, page transition,
 batch transfer, compilation, and publication waiting. `Cancel`, `Close`, and
 destructors are non-throwing and idempotent. Terminal failure, cancellation,
@@ -444,8 +468,11 @@ transaction that predates publication continues to observe its complete old
 catalog and registry snapshot until it ends.
 
 The DatabaseInstance-owned lifecycle sentry rejects queued and future
-publication after close, lets a lock owner drain, and releases generations
-after their final owners. The pinned DuckDB profile does not provide an
+publication after close, lets a lock owner drain, then closes Runtime
+generation admission and the shared executor. Executor close wakes local
+admission and quota queues but does not destroy or wait for active transports;
+live streams and reservations retain release-safe controller state. Generations
+release after their final owners. The pinned DuckDB profile does not provide an
 active-shutdown callback; dynamic extension DSO unload remains unsupported.
 
 ## Diagnostics and explanation
@@ -481,7 +508,11 @@ step, and `unaccepted`/`accepted_unexposed`/`exposed`. V3 diagnostics separately
 report ordinary retry delay, rate-limit wait, remote transport time, rate-limit
 event/wait counts, current wait state, and one closed terminal reason without
 rendering response-field values, remote buckets, opaque identities, URLs, or
-timestamps. Proactive quota pacing and cache remain disabled; indeterminate
+timestamps. Admission failures add only the closed `local_admission` primary
+class, reason/scope, effective limit, observed/requested counts, cumulative
+admission wait, and current-wait flag. A local rejection is a `resource` stage,
+never a remote timeout, occurs before attempt debit, and is not replayed.
+Proactive quota pacing and cache remain disabled; indeterminate
 replay safety is non-replayable. The
 closed primary-class and replay-classification vocabularies
 are bound to `release/1.0.0/freeze.json` and enforced by

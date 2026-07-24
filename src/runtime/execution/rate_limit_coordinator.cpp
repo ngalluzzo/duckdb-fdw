@@ -124,9 +124,9 @@ struct RateLimitCoordinator::SharedState {
 		std::condition_variable condition;
 	};
 
-	explicit SharedState(RateLimitCoordinatorLimits limits_p, std::shared_ptr<const RateLimitClock> clock_p)
-	    : mutex(), closed(false), next_ticket(1), total_waiters(0), limits(limits_p), clock(std::move(clock_p)),
-	      buckets() {
+	SharedState(RateLimitCoordinatorLimits limits_p, std::shared_ptr<const RateLimitClock> clock_p, uint64_t ticket_p)
+	    : mutex(), terminal_status(RateLimitAcquireStatus::ACQUIRED), next_ticket(ticket_p), total_waiters(0),
+	      limits(limits_p), clock(std::move(clock_p)), buckets() {
 	}
 
 	void EraseTicketLocked(
@@ -145,8 +145,26 @@ struct RateLimitCoordinator::SharedState {
 		bucket_state->condition.notify_all();
 	}
 
+	void EnterTerminalLocked(RateLimitAcquireStatus status) noexcept {
+		if (terminal_status != RateLimitAcquireStatus::ACQUIRED) {
+			return;
+		}
+		terminal_status = status;
+		for (auto bucket = buckets.begin(); bucket != buckets.end();) {
+			auto bucket_state = bucket->second;
+			total_waiters -= static_cast<uint64_t>(bucket_state->tickets.size());
+			bucket_state->tickets.clear();
+			bucket_state->condition.notify_all();
+			if (!bucket_state->permitted) {
+				bucket = buckets.erase(bucket);
+			} else {
+				++bucket;
+			}
+		}
+	}
+
 	std::mutex mutex;
-	bool closed;
+	RateLimitAcquireStatus terminal_status;
 	uint64_t next_ticket;
 	uint64_t total_waiters;
 	RateLimitCoordinatorLimits limits;
@@ -196,7 +214,8 @@ bool RateLimitCoordinator::Permit::ExtendEligibleTime(int64_t eligible_steady_mi
 		auto &state = *handle->state;
 		std::lock_guard<std::mutex> guard(state.mutex);
 		const auto bucket = state.buckets.find(handle->key);
-		if (state.closed || bucket == state.buckets.end() || !bucket->second->permitted) {
+		if (state.terminal_status != RateLimitAcquireStatus::ACQUIRED || bucket == state.buckets.end() ||
+		    !bucket->second->permitted) {
 			return false;
 		}
 		bucket->second->eligible_steady_milliseconds =
@@ -236,14 +255,14 @@ RateLimitCoordinatorLimits RateLimitCoordinator::HardLimits() noexcept {
 }
 
 RateLimitCoordinator::RateLimitCoordinator(RateLimitCoordinatorLimits limits,
-                                           std::shared_ptr<const RateLimitClock> clock) {
+                                           std::shared_ptr<const RateLimitClock> clock, uint64_t initial_ticket) {
 	const auto hard = HardLimits();
-	if (!clock || limits.waiters_per_key > hard.waiters_per_key || limits.total_waiters > hard.total_waiters ||
-	    limits.interrupt_slice_milliseconds == 0 ||
+	if (!clock || initial_ticket == 0 || limits.waiters_per_key > hard.waiters_per_key ||
+	    limits.total_waiters > hard.total_waiters || limits.interrupt_slice_milliseconds == 0 ||
 	    limits.interrupt_slice_milliseconds > hard.interrupt_slice_milliseconds) {
 		throw std::invalid_argument("invalid rate-limit coordinator limits");
 	}
-	state = std::make_shared<SharedState>(limits, std::move(clock));
+	state = std::make_shared<SharedState>(limits, std::move(clock), initial_ticket);
 }
 
 RateLimitCoordinator::~RateLimitCoordinator() noexcept {
@@ -258,8 +277,8 @@ RateLimitAcquireStatus RateLimitCoordinator::WaitForTicket(const std::shared_ptr
 	auto bucket = shared->buckets.find(key);
 	try {
 		for (;;) {
-			if (shared->closed) {
-				return RateLimitAcquireStatus::SCHEDULER_CLOSED;
+			if (shared->terminal_status != RateLimitAcquireStatus::ACQUIRED) {
+				return shared->terminal_status;
 			}
 			bucket = shared->buckets.find(key);
 			if (bucket == shared->buckets.end()) {
@@ -308,15 +327,14 @@ RateLimitAcquireStatus RateLimitCoordinator::Acquire(const QuotaBucketKey &key, 
 	if (output == nullptr || output->IsValid()) {
 		throw std::invalid_argument("rate-limit permit output must be empty");
 	}
-	if (cancellation.IsCancellationRequested()) {
-		return RateLimitAcquireStatus::CANCELLED;
-	}
-
 	auto pending = std::unique_ptr<PermitHandle>(new PermitHandle(state, key));
 	auto shared = state;
 	std::unique_lock<std::mutex> lock(shared->mutex);
-	if (shared->closed) {
-		return RateLimitAcquireStatus::SCHEDULER_CLOSED;
+	if (shared->terminal_status != RateLimitAcquireStatus::ACQUIRED) {
+		return shared->terminal_status;
+	}
+	if (cancellation.IsCancellationRequested()) {
+		return RateLimitAcquireStatus::CANCELLED;
 	}
 
 	auto bucket = shared->buckets.find(key);
@@ -330,6 +348,10 @@ RateLimitAcquireStatus RateLimitCoordinator::Acquire(const QuotaBucketKey &key, 
 	        : static_cast<uint64_t>(bucket->second->tickets.size()) + (bucket->second->permitted ? 1 : 0);
 	if (key_waiters >= shared->limits.waiters_per_key || shared->total_waiters >= shared->limits.total_waiters) {
 		return RateLimitAcquireStatus::QUEUE_SATURATED;
+	}
+	if (shared->next_ticket == std::numeric_limits<uint64_t>::max()) {
+		shared->EnterTerminalLocked(RateLimitAcquireStatus::TICKET_EXHAUSTED);
+		return RateLimitAcquireStatus::TICKET_EXHAUSTED;
 	}
 	if (bucket == shared->buckets.end()) {
 		auto new_bucket = std::make_shared<SharedState::BucketState>();
@@ -358,11 +380,11 @@ RateLimitAcquireStatus RateLimitCoordinator::Requeue(Permit *permit, int64_t eli
 
 	auto shared = state;
 	std::unique_lock<std::mutex> lock(shared->mutex);
-	if (shared->closed || cancellation.IsCancellationRequested()) {
-		const auto closed = shared->closed;
+	if (shared->terminal_status != RateLimitAcquireStatus::ACQUIRED || cancellation.IsCancellationRequested()) {
+		const auto terminal = shared->terminal_status;
 		lock.unlock();
 		permit->Complete();
-		return closed ? RateLimitAcquireStatus::SCHEDULER_CLOSED : RateLimitAcquireStatus::CANCELLED;
+		return terminal != RateLimitAcquireStatus::ACQUIRED ? terminal : RateLimitAcquireStatus::CANCELLED;
 	}
 
 	const auto key = permit->handle->key;
@@ -371,6 +393,12 @@ RateLimitAcquireStatus RateLimitCoordinator::Requeue(Permit *permit, int64_t eli
 		throw std::logic_error("rate-limit permit lost its coordinator authority");
 	}
 	bucket->second->eligible_steady_milliseconds = std::max(bucket->second->eligible_steady_milliseconds, eligible);
+	if (shared->next_ticket == std::numeric_limits<uint64_t>::max()) {
+		shared->EnterTerminalLocked(RateLimitAcquireStatus::TICKET_EXHAUSTED);
+		lock.unlock();
+		permit->Complete();
+		return RateLimitAcquireStatus::TICKET_EXHAUSTED;
+	}
 
 	const auto ticket = shared->next_ticket++;
 	bucket->second->tickets.push_back(ticket);
@@ -384,21 +412,10 @@ void RateLimitCoordinator::Close() noexcept {
 	try {
 		auto shared = state;
 		std::lock_guard<std::mutex> guard(shared->mutex);
-		if (shared->closed) {
+		if (shared->terminal_status != RateLimitAcquireStatus::ACQUIRED) {
 			return;
 		}
-		shared->closed = true;
-		for (auto bucket = shared->buckets.begin(); bucket != shared->buckets.end();) {
-			auto bucket_state = bucket->second;
-			shared->total_waiters -= static_cast<uint64_t>(bucket_state->tickets.size());
-			bucket_state->tickets.clear();
-			bucket_state->condition.notify_all();
-			if (!bucket_state->permitted) {
-				bucket = shared->buckets.erase(bucket);
-			} else {
-				++bucket;
-			}
-		}
+		shared->EnterTerminalLocked(RateLimitAcquireStatus::SCHEDULER_CLOSED);
 	} catch (...) {
 		// Close is an idempotent no-throw lifecycle boundary.
 	}
@@ -408,7 +425,7 @@ bool RateLimitCoordinator::IsClosed() const noexcept {
 	try {
 		auto shared = state;
 		std::lock_guard<std::mutex> guard(shared->mutex);
-		return shared->closed;
+		return shared->terminal_status != RateLimitAcquireStatus::ACQUIRED;
 	} catch (...) {
 		return true;
 	}

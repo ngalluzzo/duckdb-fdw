@@ -84,6 +84,16 @@ target_link_libraries(
   PRIVATE duckdb_api_runtime_executor_service)
 
 add_executable(
+  duckdb_api_admission_controller_tests
+  test/cpp/runtime/execution/admission_controller_tests.cpp)
+configure_duckdb_api_cpp_target(duckdb_api_admission_controller_tests)
+target_include_directories(duckdb_api_admission_controller_tests PRIVATE test/cpp)
+target_link_libraries(
+  duckdb_api_admission_controller_tests
+  PRIVATE duckdb_api_runtime_admission_service
+          Threads::Threads)
+
+add_executable(
   duckdb_api_rate_limit_guidance_tests
   test/cpp/runtime/execution/rate_limit_guidance_tests.cpp)
 configure_duckdb_api_cpp_target(duckdb_api_rate_limit_guidance_tests)
@@ -164,6 +174,7 @@ target_include_directories(duckdb_api_graphql_response_decoder_tests PRIVATE tes
 target_link_libraries(
   duckdb_api_graphql_response_decoder_tests
   PRIVATE duckdb_api_runtime_interface_service
+          duckdb_api_runtime_admission_service
           duckdb_api_scan_plan_service
           duckdb_api_content_digest_service
           duckdb_api_semantics_fixture_service)

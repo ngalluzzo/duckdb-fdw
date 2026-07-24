@@ -101,6 +101,7 @@ enum class RateLimitAcquireStatus : uint8_t {
 	SCHEDULER_CLOSED = 2,
 	CANCELLED = 3,
 	DEADLINE_REACHED = 4,
+	TICKET_EXHAUSTED = 5,
 };
 
 // Executor-local FIFO coordinator. It owns no worker thread and retains only
@@ -138,7 +139,8 @@ public:
 	static RateLimitCoordinatorLimits HardLimits() noexcept;
 
 	explicit RateLimitCoordinator(RateLimitCoordinatorLimits limits = HardLimits(),
-	                              std::shared_ptr<const RateLimitClock> clock = NewSystemRateLimitClock());
+	                              std::shared_ptr<const RateLimitClock> clock = NewSystemRateLimitClock(),
+	                              uint64_t initial_ticket = 1);
 	~RateLimitCoordinator() noexcept;
 
 	RateLimitCoordinator(const RateLimitCoordinator &) = delete;

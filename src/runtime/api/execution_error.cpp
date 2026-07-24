@@ -225,6 +225,26 @@ FailureProperties ResourceBudgetFailureProperties(const std::string &field) {
 	return properties;
 }
 
+FailureProperties LocalAdmissionFailureProperties(AdmissionReason reason, AdmissionScope scope, uint64_t limit,
+                                                  uint64_t observed, uint64_t requested,
+                                                  uint64_t cumulative_waiting_milliseconds, bool waiting,
+                                                  FailurePhase phase) {
+	FailureProperties properties {};
+	properties.failure_class = FailureClass::LOCAL_ADMISSION;
+	properties.phase = phase;
+	properties.replay_classification = ReplayClassification::NEVER_REPLAYABLE;
+	properties.remote_status_class = RemoteStatusClass::NONE;
+	properties.terminating_budget = BudgetDimension::NONE;
+	properties.admission_reason = reason;
+	properties.admission_scope = scope;
+	properties.admission_limit = limit;
+	properties.admission_observed = observed;
+	properties.admission_requested = requested;
+	properties.cumulative_admission_waiting_milliseconds = cumulative_waiting_milliseconds;
+	properties.admission_waiting = waiting;
+	return properties;
+}
+
 FailureProperties FailurePropertiesFromError(const ExecutionError &error) {
 	if (error.Classified()) {
 		return error.Properties();
@@ -290,6 +310,8 @@ const char *FailureClassName(FailureClass failure_class) {
 		return "cancellation";
 	case FailureClass::INTERNAL:
 		return "internal";
+	case FailureClass::LOCAL_ADMISSION:
+		return "local_admission";
 	}
 	throw std::logic_error("unknown FailureClass");
 }
@@ -336,8 +358,62 @@ const char *RateLimitReasonName(RateLimitReason reason) {
 		return "repeated_immediate";
 	case RateLimitReason::BUCKET_CHANGED:
 		return "bucket_changed";
+	case RateLimitReason::TICKET_EXHAUSTED:
+		return "ticket_exhausted";
 	}
 	throw std::logic_error("unknown RateLimitReason");
+}
+
+const char *AdmissionReasonName(AdmissionReason reason) {
+	switch (reason) {
+	case AdmissionReason::NONE:
+		return "none";
+	case AdmissionReason::CREDENTIAL_RESOLUTION_QUEUE_SATURATED:
+		return "credential_resolution_queue_saturated";
+	case AdmissionReason::CREDENTIAL_RESOLUTION_QUEUE_TIMEOUT:
+		return "credential_resolution_queue_timeout";
+	case AdmissionReason::SCAN_QUEUE_SATURATED:
+		return "scan_queue_saturated";
+	case AdmissionReason::SCAN_QUEUE_TIMEOUT:
+		return "scan_queue_timeout";
+	case AdmissionReason::REQUEST_QUEUE_SATURATED:
+		return "request_queue_saturated";
+	case AdmissionReason::REQUEST_QUEUE_TIMEOUT:
+		return "request_queue_timeout";
+	case AdmissionReason::ADMISSION_WAITING_EXHAUSTED:
+		return "admission_waiting_exhausted";
+	case AdmissionReason::RETRY_WAIT_SATURATED:
+		return "retry_wait_saturated";
+	case AdmissionReason::RATE_LIMIT_WAIT_SATURATED:
+		return "rate_limit_wait_saturated";
+	case AdmissionReason::BUFFERED_BYTES_EXHAUSTED:
+		return "buffered_bytes_exhausted";
+	case AdmissionReason::BUFFERED_ROWS_EXHAUSTED:
+		return "buffered_rows_exhausted";
+	case AdmissionReason::RUNTIME_CLOSED:
+		return "runtime_closed";
+	case AdmissionReason::TICKET_EXHAUSTED:
+		return "ticket_exhausted";
+	}
+	throw std::logic_error("unknown AdmissionReason");
+}
+
+const char *AdmissionScopeName(AdmissionScope scope) {
+	switch (scope) {
+	case AdmissionScope::NONE:
+		return "none";
+	case AdmissionScope::GLOBAL:
+		return "global";
+	case AdmissionScope::CONNECTOR:
+		return "connector";
+	case AdmissionScope::DESTINATION:
+		return "destination";
+	case AdmissionScope::PRINCIPAL:
+		return "principal";
+	case AdmissionScope::BULKHEAD:
+		return "bulkhead";
+	}
+	throw std::logic_error("unknown AdmissionScope");
 }
 
 const char *FailurePhaseName(FailurePhase phase) {
@@ -574,10 +650,38 @@ BatchStream::~BatchStream() noexcept {
 }
 
 ExecutionSnapshot BatchStream::Diagnostics() const noexcept {
-	return {1, 1, 0, 0, 0, 0, 0, ExposureState::UNACCEPTED, 1, 1, 0, 0, 0, 0, 0, 0, 0, RateLimitReason::NONE, false};
+	return {1,
+	        1,
+	        0,
+	        0,
+	        0,
+	        0,
+	        0,
+	        ExposureState::UNACCEPTED,
+	        1,
+	        1,
+	        0,
+	        0,
+	        0,
+	        0,
+	        0,
+	        0,
+	        0,
+	        RateLimitReason::NONE,
+	        false,
+	        AdmissionReason::NONE,
+	        AdmissionScope::NONE,
+	        0,
+	        0,
+	        0,
+	        0,
+	        false};
 }
 
 ScanExecutor::~ScanExecutor() noexcept {
+}
+
+void ScanExecutor::Close() const noexcept {
 }
 
 } // namespace duckdb_api

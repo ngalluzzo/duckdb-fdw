@@ -165,7 +165,8 @@ class PaginatedBatchStream final : public BatchStream {
 public:
 	PaginatedBatchStream(std::unique_ptr<const AdmittedPaginatedRestRequestProfile> admitted_profile_p,
 	                     ScanAuthorization authorization_p, std::shared_ptr<const HttpTransport> transport_p,
-	                     uint64_t max_wall_milliseconds_p, RateLimitRuntimeContext rate_limit_runtime_p)
+	                     uint64_t max_wall_milliseconds_p, RateLimitRuntimeContext rate_limit_runtime_p,
+	                     AdmissionRuntimeContext admission_runtime_p, AdmissionController::Permit scan_permit_p)
 	    : admitted_profile(std::move(admitted_profile_p)), transport(std::move(transport_p)),
 	      authorization(new ScanAuthorization(std::move(authorization_p))),
 	      column_types(BuildColumnTypes(*admitted_profile)),
@@ -175,9 +176,9 @@ public:
 	      rows_emitted(0),
 	      retry_seed(static_cast<uint64_t>(reinterpret_cast<std::uintptr_t>(this)) ^
 	                 static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())),
-	      rate_limit_runtime(std::move(rate_limit_runtime_p)), resilience_state(),
-	      current_step_exposure(ExposureState::UNACCEPTED), terminal_exposure(ExposureState::UNACCEPTED),
-	      has_terminal_exposure(false) {
+	      rate_limit_runtime(std::move(rate_limit_runtime_p)), admission_runtime(std::move(admission_runtime_p)),
+	      scan_permit(std::move(scan_permit_p)), resilience_state(), current_step_exposure(ExposureState::UNACCEPTED),
+	      terminal_exposure(ExposureState::UNACCEPTED), has_terminal_exposure(false) {
 	}
 
 	~PaginatedBatchStream() noexcept override {
@@ -192,6 +193,8 @@ public:
 			throw ExecutionError(ErrorStage::INTERNAL, "", "scan stream synchronization failed");
 		}
 		batch = TypedBatch();
+		handoff_bytes_reservation.Release();
+		handoff_rows_reservation.Release();
 		if (closed) {
 			return false;
 		}
@@ -217,12 +220,15 @@ public:
 				}
 				if (page_loaded) {
 					decoded.Release();
+					page_bytes_reservation.Release();
+					page_rows_reservation.Release();
 					offset = 0;
 					page_loaded = false;
 					accounting.CompletePage(page_has_next, std::chrono::steady_clock::now());
 					if (!page_has_next) {
 						exhausted = true;
 						authorization.reset();
+						scan_permit.Release();
 						return false;
 					}
 					current_step_exposure = ExposureState::UNACCEPTED;
@@ -326,11 +332,22 @@ private:
 			throw ExecutionError(ErrorStage::INTERNAL, "", "runtime attempted to produce an empty successful batch");
 		}
 		RequireTypedBatchHandoffMemory(decoded_memory_bytes, decoded_memory_allowance, count, column_types.size());
+		const auto reserved_handoff_bytes = TypedBatchHandoffMemoryBytes(count, column_types.size());
+		auto next_handoff_bytes =
+		    rate_limit_detail::ReserveDecodedBytes(admission_runtime, accounting, reserved_handoff_bytes);
+		auto next_handoff_rows =
+		    rate_limit_detail::ReserveDecodedRows(admission_runtime, accounting, static_cast<uint64_t>(count));
 		TypedBatch produced;
-		produced.column_types = column_types;
+		produced.column_types.reserve(column_types.size());
+		produced.column_types.assign(column_types.begin(), column_types.end());
 		produced.rows.reserve(count);
 		RequireTypedBatchHandoffMemory(decoded_memory_bytes, decoded_memory_allowance, produced.rows.capacity(),
 		                               produced.column_types.capacity());
+		if (TypedBatchHandoffMemoryBytes(produced.rows.capacity(), produced.column_types.capacity()) >
+		    reserved_handoff_bytes) {
+			throw ExecutionError(ErrorStage::RESOURCE, "decoded_memory_bytes",
+			                     "typed batch capacity exceeded its reserved admission envelope");
+		}
 		for (std::size_t index = 0; index < count; index++) {
 			CheckState(control, accounting.Deadline());
 			produced.rows.push_back(std::move(decoded.Rows()[offset + index]));
@@ -342,6 +359,8 @@ private:
 		offset += count;
 		rows_emitted += static_cast<uint64_t>(count);
 		batch = std::move(produced);
+		handoff_bytes_reservation = std::move(next_handoff_bytes);
+		handoff_rows_reservation = std::move(next_handoff_rows);
 		current_step_exposure = ExposureState::EXPOSED;
 		return true;
 	}
@@ -350,11 +369,11 @@ private:
 		const auto current_page = pagination->CurrentPage();
 		auto attempted = ExecuteHttpStepWithRetry(
 		    admitted_profile->RetryPolicy(), admitted_profile->RateLimitPolicy(), rate_limit_runtime, resilience_state,
-		    accounting, transport,
+		    admission_runtime, accounting, transport,
 		    std::min(admitted_profile->PageBudgets().header_bytes,
 		             admitted_profile->PageBudgets().decoded_memory_bytes),
 		    retry_seed,
-		    [this, current_page]() {
+		    [this, current_page](uint64_t) {
 			    auto request = BuildAdmittedPaginatedRestPageRequest(*admitted_profile, current_page);
 			    if (admitted_profile->RequiresBearer()) {
 				    request = BearerAuthenticator::AuthorizePaginatedRest(*admitted_profile, std::move(request),
@@ -375,6 +394,10 @@ private:
 			                     "HTTP response metadata exhausted the decoded-page memory budget");
 		}
 		const auto decoder_memory = allowance.decoded_memory_bytes - response.metadata.retained_bytes;
+		auto decoded_bytes_reservation =
+		    rate_limit_detail::ReserveDecodedBytes(admission_runtime, accounting, allowance.decoded_memory_bytes);
+		auto decoded_rows_reservation =
+		    rate_limit_detail::ReserveDecodedRows(admission_runtime, accounting, allowance.decoded_records);
 		auto page = DecodeJsonPage(response.body,
 		                           BuildPaginatedRestDecodePlan(*admitted_profile, admitted_profile->PageBudgets(),
 		                                                        decoder_memory, allowance.deadline),
@@ -400,6 +423,8 @@ private:
 		decoded_memory_bytes = retained_memory;
 		decoded_memory_allowance = allowance.decoded_memory_bytes;
 		decoded.Install(std::move(page.rows));
+		page_bytes_reservation = std::move(decoded_bytes_reservation);
+		page_rows_reservation = std::move(decoded_rows_reservation);
 		pagination.swap(staged_pagination);
 		offset = 0;
 		page_has_next = transition.has_next;
@@ -411,12 +436,17 @@ private:
 		if (accounting.State() != ScanResourceState::EXHAUSTED) {
 			accounting.AbortPage();
 		}
-		authorization.reset();
 		decoded.Release();
 		decoded_memory_bytes = 0;
 		decoded_memory_allowance = 0;
 		offset = 0;
 		page_loaded = false;
+		page_bytes_reservation.Release();
+		page_rows_reservation.Release();
+		handoff_bytes_reservation.Release();
+		handoff_rows_reservation.Release();
+		authorization.reset();
+		scan_permit.Release();
 	}
 
 	void Fail() noexcept {
@@ -471,6 +501,12 @@ private:
 	uint64_t rows_emitted;
 	const uint64_t retry_seed;
 	RateLimitRuntimeContext rate_limit_runtime;
+	AdmissionRuntimeContext admission_runtime;
+	AdmissionController::Permit scan_permit;
+	AdmissionController::Permit page_bytes_reservation;
+	AdmissionController::Permit page_rows_reservation;
+	AdmissionController::Permit handoff_bytes_reservation;
+	AdmissionController::Permit handoff_rows_reservation;
 	ResilienceExecutionState resilience_state;
 	ExposureState current_step_exposure;
 	ExposureState terminal_exposure;
@@ -483,6 +519,7 @@ std::unique_ptr<BatchStream>
 OpenPaginatedRestScan(std::unique_ptr<const AdmittedPaginatedRestRequestProfile> admitted_profile,
                       ScanAuthorization authorization, std::shared_ptr<const HttpTransport> transport,
                       uint64_t max_wall_milliseconds, RateLimitRuntimeContext rate_limit_runtime,
+                      AdmissionRuntimeContext admission_runtime, AdmissionController::Permit scan_permit,
                       ExecutionControl &control) {
 	if (control.IsCancellationRequested()) {
 		throw ExecutionCancelled();
@@ -491,9 +528,9 @@ OpenPaginatedRestScan(std::unique_ptr<const AdmittedPaginatedRestRequestProfile>
 		throw ExecutionError(ErrorStage::POLICY, "", "paginated REST request profile was not admitted");
 	}
 	try {
-		return std::unique_ptr<BatchStream>(
-		    new PaginatedBatchStream(std::move(admitted_profile), std::move(authorization), std::move(transport),
-		                             max_wall_milliseconds, std::move(rate_limit_runtime)));
+		return std::unique_ptr<BatchStream>(new PaginatedBatchStream(
+		    std::move(admitted_profile), std::move(authorization), std::move(transport), max_wall_milliseconds,
+		    std::move(rate_limit_runtime), std::move(admission_runtime), std::move(scan_permit)));
 	} catch (const ExecutionError &) {
 		throw;
 	} catch (const ScanResourceError &error) {

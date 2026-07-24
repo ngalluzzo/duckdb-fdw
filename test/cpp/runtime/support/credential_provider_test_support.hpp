@@ -15,8 +15,8 @@ namespace duckdb_api_test {
 // on every resolution while preserving one authority and rotating revisions.
 class RotatingCredentialProvider final : public duckdb_api::CredentialProvider {
 public:
-	explicit RotatingCredentialProvider(std::string token_p)
-	    : token(std::move(token_p)), authority(Identity(0x41)), revision(Identity(0x51)), resolve_count(0) {
+	explicit RotatingCredentialProvider(std::string token_p, std::uint8_t authority_marker = 0x41)
+	    : token(std::move(token_p)), authority(Identity(authority_marker)), revision(Identity(0x51)), resolve_count(0) {
 	}
 
 	duckdb_api::CredentialSnapshot Resolve(const duckdb_api::PlannedSecretReference &,

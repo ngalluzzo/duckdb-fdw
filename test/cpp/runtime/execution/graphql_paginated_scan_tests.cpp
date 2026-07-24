@@ -1,6 +1,7 @@
 #include "duckdb_api/authorization.hpp"
 #include "duckdb_api/internal/runtime/decoding/decoded_page_buffer.hpp"
 #include "duckdb_api/internal/runtime/decoding/graphql_response_decoder.hpp"
+#include "duckdb_api/internal/runtime/execution/graphql_paginated_scan.hpp"
 #include "duckdb_api/internal/runtime/execution/graphql_plan_admission.hpp"
 #include "duckdb_api/internal/runtime/execution/http_scan_executor.hpp"
 #include "duckdb_api/internal/runtime/pagination/graphql_cursor_pagination.hpp"
@@ -12,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -41,6 +43,135 @@ private:
 	mutable std::size_t polls;
 };
 
+class NeverAdmissionCancelled final : public duckdb_api::internal::AdmissionCancellation {
+public:
+	bool IsCancellationRequested() const noexcept override {
+		return false;
+	}
+};
+
+class TwoPageGateTransport final : public duckdb_api::internal::HttpTransport {
+public:
+	TwoPageGateTransport(std::string first_p, std::string second_p)
+	    : first(std::move(first_p)), second(std::move(second_p)), requests(0), second_entered(false), proceed(false) {
+	}
+
+	duckdb_api::internal::HttpResponse Post(const duckdb_api::internal::HttpRequest &,
+	                                        const duckdb_api::internal::HttpLimits &,
+	                                        duckdb_api::ExecutionControl &) const override {
+		std::unique_lock<std::mutex> guard(mutex);
+		const auto ordinal = ++requests;
+		if (ordinal == 2) {
+			second_entered = true;
+			condition.notify_all();
+			condition.wait(guard, [&]() { return proceed; });
+		}
+		const auto &source = ordinal == 1 ? first : second;
+		auto body = source;
+		const auto bytes = static_cast<uint64_t>(body.size());
+		return {200, 64, bytes, bytes, std::move(body), {{}, 0, false, {}, {}}};
+	}
+
+	duckdb_api::internal::HttpResponse Get(const duckdb_api::internal::HttpRequest &,
+	                                       const duckdb_api::internal::HttpLimits &,
+	                                       duckdb_api::ExecutionControl &) const override {
+		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::INTERNAL, "", "unexpected GET in GraphQL fixture");
+	}
+
+	bool WaitForSecond(std::chrono::milliseconds timeout) const {
+		std::unique_lock<std::mutex> guard(mutex);
+		return condition.wait_for(guard, timeout, [&]() { return second_entered; });
+	}
+
+	void Proceed() {
+		std::lock_guard<std::mutex> guard(mutex);
+		proceed = true;
+		condition.notify_all();
+	}
+
+private:
+	const std::string first;
+	const std::string second;
+	mutable std::mutex mutex;
+	mutable std::condition_variable condition;
+	mutable uint64_t requests;
+	mutable bool second_entered;
+	bool proceed;
+};
+
+class PostTransportGateControl final : public duckdb_api::ExecutionControl {
+public:
+	PostTransportGateControl() : armed(false), entered(false), proceed(false) {
+	}
+
+	bool IsCancellationRequested() const noexcept override {
+		std::unique_lock<std::mutex> guard(mutex);
+		if (!armed || proceed) {
+			return false;
+		}
+		entered = true;
+		condition.notify_all();
+		condition.wait(guard, [&]() { return proceed; });
+		return false;
+	}
+
+	void Arm() {
+		std::lock_guard<std::mutex> guard(mutex);
+		armed = true;
+	}
+
+	bool WaitUntilEntered(std::chrono::milliseconds timeout) const {
+		std::unique_lock<std::mutex> guard(mutex);
+		return condition.wait_for(guard, timeout, [&]() { return entered; });
+	}
+
+	void Proceed() {
+		std::lock_guard<std::mutex> guard(mutex);
+		proceed = true;
+		condition.notify_all();
+	}
+
+private:
+	mutable std::mutex mutex;
+	mutable std::condition_variable condition;
+	bool armed;
+	mutable bool entered;
+	mutable bool proceed;
+};
+
+class PostTransportGateTransport final : public duckdb_api::internal::HttpTransport {
+public:
+	PostTransportGateTransport(std::string body_p, PostTransportGateControl &gate_p)
+	    : body(std::move(body_p)), gate(gate_p), retained_bytes(0) {
+	}
+
+	duckdb_api::internal::HttpResponse Post(const duckdb_api::internal::HttpRequest &,
+	                                        const duckdb_api::internal::HttpLimits &,
+	                                        duckdb_api::ExecutionControl &) const override {
+		auto response_body = body;
+		retained_bytes.store(duckdb_api::internal::RetainedHttpStringAllocationBytes(response_body),
+		                     std::memory_order_release);
+		const auto bytes = static_cast<uint64_t>(response_body.size());
+		gate.Arm();
+		return {200, 64, bytes, bytes, std::move(response_body), {{}, 0, false, {}, {}}};
+	}
+
+	duckdb_api::internal::HttpResponse Get(const duckdb_api::internal::HttpRequest &,
+	                                       const duckdb_api::internal::HttpLimits &,
+	                                       duckdb_api::ExecutionControl &) const override {
+		throw duckdb_api::ExecutionError(duckdb_api::ErrorStage::INTERNAL, "", "unexpected GET in GraphQL fixture");
+	}
+
+	uint64_t RetainedBytes() const noexcept {
+		return retained_bytes.load(std::memory_order_acquire);
+	}
+
+private:
+	const std::string body;
+	PostTransportGateControl &gate;
+	mutable std::atomic<uint64_t> retained_bytes;
+};
+
 std::string Node(uint64_t id) {
 	return std::string("{\"id\":\"R") + std::to_string(id) + "\",\"nameWithOwner\":\"owner/repository-" +
 	       std::to_string(id) + "\",\"owner\":{\"login\":\"owner\"},\"stargazerCount\":" + std::to_string(id) +
@@ -68,14 +199,6 @@ std::unique_ptr<duckdb_api::BatchStream> Open(const std::shared_ptr<duckdb_api_t
                                               ManualHttpExecutionControl &control, uint64_t suffix) {
 	auto token = duckdb_api_test::GeneratedHttpBearerToken(suffix);
 	runtime->ExpectBearer("Bearer " + token);
-	const auto plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("graphql_secret");
-	return runtime->Executor()->OpenWithAuthorization(
-	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
-}
-
-std::unique_ptr<duckdb_api::BatchStream>
-OpenWithToken(const std::shared_ptr<duckdb_api_test::ControlledHttpRuntime> &runtime,
-              ManualHttpExecutionControl &control, std::string token) {
 	const auto plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("graphql_secret");
 	return runtime->Executor()->OpenWithAuthorization(
 	    plan, duckdb_api::ScanAuthorization::GithubUserBearer(std::move(token)), control);
@@ -185,7 +308,10 @@ void TestLateOpenCancellationRemainsCancellation() {
 	        "late direct GraphQL cancellation was relabeled or reached transport");
 
 	RotatingCredentialProvider provider("graphql_provider_cancel");
-	CancelOnPollControl provider_control(4);
+	// Provider admission adds pre/post-grant cancellation checkpoints before
+	// the existing pre/post-resolution pair. Cancel after the provider returns
+	// to prove the acquired resolution permit is released on that late edge.
+	CancelOnPollControl provider_control(5);
 	bool provider_cancelled = false;
 	try {
 		(void)runtime->Executor()->OpenWithCredentialProvider(plan, provider, provider_control);
@@ -410,8 +536,14 @@ void TestTransportCancellationAndTwoStreamIsolation() {
 	const std::string second_token = "graphql_stream_token_two";
 	runtime->RespondWithBearerBarrier("Bearer " + first_token, Page(11, 1, false, ""), "Bearer " + second_token,
 	                                  Page(22, 1, false, ""));
-	auto first = OpenWithToken(runtime, first_control, first_token);
-	auto second = OpenWithToken(runtime, second_control, second_token);
+	RotatingCredentialProvider first_provider(first_token, 0x41);
+	RotatingCredentialProvider second_provider(second_token, 0x42);
+	const auto plan = duckdb_api_test::BuildValidGraphqlScanPlanFixture("graphql_secret");
+	// The admitted maximum wire/decompression envelope intentionally permits only one request in an exact
+	// 32 MiB bulkhead. Exercise independent stream state across two exact provider-principal bulkheads so both requests
+	// may overlap without weakening the accepted per-bulkhead byte ceiling.
+	auto first = runtime->Executor()->OpenWithCredentialProvider(plan, first_provider, first_control);
+	auto second = runtime->Executor()->OpenWithCredentialProvider(plan, second_provider, second_control);
 	duckdb_api::TypedBatch first_batch;
 	duckdb_api::TypedBatch second_batch;
 	std::atomic<bool> first_ok(false);
@@ -532,6 +664,144 @@ void TestCursorTransferExactDecodedMemoryBoundary() {
 	}
 	Require(rejected && one_under_runtime->ConsumeBearerExpectation(1),
 	        "GraphQL cursor ownership transfer accepted one byte below its physical peak");
+
+	// Drive the actual page-drain branch. While page two is blocked in
+	// transport, the page-one decode and handoff reservations must be gone, the
+	// same live page permit must hold the exact cursor heap, and the only other
+	// bytes may be the page-two attempt envelope.
+	auto direct_admitted = duckdb_api::internal::TryAdmitGraphqlPlan(baseline_plan, profile);
+	Require(static_cast<bool>(direct_admitted), "direct GraphQL cursor-transfer fixture did not admit");
+	const auto &page_budget = direct_admitted->PageBudgets();
+	const duckdb_api::internal::PageResourceLimits page_limits {
+	    direct_admitted->ResiliencePolicy().max_attempts_per_step,
+	    page_budget.header_bytes,
+	    page_budget.response_bytes,
+	    page_budget.decompressed_bytes,
+	    page_budget.decoded_records,
+	    page_budget.decoded_memory_bytes,
+	    page_budget.concurrency,
+	    page_budget.serialized_request_body_bytes};
+	const auto metadata_budget = direct_admitted->RateLimitPolicy().WaitingEnabled()
+	                                 ? std::min(page_budget.header_bytes, page_budget.decoded_memory_bytes)
+	                                 : 0;
+	const auto attempt_bytes =
+	    duckdb_api::internal::rate_limit_detail::AttemptBufferEnvelope(page_limits, metadata_budget);
+	auto clock = duckdb_api::internal::NewSystemRateLimitClock();
+	auto controller = std::make_shared<duckdb_api::internal::AdmissionController>(
+	    duckdb_api::internal::AdmissionProfile::Hard(), clock);
+	const auto identity = duckdb_api::internal::AdmissionIdentity::Complete(
+	    "graphql_cursor_transfer", {"https", direct_admitted->Host(), direct_admitted->Port()}, "repositories",
+	    duckdb_api::internal::AdmissionProtocol::GRAPHQL, "repositories",
+	    duckdb_api::internal::AdmissionPrincipalToken::Direct(duckdb_api::internal::AdmissionDirectPrincipal::BEARER));
+	duckdb_api::internal::AdmissionController::Permit scan_permit;
+	duckdb_api::internal::AdmissionObservation observation {};
+	NeverAdmissionCancelled admission_cancellation;
+	const auto now = clock->SteadyNowMilliseconds();
+	const duckdb_api::internal::AdmissionWaitPolicy wait {now + 1000, false, 0, false, 0};
+	Require(controller->AcquireScan(identity, wait, admission_cancellation, &scan_permit, &observation) ==
+	            duckdb_api::internal::AdmissionAcquireStatus::ACQUIRED,
+	        "direct GraphQL cursor-transfer fixture did not acquire scan authority");
+	auto coordinator = std::make_shared<duckdb_api::internal::RateLimitCoordinator>(
+	    duckdb_api::internal::RateLimitCoordinator::HardLimits(), clock);
+	duckdb_api::internal::RateLimitRuntimeContext rate_runtime(
+	    coordinator, clock, duckdb_api::internal::RateLimitPrincipalToken::Anonymous());
+	duckdb_api::internal::AdmissionRuntimeContext admission_runtime(controller, identity);
+	auto gated_transport = std::make_shared<TwoPageGateTransport>(body, Page(2, 1, false, ""));
+	std::shared_ptr<const duckdb_api::internal::HttpTransport> transport = gated_transport;
+	auto direct_stream = duckdb_api::internal::OpenGraphqlPaginatedScan(
+	    std::move(direct_admitted), duckdb_api::ScanAuthorization::GithubUserBearer("direct_cursor_transfer_token"),
+	    transport, 30000, std::move(rate_runtime), std::move(admission_runtime), std::move(scan_permit), control);
+	duckdb_api::TypedBatch direct_batch;
+	Require(direct_stream->Next(control, direct_batch) && direct_batch.rows.size() == 1,
+	        "direct GraphQL cursor-transfer fixture did not publish page one");
+	bool second_ok = false;
+	std::exception_ptr second_error;
+	std::thread second_pull([&]() {
+		try {
+			duckdb_api::TypedBatch next;
+			second_ok = direct_stream->Next(control, next) && next.rows.size() == 1;
+		} catch (...) {
+			second_error = std::current_exception();
+		}
+	});
+	const auto reached_second = gated_transport->WaitForSecond(std::chrono::seconds(2));
+	const auto during_transfer = controller->Usage();
+	gated_transport->Proceed();
+	second_pull.join();
+	const auto page_two_usage = controller->Usage();
+	if (second_error) {
+		std::rethrow_exception(second_error);
+	}
+	Require(reached_second && during_transfer.active_scans == 1 && during_transfer.in_flight_requests == 1 &&
+	            during_transfer.buffered_rows == 0 && during_transfer.buffered_bytes == cursor_after + attempt_bytes,
+	        "page drain did not atomically narrow to exact cursor bytes before page-two attempt growth");
+	Require(second_ok, "direct GraphQL cursor-transfer fixture did not publish page two");
+	const auto page_two_handoff = duckdb_api::internal::TypedBatchHandoffMemoryBytes(1, admitted->Columns().size());
+	Require(page_two_usage.in_flight_requests == 0 &&
+	            page_two_usage.buffered_bytes == page_limits.decoded_memory_bytes + page_two_handoff &&
+	            page_two_usage.buffered_rows == page_limits.decoded_records + 1,
+	        "page two was not fully reserved before decode and published handoff");
+	Require(!direct_stream->Next(control, direct_batch), "terminal GraphQL cursor page did not exhaust");
+	direct_stream->Close();
+	const auto drained = controller->Usage();
+	Require(drained.active_scans == 0 && drained.in_flight_requests == 0 && drained.buffered_bytes == 0 &&
+	            drained.buffered_rows == 0,
+	        "GraphQL cursor-transfer completion retained admission authority");
+
+	// Gate the first caller checkpoint after a complete transport return. The
+	// attempt envelope and request are already gone, while decode has not yet
+	// reserved its page allowance, so only the response's verified pinned heap
+	// may remain charged.
+	auto narrowing_admitted = duckdb_api::internal::TryAdmitGraphqlPlan(baseline_plan, profile);
+	Require(static_cast<bool>(narrowing_admitted), "response-narrowing GraphQL fixture did not admit");
+	duckdb_api::internal::AdmissionController::Permit narrowing_scan_permit;
+	const auto narrowing_now = clock->SteadyNowMilliseconds();
+	const duckdb_api::internal::AdmissionWaitPolicy narrowing_wait {narrowing_now + 1000, false, 0, false, 0};
+	Require(controller->AcquireScan(identity, narrowing_wait, admission_cancellation, &narrowing_scan_permit,
+	                                &observation) == duckdb_api::internal::AdmissionAcquireStatus::ACQUIRED,
+	        "response-narrowing GraphQL fixture did not acquire scan authority");
+	duckdb_api::internal::RateLimitRuntimeContext narrowing_rate_runtime(
+	    coordinator, clock, duckdb_api::internal::RateLimitPrincipalToken::Anonymous());
+	duckdb_api::internal::AdmissionRuntimeContext narrowing_admission_runtime(controller, identity);
+	PostTransportGateControl narrowing_control;
+	auto narrowing_transport = std::make_shared<PostTransportGateTransport>(Page(1, 1, false, ""), narrowing_control);
+	std::shared_ptr<const duckdb_api::internal::HttpTransport> narrowing_transport_view = narrowing_transport;
+	auto narrowing_stream = duckdb_api::internal::OpenGraphqlPaginatedScan(
+	    std::move(narrowing_admitted),
+	    duckdb_api::ScanAuthorization::GithubUserBearer("direct_response_narrowing_token"), narrowing_transport_view,
+	    30000, std::move(narrowing_rate_runtime), std::move(narrowing_admission_runtime),
+	    std::move(narrowing_scan_permit), narrowing_control);
+	bool narrowing_ok = false;
+	std::exception_ptr narrowing_error;
+	std::thread narrowing_pull([&]() {
+		try {
+			duckdb_api::TypedBatch next;
+			narrowing_ok = narrowing_stream->Next(narrowing_control, next) && next.rows.size() == 1;
+		} catch (...) {
+			narrowing_error = std::current_exception();
+		}
+	});
+	const auto reached_narrowed_response = narrowing_control.WaitUntilEntered(std::chrono::seconds(2));
+	const auto narrowed_usage = controller->Usage();
+	const auto exact_response_bytes = narrowing_transport->RetainedBytes();
+	narrowing_control.Proceed();
+	narrowing_pull.join();
+	if (narrowing_error) {
+		std::rethrow_exception(narrowing_error);
+	}
+	Require(reached_narrowed_response && exact_response_bytes > 0 && narrowed_usage.active_scans == 1 &&
+	            narrowed_usage.in_flight_requests == 0 && narrowed_usage.buffered_rows == 0 &&
+	            narrowed_usage.buffered_bytes == exact_response_bytes,
+	        "complete response did not atomically narrow its worst-case attempt envelope to exact pinned storage");
+	Require(narrowing_ok, "response-narrowing GraphQL fixture did not decode after the gated checkpoint");
+	duckdb_api::TypedBatch terminal_batch;
+	Require(!narrowing_stream->Next(narrowing_control, terminal_batch),
+	        "response-narrowing GraphQL fixture did not exhaust");
+	narrowing_stream->Close();
+	const auto narrowing_drained = controller->Usage();
+	Require(narrowing_drained.active_scans == 0 && narrowing_drained.in_flight_requests == 0 &&
+	            narrowing_drained.buffered_bytes == 0 && narrowing_drained.buffered_rows == 0,
+	        "response-narrowing GraphQL fixture retained admission authority");
 }
 
 void TestMidScanFailureExposure() {

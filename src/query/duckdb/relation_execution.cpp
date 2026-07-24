@@ -67,6 +67,17 @@ std::string ResilienceSuffix(const duckdb_api::FailureProperties &properties) {
 		suffix += " remote_transport_ms=" + std::to_string(properties.cumulative_remote_transport_milliseconds);
 		suffix += properties.rate_limit_waiting ? " rate_limit_waiting=true" : " rate_limit_waiting=false";
 	}
+	if (properties.admission_reason != duckdb_api::AdmissionReason::NONE) {
+		suffix += " admission_reason=";
+		suffix += duckdb_api::AdmissionReasonName(properties.admission_reason);
+		suffix += " admission_scope=";
+		suffix += duckdb_api::AdmissionScopeName(properties.admission_scope);
+		suffix += " admission_limit=" + std::to_string(properties.admission_limit);
+		suffix += " admission_observed=" + std::to_string(properties.admission_observed);
+		suffix += " admission_requested=" + std::to_string(properties.admission_requested);
+		suffix += " admission_wait_ms=" + std::to_string(properties.cumulative_admission_waiting_milliseconds);
+		suffix += properties.admission_waiting ? " admission_waiting=true" : " admission_waiting=false";
+	}
 	if (properties.terminating_budget != duckdb_api::BudgetDimension::NONE) {
 		suffix += " budget=";
 		suffix += duckdb_api::BudgetDimensionName(properties.terminating_budget);

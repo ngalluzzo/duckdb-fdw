@@ -60,7 +60,11 @@ enum class FailureClass : uint8_t {
 	SCHEMA,
 	RESOURCE_BUDGET,
 	CANCELLATION,
-	INTERNAL
+	INTERNAL,
+	// RFC 0026: executor-local admission, queue, waiter, or buffer authority
+	// rejected work before remote execution. Never a remote timeout or retry
+	// signal.
+	LOCAL_ADMISSION
 };
 
 // RFC 0021: replay classification for a traversal step or terminal failure. It
@@ -124,10 +128,37 @@ enum class RateLimitReason : uint8_t {
 	QUEUE_SATURATED,
 	SCHEDULER_CLOSED,
 	REPEATED_IMMEDIATE,
-	BUCKET_CHANGED
+	BUCKET_CHANGED,
+	TICKET_EXHAUSTED
 };
 
 const char *RateLimitReasonName(RateLimitReason reason);
+
+// RFC 0026: content-free executor-local admission result. NONE is canonical
+// for work that did not terminate in admission. Reasons and scopes are closed
+// public diagnostic vocabulary; no identity component or hash crosses this
+// boundary.
+enum class AdmissionReason : uint8_t {
+	NONE,
+	CREDENTIAL_RESOLUTION_QUEUE_SATURATED,
+	CREDENTIAL_RESOLUTION_QUEUE_TIMEOUT,
+	SCAN_QUEUE_SATURATED,
+	SCAN_QUEUE_TIMEOUT,
+	REQUEST_QUEUE_SATURATED,
+	REQUEST_QUEUE_TIMEOUT,
+	ADMISSION_WAITING_EXHAUSTED,
+	RETRY_WAIT_SATURATED,
+	RATE_LIMIT_WAIT_SATURATED,
+	BUFFERED_BYTES_EXHAUSTED,
+	BUFFERED_ROWS_EXHAUSTED,
+	RUNTIME_CLOSED,
+	TICKET_EXHAUSTED
+};
+
+enum class AdmissionScope : uint8_t { NONE, GLOBAL, CONNECTOR, DESTINATION, PRINCIPAL, BULKHEAD };
+
+const char *AdmissionReasonName(AdmissionReason reason);
+const char *AdmissionScopeName(AdmissionScope scope);
 
 // RFC 0021: the additive structured failure-properties field. Every member is a
 // closed code, ordinal, or checked count — never content (no body, document,
@@ -159,6 +190,13 @@ struct FailureProperties {
 	std::uint64_t rate_limit_waits;
 	RateLimitReason rate_limit_reason;
 	bool rate_limit_waiting;
+	AdmissionReason admission_reason;
+	AdmissionScope admission_scope;
+	std::uint64_t admission_limit;
+	std::uint64_t admission_observed;
+	std::uint64_t admission_requested;
+	std::uint64_t cumulative_admission_waiting_milliseconds;
+	bool admission_waiting;
 };
 
 class ExecutionError : public std::exception {
@@ -220,6 +258,14 @@ BudgetDimension BudgetDimensionFromField(const std::string &field);
 // the terminating budget dimension derived from the resource field. step and
 // rows_exposed are zero; the scan catch boundary enriches them.
 FailureProperties ResourceBudgetFailureProperties(const std::string &field);
+
+// RFC 0026: construct one classified local-admission failure from closed
+// scheduler facts. terminating_budget remains NONE because shared executor
+// capacity is distinct from the immutable scan ledger.
+FailureProperties LocalAdmissionFailureProperties(AdmissionReason reason, AdmissionScope scope, uint64_t limit,
+                                                  uint64_t observed, uint64_t requested,
+                                                  uint64_t cumulative_waiting_milliseconds, bool waiting,
+                                                  FailurePhase phase);
 
 // RFC 0021: base failure properties for an ExecutionError, preserving an
 // explicit classification when present and otherwise deriving the coarse
@@ -372,6 +418,13 @@ struct ExecutionSnapshot {
 	std::uint64_t rate_limit_waits;
 	RateLimitReason rate_limit_reason;
 	bool rate_limit_waiting;
+	AdmissionReason admission_reason;
+	AdmissionScope admission_scope;
+	std::uint64_t admission_limit;
+	std::uint64_t admission_observed;
+	std::uint64_t admission_requested;
+	std::uint64_t cumulative_admission_waiting_milliseconds;
+	bool admission_waiting;
 };
 
 class BatchStream {
@@ -405,6 +458,10 @@ class ScanExecutor {
 public:
 	virtual ~ScanExecutor() noexcept;
 	virtual std::unique_ptr<BatchStream> Open(const ScanPlan &plan, ExecutionControl &control) const = 0;
+	// RFC 0026: executor/DatabaseInstance lifecycle boundary. The compatibility
+	// default is idempotent and does nothing; concrete shared Runtime executors
+	// close admission and wake queued work without throwing.
+	virtual void Close() const noexcept;
 
 	std::unique_ptr<BatchStream> OpenWithAuthorization(const ScanPlan &plan, ScanAuthorization authorization,
 	                                                   ExecutionControl &control) const {

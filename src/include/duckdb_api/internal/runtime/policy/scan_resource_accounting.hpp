@@ -115,6 +115,7 @@ struct ScanResourceCounters {
 	uint64_t cumulative_retry_waiting_milliseconds;
 	uint64_t cumulative_rate_limit_waiting_milliseconds;
 	uint64_t cumulative_remote_transport_milliseconds;
+	uint64_t cumulative_admission_waiting_milliseconds;
 };
 
 enum class ScanResourceState : uint8_t {
@@ -150,6 +151,14 @@ class ScanResourceAccounting {
 public:
 	explicit ScanResourceAccounting(const ScanResourceProfile &profile);
 
+	// BeginStep starts the one immutable scan deadline and a pending traversal
+	// step without charging a page or attempt. BeginAttempt is called only after
+	// request and buffer admission succeeds; its first call atomically commits
+	// the page plus attempt, while retries commit only another attempt.
+	void BeginStep(std::chrono::steady_clock::time_point now);
+	PageResourceAllowance BeginAttempt(std::chrono::steady_clock::time_point now);
+	// Transitional source-compatible wrapper for focused consumers. Production
+	// Runtime uses the split operations above.
 	PageResourceAllowance BeginPage(std::chrono::steady_clock::time_point now);
 	PageResourceAllowance BeginRetryAttempt(std::chrono::steady_clock::time_point now);
 	void CommitRequestBody(uint64_t serialized_request_body_bytes);
@@ -171,6 +180,7 @@ public:
 	void CommitWait(uint64_t milliseconds);
 	void CommitRetryWait(uint64_t milliseconds);
 	void CommitRateLimitWait(uint64_t milliseconds);
+	void CommitAdmissionWait(uint64_t milliseconds, uint64_t limit);
 	void CommitRemoteTransportTime(uint64_t milliseconds);
 
 	const ScanResourceProfile &Profile() const noexcept;
@@ -187,7 +197,6 @@ public:
 
 private:
 	void RequireReadyForNext(std::chrono::steady_clock::time_point now);
-	PageResourceAllowance BeginAttempt(std::chrono::steady_clock::time_point now);
 	void CommitAttemptUsage(const TransportResourceUsage &usage, ScanResourceState next_state);
 	[[noreturn]] void Fail(std::string field, std::string message);
 
@@ -198,6 +207,7 @@ private:
 	std::chrono::steady_clock::time_point deadline;
 	PageResourceAllowance active_allowance;
 	uint64_t current_step_attempts;
+	bool current_step_page_committed;
 };
 
 } // namespace internal

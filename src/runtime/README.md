@@ -57,7 +57,7 @@ may additionally restrict execution to one exact host and port.
 | `api/` | Authorization and stable execution/error value behavior |
 | `authentication/` | Credential placement and request-header enforcement |
 | `decoding/` | JSON syntax, typed projection, conversion, and decoded-memory ownership |
-| `execution/` | Protocol admission, immutable request profiles, executor dispatch, pull state, cancellation, failure, close, and page lifecycle. REST admission is split into request materialization, relational authority, network/auth authority, pagination, and orchestration modules. |
+| `execution/` | Protocol admission, the standalone executor-local admission controller, immutable request profiles, resilience coordination, executor dispatch, pull state, cancellation, failure, close, and page lifecycle. REST admission is split into request materialization, relational authority, network/auth authority, pagination, and orchestration modules. |
 | `generation/` | Immutable active snapshots, exact reload-decision admission, serialized staging leases, atomic publication, and database close |
 | `pagination/` | URI and Link grammar or the sequential next-page policy |
 | `policy/` | Network-address rules and page/scan resource accounting |
@@ -97,6 +97,10 @@ live-network authority.
   builder. Only the typed conditional input may select the admitted fixed field.
 - Keep credentials inside opaque, move-only capabilities bound to approved
   authenticators, placements, and hosts. Diagnostics must remain redacted.
+- Acquire provider, scan, request, recovery-wait, byte, and row authority only
+  through the admission service's atomic complete vectors. Attempt debit and
+  request construction follow request/buffer admission; responses release
+  their byte reservation before any recovery wait.
 - Acquire a Runtime generation lease before the Query catalog guard. Finish
   every fallible target-snapshot operation during staging; terminal commit is
   only an atomic snapshot exchange. Keep discard, close, and destruction
@@ -142,6 +146,7 @@ Tests mirror the production directories under `test/cpp/runtime/`:
 | Authorization, credential snapshots, and stream values | `duckdb_api_authorization_contract_tests`, `duckdb_api_credential_provider_contract_tests`, `duckdb_api_execution_contract_tests` |
 | Generation ownership and publication lifecycle | `duckdb_api_runtime_generation_contract_tests`, `duckdb_api_runtime_generation_lifecycle_tests` |
 | Request, network, and resource policy | `duckdb_api_request_validation_tests`, `duckdb_api_network_policy_tests`, `duckdb_api_scan_resource_accounting_tests` |
+| Executor admission, bulkheads, queues, and reservations | `duckdb_api_admission_controller_tests`, linked only through `duckdb_api_runtime_admission_service` |
 | URI and Link pagination | `duckdb_api_uri_reference_tests`, `duckdb_api_link_pagination_tests` |
 | JSON and decoded-page ownership | `duckdb_api_json_decoder_tests`, `duckdb_api_json_root_array_decoder_tests`, `duckdb_api_decoded_page_buffer_tests` |
 | GraphQL admission and request bytes | `duckdb_api_graphql_plan_admission_tests`, `duckdb_api_package_http_execution_tests` |

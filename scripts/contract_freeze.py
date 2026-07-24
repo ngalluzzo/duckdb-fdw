@@ -74,6 +74,7 @@ EXPECTED_RFC_AUTHORITIES = frozenset(
         "RFC 0023",
         "RFC 0024",
         "RFC 0025",
+        "RFC 0026",
     }
 )
 
@@ -177,13 +178,14 @@ EXPECTED_FAILURE_PRIMARY_CLASSES = frozenset(
         "decode",
         "schema",
         "resource_budget",
+        "local_admission",
         "cancellation",
         "internal",
     }
 )
 
 EXPECTED_FAILURE_TAXONOMY_AUTHORITY = (
-    "RFC 0021; RFC 0024; RFC 0025; docs/RUNTIME_CONTRACTS.md Error ownership and redaction"
+    "RFC 0021; RFC 0024; RFC 0025; RFC 0026; docs/RUNTIME_CONTRACTS.md Error ownership and redaction"
 )
 
 EXPECTED_REPLAY_CLASSIFICATIONS = frozenset(
@@ -258,7 +260,63 @@ EXPECTED_BOUNDED_REACTIVE_RATE_LIMIT_CONTRACT = {
         "scheduler_closed",
         "repeated_immediate",
         "bucket_changed",
+        "ticket_exhausted",
     ],
+}
+
+EXPECTED_BOUNDED_RUNTIME_ADMISSION_CONTRACT = {
+    "authority": "RFC 0026; docs/RUNTIME_CONTRACTS.md Executor-local admission",
+    "coordination_domain": "one_runtime_executor_per_duckdb_database_instance",
+    "dimensions": ["global", "connector", "destination", "principal", "bulkhead"],
+    "bulkhead_identity": [
+        "connector",
+        "relation_operation",
+        "protocol",
+        "destination",
+        "principal",
+    ],
+    "hard_limits": {
+        "credential_resolutions": [16, 8, 8, 0, 0],
+        "queued_credential_resolutions": [64, 16, 16, 0, 0],
+        "active_scans": [64, 16, 16, 8, 4],
+        "in_flight_requests": [32, 8, 8, 4, 2],
+        "queued_scan_admissions": [256, 64, 64, 32, 16],
+        "queued_request_admissions": [256, 64, 64, 32, 16],
+        "ordinary_retry_waiters": [32, 16, 16, 8, 4],
+        "rate_limit_waiters": [32, 16, 16, 8, 4],
+        "buffered_bytes": [268435456, 134217728, 134217728, 67108864, 33554432],
+        "buffered_decoded_rows": [6400, 3200, 3200, 1600, 800],
+    },
+    "provider_scan_request_queue_timeout_milliseconds": 1000,
+    "aggregate_request_admission_wait_milliseconds": 5000,
+    "cancellation_slice_milliseconds": 5,
+    "queue_law": "exact_key_fifo_with_oldest_eligible_cross_key_bypass",
+    "scope_precedence": ["global", "connector", "destination", "principal", "bulkhead"],
+    "attempt_debit": "after_request_and_buffer_admission",
+    "buffer_admission": "worst_case_colive_capacity_before_allocation_fail_fast",
+    "recovery_wait_response_bytes": 0,
+    "local_rejection_transport_attempts": 0,
+    "local_rejection_replayable": False,
+    "diagnostic_reasons": [
+        "none",
+        "credential_resolution_queue_saturated",
+        "credential_resolution_queue_timeout",
+        "scan_queue_saturated",
+        "scan_queue_timeout",
+        "request_queue_saturated",
+        "request_queue_timeout",
+        "admission_waiting_exhausted",
+        "retry_wait_saturated",
+        "rate_limit_wait_saturated",
+        "buffered_bytes_exhausted",
+        "buffered_rows_exhausted",
+        "runtime_closed",
+        "ticket_exhausted",
+    ],
+    "diagnostic_scopes": ["none", "global", "connector", "destination", "principal", "bulkhead"],
+    "executor_close": "idempotent_nonthrowing_queue_drain_with_release_safe_live_handles",
+    "public_tuning": False,
+    "circuit_breaking": False,
 }
 
 
@@ -634,6 +692,8 @@ def verify_freeze(
         raise FreezeError("freeze bounded-retry contract disagrees with graduated RFC 0024")
     if freeze.get("bounded_reactive_rate_limit") != EXPECTED_BOUNDED_REACTIVE_RATE_LIMIT_CONTRACT:
         raise FreezeError("freeze bounded reactive rate-limit contract disagrees with graduated RFC 0025")
+    if freeze.get("bounded_runtime_admission") != EXPECTED_BOUNDED_RUNTIME_ADMISSION_CONTRACT:
+        raise FreezeError("freeze bounded Runtime admission contract disagrees with graduated RFC 0026")
 
     column_shapes = freeze["column_shapes"]
     if set(column_shapes.get("authored", [])) != _schema_column_shapes(schema):

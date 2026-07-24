@@ -4,12 +4,31 @@
 
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace duckdb_api {
 namespace internal {
+
+// The supported native cells use bounded std::string storage whose capacity
+// rounding stays within this per-allocation envelope. Admission charges the
+// envelope before request construction or transport buffering; Runtime then
+// verifies the actual pinned capacity. This covers the terminating byte plus
+// allocator rounding without treating content limits as allocation limits.
+constexpr uint64_t HTTP_STRING_ALLOCATION_SLOP_BYTES = 64;
+
+inline uint64_t HttpStringAllocationLimit(uint64_t content_bytes) noexcept {
+	return content_bytes > std::numeric_limits<uint64_t>::max() - HTTP_STRING_ALLOCATION_SLOP_BYTES
+	           ? std::numeric_limits<uint64_t>::max()
+	           : content_bytes + HTTP_STRING_ALLOCATION_SLOP_BYTES;
+}
+
+inline bool HasBoundedHttpStringCapacity(const std::string &value, uint64_t content_limit) noexcept {
+	const auto capacity = static_cast<uint64_t>(value.capacity());
+	return capacity < std::numeric_limits<uint64_t>::max() && capacity + 1 <= HttpStringAllocationLimit(content_limit);
+}
 
 struct HttpHeader {
 	std::string name;
@@ -80,6 +99,29 @@ struct HttpResponse {
 	std::string body;
 	HttpResponseMetadata metadata;
 };
+
+// Exact heap storage pinned by a complete response after transport-local
+// request, framing, and raw decode buffers have been destroyed. Small-string
+// bytes live inside the response object and therefore add no buffered heap
+// authority.
+inline uint64_t RetainedHttpStringAllocationBytes(const std::string &value) noexcept {
+	const auto object_begin = reinterpret_cast<std::uintptr_t>(&value);
+	const auto object_end = object_begin + sizeof(value);
+	const auto data = reinterpret_cast<std::uintptr_t>(value.data());
+	return data >= object_begin && data < object_end ? 0 : static_cast<uint64_t>(value.capacity()) + 1;
+}
+
+inline bool TryRetainedHttpResponseBytes(const HttpResponse &response, uint64_t *result) noexcept {
+	if (!result) {
+		return false;
+	}
+	const auto body = RetainedHttpStringAllocationBytes(response.body);
+	if (response.metadata.retained_bytes > std::numeric_limits<uint64_t>::max() - body) {
+		return false;
+	}
+	*result = body + response.metadata.retained_bytes;
+	return true;
+}
 
 enum class HttpTransportFailureKind : uint8_t {
 	COULD_NOT_RESOLVE_HOST,

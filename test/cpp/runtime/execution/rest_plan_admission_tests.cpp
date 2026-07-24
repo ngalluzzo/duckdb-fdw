@@ -312,6 +312,51 @@ void TestApiKeyAuthenticatorPlacesDeclaredHeaderAndQueryValues() {
 			Require(header.value.find("query-secret-value") == std::string::npos,
 			        "api_key query placement leaked its value into a header");
 		}
+
+		auto exact_request = duckdb_api::internal::BuildAdmittedRestRequest(*admitted);
+		const uint64_t framing = 1 + admitted->ApiKeyPlacementName().size() + 1;
+		Require(exact_request.target.size() + framing < 8192,
+		        "api_key exact target fixture left no credential authority");
+		const auto exact_value_bytes = 8192 - exact_request.target.size() - framing;
+		auto exact_authorization = ScanAuthorization::Credential(std::string(exact_value_bytes, 'x'));
+		const auto exact = ApiKeyAuthenticator::AuthorizeRest(*admitted, std::move(exact_request), exact_authorization);
+		Require(exact.target.size() == 8192 && duckdb_api::internal::HasBoundedHttpStringCapacity(exact.target, 8192),
+		        "api_key query placement rejected or overallocated its exact target boundary");
+		bool one_over_rejected = false;
+		try {
+			auto one_over_request = duckdb_api::internal::BuildAdmittedRestRequest(*admitted);
+			auto one_over_authorization = ScanAuthorization::Credential(std::string(exact_value_bytes + 1, 'x'));
+			(void)ApiKeyAuthenticator::AuthorizeRest(*admitted, std::move(one_over_request), one_over_authorization);
+		} catch (const duckdb_api::ExecutionError &error) {
+			one_over_rejected = error.Stage() == duckdb_api::ErrorStage::RESOURCE && error.Field() == "header_bytes";
+		}
+		Require(one_over_rejected,
+		        "api_key query placement allocated an encoded value beyond the remaining target authority");
+
+		auto escaped_request = duckdb_api::internal::BuildAdmittedRestRequest(*admitted);
+		const auto escaped_value_bytes = 8192 - escaped_request.target.size() - framing;
+		std::string escaped_value(escaped_value_bytes % 3, 'x');
+		escaped_value.append(escaped_value_bytes / 3, '!');
+		auto escaped_authorization = ScanAuthorization::Credential(std::string(escaped_value));
+		const auto escaped =
+		    ApiKeyAuthenticator::AuthorizeRest(*admitted, std::move(escaped_request), escaped_authorization);
+		Require(escaped.target.size() == 8192 && escaped.target.find("%21") != std::string::npos &&
+		            duckdb_api::internal::HasBoundedHttpStringCapacity(escaped.target, 8192),
+		        "api_key query placement did not exact-size its three-byte escaping boundary");
+		bool escaped_one_over_rejected = false;
+		try {
+			auto escaped_one_over_request = duckdb_api::internal::BuildAdmittedRestRequest(*admitted);
+			auto escaped_one_over_value = escaped_value;
+			escaped_one_over_value.push_back('x');
+			auto escaped_one_over_authorization = ScanAuthorization::Credential(std::move(escaped_one_over_value));
+			(void)ApiKeyAuthenticator::AuthorizeRest(*admitted, std::move(escaped_one_over_request),
+			                                         escaped_one_over_authorization);
+		} catch (const duckdb_api::ExecutionError &error) {
+			escaped_one_over_rejected =
+			    error.Stage() == duckdb_api::ErrorStage::RESOURCE && error.Field() == "header_bytes";
+		}
+		Require(escaped_one_over_rejected,
+		        "api_key query placement allocated an escaped value beyond the remaining target authority");
 	}
 }
 

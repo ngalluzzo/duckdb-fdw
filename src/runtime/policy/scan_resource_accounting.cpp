@@ -74,8 +74,8 @@ const std::string &ScanResourceError::SafeMessage() const noexcept {
 }
 
 ScanResourceAccounting::ScanResourceAccounting(const ScanResourceProfile &profile_p)
-    : profile(profile_p), counters {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, state(ScanResourceState::READY),
-      deadline_started(false), deadline(), active_allowance {0, 0, 0, 0, 0, 0, {}}, current_step_attempts(0) {
+    : profile(profile_p), counters {}, state(ScanResourceState::READY), deadline_started(false), deadline(),
+      active_allowance {0, 0, 0, 0, 0, 0, {}}, current_step_attempts(0), current_step_page_committed(false) {
 	// Preserve the pre-v3 aggregate-initializer surface used by focused Runtime
 	// consumers: an aggregate waiting budget with neither mechanism split is an
 	// ordinary-retry budget. New v3 profiles always provide both split fields.
@@ -121,9 +121,9 @@ void ScanResourceAccounting::RequireReadyForNext(std::chrono::steady_clock::time
 	}
 }
 
-PageResourceAllowance ScanResourceAccounting::BeginPage(std::chrono::steady_clock::time_point now) {
+void ScanResourceAccounting::BeginStep(std::chrono::steady_clock::time_point now) {
 	if (state != ScanResourceState::READY) {
-		Fail("resource_state", "scan resource state cannot begin a page");
+		Fail("resource_state", "scan resource state cannot begin a traversal step");
 	}
 	if (!deadline_started) {
 		const auto wall_milliseconds =
@@ -138,14 +138,9 @@ PageResourceAllowance ScanResourceAccounting::BeginPage(std::chrono::steady_cloc
 	}
 	RequireReadyForNext(now);
 
-	try {
-		counters.pages = AddChecked(counters.pages, 1, profile.scan.pages);
-		current_step_attempts = 0;
-		state = ScanResourceState::STEP_ACTIVE;
-		return BeginAttempt(now);
-	} catch (const ScanResourceError &error) {
-		Fail(error.Field(), error.SafeMessage());
-	}
+	current_step_attempts = 0;
+	current_step_page_committed = false;
+	state = ScanResourceState::STEP_ACTIVE;
 }
 
 PageResourceAllowance ScanResourceAccounting::BeginAttempt(std::chrono::steady_clock::time_point now) {
@@ -155,38 +150,55 @@ PageResourceAllowance ScanResourceAccounting::BeginAttempt(std::chrono::steady_c
 	if (now >= deadline) {
 		Fail("wall_milliseconds", "scan exceeded its wall-time budget");
 	}
-	if (current_step_attempts >= profile.page.request_attempts ||
+	if ((!current_step_page_committed && counters.pages >= profile.scan.pages) ||
+	    current_step_attempts >= profile.page.request_attempts ||
 	    counters.request_attempts >= profile.scan.request_attempts) {
-		Fail("request_attempts", "scan exhausted its request-attempt budget");
+		Fail(!current_step_page_committed && counters.pages >= profile.scan.pages ? "pages" : "request_attempts",
+		     !current_step_page_committed && counters.pages >= profile.scan.pages
+		         ? "scan exhausted its page budget"
+		         : "scan exhausted its request-attempt budget");
 	}
 	try {
-		current_step_attempts = AddChecked(current_step_attempts, 1, profile.page.request_attempts);
-		counters.request_attempts = AddChecked(counters.request_attempts, 1, profile.scan.request_attempts);
-		counters.active_requests = AddChecked(counters.active_requests, 1, profile.scan.active_requests);
-		active_allowance.header_bytes =
+		const auto next_step_attempts = AddChecked(current_step_attempts, 1, profile.page.request_attempts);
+		const auto next_scan_attempts = AddChecked(counters.request_attempts, 1, profile.scan.request_attempts);
+		const auto next_pages =
+		    current_step_page_committed ? counters.pages : AddChecked(counters.pages, 1, profile.scan.pages);
+		const auto next_active_requests = AddChecked(counters.active_requests, 1, profile.scan.active_requests);
+		PageResourceAllowance allowance {};
+		allowance.header_bytes =
 		    std::min(profile.page.header_bytes, Remaining(profile.scan.header_bytes, counters.header_bytes));
-		active_allowance.wire_response_bytes =
+		allowance.wire_response_bytes =
 		    std::min(profile.page.wire_response_bytes,
 		             Remaining(profile.scan.wire_response_bytes, counters.wire_response_bytes));
-		active_allowance.decompressed_response_bytes =
+		allowance.decompressed_response_bytes =
 		    std::min(profile.page.decompressed_response_bytes,
 		             Remaining(profile.scan.decompressed_response_bytes, counters.decompressed_response_bytes));
-		active_allowance.decoded_records =
+		allowance.decoded_records =
 		    std::min(profile.page.decoded_records, Remaining(profile.scan.decoded_records, counters.decoded_records));
-		active_allowance.decoded_memory_bytes =
+		allowance.decoded_memory_bytes =
 		    std::min(profile.page.decoded_memory_bytes, profile.scan.retained_decoded_memory_bytes);
-		active_allowance.serialized_request_body_bytes =
-		    profile.page.serialized_request_body_bytes == 0
-		        ? 0
-		        : std::min(
-		              profile.page.serialized_request_body_bytes,
-		              Remaining(profile.scan.serialized_request_body_bytes, counters.serialized_request_body_bytes));
-		active_allowance.deadline = deadline;
+		allowance.serialized_request_body_bytes = profile.page.serialized_request_body_bytes == 0
+		                                              ? 0
+		                                              : std::min(profile.page.serialized_request_body_bytes,
+		                                                         Remaining(profile.scan.serialized_request_body_bytes,
+		                                                                   counters.serialized_request_body_bytes));
+		allowance.deadline = deadline;
+		current_step_attempts = next_step_attempts;
+		counters.request_attempts = next_scan_attempts;
+		counters.pages = next_pages;
+		counters.active_requests = next_active_requests;
+		current_step_page_committed = true;
+		active_allowance = allowance;
 		state = ScanResourceState::REQUEST_ACTIVE;
 		return active_allowance;
 	} catch (const ScanResourceError &error) {
 		Fail(error.Field(), error.SafeMessage());
 	}
+}
+
+PageResourceAllowance ScanResourceAccounting::BeginPage(std::chrono::steady_clock::time_point now) {
+	BeginStep(now);
+	return BeginAttempt(now);
 }
 
 PageResourceAllowance ScanResourceAccounting::BeginRetryAttempt(std::chrono::steady_clock::time_point now) {
@@ -274,11 +286,13 @@ void ScanResourceAccounting::CompletePage(bool has_next, std::chrono::steady_clo
 	}
 	if (!has_next) {
 		current_step_attempts = 0;
+		current_step_page_committed = false;
 		state = ScanResourceState::EXHAUSTED;
 		return;
 	}
 	state = ScanResourceState::READY;
 	current_step_attempts = 0;
+	current_step_page_committed = false;
 	RequireReadyForNext(now);
 }
 
@@ -313,6 +327,18 @@ void ScanResourceAccounting::CommitRateLimitWait(uint64_t milliseconds) {
 		               profile.scan.cumulative_rate_limit_waiting_milliseconds);
 	} catch (const ScanResourceError &) {
 		Fail("cumulative_waiting_milliseconds", "scan exceeded its cumulative-waiting budget");
+	}
+}
+
+void ScanResourceAccounting::CommitAdmissionWait(uint64_t milliseconds, uint64_t limit) {
+	if (state != ScanResourceState::STEP_ACTIVE) {
+		Fail("resource_state", "scan resource state cannot commit admission waiting");
+	}
+	try {
+		counters.cumulative_admission_waiting_milliseconds =
+		    AddChecked(counters.cumulative_admission_waiting_milliseconds, milliseconds, limit);
+	} catch (const ScanResourceError &) {
+		Fail("admission_waiting_milliseconds", "scan exceeded its cumulative admission-waiting budget");
 	}
 }
 

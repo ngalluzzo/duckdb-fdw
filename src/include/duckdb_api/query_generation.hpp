@@ -140,9 +140,11 @@ public:
 	                                          ExecutionControl &control) const = 0;
 
 	// DatabaseInstance teardown calls this only after Query has rejected new
-	// catalog publication. Implementations close their provider-side admission
-	// service without invalidating immutable generations, plans, executors, or
-	// streams already retained by DuckDB state. Close is idempotent and must not
+	// catalog publication. The installed composition then closes Runtime
+	// generation admission followed by the shared executor's request/admission
+	// services. Immutable generations, plans, streams, permits, and reservations
+	// already retained by DuckDB remain valid for bounded completion or release;
+	// they gain no new admission authority. Close is idempotent and must not
 	// throw; dynamic extension unload remains unsupported.
 	virtual void Close() const noexcept = 0;
 };

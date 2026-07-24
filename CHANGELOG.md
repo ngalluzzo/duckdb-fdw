@@ -6,6 +6,13 @@ This file records user-visible changes to duckdb-fdw.
 
 ### Added
 
+- Bounded Runtime admission and bulkhead isolation (RFC 0026). Each executor
+  now applies fixed global, connector, destination, credential-principal, and
+  operation ceilings to provider resolution, active scans, requests, recovery
+  waits, buffered bytes, and decoded rows. Local overload fails closed before
+  transport with safe `local_admission` diagnostics, while independently
+  eligible work can continue. See the
+  [0.18.0 release notes](docs/releases/0.18.0-notes.md).
 - Durable `duckdb_api` credentials (RFC 0023): the closed provider surface now
   supports `config(TOKEN ...)` and `environment(VARIABLE ...)` in temporary
   memory or explicit persistent `IN duckdb_api` storage. Each scan retains one

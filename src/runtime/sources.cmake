@@ -8,6 +8,8 @@ set(REMOTE_RUNTIME_GENERATION_SOURCES
     src/runtime/generation/generation_snapshot.cpp
     src/runtime/generation/generation_publication.cpp
     src/runtime/generation/generation_registry.cpp)
+set(REMOTE_RUNTIME_ADMISSION_SOURCES
+    src/runtime/execution/admission_controller.cpp)
 set(REMOTE_RUNTIME_RESILIENCE_SOURCES
     src/runtime/execution/rate_limit_clock.cpp
     src/runtime/execution/rate_limit_guidance.cpp
@@ -40,6 +42,7 @@ set(REMOTE_RUNTIME_EXECUTOR_SOURCES
     src/runtime/pagination/graphql_cursor_pagination.cpp
     src/runtime/transport/graphql_request_body.cpp)
 set(REMOTE_RUNTIME_SOURCES
+    ${REMOTE_RUNTIME_ADMISSION_SOURCES}
     ${REMOTE_RUNTIME_RESILIENCE_SOURCES}
     ${REMOTE_RUNTIME_EXECUTOR_SOURCES}
     src/runtime/policy/network_policy.cpp

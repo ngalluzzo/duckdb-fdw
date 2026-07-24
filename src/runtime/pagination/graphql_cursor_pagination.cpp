@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <new>
+#include <type_traits>
 #include <utility>
 
 namespace duckdb_api {
@@ -30,32 +31,15 @@ GraphqlCursorErrorKind GraphqlCursorError::Kind() const noexcept {
 
 GraphqlCursorState::GraphqlCursorState(uint64_t max_pages_p, uint64_t max_cursor_bytes_p)
     : max_pages(max_pages_p), max_cursor_bytes(max_cursor_bytes_p), requested_pages(0), exhausted(false), failed(false),
-      seen() {
+      seen(), seen_count(0) {
 	if (max_pages == 0 || max_pages > 32 || max_cursor_bytes == 0 || max_cursor_bytes > 512) {
 		throw GraphqlCursorError(GraphqlCursorErrorKind::PROFILE, "pagination.cursor",
 		                         "GraphQL cursor profile is invalid");
 	}
-	try {
-		seen.reserve(static_cast<std::size_t>(max_pages));
-	} catch (const std::bad_alloc &) {
-		throw GraphqlCursorError(GraphqlCursorErrorKind::RESOURCE_BUDGET, "decoded_memory_bytes",
-		                         "GraphQL cursor state exceeded available memory");
-	}
-}
-
-GraphqlCursorState::GraphqlCursorState(const GraphqlCursorState &other)
-    : max_pages(other.max_pages), max_cursor_bytes(other.max_cursor_bytes), requested_pages(other.requested_pages),
-      exhausted(other.exhausted), failed(other.failed), seen(other.seen) {
-	try {
-		seen.reserve(static_cast<std::size_t>(max_pages));
-	} catch (const std::bad_alloc &) {
-		throw GraphqlCursorError(GraphqlCursorErrorKind::RESOURCE_BUDGET, "decoded_memory_bytes",
-		                         "GraphQL cursor state exceeded available memory");
-	}
 }
 
 const std::string *GraphqlCursorState::CurrentCursor() const noexcept {
-	return exhausted || failed || seen.empty() ? nullptr : &seen.back();
+	return exhausted || failed || seen_count == 0 ? nullptr : &seen[seen_count - 1];
 }
 
 uint64_t GraphqlCursorState::RequestedPages() const noexcept {
@@ -63,14 +47,19 @@ uint64_t GraphqlCursorState::RequestedPages() const noexcept {
 }
 
 uint64_t GraphqlCursorState::RetainedMemoryBytes() const noexcept {
-	const auto overhead = static_cast<uint64_t>(seen.capacity()) * static_cast<uint64_t>(sizeof(std::string));
-	uint64_t result = overhead;
-	for (std::size_t index = 0; index < seen.size(); index++) {
-		const auto capacity = static_cast<uint64_t>(seen[index].capacity());
-		if (capacity > std::numeric_limits<uint64_t>::max() - result) {
+	uint64_t result = 0;
+	for (std::size_t index = 0; index < seen_count; index++) {
+		const auto object_begin = reinterpret_cast<std::uintptr_t>(&seen[index]);
+		const auto object_end = object_begin + sizeof(seen[index]);
+		const auto data = reinterpret_cast<std::uintptr_t>(seen[index].data());
+		if (data >= object_begin && data < object_end) {
+			continue;
+		}
+		const auto allocation = static_cast<uint64_t>(seen[index].capacity()) + 1;
+		if (allocation > std::numeric_limits<uint64_t>::max() - result) {
 			return std::numeric_limits<uint64_t>::max();
 		}
-		result += capacity;
+		result += allocation;
 	}
 	return result;
 }
@@ -85,7 +74,7 @@ bool GraphqlCursorState::IsFailed() const noexcept {
 
 [[noreturn]] void GraphqlCursorState::Reject(GraphqlCursorErrorKind kind, std::string field, std::string safe_message) {
 	failed = true;
-	std::vector<std::string>().swap(seen);
+	Release();
 	throw GraphqlCursorError(kind, std::move(field), std::move(safe_message));
 }
 
@@ -103,7 +92,7 @@ void GraphqlCursorState::Advance(bool has_next, std::string end_cursor) {
 	}
 	if (!has_next) {
 		exhausted = true;
-		std::vector<std::string>().swap(seen);
+		Release();
 		return;
 	}
 	if (end_cursor.empty()) {
@@ -113,15 +102,18 @@ void GraphqlCursorState::Advance(bool has_next, std::string end_cursor) {
 		Reject(GraphqlCursorErrorKind::RESOURCE_BUDGET, "pagination.cursor",
 		       "GraphQL continuation cursor exceeded its byte budget");
 	}
-	if (std::find(seen.begin(), seen.end(), end_cursor) != seen.end()) {
-		Reject(GraphqlCursorErrorKind::PROTOCOL, "pagination.cursor", "GraphQL continuation cursor repeated");
+	for (std::size_t index = 0; index < seen_count; index++) {
+		if (seen[index] == end_cursor) {
+			Reject(GraphqlCursorErrorKind::PROTOCOL, "pagination.cursor", "GraphQL continuation cursor repeated");
+		}
 	}
-	try {
-		seen.push_back(std::move(end_cursor));
-	} catch (const std::bad_alloc &) {
-		Reject(GraphqlCursorErrorKind::RESOURCE_BUDGET, "decoded_memory_bytes",
-		       "GraphQL cursor state exceeded available memory");
+	if (seen_count >= seen.size()) {
+		Reject(GraphqlCursorErrorKind::RESOURCE_BUDGET, "pagination.cursor",
+		       "GraphQL cursor traversal exceeded its page authority");
 	}
+	static_assert(std::is_nothrow_move_assignable<std::string>::value,
+	              "cursor transfer must not allocate replacement storage");
+	seen[seen_count++] = std::move(end_cursor);
 }
 
 void GraphqlCursorState::Fail() noexcept {
@@ -130,7 +122,10 @@ void GraphqlCursorState::Fail() noexcept {
 }
 
 void GraphqlCursorState::Release() noexcept {
-	std::vector<std::string>().swap(seen);
+	for (std::size_t index = 0; index < seen_count; index++) {
+		std::string().swap(seen[index]);
+	}
+	seen_count = 0;
 }
 
 } // namespace internal

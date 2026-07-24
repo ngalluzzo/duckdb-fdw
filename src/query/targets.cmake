@@ -73,4 +73,5 @@ target_link_libraries(
   PUBLIC duckdb_api_query_request_service
          duckdb_api_package_compiler_service
          duckdb_api_package_bound_planning_service
-         duckdb_api_runtime_generation_service)
+         duckdb_api_runtime_generation_service
+         duckdb_api_runtime_interface_service)

@@ -181,6 +181,12 @@ void TestOpenStageFailuresDoNotAcquireStream() {
 	    {QueryRuntimeScenario::OPEN_RESOURCE_ERROR,
 	     "Invalid Input Error: [duckdb_api][resource] connector=github relation=duckdb_login_search_page "
 	     "field=response_bytes: response exceeds its byte budget"},
+	    {QueryRuntimeScenario::OPEN_LOCAL_ADMISSION_ERROR,
+	     "Invalid Input Error: [duckdb_api][resource] connector=github relation=duckdb_login_search_page "
+	     "field=admission: local Runtime admission rejected scan [class=local_admission attempt=0 "
+	     "cumulative_delay_ms=0 exposure=unaccepted rows_exposed=0 admission_reason=scan_queue_saturated "
+	     "admission_scope=destination admission_limit=16 admission_observed=16 admission_requested=1 "
+	     "admission_wait_ms=0 admission_waiting=false]"},
 	};
 	for (const auto &entry : structured_cases) {
 		duckdb::DuckDB database(nullptr);
