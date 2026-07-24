@@ -379,8 +379,9 @@ Outcome Run(const RetryPlan &retry, const AdmittedRateLimitPolicy &rate_limit, s
 const RetryPlan NO_RETRY {1, 1, 0, 0};
 
 void TestImmediateRecoveryAndTargetedObservation() {
+	auto clock = std::make_shared<AdvancingClock>();
 	auto outcome = Run(NO_RETRY, WaitingPolicy(),
-	                   {Complete(429, {{"x-reset", "0"}}), Complete(200, {{"x-reset", "not-observed"}})});
+	                   {Complete(429, {{"x-reset", "0"}}), Complete(200, {{"x-reset", "not-observed"}})}, 1000, clock);
 	Require(!outcome.failed && outcome.response_status == 200 && outcome.requests == 2,
 	        "one immediate rate-limit repeat did not recover");
 	Require(outcome.state.rate_limit_events == 1 && outcome.state.rate_limit_repeats == 1 &&
